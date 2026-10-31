@@ -17,10 +17,11 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 )
 
-func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	fmt.Println("BenchTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo)
 
 	setRoutes(erigonUrl, gethUrl)
@@ -29,19 +30,19 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"trace_transaction"}, resultsCh)
+		go writePattern(true, []string{"trace_transaction"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
 
-	var nBlocks = 0
-	var nTransactions = 0
+	nBlocks := 0
+	nTransactions := 0
 
 	for bn := blockFrom; bn < blockTo; bn++ {
 		if nBlocks%50 == 0 {

@@ -179,7 +179,7 @@ func (ln *LocalNode) delete(e enr.Entry) {
 }
 
 func (ln *LocalNode) endpointForIP(ip netip.Addr) *lnEndpoint {
-	if ip.Is4() {
+	if ip.Unmap().Is4() {
 		return &ln.endpoint4
 	}
 	return &ln.endpoint6
@@ -294,11 +294,11 @@ func (ln *LocalNode) sign() {
 	ln.bumpSeq()
 	r.SetSeq(ln.seq)
 	if err := SignV4(&r, ln.key); err != nil {
-		panic(fmt.Errorf("enode: can't sign record: %v", err))
+		panic(fmt.Errorf("enode: can't sign record: %w", err))
 	}
 	n, err := New(ValidSchemes, &r)
 	if err != nil {
-		panic(fmt.Errorf("enode: can't verify local record: %v", err))
+		panic(fmt.Errorf("enode: can't verify local record: %w", err))
 	}
 	ln.cur.Store(n)
 	log.Trace("[p2p] New local node record", "seq", ln.seq, "id", n.ID(), "ip", n.IPAddr(), "udp", n.UDP(), "tcp", n.TCP())

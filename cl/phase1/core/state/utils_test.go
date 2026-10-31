@@ -22,6 +22,8 @@ import (
 
 	"github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -30,7 +32,7 @@ import (
 
 func TestValidatorSlashing(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.DenebVersion))
+	require.NoError(t, utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.Phase0Version)))
 	_, err := state.SlashValidator(1, nil)
 	require.NoError(t, err)
 	_, err = state.SlashValidator(2, nil)
@@ -39,6 +41,35 @@ func TestValidatorSlashing(t *testing.T) {
 	exit, err := state.BeaconState.ValidatorExitEpoch(1)
 	require.NoError(t, err)
 	require.NotEqual(t, exit, uint64(math.MaxUint64))
+}
+
+func TestSlashValidatorClearsPendingBuilderPaymentsGloas(t *testing.T) {
+	beaconState := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(beaconState, stateEncoded, int(clparams.Phase0Version)))
+	beaconState.SetVersion(clparams.GloasVersion)
+	pendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * beaconState.BeaconConfig().SlotsPerEpoch))
+	pendingPayments.Set(1, &cltypes.BuilderPendingPayment{ProposerIndex: 1, Withdrawal: &cltypes.BuilderPendingWithdrawal{Amount: 10}})
+	pendingPayments.Set(2, &cltypes.BuilderPendingPayment{ProposerIndex: 2, Withdrawal: &cltypes.BuilderPendingWithdrawal{Amount: 20}})
+	pendingPayments.Set(3, &cltypes.BuilderPendingPayment{ProposerIndex: 1, Withdrawal: &cltypes.BuilderPendingWithdrawal{Amount: 30}})
+	beaconState.SetBuilderPendingPayments(pendingPayments)
+
+	_, err := beaconState.SlashValidator(1, nil)
+	require.NoError(t, err)
+	require.Zero(t, pendingPayments.Get(1).Withdrawal.Amount)
+	require.Equal(t, uint64(20), pendingPayments.Get(2).Withdrawal.Amount)
+	require.Zero(t, pendingPayments.Get(3).Withdrawal.Amount)
+}
+
+func TestSlashValidatorPreservesPendingBuilderPaymentsBeforeGloas(t *testing.T) {
+	beaconState := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(beaconState, stateEncoded, int(clparams.Phase0Version)))
+	pendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * beaconState.BeaconConfig().SlotsPerEpoch))
+	pendingPayments.Set(1, &cltypes.BuilderPendingPayment{ProposerIndex: 1, Withdrawal: &cltypes.BuilderPendingWithdrawal{Amount: 10}})
+	beaconState.SetBuilderPendingPayments(pendingPayments)
+
+	_, err := beaconState.SlashValidator(1, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10), pendingPayments.Get(1).Withdrawal.Amount)
 }
 
 func TestValidatorFromDeposit(t *testing.T) {
@@ -54,7 +85,7 @@ func TestValidatorFromDeposit(t *testing.T) {
 
 func TestSyncReward(t *testing.T) {
 	state := New(&clparams.MainnetBeaconConfig)
-	utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.Phase0Version))
+	require.NoError(t, utils.DecodeSSZSnappy(state, stateEncoded, int(clparams.Phase0Version)))
 
 	propReward, partReward, err := state.SyncRewards()
 	require.NoError(t, err)

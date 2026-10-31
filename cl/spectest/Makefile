@@ -1,5 +1,7 @@
 .PHONY: clean setup example run clean
 
+export GOEXPERIMENT ?= jsonv2
+
 tests:
 	$(MAKE) -C ../.. test-fixtures-cl
 

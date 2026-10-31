@@ -18,6 +18,8 @@ package antiquary
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -27,20 +29,42 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
+func TestShouldBackoffHistoricalStateRead(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "missing GLOAS data", err: historical_states_reader.ErrMissingGloasData, want: true},
+		{name: "missing history vector", err: historical_states_reader.ErrMissingHistoryVectorData, want: true},
+		{name: "corrupt queue diff", err: base_encoding.ErrCorruptQueueDiff, want: true},
+		{name: "history rebuild required", err: state_accessors.ErrHistoryRebuildRequired, want: true},
+		{name: "generic error", err: errors.New("read failed"), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := fmt.Errorf("failed to read builders: %w", test.err)
+			require.Equal(t, test.want, shouldBackoffHistoricalStateRead(err))
+		})
+	}
+}
+
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	reader := tests.LoadChain(blocks, db, t)
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	sn.OnHeadState(postState)
+	require.NoError(t, sn.OnHeadState(postState))
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
@@ -99,10 +123,10 @@ func TestStateAntiquaryCommitIsBounded(t *testing.T) {
 	to := blocks[len(blocks)-1].Block.Slot + 33
 
 	run := func(maxSlotsPerCommit uint64) (commits int64, progress uint64) {
-		db := memdb.NewTestDB(t, dbcfg.ChainDB)
-		reader := tests.LoadChain(blocks, postState, db, t)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+		reader := tests.LoadChain(blocks, db, t)
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-		sn.OnHeadState(postState)
+		require.NoError(t, sn.OnHeadState(postState))
 		ctx := context.Background()
 		vt := state_accessors.NewStaticValidatorTable()
 		counter := &atomic.Int64{}

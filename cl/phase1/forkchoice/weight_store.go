@@ -26,8 +26,8 @@ import (
 // [New in Gloas:EIP7732]
 type WeightStore interface {
 	// GetWeight returns the weight (in Gwei) for a ForkChoiceNode.
-	// Takes payload status into account via node ancestor checks.
-	GetWeight(node ForkChoiceNode) uint64
+	// The current slot must stay the same for all candidates in a head walk.
+	GetWeight(node ForkChoiceNode, currentSlot uint64) uint64
 
 	// GetAttestationScore returns the attestation score for a ForkChoiceNode.
 	GetAttestationScore(node ForkChoiceNode) uint64
@@ -43,15 +43,6 @@ type WeightStore interface {
 type weightStore struct {
 	f               *ForkChoiceStore
 	checkpointState *checkpointState // cached per getHeadGloas invocation
-}
-
-// NewWeightStore creates a new WeightStore for the given ForkChoiceStore.
-// It pre-fetches the checkpoint state once so that repeated calls to
-// GetAttestationScore / GetProposerScore avoid redundant disk reads.
-func NewWeightStore(f *ForkChoiceStore) WeightStore {
-	justifiedCheckpoint := f.JustifiedCheckpoint()
-	cs, _ := f.getCheckpointState(justifiedCheckpoint)
-	return newWeightStoreFromCheckpointState(f, cs)
 }
 
 func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) WeightStore {
@@ -72,8 +63,8 @@ func newWeightStoreFromCheckpointState(f *ForkChoiceStore, cs *checkpointState) 
 //
 // So: PENDING OR not-previous-slot → calculate weight
 // NOT PENDING AND is-previous-slot → return 0
-func getWeight(store WeightStore, f *ForkChoiceStore, node ForkChoiceNode) uint64 {
-	if f.isPreviousSlotPayloadDecision(node) {
+func getWeight(store WeightStore, f *ForkChoiceStore, node ForkChoiceNode, currentSlot uint64) uint64 {
+	if f.isPreviousSlotPayloadDecision(node, currentSlot) {
 		return 0
 	}
 
@@ -102,12 +93,12 @@ func getProposerScore(f *ForkChoiceStore, cs *checkpointState) uint64 {
 	if cs == nil {
 		return 0
 	}
-	committeeWeight := cs.activeBalance / f.beaconCfg.SlotsPerEpoch
+	committeeWeight := cs.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
 	return (committeeWeight * f.beaconCfg.ProposerScoreBoost) / 100
 }
 
-func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
-	return getWeight(w, w.f, node)
+func (w *weightStore) GetWeight(node ForkChoiceNode, currentSlot uint64) uint64 {
+	return getWeight(w, w.f, node, currentSlot)
 }
 
 // GetAttestationScore returns the attestation score for a ForkChoiceNode.

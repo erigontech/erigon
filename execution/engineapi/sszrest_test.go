@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -61,8 +62,8 @@ func (m *bodiesRangeExecutionModule) GetHeader(_ context.Context, _ *common.Hash
 	return m.headers[*blockNumber], nil
 }
 
-func newSSZRequest(method, path, fork string, body []byte) *http.Request {
-	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+func newSSZRequest(ctx context.Context, method, path, fork string, body []byte) *http.Request {
+	req := httptest.NewRequestWithContext(ctx, method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", sszRestContentType)
 	if fork != "" {
 		req.Header.Set("Eth-Execution-Version", fork)
@@ -397,7 +398,7 @@ func TestSSZRESTForkchoiceResponseRoundTrip(t *testing.T) {
 }
 
 func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
-	blockValue := uint256.NewInt(112233).ToBig()
+	blockValue := uint256.NewInt(112233)
 	bundle := &engine_types.BlobsBundle{
 		Commitments: []hexutil.Bytes{bytes.Repeat([]byte{0x01}, sszKZGBytes)},
 		Proofs:      []hexutil.Bytes{bytes.Repeat([]byte{0x02}, sszKZGBytes)},
@@ -428,7 +429,7 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 			}
 			resp := &engine_types.GetPayloadResponse{
 				ExecutionPayload:      payload,
-				BlockValue:            (*hexutil.Big)(blockValue),
+				BlockValue:            (*hexutil.U256)(blockValue),
 				ShouldOverrideBuilder: true,
 			}
 			if tc.wantBundle {
@@ -441,7 +442,7 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			out, err := decodeBuiltPayload(enc, tc.version)
 			require.NoError(t, err)
-			require.Equal(t, blockValue, out.BlockValue.ToInt())
+			require.Equal(t, blockValue, (*uint256.Int)(out.BlockValue))
 			require.Equal(t, payload.BlockHash, out.ExecutionPayload.BlockHash)
 			require.Equal(t, tc.wantSOB, out.ShouldOverrideBuilder)
 			if tc.wantBundle {
@@ -524,7 +525,7 @@ func TestSSZRESTBodiesByRangePreservesTrailingUnavailableBody(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec,
-		newSSZRequest(http.MethodGet, "/engine/v1/bodies?from=10&count=3", "cancun", nil))
+		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=3", "cancun", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
@@ -699,7 +700,7 @@ func TestSSZRESTPayloadStatusDecodeResetsOptionals(t *testing.T) {
 
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), false)
-	req := httptest.NewRequest(http.MethodGet, "/engine/v1/capabilities", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/capabilities", nil)
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
 
@@ -716,7 +717,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
 	require.Equal(t, []string{"payloads", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
 	require.Equal(t, []string{"v1", "v2", "v3"}, caps.IndependentlyVersioned["blobs"])
-	require.Equal(t, []string{"capabilities", "identity"}, caps.UnscopedEndpoints)
+	require.Equal(t, []string{"capabilities", "identity", "inclusion-list"}, caps.UnscopedEndpoints)
 	// pin the spec's MAX_* values: MAX_BODIES_REQUEST, MAX_VERSIONED_HASHES_PER_REQUEST,
 	// MAX_REQUEST_BODY_SIZE (2**26 = 64 MiB).
 	require.Equal(t, uint64(32), caps.Limits["bodies.max_count"])
@@ -726,7 +727,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 
 func TestSSZRESTIdentityRoute(t *testing.T) {
 	srv := newTestEngineServer(&chain.Config{}, false)
-	req := httptest.NewRequest(http.MethodGet, "/engine/v1/identity", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/identity", nil)
 	req.Header.Set("X-Engine-Client-Version", "LH/v9.9.9")
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
@@ -743,7 +744,7 @@ func TestSSZRESTIdentityRoute(t *testing.T) {
 func TestSSZRESTUnscopedIgnoreForkHeader(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), false)
 	for _, path := range []string{"/engine/v1/capabilities", "/engine/v1/identity"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req.Header.Set("Eth-Execution-Version", "not-a-fork")
 		rec := httptest.NewRecorder()
 		srv.SSZRESTHandler().ServeHTTP(rec, req)
@@ -790,7 +791,7 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 			case "blobs too many hashes":
 				body = bytes.Repeat([]byte{0x01}, (sszMaxGetBlobHashes+1)*32)
 			}
-			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, bytes.NewReader(body))
 			if tc.contentType != "" {
 				req.Header.Set("Content-Type", tc.contentType)
 			}
@@ -810,7 +811,7 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 func TestSSZRESTUnscheduledFork(t *testing.T) {
 	srv := newTestEngineServer(&chain.Config{ShanghaiTime: common.NewUint64(0), CancunTime: common.NewUint64(0)}, false)
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/payloads", "amsterdam", nil))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "amsterdam", nil))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 }
@@ -824,7 +825,7 @@ func TestSSZRESTNewPayloadDispatch(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/payloads", "paris", body))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "paris", body))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
@@ -849,7 +850,7 @@ func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/forkchoice", "cancun", body))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "cancun", body))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 }
@@ -859,7 +860,7 @@ func TestSSZRESTBlobsPoolDisabled(t *testing.T) {
 	body, err := encodeHashListRequest([]common.Hash{common.HexToHash("0x01")}, sszMaxGetBlobHashes)
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(http.MethodPost, "/engine/v1/blobs/v1", "", body))
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/blobs/v1", "", body))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	require.Empty(t, rec.Body.Bytes())
 }
@@ -886,6 +887,20 @@ func TestSSZRESTErrorMapping(t *testing.T) {
 	}
 }
 
+func TestEncodeBuiltPayloadIgnoresExecutionRequestsBeforeElectra(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.CapellaVersion, clparams.DenebVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			resp := &engine_types.GetPayloadResponse{
+				ExecutionPayload:  engine_types.NewExecutionPayloadSSZ(version),
+				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
+			}
+
+			_, err := encodeBuiltPayload(resp, version)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
 	id, err := parsePayloadIDPath("0x0102030405060708")
 	require.NoError(t, err)
@@ -900,6 +915,8 @@ func TestExchangeCapabilitiesDropsLegacySSZEndpoints(t *testing.T) {
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")
+	require.Contains(t, caps, "engine_getBlobsV4")
+	require.Contains(t, caps, "engine_getInclusionListV1")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")
 	for _, capability := range caps {
 		require.NotContains(t, capability, "/engine/v")
@@ -933,7 +950,7 @@ func TestSSZRESTExecutionRequestsBound(t *testing.T) {
 func TestSSZRESTReadBodyNonSizeError(t *testing.T) {
 	// a non-size read error (truncated body / client disconnect) is 400, not 413
 	srv := newTestEngineServer(allForksConfig(), false)
-	req := httptest.NewRequest(http.MethodPost, "/engine/v1/forkchoice", iotest.ErrReader(errors.New("boom")))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/engine/v1/forkchoice", iotest.ErrReader(errors.New("boom")))
 	req.Header.Set("Content-Type", sszRestContentType)
 	req.Header.Set("Eth-Execution-Version", "cancun")
 	rec := httptest.NewRecorder()
@@ -956,7 +973,7 @@ func TestSSZRESTRejectsOversizedContentLengthBeforeRead(t *testing.T) {
 		{"blobs", "/engine/v1/blobs/v1", "", 4 + sszMaxGetBlobHashes*32},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, tc.path, iotest.ErrReader(errors.New("body must not be read")))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, iotest.ErrReader(errors.New("body must not be read")))
 			req.ContentLength = tc.max + 1
 			req.Header.Set("Content-Type", sszRestContentType)
 			if tc.fork != "" {
@@ -974,7 +991,7 @@ func TestSSZRESTRejectsOversizedContentLengthBeforeRead(t *testing.T) {
 
 func TestSSZRESTRejectsOversizedStreamingBody(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), false)
-	req := newSSZRequest(http.MethodPost, "/engine/v1/forkchoice", "amsterdam",
+	req := newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "amsterdam",
 		make([]byte, sszMaxForkchoiceRequestBody+1))
 	req.ContentLength = -1
 	rec := httptest.NewRecorder()
@@ -993,7 +1010,7 @@ func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
 	targetGasLimit := hexutil.Uint64(30000000)
 	withdrawals := make([]*types.Withdrawal, sszMaxWithdrawals)
 	for i := range withdrawals {
-		withdrawals[i] = &types.Withdrawal{Index: uint64(i), Validator: uint64(i), Address: common.Address{byte(i)}, Amount: uint64(i)}
+		withdrawals[i] = &types.Withdrawal{Index: hexutil.Uint64(i), Validator: hexutil.Uint64(i), Address: common.Address{byte(i)}, Amount: hexutil.Uint64(i)}
 	}
 	attrs := &engine_types.PayloadAttributes{
 		Timestamp:             500,
@@ -1009,4 +1026,23 @@ func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
 	enc, err := encodeForkchoiceUpdate(clparams.GloasVersion, &engine_types.ForkChoiceState{}, attrs, custody)
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(enc), sszMaxForkchoiceRequestBody)
+}
+
+func TestSSZRESTGetInclusionListRoute(t *testing.T) {
+	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
+	srv := NewEngineServer(log.New(), &chain.Config{}, &stubExecutionModule{
+		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
+	}, nil, false, true, false, false, nil, nil, 0, 0)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/inclusion-list", nil)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	var resp solid.TransactionsSSZ
+	require.NoError(t, resp.DecodeSSZ(rec.Body.Bytes(), 0))
+	want, err := types.MarshalTransactionsBinary(txns)
+	require.NoError(t, err)
+	require.Equal(t, []hexutil.Bytes{want[0]}, transactionsBytes(&resp))
 }

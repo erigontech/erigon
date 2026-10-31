@@ -311,6 +311,124 @@ func (c *MockSyncedDataOnHeadStateWithBlockRootCall) DoAndReturn(f func(*state.C
 	return c
 }
 
+// OnOwnedHeadStateWithBlockRoot mocks base method.
+func (m *MockSyncedData) OnOwnedHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OnOwnedHeadStateWithBlockRoot", newState, blockRoot)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// OnOwnedHeadStateWithBlockRoot indicates an expected call of OnOwnedHeadStateWithBlockRoot.
+func (mr *MockSyncedDataMockRecorder) OnOwnedHeadStateWithBlockRoot(newState, blockRoot any) *MockSyncedDataOnOwnedHeadStateWithBlockRootCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnOwnedHeadStateWithBlockRoot", reflect.TypeOf((*MockSyncedData)(nil).OnOwnedHeadStateWithBlockRoot), newState, blockRoot)
+	return &MockSyncedDataOnOwnedHeadStateWithBlockRootCall{Call: call}
+}
+
+// MockSyncedDataOnOwnedHeadStateWithBlockRootCall wrap *gomock.Call
+type MockSyncedDataOnOwnedHeadStateWithBlockRootCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataOnOwnedHeadStateWithBlockRootCall) Return(arg0 error) *MockSyncedDataOnOwnedHeadStateWithBlockRootCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataOnOwnedHeadStateWithBlockRootCall) Do(f func(*state.CachingBeaconState, common.Hash) error) *MockSyncedDataOnOwnedHeadStateWithBlockRootCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataOnOwnedHeadStateWithBlockRootCall) DoAndReturn(f func(*state.CachingBeaconState, common.Hash) error) *MockSyncedDataOnOwnedHeadStateWithBlockRootCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SelectedHead mocks base method.
+func (m *MockSyncedData) SelectedHead() (common.Hash, uint64, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SelectedHead")
+	ret0, _ := ret[0].(common.Hash)
+	ret1, _ := ret[1].(uint64)
+	ret2, _ := ret[2].(bool)
+	return ret0, ret1, ret2
+}
+
+// SelectedHead indicates an expected call of SelectedHead.
+func (mr *MockSyncedDataMockRecorder) SelectedHead() *MockSyncedDataSelectedHeadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SelectedHead", reflect.TypeOf((*MockSyncedData)(nil).SelectedHead))
+	return &MockSyncedDataSelectedHeadCall{Call: call}
+}
+
+// MockSyncedDataSelectedHeadCall wrap *gomock.Call
+type MockSyncedDataSelectedHeadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataSelectedHeadCall) Return(arg0 common.Hash, arg1 uint64, arg2 bool) *MockSyncedDataSelectedHeadCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataSelectedHeadCall) Do(f func() (common.Hash, uint64, bool)) *MockSyncedDataSelectedHeadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataSelectedHeadCall) DoAndReturn(f func() (common.Hash, uint64, bool)) *MockSyncedDataSelectedHeadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// StateHead mocks base method.
+func (m *MockSyncedData) StateHead() (common.Hash, uint64, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateHead")
+	ret0, _ := ret[0].(common.Hash)
+	ret1, _ := ret[1].(uint64)
+	ret2, _ := ret[2].(bool)
+	return ret0, ret1, ret2
+}
+
+// StateHead indicates an expected call of StateHead.
+func (mr *MockSyncedDataMockRecorder) StateHead() *MockSyncedDataStateHeadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateHead", reflect.TypeOf((*MockSyncedData)(nil).StateHead))
+	return &MockSyncedDataStateHeadCall{Call: call}
+}
+
+// MockSyncedDataStateHeadCall wrap *gomock.Call
+type MockSyncedDataStateHeadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataStateHeadCall) Return(arg0 common.Hash, arg1 uint64, arg2 bool) *MockSyncedDataStateHeadCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataStateHeadCall) Do(f func() (common.Hash, uint64, bool)) *MockSyncedDataStateHeadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataStateHeadCall) DoAndReturn(f func() (common.Hash, uint64, bool)) *MockSyncedDataStateHeadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Syncing mocks base method.
 func (m *MockSyncedData) Syncing() bool {
 	m.ctrl.T.Helper()
@@ -498,6 +616,44 @@ func (c *MockSyncedDataViewHeadStateCall) Do(f func(synced_data.ViewHeadStateFn)
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSyncedDataViewHeadStateCall) DoAndReturn(f func(synced_data.ViewHeadStateFn) error) *MockSyncedDataViewHeadStateCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ViewHeadStateWithIdentity mocks base method.
+func (m *MockSyncedData) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ViewHeadStateWithIdentity", fn)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ViewHeadStateWithIdentity indicates an expected call of ViewHeadStateWithIdentity.
+func (mr *MockSyncedDataMockRecorder) ViewHeadStateWithIdentity(fn any) *MockSyncedDataViewHeadStateWithIdentityCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ViewHeadStateWithIdentity", reflect.TypeOf((*MockSyncedData)(nil).ViewHeadStateWithIdentity), fn)
+	return &MockSyncedDataViewHeadStateWithIdentityCall{Call: call}
+}
+
+// MockSyncedDataViewHeadStateWithIdentityCall wrap *gomock.Call
+type MockSyncedDataViewHeadStateWithIdentityCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataViewHeadStateWithIdentityCall) Return(arg0 error) *MockSyncedDataViewHeadStateWithIdentityCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataViewHeadStateWithIdentityCall) Do(f func(synced_data.ViewHeadStateWithIdentityFn) error) *MockSyncedDataViewHeadStateWithIdentityCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataViewHeadStateWithIdentityCall) DoAndReturn(f func(synced_data.ViewHeadStateWithIdentityFn) error) *MockSyncedDataViewHeadStateWithIdentityCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

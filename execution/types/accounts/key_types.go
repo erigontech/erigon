@@ -17,7 +17,9 @@
 package accounts
 
 import (
+	"encoding/binary"
 	"fmt"
+	"sync/atomic"
 	"unique"
 
 	"github.com/erigontech/erigon/common"
@@ -26,11 +28,38 @@ import (
 
 type Address unique.Handle[common.Address]
 
-var ZeroAddress = InternAddress(common.Address{})
-var NilAddress = Address{}
+var (
+	ZeroAddress = InternAddress(common.Address{})
+	NilAddress  = Address{}
+)
+
+// unique drops a value at the first GC after its last handle dies, so values the next request reads again are
+// allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
+// direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
+const (
+	addressTableSize = 256 * 1024
+	keyTableSize     = 1024 * 1024
+)
+
+var (
+	addressTable [addressTableSize]atomic.Value // Address
+	keyTable     [keyTableSize]atomic.Value     // StorageKey
+	_            = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
+	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
+)
+
+func addressSlot(a common.Address) *atomic.Value {
+	return &addressTable[binary.BigEndian.Uint32(a[16:])&(addressTableSize-1)]
+}
 
 func InternAddress(a common.Address) Address {
-	return Address(unique.Make(a))
+	slot := addressSlot(a)
+	if h, ok := slot.Load().(Address); ok && h.Value() == a {
+		return h
+	}
+	h := Address(unique.Make(a))
+	slot.Store(h)
+	return h
 }
 
 func (a Address) IsNil() bool {
@@ -61,7 +90,7 @@ func (a Address) String() string {
 
 func (a Address) Format(s fmt.State, c rune) {
 	if a == NilAddress {
-		s.Write([]byte("<nil>"))
+		_, _ = s.Write([]byte("<nil>"))
 		return
 	}
 	a.Value().Format(s, c)
@@ -113,11 +142,24 @@ func (a Address) Cmp(o Address) int {
 
 type StorageKey unique.Handle[common.Hash]
 
-var ZeroKey = InternKey(common.Hash{})
-var NilKey = StorageKey{}
+var (
+	ZeroKey = InternKey(common.Hash{})
+	NilKey  = StorageKey{}
+)
+
+// keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
+func keySlot(k common.Hash) *atomic.Value {
+	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
+}
 
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey(unique.Make(k))
+	slot := keySlot(k)
+	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
+		return h
+	}
+	h := StorageKey(unique.Make(k))
+	slot.Store(h)
+	return h
 }
 
 func (k StorageKey) IsNil() bool {
@@ -140,7 +182,7 @@ func (k StorageKey) String() string {
 
 func (k StorageKey) Format(s fmt.State, c rune) {
 	if k == NilKey {
-		s.Write([]byte("<nil>"))
+		_, _ = s.Write([]byte("<nil>"))
 		return
 	}
 	k.Value().Format(s, c)
@@ -164,9 +206,11 @@ func (k StorageKey) Cmp(o StorageKey) int {
 
 type CodeHash unique.Handle[common.Hash]
 
-var ZeroCodeHash = InternCodeHash(common.Hash{})
-var NilCodeHash = CodeHash{}
-var EmptyCodeHash = InternCodeHash(empty.CodeHash)
+var (
+	ZeroCodeHash  = InternCodeHash(common.Hash{})
+	NilCodeHash   = CodeHash{}
+	EmptyCodeHash = InternCodeHash(empty.CodeHash)
+)
 
 func InternCodeHash(k common.Hash) CodeHash {
 	return CodeHash(unique.Make(k))
@@ -200,7 +244,7 @@ func (h CodeHash) String() string {
 
 func (h CodeHash) Format(s fmt.State, c rune) {
 	if h == NilCodeHash {
-		s.Write([]byte("<nil>"))
+		_, _ = s.Write([]byte("<nil>"))
 		return
 	}
 	h.Value().Format(s, c)

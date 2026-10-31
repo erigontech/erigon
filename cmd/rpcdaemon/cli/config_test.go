@@ -17,23 +17,90 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
+
+func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
+	handshake := func(t *testing.T, corsDomains []string, origin string) int {
+		t.Helper()
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		port := ln.Addr().(*net.TCPAddr).Port
+		cfg := &httpcfg.HttpCfg{
+			Enabled:           true,
+			HttpServerEnabled: true,
+			HttpListenAddress: "127.0.0.1",
+			HttpPort:          port,
+			HttpListener:      ln,
+			HttpCORSDomain:    corsDomains,
+			HttpVirtualHost:   []string{"localhost"},
+			WebsocketEnabled:  true,
+			WebsocketPort:     port,
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- StartRpcServer(ctx, cfg, nil, log.New()) }()
+		defer func() {
+			cancel()
+			<-done
+		}()
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/", nil)
+		require.NoError(t, err)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Sec-WebSocket-Version", "13")
+		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	require.Equal(t, http.StatusForbidden, handshake(t, nil, "https://evil.example"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://localhost:3000"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://127.0.0.1:3000"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://[::1]:8545"))
+	require.Equal(t, http.StatusForbidden, handshake(t, nil, "http://127.0.0.2:3000"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, "https://dapp.example"))
+	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://evil.example"))
+	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://dapp.example:8443"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, ""))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://*.example.com"}, "https://dapp.example.com"))
+	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://*.example.com"}, "https://evil.example"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"*"}, "https://evil.example"))
+}
 
 // TestIsWebsocket tests if an incoming websocket upgrade request is detected properly.
 func TestIsWebsocket(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/", nil)
+	r, _ := http.NewRequestWithContext(t.Context(), "GET", "/", nil)
 
 	require.False(t, isWebsocket(r))
 	r.Header.Set("upgrade", "websocket")
@@ -69,4 +136,163 @@ func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
 		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
 		require.NoError(t, err)
 	})
+}
+
+func TestRegularRpcServerGraphQLHostAndCORS(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	cfg := &httpcfg.HttpCfg{
+		Enabled:           true,
+		HttpServerEnabled: true,
+		GraphQLEnabled:    true,
+		HttpListenAddress: "127.0.0.1",
+		HttpPort:          port,
+		HttpListener:      ln,
+		HttpCORSDomain:    []string{"https://dapp.example"},
+		HttpVirtualHost:   []string{"localhost"},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- StartRpcServer(ctx, cfg, nil, log.New()) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	query := func(t *testing.T, host, origin string) (int, http.Header) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+ln.Addr().String()+"/graphql", strings.NewReader(`{"query":"{__typename}"}`))
+		require.NoError(t, err)
+		req.Host = host
+		req.Header.Set("Content-Type", "application/json")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+
+	status, _ := query(t, "rebind.example", "")
+	require.Equal(t, http.StatusForbidden, status)
+	status, header := query(t, "localhost", "https://dapp.example")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "https://dapp.example", header.Get("Access-Control-Allow-Origin"))
+}
+
+type subscribingService struct{}
+
+func (subscribingService) Heads(ctx context.Context) (*rpc.Subscription, error) {
+	notifier, ok := rpc.NotifierFromContext(ctx)
+	if !ok {
+		return nil, rpc.ErrNotificationsUnsupported
+	}
+	return notifier.CreateSubscription(), nil
+}
+
+// The authenticated endpoint applies the configured subscription limit as the regular one does.
+func TestAuthenticatedRpcServerAppliesSubscriptionLimit(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	cfg := &httpcfg.HttpCfg{
+		WebsocketEnabled:  true,
+		AuthRpcListener:   ln,
+		JWTSecretPath:     filepath.Join(t.TempDir(), "jwt.hex"),
+		SubscriptionLimit: 1,
+	}
+	logger := log.New()
+	listener, engineSrv, _, err := createEngineListener(cfg, []rpc.API{{Namespace: "test", Service: subscribingService{}}}, logger)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		engineSrv.Stop()
+		_ = listener.Close()
+	})
+	jwtSecret, err := ObtainJWTSecret(cfg, logger)
+	require.NoError(t, err)
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()}).SignedString(jwtSecret)
+	require.NoError(t, err)
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws://"+ln.Addr().String(), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
+	})
+	if err != nil && resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	subscribe := func(id int) *struct{ Code int } {
+		t.Helper()
+		request := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_subscribe","params":["heads"]}`, id)
+		require.NoError(t, conn.Write(t.Context(), websocket.MessageText, []byte(request)))
+		_, data, err := conn.Read(t.Context())
+		require.NoError(t, err)
+		var answer struct {
+			Error *struct{ Code int } `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(data, &answer))
+		return answer.Error
+	}
+	require.Nil(t, subscribe(1))
+	second := subscribe(2)
+	require.NotNil(t, second, "second subscription accepted with a limit of 1")
+	require.Equal(t, rpc.ErrCodeServerOverloaded, second.Code)
+}
+
+func TestAuthenticatedRpcServerRequiresJwtForGraphQL(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	cfg := &httpcfg.HttpCfg{
+		GraphQLEnabled:  true,
+		AuthRpcListener: ln,
+		JWTSecretPath:   filepath.Join(t.TempDir(), "jwt.hex"),
+	}
+	listener, engineSrv, _, err := createEngineListener(cfg, []rpc.API{{Namespace: "test", Service: subscribingService{}}}, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		engineSrv.Stop()
+		_ = listener.Close()
+	})
+
+	for _, path := range []string{"/graphql", "/graphql/ui"} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+ln.Addr().String()+path, strings.NewReader(`{"query":"{block{number}}"}`))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusForbidden, resp.StatusCode, path)
+	}
+}
+
+func TestGraphQLHandlerAdmissionControl(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	blockFirst := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+	})
+	handler := newGraphQLHandler(&httpcfg.HttpCfg{HttpVirtualHost: []string{"*"}}, blockFirst, 1)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first request did not reach the GraphQL handler")
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	close(release)
+	<-done
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }

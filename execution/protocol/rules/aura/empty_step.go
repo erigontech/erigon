@@ -61,6 +61,7 @@ func (s *EmptyStep) Less(other *EmptyStep) bool {
 	}
 	return false
 }
+
 func (s *EmptyStep) LessOrEqual(other *EmptyStep) bool {
 	if s.step <= other.step {
 		return true

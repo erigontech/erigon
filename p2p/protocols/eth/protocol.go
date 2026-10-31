@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -53,8 +52,10 @@ var ProtocolToString = map[uint]string{
 const ProtocolName = "eth"
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
-const maxMessageSize = 10 * 1024 * 1024
-const ProtocolMaxMsgSize = maxMessageSize
+const (
+	maxMessageSize     = 10 * 1024 * 1024
+	ProtocolMaxMsgSize = maxMessageSize
+)
 
 var ProtocolLengths = map[uint]uint64{ETH68: 17, ETH69: 18, ETH70: 18, ETH71: 20}
 
@@ -155,10 +156,15 @@ type Packet interface {
 }
 
 // StatusPacket is the network packet for the status message for eth/64 and later.
+//
+// TD is a *uint256.Int rather than a *big.Int: total difficulty fits in 256
+// bits and the wire encoding is identical, while execution/rlp can decode a
+// uint256.Int but not a big.Int (a *big.Int field falls through to the struct
+// decoder and fails with "expected input list for big.Int").
 type StatusPacket struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
-	TD              *big.Int
+	TD              *uint256.Int
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID

@@ -13,7 +13,6 @@ package engineapi
 
 import (
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -305,26 +304,25 @@ func decodeForkchoiceResponse(buf []byte) (*engine_types.ForkChoiceUpdatedRespon
 	return resp, nil
 }
 
-func blockValueHash(v *hexutil.Big) common.Hash {
+func blockValueHash(v *hexutil.U256) common.Hash {
 	var out common.Hash
 	if v == nil {
 		return out
 	}
-	u := uint256.MustFromBig((*big.Int)(v))
-	b := u.Bytes32()
+	b := (*uint256.Int)(v).Bytes32()
 	for i := range b {
 		out[i] = b[31-i]
 	}
 	return out
 }
 
-func blockValueFromHash(v common.Hash) *hexutil.Big {
+func blockValueFromHash(v common.Hash) *hexutil.U256 {
 	var be [32]byte
 	for i := range v {
 		be[i] = v[31-i]
 	}
 	u := new(uint256.Int).SetBytes(be[:])
-	return (*hexutil.Big)(u.ToBig())
+	return (*hexutil.U256)(u)
 }
 
 func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersion) *engine_types.BlobsBundle {
@@ -390,7 +388,7 @@ func decodeBuiltPayload(buf []byte, version clparams.StateVersion) (*engine_type
 func newWithdrawalListSSZ(withdrawals []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
 	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](sszMaxWithdrawals, sszWithdrawalBytes)
 	for _, w := range withdrawals {
-		l.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+		l.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
 	}
 	return l
 }
@@ -398,7 +396,7 @@ func newWithdrawalListSSZ(withdrawals []*types.Withdrawal) *solid.ListSSZ[*cltyp
 func withdrawalsFromSSZList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdrawal {
 	out := make([]*types.Withdrawal, 0, l.Len())
 	l.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
-		out = append(out, &types.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+		out = append(out, &types.Withdrawal{Index: hexutil.Uint64(w.Index), Validator: hexutil.Uint64(w.Validator), Address: w.Address, Amount: hexutil.Uint64(w.Amount)})
 		return true
 	})
 	return out
@@ -676,4 +674,12 @@ func decodeBlobsV2Response(buf []byte) ([]*engine_types.BlobAndProofV2, error) {
 		return true
 	})
 	return out, nil
+}
+
+func encodeGetInclusionListResponse(txs []hexutil.Bytes) ([]byte, error) {
+	raw := make([][]byte, len(txs))
+	for i, tx := range txs {
+		raw[i] = tx
+	}
+	return solid.NewTransactionsSSZFromTransactions(raw).EncodeSSZ(nil)
 }

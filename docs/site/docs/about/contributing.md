@@ -17,7 +17,7 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
    git clone https://github.com/<your-username>/erigon.git
    cd erigon
    ```
-2. Build the project (requires Go 1.25+ and a C++ compiler):
+2. Build the project (requires Go 1.26+ and a C++ compiler):
    ```bash
    make erigon
    ```
@@ -36,14 +36,14 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 
 - Target the `main` branch for new features and non-critical fixes.
 - Target the relevant `release/x.y` branch for release-specific backports.
-- Keep PRs focused — one logical change per PR makes review faster.
+- Keep PRs focused — one logical change per pull request (PR) makes review faster.
 - Feel free to open a draft PR early if you want feedback on the direction before the implementation is complete.
 - Include a clear description of what changed, why, and how it was tested.
 
 ### Code style and guidelines
 
 - Follow the existing Go conventions in the codebase.
-- Run `make lint` before submitting — the CI will enforce it.
+- Run `make lint` before submitting — continuous integration (CI) will enforce it.
 - All new code should be covered by tests where practical.
 - Use the package-prefix commit message format: `eth, rpc: make trace configs optional`. This keeps the git log scannable by subsystem.
 
@@ -71,7 +71,7 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
 
 ### Submitting a pull request
 
-1. Create a new branch from `release/3.4`.
+1. Create a new branch from the branch the documentation is published from — the one named by the `DOCS_DEPLOY_BRANCH` repository variable, which is not necessarily the newest release branch. If you cannot read repository variables, open an issue asking which branch to target before you start, or open the pull request as a draft and ask there before building on the branch.
 2. Edit or add `.md` / `.mdx` files under `docs/site/docs/`.
 3. Verify your changes render correctly in the local dev server.
-4. Open a pull request against `release/3.4` with a clear description of what changed and why.
+4. Open a pull request against that same branch, with a clear description of what changed and why.

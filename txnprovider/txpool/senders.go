@@ -28,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -212,24 +210,24 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 	return id, traced
 }
 
-func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
+func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, accounts.CodeHash, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
 		panic("must not happen")
 	}
 	encoded, err := cacheView.Get(addr[:])
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
 	if len(encoded) == 0 {
-		return 0, uint256.Int{}, nil
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, nil
 	}
 	acc := accounts.Account{}
 	err = accounts.DeserialiseV3(&acc, encoded)
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
-	return acc.Nonce, acc.Balance, nil
+	return acc.Nonce, acc.Balance, acc.CodeHash, nil
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
@@ -239,29 +237,11 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
-	var processedTxns bool
-	for _, diff := range stateChanges.ChangeBatch {
-		for _, change := range diff.Changes { // merge state changes
-			addrB := gointerfaces.ConvertH160toAddress(change.Address)
-			sc.getOrCreateID(addrB, logger)
-		}
-
-		// unwindTxns/minedTxns do not depend on individual diffs inside the batch.
-		// Processing them for every diff only repeats the same work.
-		if processedTxns {
-			continue
-		}
-		processedTxns = true
-
-		if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
-			return err
-		}
-		if err := sc.registerNewSenders(&minedTxns, logger); err != nil {
-			return err
-		}
+func (sc *sendersBatch) onNewBlock(unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+	if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
+		return err
 	}
-	return nil
+	return sc.registerNewSenders(&minedTxns, logger)
 }
 
 func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
@@ -277,8 +257,8 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 
 // Encode the details of txn sender into the given "buffer" byte-slice that should be big enough
 func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
-	var fieldSet = 0 // start with first bit set to 0
-	var pos = 1
+	fieldSet := 0 // start with first bit set to 0
+	pos := 1
 	if nonce > 0 {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))

@@ -22,6 +22,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"reflect"
@@ -38,6 +39,13 @@ import (
 func TestMain(m *testing.M) {
 	// Run the app if we've been exec'd as "ethkey-test" in runEthkey.
 	reexec.Register("evm-test", func() {
+		if benchtime := os.Getenv("EVM_TEST_BENCHTIME"); benchtime != "" {
+			testing.Init()
+			if err := flag.Set("test.benchtime", benchtime); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
 		if err := app.Run(context.Background(), os.Args); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -263,6 +271,48 @@ func TestT8n(t *testing.T) {
 	}
 }
 
+// A stdin input that cannot be decoded, or that carries no "env" section, must
+// fail with a numbered error. Both used to be ignored, so the tool reached
+// `prestate.Env = *inputData.Env` with a nil env and panicked (exit code 2).
+func TestT8nStdinInputError(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stdin       string
+		expExitCode int
+	}{
+		{
+			name:        "malformed json",
+			stdin:       `{"alloc":`,
+			expExitCode: 10,
+		},
+		{
+			name:        "missing env section",
+			stdin:       `{"alloc":{},"txs":[]}`,
+			expExitCode: 10,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tt := cmdtest.NewTestCmd(t, nil)
+			tt.Run("evm-test", "t8n",
+				"--input.alloc=stdin", "--input.txs=stdin", "--input.env=stdin",
+				"--state.fork=London")
+			if _, err := tt.InputLine(tc.stdin); err != nil {
+				t.Logf("writing stdin: %v", err)
+			}
+			tt.CloseStdin()
+			_ = tt.Output()
+			tt.WaitExit()
+			if stderr := tt.StderrText(); strings.Contains(stderr, "panic") {
+				t.Fatalf("tool panicked instead of reporting an error:\n%s", stderr)
+			}
+			if have := tt.ExitStatus(); have != tc.expExitCode {
+				t.Fatalf("wrong exit code, have %d, want %d", have, tc.expExitCode)
+			}
+		})
+	}
+}
+
 func TestEvmRun(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
@@ -276,60 +326,69 @@ func TestEvmRun(t *testing.T) {
 	}
 
 	t.Parallel()
-	tt := cmdtest.NewTestCmd(t, nil)
-	for i, tc := range []struct {
+	for _, tc := range []struct {
+		name           string
 		input          []string
 		wantStdoutFile string
 		wantStderrFile string
 	}{
-		{ // json tracing
+		{
+			name:           "json tracing",
 			input:          []string{"--json", "--code", "6040", "run"},
 			wantStdoutFile: "./testdata/evmrun/1.out.1.txt",
 			wantStderrFile: "./testdata/evmrun/1.out.2.txt",
 		},
-		{ // Debug output
+		{
+			name:           "debug output",
 			input:          []string{"--debug", "--code", "6040", "run"},
 			wantStdoutFile: "./testdata/evmrun/2.out.1.txt",
 			wantStderrFile: "./testdata/evmrun/2.out.2.txt",
 		},
-		{ // bench run output
+		{
+			name:           "bench run output",
 			input:          []string{"--bench", "--code", "6040", "run"},
 			wantStdoutFile: "./testdata/evmrun/3.out.1.txt",
 			wantStderrFile: "./testdata/evmrun/3.out.2.txt",
 		},
-		{ // statetest
+		{
+			name:           "bench statetest",
 			input:          []string{"--bench", "statetest", "./testdata/statetest.json"},
 			wantStdoutFile: "./testdata/evmrun/4.out.1.txt",
 			wantStderrFile: "./testdata/evmrun/4.out.2.txt",
 		},
 	} {
-		tt.Logf("args: go run ./cmd/evm %v\n", strings.Join(tc.input, " "))
-		tt.Run("evm-test", tc.input...)
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tt := cmdtest.NewTestCmd(t, nil)
+			tt.Env = []string{"EVM_TEST_BENCHTIME=1x"}
+			tt.Logf("args: go run ./cmd/evm %v\n", strings.Join(tc.input, " "))
+			tt.Run("evm-test", tc.input...)
 
-		haveStdOut := tt.Output()
-		tt.WaitExit()
-		haveStdErr := tt.Stderr()
+			haveStdOut := tt.Output()
+			tt.WaitExit()
+			haveStdErr := tt.Stderr()
 
-		checkExpectedOutput(t, haveStdOut, tc.wantStdoutFile, i)
-		checkExpectedOutput(t, haveStdErr, tc.wantStderrFile, i)
+			checkExpectedOutput(t, haveStdOut, tc.wantStdoutFile)
+			checkExpectedOutput(t, haveStdErr, tc.wantStderrFile)
+		})
 	}
 }
 
-func checkExpectedOutput(t *testing.T, output []byte, expectationFilePath string, i int) {
+func checkExpectedOutput(t *testing.T, output []byte, expectationFilePath string) {
 	if len(expectationFilePath) > 0 {
 		want, err := os.ReadFile(expectationFilePath)
 		if err != nil {
-			t.Fatalf("test %d: could not read expected output: %v", i, err)
+			t.Fatalf("could not read expected output: %v", err)
 		}
 
 		re, err := regexp.Compile(string(want))
 		if err != nil {
-			t.Fatalf("test %d: could not compile regular expression: %v", i, err)
+			t.Fatalf("could not compile regular expression: %v", err)
 		}
 
 		output = withoutLogLines(output)
 		if !re.Match(output) {
-			t.Fatalf("test %d, output wrong, have \n%v\nwant\n%v\n", i, string(output), string(want))
+			t.Fatalf("output wrong, have \n%v\nwant\n%v\n", string(output), string(want))
 		}
 	}
 }

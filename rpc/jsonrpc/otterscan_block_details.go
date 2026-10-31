@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -26,50 +25,28 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	var (
-		b       *types.Block
-		senders []common.Address
-	)
-	if number == rpc.PendingBlockNumber {
-		b, senders, err = api.getBlockWithSenders(ctx, number, tx)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
-		if err != nil {
-			if errors.As(err, &rpc.BlockNotFoundErr{}) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
-			return nil, err
-		}
-		b, senders, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
-		if err != nil {
-			return nil, err
-		}
+	b, err := api.getBlock(ctx, number, tx)
+	if err != nil {
+		return nil, err
 	}
 	if b == nil {
 		return nil, nil
 	}
 
-	return api.getBlockDetailsImpl(ctx, tx, b, number, senders)
+	return api.getBlockDetailsImpl(ctx, tx, b, number)
 }
 
 func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +61,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, fmt.Errorf("couldn't find block number for hash %v", hash[:])
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -98,20 +75,20 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	}
 	number := rpc.BlockNumber(b.NumberU64())
 
-	return api.getBlockDetailsImpl(ctx, tx, b, number, b.Body().SendersFromTxs())
+	return api.getBlockDetailsImpl(ctx, tx, b, number)
 }
 
-func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, senders []common.Address) (map[string]any, error) {
+func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber) (map[string]any, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
+	getBlockRes, err := delegateGetBlockByNumber(b, number, false)
 	if err != nil {
 		return nil, err
 	}
-	getIssuanceRes, err := delegateIssuance(tx, b, chainConfig, api.engine())
+	getIssuanceRes, err := delegateIssuance(b, chainConfig, api.engine())
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +96,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	if err != nil {
 		return nil, err
 	}
-	feesRes, err := delegateBlockFees(ctx, tx, b, senders, chainConfig, receipts)
+	feesRes, err := delegateBlockFees(b, chainConfig, receipts)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +104,6 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["issuance"] = getIssuanceRes
-	response["totalFees"] = (*hexutil.Big)(feesRes)
+	response["totalFees"] = (*hexutil.U256)(&feesRes)
 	return response, nil
 }

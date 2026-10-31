@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"net"
+	"sync/atomic"
 
 	"github.com/libp2p/go-libp2p/core/control"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -22,7 +23,8 @@ var privateCIDRList = []string{
 }
 
 type Gater struct {
-	filter *multiaddr.Filters
+	filter     *multiaddr.Filters
+	dialPolicy atomic.Pointer[func(peer.ID) bool]
 }
 
 func NewGater(cfg *P2PConfig) (g *Gater, err error) {
@@ -34,10 +36,15 @@ func NewGater(cfg *P2PConfig) (g *Gater, err error) {
 	return g, nil
 }
 
+func (g *Gater) SetDialPolicy(dialable func(peer.ID) bool) {
+	g.dialPolicy.Store(&dialable)
+}
+
 // InterceptPeerDial tests whether we're permitted to Dial the specified peer.
 // This is called by the network.Network implementation when dialling a peer.
 func (g *Gater) InterceptPeerDial(p peer.ID) (allow bool) {
-	return true
+	dialable := g.dialPolicy.Load()
+	return dialable == nil || (*dialable)(p)
 }
 
 // InterceptAddrDial tests whether we're permitted to dial the specified

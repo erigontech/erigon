@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -35,11 +36,11 @@ type headerResponse struct {
 	Header    *cltypes.SignedBeaconBlockHeader `json:"header"`
 }
 
-func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root common.Hash, err error) {
+func (a *ApiHandler) rootFromBlockId(tx kv.Tx, blockId *beaconhttp.SegmentID) (root common.Hash, err error) {
 	switch {
 	case blockId.Head():
 		var statusCode int
-		root, _, statusCode, err = a.getHead()
+		root, _, statusCode, err = a.getSelectedHead()
 		if err != nil {
 			return common.Hash{}, beaconhttp.NewEndpointError(statusCode, err)
 		}
@@ -56,12 +57,16 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
 		}
 	case blockId.GetSlot() != nil:
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.GetSlot())
+		slot := *blockId.GetSlot()
+		if slot > math.MaxUint32 {
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", slot))
+		}
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		if root == (common.Hash{}) {
-			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", *blockId.GetSlot()))
+			return common.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %d", slot))
 		}
 	case blockId.GetRoot() != nil:
 		// first check if it exists
@@ -84,20 +89,19 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
 
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
-
-	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
+	blk, err := a.readBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
 	}
 	if blk == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	// Check if the block is canonical
 	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
@@ -107,6 +111,41 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 	return newBeaconResponse(blk).
 		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithVersion(blk.Version()).WithOptimistic(isOptimistic), nil
+}
+
+func (a *ApiHandler) readBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
+	if err != nil || blk != nil {
+		return blk, err
+	}
+	return a.readLiveBlockByRoot(root)
+}
+
+func (a *ApiHandler) readLiveBlockByRoot(root common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	blk, _, ok := a.liveBlockAndHeader(root)
+	if !ok {
+		return nil, nil
+	}
+	blockRoot, err := blk.Block.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	if blockRoot != root {
+		return nil, nil
+	}
+	return blk, nil
+}
+
+func (a *ApiHandler) liveBlockAndHeader(root common.Hash) (*cltypes.SignedBeaconBlock, *cltypes.BeaconBlockHeader, bool) {
+	header, ok := a.forkchoiceStore.GetHeader(root)
+	if !ok || header == nil {
+		return nil, nil, false
+	}
+	blk, ok := a.forkchoiceStore.GetBlock(root)
+	if !ok || blk == nil || blk.Block == nil || blk.Block.Body == nil {
+		return nil, nil, false
+	}
+	return blk, header, true
 }
 
 func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -121,7 +160,7 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +201,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockAttestations(w http.ResponseWriter, r *h
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +234,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}

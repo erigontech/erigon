@@ -53,16 +53,16 @@ type TraceCallAction struct {
 	To            common.Address `json:"to"`
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
-	Gas           hexutil.Big    `json:"gas"`
-	Value         hexutil.Big    `json:"value"`
-	Balance       hexutil.Big    `json:"balance"`
+	Gas           hexutil.U256   `json:"gas"`
+	Value         hexutil.U256   `json:"value"`
+	Balance       hexutil.U256   `json:"balance"`
 	Init          hexutil.Bytes  `json:"init"`
 	Input         hexutil.Bytes  `json:"input"`
 	CallType      string         `json:"callType"`
 }
 
 type CallResult struct {
-	GasUsed hexutil.Big    `json:"gasUsed"`
+	GasUsed hexutil.U256   `json:"gasUsed"`
 	Output  hexutil.Bytes  `json:"output"`
 	Address common.Address `json:"address"`
 	Code    hexutil.Bytes  `json:"code"`
@@ -108,12 +108,11 @@ var TraceOpts = struct {
 func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
 	var b TraceCall
 
-	if args.Data == nil {
+	if args.Data == nil && args.Input == nil {
 		args.Data = &hexutil.Bytes{}
 	}
 
 	argsVal, err := json.Marshal(args)
-
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +122,6 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	}
 
 	optsVal, err := json.Marshal(traceOpts)
-
 	if err != nil {
 		return nil, err
 	}
@@ -142,9 +140,9 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	return &b.Result, nil
 }
 
-func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
+func (reqGen *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,%s,"%s"],"id":%d}`
-	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), req.reqID)
+	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), reqGen.reqID)
 }
 
 func (reqGen *requestGenerator) TraceTransaction(hash common.Hash) ([]TransactionTrace, error) {

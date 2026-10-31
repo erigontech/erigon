@@ -19,6 +19,7 @@ package solid
 import (
 	"encoding/json"
 	"math/bits"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -76,6 +77,11 @@ func (*ParticipationBitList) Static() bool {
 
 // CopyTo is like a Power Rangers team up episode - we get the bits from another list!
 func (u *ParticipationBitList) CopyTo(target IterableSSZ[byte]) {
+	if participation, ok := target.(*ParticipationBitList); ok {
+		participation.u = append(participation.u[:0], u.u[:u.l]...)
+		participation.l = u.l
+		return
+	}
 	target.Clear()
 	for i := 0; i < u.l; i++ {
 		target.Append(u.u[i])
@@ -83,10 +89,7 @@ func (u *ParticipationBitList) CopyTo(target IterableSSZ[byte]) {
 }
 
 func (u *ParticipationBitList) Copy() *ParticipationBitList {
-	n := NewParticipationBitList(u.l, u.c)
-	n.u = make([]byte, len(u.u), cap(u.u))
-	copy(n.u, u.u)
-	return n
+	return &ParticipationBitList{u: slices.Clone(u.u), l: u.l, c: u.c}
 }
 
 // Range allows us to do something to each bit in the list, just like a Power Rangers roll call.
@@ -151,11 +154,11 @@ func (u *ParticipationBitList) HashSSZProgressive() ([32]byte, error) {
 	return merkle_tree.ProgressiveBasicListRoot(u.Bytes(), uint64(u.l))
 }
 
-func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
-	elements := arr.u
-	offset := 32*(arr.l/32) + 32
-	if len(arr.u) <= offset {
-		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
+func (u *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
+	elements := u.u
+	offset := 32*(u.l/32) + 32
+	if len(u.u) <= offset {
+		elements = append(elements, make([]byte, offset-len(u.u)+1)...)
 	}
 	elements = elements[:offset]
 	for i := range depth {
@@ -165,11 +168,11 @@ func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
 		}
 		outputLen := len(elements) / 2
-		arr.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
+		u.makeBuf(outputLen)
+		if err := merkle_tree.HashByteSlice(u.buf, elements); err != nil {
 			return err
 		}
-		elements = arr.buf
+		elements = u.buf
 	}
 	copy(xs, elements[:32])
 	return nil

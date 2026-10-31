@@ -23,6 +23,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -60,6 +62,17 @@ func TestCodeCache_PutAddrCodeHashReplacesStaleEntry(t *testing.T) {
 	got, ok := c.GetAddrCodeHash(addr)
 	require.True(t, ok)
 	require.Equal(t, newHash, got)
+}
+
+func TestCodeCache_GetAddrCodeHashWithTxNumPreservesStamp(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	addr := makeAddr(1)
+	codeHash := [32]byte{1}
+	c.PutAddrCodeHash(addr, codeHash, 42)
+	gotHash, gotTxNum, ok := c.GetAddrCodeHashWithTxNum(addr)
+	require.True(t, ok)
+	require.Equal(t, codeHash, gotHash)
+	require.Equal(t, uint64(42), gotTxNum)
 }
 
 func TestCodeCache_GetByCodeHash_HitAfterPut(t *testing.T) {
@@ -126,18 +139,17 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 	require.Nil(t, v)
 }
 
-func TestCodeCache_PutWithCodeHash_EvictsColdestWhenFull(t *testing.T) {
-	// Tiny byte budget → a 1-entry freelru cap. The second put must EVICT the
-	// coldest entry (LRU), not freeze the layer: the newest code is retrievable
-	// and the oldest is gone.
-	c := closeOnCleanup(t, NewCodeCache(8, 1*datasize.MB))
+func TestCodeCache_PutWithCodeHash_EvictsWhenFull(t *testing.T) {
+	// A budget with room for one entry. The second put must evict rather than
+	// freeze the layer, leaving exactly one of the two codes resident.
+	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeEntryBytes+8), 1*datasize.MB))
 	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
 	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
 
-	_, ok := c.GetByCodeHash(makeCodeHash(2))
-	assert.True(t, ok, "newest codeHashToCode entry must be present after eviction (no freeze)")
-	_, ok = c.GetByCodeHash(makeCodeHash(1))
-	assert.False(t, ok, "coldest codeHashToCode entry must have been evicted")
+	_, first := c.GetByCodeHash(makeCodeHash(1))
+	_, second := c.GetByCodeHash(makeCodeHash(2))
+	assert.NotEqual(t, first, second, "exactly one entry must survive the byte bound")
+	assert.Equal(t, 1, c.codeHashToCode.Len())
 }
 
 func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {
@@ -180,69 +192,6 @@ func TestCodeCache_CodeSize_EmptyHashOrNegativeIsNoOp(t *testing.T) {
 // =============================================================================
 // Microbenchmarks — measure the per-op cost of the codeHashToCode path.
 // =============================================================================
-
-func BenchmarkCodeCache_GetByCodeHash_Hit(b *testing.B) {
-	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-	code := bytes.Repeat([]byte{0x5b}, 2048) // 2 KiB typical contract size
-	codeHash := makeCodeHash(0x11)
-	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		v, ok := c.GetByCodeHash(codeHash)
-		if !ok || len(v) == 0 {
-			b.Fatal("expected hit")
-		}
-	}
-}
-
-func BenchmarkCodeCache_GetByCodeHash_Miss(b *testing.B) {
-	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-	missHash := makeCodeHash(0x22)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = c.GetByCodeHash(missHash)
-	}
-}
-
-// BenchmarkCodeCache_Get_AddrLevel_Hit baseline: the existing addr-keyed
-// path. Compare against GetByCodeHash to verify the codeHashToCode lookup is at least
-// as fast (one map probe vs two: addr→hash then hash→code).
-func BenchmarkCodeCache_Get_AddrLevel_Hit(b *testing.B) {
-	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-	code := bytes.Repeat([]byte{0x5b}, 2048)
-	addr := makeAddr(1)
-	c.PutWithCodeHash(addr, code, makeCodeHash(0x33), 0)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		v, ok := c.Get(addr)
-		if !ok || len(v) == 0 {
-			b.Fatal("expected hit")
-		}
-	}
-}
-
-// BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode measures the workload
-// shape this layer is designed for: many addresses sharing one codeHash.
-// Without codeHashToCode every fresh addr would pay a file read. With codeHashToCode every
-// caller that already knows the hash hits one shared entry.
-func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
-	c := closeOnCleanup(b, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-	code := bytes.Repeat([]byte{0x5b}, 2048)
-	codeHash := makeCodeHash(0x44)
-	c.PutWithCodeHash(makeAddr(1), code, codeHash, 0) // populate once
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Caller knows the hash from a prior account read; probes codeHashToCode.
-		v, ok := c.GetByCodeHash(codeHash)
-		if !ok || len(v) == 0 {
-			b.Fatal("expected hit")
-		}
-	}
-}
 
 // TestCodeCache_Unwind_DropsUnwoundCodeEverywhere verifies the (txNum, epoch)
 // model: code deployed on a fork that is later
@@ -319,4 +268,74 @@ func TestCodeCache_Unwind_RedeployRevives(t *testing.T) {
 	gotH, ok := c.GetByCodeHash(codeHash)
 	require.True(t, ok, "re-deployed codeHash→code must be live")
 	require.Equal(t, code, gotH)
+}
+
+// Only 8 of an address's bytes pick the slot, so two addresses can collide
+// there. The full-address compare is what keeps a collision a miss instead of
+// serving the other contract's codeHash.
+func TestCodeCache_AddrCodeHashSlotCollision(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x11}, 12), 0, 0, 0, 0, 0, 0, 0, 1)
+	a2 := append(bytes.Repeat([]byte{0x22}, 12), 0, 0, 0, 0, 0, 0, 0, 1)
+	require.Equal(t, addrSlot(common.BytesToAddress(a1)), addrSlot(common.BytesToAddress(a2)),
+		"the two addresses must share a slot for this test to mean anything")
+	h1, h2 := [32]byte{1}, [32]byte{2}
+
+	c.PutAddrCodeHash(a1, h1, 100)
+	got, ok := c.GetAddrCodeHash(a1)
+	require.True(t, ok)
+	require.Equal(t, h1, got)
+
+	// The colliding address must miss, never inherit a1's hash.
+	_, ok = c.GetAddrCodeHash(a2)
+	require.False(t, ok)
+
+	// Replacement serves the address just inserted.
+	c.PutAddrCodeHash(a2, h2, 100)
+	got, ok = c.GetAddrCodeHash(a2)
+	require.True(t, ok)
+	require.Equal(t, h2, got)
+	_, ok = c.GetAddrCodeHash(a1)
+	require.False(t, ok, "a1 was displaced by the colliding insert")
+
+	// Deleting the non-resident colliding address must leave a2's mapping.
+	c.DeleteAddrCodeHash(a1)
+	got, ok = c.GetAddrCodeHash(a2)
+	require.True(t, ok, "deleting a colliding address dropped the wrong mapping")
+	require.Equal(t, h2, got)
+}
+
+// The addr→code binding shares the same lossy 64-bit slot, guarded by the full
+// address in GetWithTxNum. Without that guard one address would serve another's
+// code.
+func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x33}, 12), 0, 0, 0, 0, 0, 0, 0, 7)
+	a2 := append(bytes.Repeat([]byte{0x44}, 12), 0, 0, 0, 0, 0, 0, 0, 7)
+	require.Equal(t, addrSlot(common.BytesToAddress(a1)), addrSlot(common.BytesToAddress(a2)),
+		"the two addresses must share a slot for this test to mean anything")
+	code1, code2 := []byte{0x60, 0x01}, []byte{0x60, 0x02}
+
+	c.Put(a1, code1, 0)
+	got, ok := c.Get(a1)
+	require.True(t, ok)
+	require.Equal(t, code1, got)
+
+	// The colliding address must miss, never inherit a1's code.
+	_, ok = c.Get(a2)
+	require.False(t, ok)
+
+	// Binding the colliding address serves it, and a1 no longer claims the slot.
+	c.Put(a2, code2, 0)
+	got, ok = c.Get(a2)
+	require.True(t, ok)
+	require.Equal(t, code2, got)
+	_, ok = c.Get(a1)
+	require.False(t, ok)
+
+	// Deleting a non-resident colliding address must not evict a2's live entry.
+	c.Delete(a1)
+	got, ok = c.Get(a2)
+	require.True(t, ok, "Delete of a colliding address dropped the wrong entry")
+	require.Equal(t, code2, got)
 }

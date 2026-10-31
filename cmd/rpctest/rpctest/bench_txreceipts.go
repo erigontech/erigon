@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,34 +28,29 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getTransactionReceipt"}, resultsCh)
+		go writePattern(true, []string{"eth_getTransactionReceipt"}, resultsCh)
 	}
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		b, skip, err := fetchBlock(reqGen, bn, false, nil)
 		if err != nil {
@@ -80,37 +76,32 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 
 const logInterval = 20 * time.Second
 
-func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getBlockReceipts"}, resultsCh)
+		go writePattern(true, []string{"eth_getBlockReceipts"}, resultsCh)
 	}
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
-	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	log.Info("starting", "last_block", blockNumber.Number, "from", blockNumber, "to", blockTo)
+	log.Info("starting", "last_block", lastBlock, "from", blockFrom, "to", blockTo)
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		request := reqGen.getBlockReceipts(bn)
 		errCtx := fmt.Sprintf("block %d", bn)

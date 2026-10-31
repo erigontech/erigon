@@ -25,11 +25,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -39,15 +41,59 @@ import (
 
 const gracePeerCount = 32
 
+// maxConcurrentRequests is the consensus spec's MAX_CONCURRENT_REQUESTS. Responders may penalise more open streams
+// with one peer for one request type, so the cap counts all versions of a request together.
+const maxConcurrentRequests = 2
+
+// ErrPeerBusy reports that a request was not sent because the peer already has maxConcurrentRequests open streams
+// for the request type. It is not the peer's fault.
+var ErrPeerBusy = errors.New("peer already has the maximum number of concurrent requests for this request type")
+
+type peerStream struct {
+	pid         peer.ID
+	requestType string
+}
+
 var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
 	sentinelproto.UnimplementedSentinelServer
 
-	ctx      context.Context
-	sentinel *sentinel.Sentinel
+	ctx                context.Context
+	sentinel           *sentinel.Sentinel
+	peerRequestBackend peerRequestBackend
+
+	openStreamsMu sync.Mutex
+	openStreams   map[peerStream]int
 
 	logger log.Logger
+}
+
+func (s *SentinelServer) claimStream(key peerStream) bool {
+	s.openStreamsMu.Lock()
+	defer s.openStreamsMu.Unlock()
+	if s.openStreams[key] >= maxConcurrentRequests {
+		return false
+	}
+	if s.openStreams == nil {
+		s.openStreams = make(map[peerStream]int)
+	}
+	s.openStreams[key]++
+	return true
+}
+
+func (s *SentinelServer) releaseStream(key peerStream) {
+	s.openStreamsMu.Lock()
+	defer s.openStreamsMu.Unlock()
+	if s.openStreams[key]--; s.openStreams[key] <= 0 {
+		delete(s.openStreams, key)
+	}
+}
+
+type peerRequestBackend interface {
+	GetPeersCount() (active int, connected int, disconnected int)
+	Config() *sentinel.SentinelConfig
+	ReqRespHandler() http.Handler
 }
 
 type (
@@ -58,25 +104,45 @@ type (
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
-		sentinel: sentinel,
-		ctx:      ctx,
-		logger:   logger,
+		sentinel:           sentinel,
+		peerRequestBackend: sentinel,
+		ctx:                ctx,
+		logger:             logger,
 	}
 }
 
-func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
+// dropPeer disconnects pid and forgets it, so the same failing peer is not
+// picked again for the next request.
+func (s *SentinelServer) dropPeer(pid peer.ID) {
+	s.sentinel.Host().Peerstore().RemovePeer(pid)
+	s.closePeer(pid)
+}
+
+func (s *SentinelServer) closePeer(pid peer.ID) {
+	if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
+		s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
+	}
+}
+
+func (s *SentinelServer) BanPeer(ctx context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
 	active, _, _ := s.sentinel.GetPeersCount()
 	if active < gracePeerCount {
+		s.logger.Debug("[Sentinel] Skipping peer ban", "peer", p.GetPid(), "active", active)
 		return &sentinelproto.EmptyMessage{}, nil
 	}
+	return s.BanPeerForInvalidData(ctx, p)
+}
 
+// BanPeerForInvalidData bypasses the grace threshold: a peer serving invalid data
+// must be banned even when few peers are connected.
+func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
 	var pid peer.ID
-	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
+	if err := pid.UnmarshalText([]byte(p.GetPid())); err != nil {
 		return nil, err
 	}
+	s.logger.Debug("[Sentinel] Banning peer", "peer", pid)
 	s.sentinel.Peers().SetBanStatus(pid, true)
-	s.sentinel.Host().Peerstore().RemovePeer(pid)
-	s.sentinel.Host().Network().ClosePeer(pid)
+	s.dropPeer(pid)
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
@@ -89,31 +155,49 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
+	protocolID, _, _ := strings.Cut(req.Topic, ",")
+	requestType := strings.TrimSpace(protocolID)
+	if rest, ok := strings.CutPrefix(requestType, communication.ProtocolPrefix+"/"); ok {
+		requestType, _, _ = strings.Cut(rest, "/")
+	}
+	stream := peerStream{pid: pid, requestType: requestType}
+	if !s.claimStream(stream) {
+		return nil, ErrPeerBusy
+	}
+	defer s.releaseStream(stream)
+
 	// prepare the http request
-	httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", bytes.NewBuffer(req.Data))
 	if err != nil {
 		return nil, err
 	}
 
-	activePeers, _, _ := s.sentinel.GetPeersCount()
+	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
 
-	shouldBanOnFail := activePeers >= int(s.sentinel.Config().MaxPeerCount)
+	shouldBanOnFail := activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
 	if req.MaxResponseBytes > 0 {
 		httpReq.Header.Set(httpreqresp.MaxResponseBytesHeader, strconv.FormatUint(req.MaxResponseBytes, 10))
 	}
-	// for now this can't actually error. in the future, it can due to a network error
-	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
+	resp, err := httpreqresp.Do(s.peerRequestBackend.ReqRespHandler(), httpReq)
 	if err != nil {
 		// we remove, but dont ban the peer if we fail. this is because its probably not their fault, but maybe it is.
 		return nil, err
 	}
+	stopBodyClose := closeBodyOnCancel(ctx, resp.Body)
+	defer stopBodyClose()
 	defer resp.Body.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		errorMessage := &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       string(errBody),
@@ -123,15 +207,16 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		//	return nil, errorMessage
 		//}
 		if shouldBanOnFail {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
+			s.dropPeer(pid)
 		}
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
 	code, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
 		return nil, err
 	}
@@ -140,17 +225,16 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if !responseCode.Success() {
 		errorMessage, err := responseCode.ErrorMessage(resp)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if shouldBanOnFail {
-				s.sentinel.Peers().RemovePeer(pid)
-				s.sentinel.Host().Peerstore().RemovePeer(pid)
-				s.sentinel.Host().Network().ClosePeer(pid)
+				s.dropPeer(pid)
 			}
 			return nil, err
 		}
 		if shouldBanOnFail && responseCode != httpreqresp.ResponseCodeResourceUnavailable {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
+			s.dropPeer(pid)
 		}
 		return nil, &PeerResponseError{
 			Code:    responseCode,
@@ -161,12 +245,13 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
 		// drop the peer as the status path above would.
 		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
+			s.dropPeer(pid)
 		}
 		return nil, err
 	}
@@ -178,6 +263,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		},
 	}
 	return ans, nil
+}
+
+func closeBodyOnCancel(ctx context.Context, body io.Closer) func() bool {
+	return context.AfterFunc(ctx, func() { _ = body.Close() })
 }
 
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
@@ -194,9 +283,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.Req
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "protocols not supported") {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
+			s.dropPeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
@@ -218,9 +305,7 @@ func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *senti
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "protocols not supported") {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
+			s.dropPeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)

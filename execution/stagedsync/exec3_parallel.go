@@ -1,28 +1,31 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
-	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -80,59 +83,78 @@ rwloop does:
   - commit
   - open new RoTx
   - set new RoTx to all Workers
-  - start Worker start workers
+  - start WorkerContext start workers
 
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 
 type parallelExecutor struct {
 	txExecutor
-	execWorkers []*exec.Worker
+	// verdict and exhausted carry the apply loop's typed outcome as data, out of a
+	// run whose executor stayed healthy. At most one is set, and neither is set when
+	// exec() returns an operational error: operational outranks verdict outranks
+	// exhaustion, so the stage boundary classifies on these fields, never by
+	// errors.Is over a joined error.
+	verdict     *blockVerdict
+	exhausted   *ErrLoopExhausted
+	execWorkers []*exec.WorkerContext
 	stopWorkers func()
-	waitWorkers func()
-	// cancelExecLoop publishes the stopCause on the coordination context
-	// (execLoopCtx). It is a SIGNAL that the exec loop, calculator and apply loop
-	// each read to decide how to wind down. It cancels execLoopCtx and therefore
-	// its child workersCtx too, but every publish site is ordered after the exec
-	// loop has produced everything up to the coalesce block, so it never aborts an
-	// in-flight block mid-work.
+	// prevBlocks lists the finished-but-not-yet-committed blocks' versionMaps. A
+	// worker executing block M reads blocks < M from this list in front of its raw
+	// sd read, so it sees earlier blocks' writes that apply has not yet committed
+	// to the shared domain. Dropped from the tail on commit; nil when the gate is off.
+	prevBlocks *state.PrevBlockList
+	// mintedWorkers are extra WorkerContexts created when the runSem pool is empty
+	// because in-flight workers are parked mid-EVM on a dependency (holding their
+	// context). Reused via runSem and reclaimed at teardown. CPU concurrency stays
+	// bounded by execSem, so extra contexts add memory, not parallelism.
+	mintedWorkers []*exec.WorkerContext
+	mintMu        sync.Mutex
+	// cancelExecLoop publishes the stop cause on execLoopCtx. Normal stops finish
+	// work up to the coalesce block; failures can abort speculative work in progress.
 	cancelExecLoop context.CancelCauseFunc
-	// cancelWorkers stops the OCC worker pool via workersCtx (a child of the
-	// coordination context). It is the explicit, ordered halt the exec loop calls
-	// once it has produced everything up to the coalesce block.
-	cancelWorkers  context.CancelFunc
-	in             *exec.QueueWithRetry
-	rws            *exec.ResultsQueue
+	// cancelWorkers stops the OCC worker pool via workersCtx (child of execLoopCtx):
+	// the explicit ordered halt the exec loop calls once it has produced up to the
+	// coalesce block.
+	cancelWorkers context.CancelFunc
+	// runSem holds the idle worker contexts; runWG tracks task goroutines, busy or
+	// idle, for teardown.
+	runSem chan *exec.WorkerContext
+	// execSem decouples the CPU-parallelism gate (sized to the worker count) from the
+	// WorkerContext-object pool (runSem). A worker resting mid-EVM on a dependency
+	// keeps its object but releases its execSem slot, so resting does not reduce
+	// concurrency — another worker runs on a different object. runSem must hold enough
+	// objects for the peak of executing+resting workers; execSem sizes parallelism.
+	execSem chan struct{}
+	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
+	// open and close one; like applyTx it lives for one exec loop.
+	slotTxs chan kv.TemporalTx
+	runWG   sync.WaitGroup
+	// idleGo hands a task to a finished task goroutine, so its grown stack is reused.
+	idleGo     chan func()
+	workersCtx context.Context
+	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
+	results        chan *exec.TxResult
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
-	// applyResultsCh and commitResultsCh are set before execLoop starts.
-	// The exec loop closes them on exit to signal the apply loop and
-	// calculator to drain.
-	applyResultsCh  chan applyResult
-	commitResultsCh chan applyResult
-	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
-	// accumulator for txpool state-diff notifications; set before execLoop
-	// starts so that AuRa system-call nonce changes are emitted per block.
+	// consumers is the fan-out registry (apply loop + commitment calculator), set
+	// before execLoop starts. The exec loop closes it on exit to drain the consumers.
+	consumers   *resultStream
+	maxBlockNum uint64 // set before execLoop; exec loop exits when reached
 	accumulator *shards.Accumulator
-	// changesetAccumulator state owned by the exec loop. Accessing or mutating
-	// this is the exec loop's responsibility — putting it here (rather than on
-	// the apply-loop side) ensures all sd.mem mutations originate from a single
-	// goroutine and avoids the data race between SetChangesetAccumulator
-	// (apply loop) and ApplyStateWrites (exec loop, via SysCallContract for
-	// block-end system calls) on SharedDomains.mem.
-	// changesetWindowStart is the first block of the batch that must capture
-	// a changeset (see changesetWindowStart in exec3.go); blocks below it run
-	// without an accumulator.
+	// changesetWindowStart is the first block of the batch that must capture a
+	// changeset; blocks below it run without one.
 	changesetWindowStart uint64
-	currentChangeSet     *changeset.StateChangeSet
-	// currentChangeSetBlock is the block number currentChangeSet belongs to
-	// (0 == none). Tracked so ensureChangesetAccumulator can be a no-op when the
-	// accumulator is already installed for the block whose writes are about to
-	// be applied — making changeset capture robust against blocks scheduled out
-	// of band (e.g. processRequest scheduling the first block of a new request
-	// after the blockExecutors map went empty mid-batch, with no preceding
-	// blockResult to trigger the install at the rotation site below).
+	// currentChangeSet is the block's changeset while it is being built: the exec
+	// loop creates it and saves it by hash, then the apply fold and the committer
+	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
+	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
+	// global install would only race the fold's own transient bind.
+	currentChangeSet *changeset.StateChangeSet
+	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
+	// currentChangeSetHash is the hash currentChangeSet was last saved under.
+	currentChangeSetHash common.Hash
 }
 
 // stopKind classifies why the executor was asked to stop. It maps directly
@@ -140,9 +162,10 @@ type parallelExecutor struct {
 type stopKind uint8
 
 const (
-	stopReachedMax stopKind = iota // all requested work applied — clean batch end
-	stopMoreWork                   // size/exhausted cut before maxBlock — resume next cycle
-	stopBadBlock                   // wrong trie root — fail the implicated block and unwind
+	stopReachedMax  stopKind = iota // all requested work applied — clean batch end
+	stopMoreWork                    // size/exhausted cut before maxBlock — resume next cycle
+	stopBadBlock                    // wrong trie root — fail the implicated block and unwind
+	stopOperational                 // infrastructure failure — abort without a block verdict
 )
 
 func (k stopKind) String() string {
@@ -153,6 +176,8 @@ func (k stopKind) String() string {
 		return "more-work"
 	case stopBadBlock:
 		return "bad-block"
+	case stopOperational:
+		return "operational"
 	default:
 		return fmt.Sprintf("stopKind(%d)", uint8(k))
 	}
@@ -160,10 +185,9 @@ func (k stopKind) String() string {
 
 // stopCause is the cancel cause published on the shared executor context. It
 // carries the block the batch coalesces to (M) and the kind so every goroutine
-// reads the same signal and decides how to wind down: exec produces state up to
-// M then stops; the calculator caps fold-ahead at M and keeps computing to M on
-// its own (uncancelled) context; the apply loop derives the commit boundary and
-// stage return. A stopBadBlock cause aborts immediately.
+// reads the same signal: exec produces state up to M then stops; the calculator
+// caps fold-ahead at M and keeps computing to M on its own uncancelled context;
+// the apply loop derives the commit boundary. A stopBadBlock cause aborts immediately.
 type stopCause struct {
 	block uint64
 	kind  stopKind
@@ -179,75 +203,133 @@ func (s *stopCause) Error() string {
 
 // stopCauseOf returns the stopCause published on ctx, if any.
 func stopCauseOf(ctx context.Context) (*stopCause, bool) {
-	var s *stopCause
-	if errors.As(context.Cause(ctx), &s) {
+	if s, ok := errors.AsType[*stopCause](context.Cause(ctx)); ok {
 		return s, true
 	}
 	return nil, false
 }
 
+// cancelOperational aborts the exec loop with an infrastructure-failure cause: a
+// transient read/roTx error or a worker panic, not a block-validity verdict. It
+// must not surface as ErrInvalidBlock (that would unwind a valid block).
+func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
+	pe.cancelExecLoop(&stopCause{block: blockNum, kind: stopOperational, err: err})
+}
+
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
-// block-specific StateChangeSet before any of blockNum's sd.mem writes are
-// applied. Idempotent. Exec-loop only — it mutates SharedDomains.mem via
-// SetChangesetAccumulator, which must be single-writer (see the comment on
-// currentChangeSet).
-func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
+// block-specific StateChangeSet, to be saved by hash and bound transiently by
+// the apply fold and the committer. Idempotent; a no-op outside the changeset
+// window. A zero blockHash defers the save to the first caller that knows it.
+// Exec-loop only.
+func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHash common.Hash) {
 	if blockNum < pe.changesetWindowStart || blockNum == 0 || blockNum > pe.maxBlockNum {
 		return
 	}
-	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
-		return
+	if pe.currentChangeSet == nil || pe.currentChangeSetBlock != blockNum {
+		// A stale changeset for a different block was already saved by hash, so
+		// overwriting it here loses nothing.
+		pe.currentChangeSet = &changeset.StateChangeSet{}
+		pe.currentChangeSetBlock = blockNum
+		pe.currentChangeSetHash = common.Hash{}
 	}
-	// A previous block's accumulator is normally saved+cleared at its
-	// blockResult; if one is still installed here for a different block the
-	// rotation was missed — overwrite (the previous block's changeset was
-	// already saved at its blockResult, so nothing is lost).
-	pe.currentChangeSet = &changeset.StateChangeSet{}
-	pe.currentChangeSetBlock = blockNum
-	pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
+	// Save at block start, not only at its end: the calculator's mid-block
+	// step-boundary checkpoint looks the changeset up by hash, and an unsaved one
+	// drops those commitment writes from the unwind diff, leaving commitment ahead
+	// of the state after a reorg.
+	if blockHash != (common.Hash{}) && blockHash != pe.currentChangeSetHash {
+		pe.currentChangeSetHash = blockHash
+		pe.domains().SavePastChangesetAccumulator(blockHash, blockNum, pe.currentChangeSet)
+	}
 }
 
 // clearChangesetAccumulator detaches the current changeset accumulator after
 // its block's changeset has been saved. Exec-loop only.
 func (pe *parallelExecutor) clearChangesetAccumulator() {
-	pe.domains().SetChangesetAccumulator(nil)
 	pe.currentChangeSet = nil
 	pe.currentChangeSetBlock = 0
+	pe.currentChangeSetHash = common.Hash{}
 }
 
-func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
+// bindBlockChangesetForFold binds block N's saved changeset (by hash) so the
+// apply fold's DomainPuts record account/storage/code diffs into it — letting
+// unwind revert state, not just commitment. The bind is transient and
+// self-restoring under changesetMu; nothing installs a persistent global.
+// Returns a restore closure; a no-op if the block has no saved changeset.
+func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
+	pe.domains().LockChangesetAccumulator()
+	defer pe.domains().UnlockChangesetAccumulator()
+	cs := pe.domains().GetChangesetByHash(blockNum, blockHash)
+	if cs == nil {
+		return func() {}
+	}
+	unswap := pe.domains().SwapChangesetAccumulatorLocked(cs)
+	return func() {
+		pe.domains().LockChangesetAccumulator()
+		unswap()
+		pe.domains().UnlockChangesetAccumulator()
+	}
+}
+
+// foldTx applies one published tx's versionMap view and indexes to sd.mem. The
+// finalize tx skips ApplyTxIndexes' receipt-cache write: it shares the last regular
+// tx's txNum, so a write here would clobber that entry.
+func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
+	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
+	defer restoreCS()
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
+		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	return nil
+}
+
+func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
 	var (
 		outHeader *types.Header
 		outTx     kv.TemporalRwTx
 		outErr    error
 	)
 	pprof.Do(ctx, pprof.Labels("phase", "pe-exec"), func(lctx context.Context) {
-		outHeader, outTx, outErr = pe.execImpl(lctx, execStage, u, startBlockNum, offsetFromBlockBeginning,
+		outHeader, outTx, outErr = pe.execImpl(lctx, startBlockNum, offsetFromBlockBeginning,
 			maxBlockNum, blockLimit, initialTxNum, inputTxNum, initialCycle, rwTx, stepsInDb, accumulator, readAhead, logEvery)
 	})
 	return outHeader, outTx, outErr
 }
 
-func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState, u Unwinder,
+func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
+	// Deterministic bug-injection faults for this batch (chaos_monkey.WithFaults on the
+	// run context). Read once here; every injection site additionally gates on
+	// enableChaosMonkey, and incarnation-scoped faults fire only at the last valid
+	// incarnation (the seal path) so induced failures are deterministic and traceable.
+	pe.chaosFaults = chaos_monkey.FaultsFromContext(ctx)
 
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
-	// and cannot be shared with the execLoop goroutine. The execLoop creates
-	// its own roTx at line 571. executeBlocks uses its own roTx too.
+	// and cannot be shared with the execLoop goroutine, which opens its own roTx.
 
-	// applyResults receives completed block/tx results from execLoop for the apply goroutine.
-	// commitResults receives the same stream for the commitment calculator.
-	// Both are fed by the fan-out in the execLoop's blockExecutor.
-	applyResults := make(chan applyResult, 2_048)
-	commitResults := make(chan applyResult, 2_048)
-	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on.
-	// A nil channel leaves the per-block alloc+send and calculator select arm
-	// inert (the receive on nil blocks forever, so the loop stays gated on cc.in).
+	// applyResults feeds the apply goroutine; commitResults feeds the commitment
+	// calculator. Both are fed by the fan-out in the execLoop's blockExecutor.
+	// Room for a whole 150M-gas block of transfers, so the exec loop does not stall
+	// on a consumer that folds each tx as it is published.
+	applyResults := make(chan applyResult, 16_384)
+	commitResults := make(chan applyResult, 16_384)
+	// Exec-only (DISCARD_COMMITMENT): nil the commit stream so no commitment work
+	// runs — fan-out and batch-commit trigger no-op on a nil channel, and the
+	// calculator exits immediately and closes rootResults.
+	if pe.cfg.discardCommitment {
+		commitResults = nil
+	}
+	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on; a nil
+	// channel leaves the per-block send and calculator select arm inert.
 	var blockRequests chan *blockRequest
 	if dbg.BALDrivenCommitment {
 		blockRequests = make(chan *blockRequest, 2_048)
@@ -261,21 +343,40 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		if blockLimit > 0 {
 			lastBlock = min(startBlockNum+blockLimit-1, maxBlockNum)
 		}
-		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
+		log.Info(fmt.Sprintf("[%s] parallel starting", pe.logPrefix),
 			"from", startBlockNum, "to", maxBlockNum, "limit", lastBlock, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
-	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
-	// before any goroutine reads txNum (via AsGetter/GetLatest).
-	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
-	if err != nil {
-		return nil, rwTx, err
+	// restoreTxNum must run before pe.run() so doms.SetTxNum() completes before any
+	// goroutine reads txNum. With an injected block source (ephemeral replay) the
+	// caller owns range resolution, so the passed-in inputTxNum is used as-is.
+	restoredTxNum := inputTxNum
+	if pe.blockSrc == nil {
+		var err error
+		restoredTxNum, _, _, _, err = restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
+		if err != nil {
+			return nil, rwTx, err
+		}
 	}
 
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
+
+	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
+	pe.prevBlocks = state.NewPrevBlockList()
+
+	// Register the fan-out consumers and maxBlockNum BEFORE run() starts the execLoop
+	// goroutine: execLoop's exit path (closeApplyChannels) reads pe.consumers, so
+	// setting them after run() races that goroutine (same reason pe.prevBlocks is set
+	// above). Registration order is publish order; close walks it in reverse (commit
+	// before apply). blockRequests is not registered — it is closed by its sole sender
+	// (the executeBlocks dispatch goroutine), not by execLoop.
+	pe.consumers = newResultStream()
+	pe.consumers.register("applyResults", applyResults)
+	pe.consumers.register("commitResults", commitResults)
+	pe.maxBlockNum = maxBlockNum
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
@@ -284,74 +385,54 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		return nil, rwTx, err
 	}
 
-	if err := pe.resetWorkers(ctx, pe.rs, rwTx); err != nil {
-		return nil, rwTx, err
-	}
+	pe.resetWorkers(pe.rs)
 
 	// Disable inline TouchKey — the commitment calculator accumulates touches
-	// via its own Updates buffer (TouchUpdates from VersionedWrites).
+	// via its own Updates buffer.
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
 	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
-	// Parallel exec needs in-mem history reads enabled for the calculator
-	// goroutine. Capture the caller's setting first and restore it on exit
-	// — the previous defer-to-false (b72aa7b4f7 #20805) hardcoded the
-	// post-exec value to false regardless of what the caller had set,
-	// which broke post-exec callers (engine API forkchoice_updated's
-	// GetAsOf, post-batch trie-root computation, RPC reads) with
-	// "GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled"
-	// or with partial-state reads. Repro: EEST
-	// test_gas_limit_below_minimum[gas_limit_5000] in parallel mode; same
-	// root cause likely behind mainnet from-0 parallel wrong-trie-root at
-	// block 131578.
+	// Restore the caller's InMemHistoryReads on exit; forcing it false breaks
+	// post-exec callers (forkchoice GetAsOf, RPC reads) that need in-mem history.
 	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
 	// The calculator installs its own asOfStateReader on the shared commitment
 	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
-	// into later foreground commitment reads (which break when the caller runs
-	// with in-mem history reads disabled, e.g. offline re-exec).
+	// into later foreground commitment reads.
 	sdCtx := pe.rs.Domains().GetCommitmentContext()
 	prevStateReader := sdCtx.StateReader()
 	defer sdCtx.SetStateReader(prevStateReader)
 
-	// Store channels and limits on pe so execLoop can access them.
-	// blockRequests is intentionally not stashed here: it is closed by its
-	// sole sender (the executeBlocks dispatch goroutine), not by execLoop —
-	// closing it from execLoop would race the dispatch goroutine's send.
-	pe.applyResultsCh = applyResults
-	pe.commitResultsCh = commitResults
-	pe.maxBlockNum = maxBlockNum
-
-	// Configure changeset capture and seed the initial accumulator BEFORE
-	// the exec loop / executeBlocks goroutines start touching sd.mem. The
-	// exec loop owns all subsequent SetChangesetAccumulator transitions
-	// (per-block save/clear/install) so apply-loop and exec-loop sd.mem
-	// writes never race on SharedDomains.mem.
+	// Configure changeset capture and seed the initial accumulator BEFORE the exec
+	// loop / executeBlocks goroutines start touching sd.mem. The exec loop owns all
+	// subsequent accumulator transitions so apply-loop and exec-loop sd.mem writes
+	// never race on SharedDomains.mem.
 	pe.changesetWindowStart = changesetWindowStart(pe.cfg.syncCfg.AlwaysGenerateChangesets,
 		pe.cfg.syncCfg.MaxReorgDepth, pe.cfg.blockReader.FrozenBlocks(), startBlockNum, maxBlockNum)
-	pe.ensureChangesetAccumulator(startBlockNum)
+	pe.ensureChangesetAccumulator(startBlockNum, common.Hash{})
 
-	// Start the commitment calculator. It mirrors serial's per-block gate
-	// (exec3_serial.go: `if !dbg.BatchCommitments || shouldGenerateChangesets
-	// || KeepExecutionProofs`): blocks from the changeset window onward must
-	// compute per-block — otherwise batch-mode dedupes branch updates across
-	// the batch and flushes them all into one block's changeset, which fails
-	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests.
-	// The calculator only publishes results; the apply loop is the sole
-	// cancellation authority (it classifies errors and drives the single unwind).
+	// Start the commitment calculator. Blocks from the changeset window onward must
+	// compute per-block — otherwise batch-mode dedupes branch updates across the
+	// batch and flushes them all into one block's changeset, which fails on
+	// subsequent reorgs. The calculator only publishes results; the apply loop is the
+	// sole cancellation authority.
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
-	// workCtx (ctx) runs the calculator's roTx/compute/publish; signalCtx
-	// (executorContext) carries the stopCause. Separating them lets a clean-stop
-	// cancel signal the calculator without aborting an in-flight commitment.
-	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
+	// ctx runs the calculator's roTx/compute/publish; executorContext carries the
+	// stopCause. Separating them lets a clean-stop cancel signal the calculator
+	// without aborting an in-flight commitment.
+	commitDomainReader := state.NewLayeredDomainReader(pe.rs.Domains(), nil, pe.prevBlocks)
+	// committedTransactions=0: handleCommitResult already stored the absolute
+	// lastCommittedTxNum, so the commit log must not re-add a delta.
+	logCommit := func(p commitment.CommitProgress) { pe.LogCommitments(0, stepsInDb, p) }
+	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader, logCommit)
 	if err != nil {
 		return nil, nil, err
 	}
 	calculator.Start(ctx)
 	defer calculator.Stop()
 
-	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, blockRequests, commitResults); err != nil {
+	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, pe.consumers, blockRequests); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -362,103 +443,77 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
 	var hasLoggedExecution bool
-	var hasLoggedCommittments atomic.Bool
-	var commitStart time.Time
-
-	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
+				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
+				// Surface the panic as the loop's error; otherwise execImpl returns
+				// nil with sd.mem partly folded and the caller mistakes an internal
+				// invariant failure for success.
+				if err == nil {
+					err = fmt.Errorf("apply loop panic: %v", rec)
+				}
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
+				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
-				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
+				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
 			}
 		}()
 
-		// Open a thread-local read-only tx for domain operations. The apply loop
-		// must not use the rwTx for domain reads — rwTx is thread-bound to the
-		// caller goroutine and will be used only for flush/unwind/stage-update.
-		applyRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
-		if err != nil {
-			return fmt.Errorf("apply loop: open roTx: %w", err)
+		if pe.enableChaosMonkey && pe.chaosFaults.ApplyLoopPanic != nil {
+			panic(pe.chaosFaults.ApplyLoopPanic)
 		}
-		defer applyRoTx.Rollback()
 
-		// pe.changesetWindowStart and pe.currentChangeSet were set up
-		// before pe.run/executeBlocks launched their goroutines (above the
-		// calculator.Start call). Per-block accumulator save/clear/install
-		// transitions are driven from the exec loop's blockResult handler.
-
-		// appliedBlocks tracks blockNums that completed full apply-loop
-		// processing (including post-block validation). Used at exit to
-		// detect "the channel closed cleanly but a block was silently
-		// missed" — i.e. block N's blockResult never arrived and we
-		// returned nil anyway. Without this check those bugs silently let
-		// invalid blocks become canonical.
+		// appliedBlocks tracks blockNums that completed full apply-loop processing
+		// (including post-block validation). Compared at exit against txResultBlocks
+		// to catch "channel closed cleanly but a block was silently missed" — its
+		// blockResult never arrived, so the validator never fired and an invalid
+		// block could become canonical.
 		appliedBlocks := make(map[uint64]struct{})
 
-		// txResultBlocks tracks every blockNum that had AT LEAST ONE
-		// tx-result reach the apply loop. The completeness check at
-		// channel-close compares this against appliedBlocks: any block
-		// whose tx-results arrived but whose blockResult never did is a
-		// silent failure (validator never fired for it).
+		// txResultBlocks tracks every blockNum that had at least one tx-result reach
+		// the apply loop. A block here but not in appliedBlocks is a silent failure.
 		txResultBlocks := make(map[uint64]struct{})
 
-		// rootResultsClosed records whether the calculator's rootResults
-		// channel has closed. We disable that select-arm by setting the
-		// local rootResults variable to nil (nil channels are never
-		// ready), but later code that drains rootResults after
-		// applyResults closes must skip the drain entirely if the
-		// channel is already known closed — `for cr := range nilChan`
-		// would hang forever.
+		// rootResultsClosed records whether rootResults has closed. The select-arm is
+		// disabled by setting the local rootResults to nil; the drain-after-close path
+		// must then skip its `for cr := range rootResults` (which would hang on nil).
 		rootResultsClosed := false
 
 		// fail tracks the earliest block-validity failure across the exec
-		// (blockResult.Err) and commit (ErrWrongTrieRoot) streams. Block-
-		// validation errors take precedence over trie-root mismatches on the
-		// same block: a wrong error category breaks eest's validation taxonomy.
-		// With fold-ahead a commit wrong-root can arrive before the block's exec
-		// verdict, so it is recorded and surfaced only after applyResults closes
-		// (once exec has had its say) — see failCandidate.consider.
+		// (blockResult.Err) and commit (ErrWrongTrieRoot) streams. Exec verdicts take
+		// precedence over trie-root mismatches on the same block. With fold-ahead a
+		// commit wrong-root can arrive before the block's exec verdict, so it is
+		// recorded and surfaced only after applyResults closes.
 		var fail failCandidate
-		// finalized flips once the reported failure is decided (an exec verdict,
-		// or exec cleanly passing the block a commit wrong-root was deferred on).
-		// Remaining results are then drained without re-validation so a post-
-		// cancel block can't mask the recorded failure.
+		// finalized flips once the reported failure is decided. Remaining results are
+		// then drained without re-validation so a post-cancel block can't mask it.
 		finalized := false
 
-		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
-		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
-		// separate entries).  This differs from the old StateUpdates count which
-		// grouped all fields of one account as a single entry.  The values are only
-		// used for an internal consistency check (blockUpdateCount==ApplyCount) and
-		// trace output, so the change in semantics does not affect correctness.
+		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries;
+		// used only for an internal consistency check (blockUpdateCount==ApplyCount)
+		// and trace output.
 		blockUpdateCount := 0
 		blockApplyCount := 0
-		// Collect per-tx writes so we can notify the accumulator AFTER
-		// StartChange (which arrives with the blockResult, after all txResults).
-		var pendingAccumulatorWrites []*state.WriteSet
+		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
+		// arrives with the blockResult, after all txResults).
+		var pendingAccumulatorWrites []state.WriteSetView
+		// balBuilder holds the current block's access list up to its last published tx.
+		var balBuilder *state.BlockAccessListBuilder
+		// foldErr is the first per-tx fold error of the current block, surfaced at
+		// its blockResult.
+		var foldErr error
 
-		// handleCommitResult processes a single commitment result from the
-		// calculator. Defined here so both the blockResult handler and the
-		// rootResults case in the main select can use it.
-		// handleCommitResult classifies a commitment result. It performs NO
-		// unwind side-effects: a wrong-root is only classified here and routed
-		// through the fail/finalized machinery, so the reported failure and its
-		// block hash are chosen after exec has had its say (under fold-ahead a
-		// commit wrong-root can arrive before the block's exec verdict). The
-		// actual unwind for a !initialCycle wrong-root happens at finalization
-		// with the implicated block's own hash.
+		// handleCommitResult classifies a commitment result with NO unwind
+		// side-effects: a wrong-root is routed through the fail/finalized machinery
+		// so the reported failure and its block hash are chosen after exec has had
+		// its say. The actual unwind happens at finalization.
 		handleCommitResult := func(cr commitmentResult) error {
 			if cr.err != nil {
-				// Lazy-load / ComputeCommitment errors from the calculator
-				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
-				// would mark a valid block as bad and trigger an unwind that
-				// throws away valid state. Fail fast instead and preserve the
-				// original error in the message.
+				// Non-wrong-root calculator errors (lazy-load / ComputeCommitment)
+				// must not be treated as a wrong-root — that would mark a valid block
+				// bad and unwind valid state. Fail fast, preserving the original error.
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
@@ -471,139 +526,124 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			return nil
 		}
 
-		// deliberateCancel is the light context-cancel — teardown (stopWorkers +
-		// wait) stays with execImpl's deferred executorCancel so only the main
-		// goroutine drives cleanup.
+		// deliberateCancel is the light context-cancel; teardown stays with execImpl's
+		// deferred executorCancel so only the main goroutine drives cleanup.
 		deliberateCancel := func() {
 			pe.cancelExecLoop(&stopCause{block: fail.block, kind: stopBadBlock, err: fail.err})
 		}
-		// processCommit records a commit failure into `fail`. Non-wrong-root
-		// commit errors (lazy-load / compute) are infrastructure faults, so
-		// fast-fail. A wrong-root is deferred so the block's own exec verdict can
-		// supersede it — EXCEPT when exec has already applied the block: then its
-		// verdict is in (this is an incremental, not fold-ahead, wrong-root), so
-		// finalize and cancel eagerly rather than keep building on known-wrong
-		// state. Fold-ahead wrong-roots arrive before the block is applied and so
-		// still defer, with the cancel firing once exec cleanly applies the block.
-		processCommit := func(cr commitmentResult) error {
+		// processCommit records a commit failure into `fail`. A wrong-root is deferred
+		// so the block's own exec verdict can supersede it — except when exec has
+		// already applied the block (an incremental, not fold-ahead, wrong-root): then
+		// finalize and cancel eagerly rather than keep building on known-wrong state.
+		processCommit := func(cr commitmentResult) {
 			err := handleCommitResult(cr)
 			if err == nil {
-				return nil
+				return
 			}
 			fail.consider(cr.blockNum, cr.blockHash, false, err)
 			if !errors.Is(err, ErrWrongTrieRoot) {
-				// Infra fault (lazy-load / compute), not block-validity: report it
-				// but do NOT return here — a bare return kills the apply loop while
-				// the exec loop may be blocked on a mustDeliver send, wedging
-				// shutdown. Record + cancel + keep draining (which unblocks that
-				// send); fail.err surfaces at channel close.
+				// Infra fault: do NOT bare-return — that kills the apply loop while the
+				// exec loop may be blocked on a mustDeliver send, wedging shutdown.
+				// Record + cancel + keep draining; fail.err surfaces at channel close.
 				finalized = true
 				deliberateCancel()
-				return nil
+				return
 			}
 			if _, applied := appliedBlocks[cr.blockNum]; applied {
 				finalized = true
 				deliberateCancel()
 			}
-			return nil
 		}
 
-		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
-		// Do NOT add ctx.Done or executorContext.Done cases here — the exec
-		// loop owns shutdown sequencing. Adding context checks here causes
-		// the apply loop to exit before the calculator finishes, leaving
-		// sd.mem inconsistent with the commitment boundary.
+		// Apply loop: exits ONLY when applyResults is closed by the exec loop. Do NOT
+		// add ctx.Done / executorContext.Done cases — the exec loop owns shutdown
+		// sequencing, and exiting early leaves sd.mem inconsistent with the commitment
+		// boundary.
 		for {
 			select {
 			case applyResult, ok := <-applyResults:
 				if !ok {
-					// Exec loop closed the channel — batch is complete.
-					// Drain calculator results, then exit. Skip the drain
-					// if rootResults already closed (its select-arm was
-					// disabled by setting rootResults=nil; ranging a nil
-					// channel hangs forever).
+					// Exec loop closed the channel — batch complete. Drain calculator
+					// results, then exit. Skip the drain if rootResults already closed
+					// (ranging a nil channel hangs forever).
 					if !rootResultsClosed {
 						for cr := range rootResults {
-							if err := processCommit(cr); err != nil {
-								return err
-							}
+							processCommit(cr)
 						}
 					}
 					if lastBlockResult.BlockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
 					}
-					// Two reasons the exec loop closes the channel:
-					//   (1) sizeEst > batchLimit — flush and tell the stage loop
-					//       there is more work pending (ErrLoopExhausted)
-					//   (2) blockResult.BlockNum >= pe.maxBlockNum — we processed
-					//       every block we were asked to; clean exit, not "more work"
-					// Fork validation (StateStep, single-block batches) only ever hits
-					// case (2); returning ErrLoopExhausted there causes the stage loop
-					// to error with "unexpected state step has more work".
-					// Completeness check: when the exec loop closes the apply channel,
-					// every block whose tx-results arrived must also have produced a
-					// blockResult. Otherwise the per-block validator never fires for
-					// it and an invalid block becomes canonical.
+					// Completeness check: every block whose tx-results arrived must also
+					// have produced a blockResult, else the per-block validator never
+					// fired for it and an invalid block could become canonical.
+					// txResultBlocks minus appliedBlocks is that silent-failure set.
 					//
-					// We track this two ways:
-					//   - appliedBlocks: blockResults we fully processed (validated)
-					//   - txResultBlocks: any block we saw at least one tx-result for
-					// A block in txResultBlocks but not in appliedBlocks means
-					// its tx-results arrived but the trailing blockResult never did
-					// — exactly the silent-failure mode this catches.
-					//
-					// Not reaching maxBlockNum is a normal partial-batch state: when
-					// the exec loop hits its size budget mid-batch it stops with a
-					// stopMoreWork cause, the apply loop drops out via the
-					// ErrLoopExhausted return below, and the stage loop resumes from
-					// lastBlockResult+1 in a follow-up call. Each block still executes
-					// exactly once across the two batches, so we deliberately do NOT
-					// flag maxBlockNum-not-applied here.
-					// Surface the earliest recorded failure ahead of the
-					// missing-blocks check: a deliberate cancel manufactures a
-					// missing-block condition that would otherwise mask it.
-					//
-					// A deferred commit wrong-root does its unwind here, not inline
-					// at classification time — so a !initialCycle reorg marks the
-					// bad block with the implicated block's OWN hash (fail.blockHash),
-					// not whatever block exec had last applied when the wrong-root
-					// arrived. initialCycle has no reorg: the error is fatal.
+					// Surface the earliest recorded failure ahead of the missing-blocks
+					// check: a deliberate cancel manufactures a missing-block condition
+					// that would otherwise mask it. A deferred commit wrong-root does its
+					// unwind here (not inline) so a !initialCycle reorg marks the bad
+					// block with the implicated block's OWN hash.
+					opStop, _ := stopCauseOf(executorContext)
 					if fail.set {
-						if !fail.exec && errors.Is(fail.err, ErrWrongTrieRoot) && !initialCycle {
-							if err := handleIncorrectRootHashError(fail.block, fail.blockHash, rwTx, pe.cfg, execStage, pe.logger, u); err != nil {
-								return err
-							}
+						// A generic commit wrong-root can be a symptom of a concurrent
+						// operational abort (incomplete state manufactures a wrong root):
+						// surface the operational error instead so a valid block is not
+						// marked bad. An authoritative exec verdict is returned regardless.
+						if deferVerdictToOperational(fail.exec, opStop) {
+							return opStop.err
+						}
+						// A definitive invalid-block verdict travels as typed data; a
+						// commit-side infrastructure error (not an ErrInvalidBlock) is
+						// operational and surfaces as the error return, no bad block.
+						if errors.Is(fail.err, rules.ErrInvalidBlock) {
+							pe.verdict = &blockVerdict{blockNum: fail.block, blockHash: fail.blockHash, err: fail.err}
 							return nil
 						}
 						return fail.err
 					}
+					// An operational abort is an infrastructure failure, not a block
+					// verdict: return it raw (retryable, no unwind) before the missing-block
+					// guard, since it legitimately leaves later blocks unexecuted.
+					if opStop != nil && opStop.kind == stopOperational {
+						return opStop.err
+					}
+					// A plain (non-stopCause) context cancellation — shutdown, or the CL
+					// cancelling the payload — is operational, not a block verdict: return
+					// it raw before the missing-block guard, which a cancel would otherwise
+					// trip into a spurious ErrInvalidBlock reported to the CL as INVALID.
+					// A stopCause cancellation falls through to the switch below, which
+					// maps stopReachedMax/stopMoreWork to their proper results.
+					if _, isStop := stopCauseOf(executorContext); !isStop && executorContext.Err() != nil {
+						return context.Cause(executorContext)
+					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
-							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
+						pe.verdict = &blockVerdict{blockNum: lastBlockResult.BlockNum, err: fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
+							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)}
+						return nil
 					}
 					// The stop kind rides in the shared context's cause: stopReachedMax
-					// is a clean batch end (nil); stopMoreWork is a partial batch to
-					// resume next cycle (ErrLoopExhausted). stopBadBlock is handled by the
-					// fail branch above.
+					// is a clean batch end (nil), stopMoreWork a partial batch to resume
+					// (ErrLoopExhausted). stopBadBlock is handled by the fail branch above.
 					if sc, ok := stopCauseOf(executorContext); ok {
 						switch sc.kind {
 						case stopReachedMax:
 							return nil
 						case stopMoreWork:
-							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+							pe.exhausted = &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+							return nil
 						}
 					}
-					// Fallback for exit paths that publish no cause: a single-block
-					// fork-validation batch exits via execLoopExitCheck (no cause), and
-					// real shutdown cancels with context.Canceled. A fully-applied range
-					// — or an empty loop that executed nothing because the range was
-					// already applied (async background commit advanced progress) — is a
-					// clean end; otherwise there is more work.
+					// Fallback for exit paths that publish no cause (single-block
+					// fork-validation, or shutdown via context.Canceled). A fully-applied
+					// range — or an empty loop that executed nothing because the range was
+					// already applied — is a clean end; otherwise there is more work.
 					if applyLoopCloseIsClean(lastBlockResult.BlockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
-					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+					pe.exhausted = &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+					return nil
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
@@ -616,87 +656,92 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, writeCount)
 					}
 					blockUpdateCount += writeCount
-					// All ApplyStateWrites + ApplyTxIndexes run in the execLoop
-					// (sole sd.mem writer). The apply loop here only collects
-					// accumulator notifications and per-tx counters.
+					// The apply loop is the sole sd.mem writer. Folding mid-block is safe:
+					// every cell a published tx wrote is in the versionMap, so later txs
+					// resolve it there and never read it from sd.mem.
+					if !finalized && foldErr == nil {
+						foldErr = pe.foldTx(ctx, rwTx, applyResult)
+					}
+					for _, t := range applyResult.balTxs {
+						if t.index == -1 {
+							balBuilder = state.NewBlockAccessListBuilder()
+						}
+						if balBuilder == nil || t.index != balBuilder.Next() {
+							balBuilder = nil
+							break
+						}
+						balBuilder.Add(t.index, t.reads, t.writes)
+					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					built := balBuilder
+					balBuilder = nil
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
 					}
-					// Apply loop is the canonical error-emission point for
-					// block-validity rejections (insufficient funds, gas
-					// overflow, finalize rejection, scheduler-exhausted
-					// incarnations). The worker plumbs the diagnosis through
-					// blockResult.Err via nextResult → processResults → the
-					// exec loop's sendResult, then exits on its own. Record the
-					// exec verdict (it wins its block over a commit wrong-root)
-					// and keep draining so an earlier commit wrong-root still in
-					// rootResults can supersede it; the earliest recorded failure
-					// is returned at channel-close. No cancel here — the exec loop
-					// self-exits after an errored block, and cancelling would join
-					// context.Canceled onto the reported error.
+					// Keep draining so a commitment failure in an earlier block can
+					// take precedence.
 					if applyResult.Err != nil {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, applyResult.Err)
 						finalized = true
+						// An infrastructure failure aborts the batch retryably without a
+						// block verdict; a validity verdict goes through fail so it wins its
+						// block over a concurrent commit wrong-root.
+						if applyResult.Operational {
+							pe.cancelOperational(applyResult.BlockNum, applyResult.Err)
+						} else {
+							fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, applyResult.Err)
+							deliberateCancel()
+						}
 						continue
 					}
-					// failInfra routes an apply-loop infrastructure fault through
-					// failCandidate (earliest-block-wins) + cancel, and keeps the loop
-					// draining. Never bare-return from the apply loop while the exec
-					// loop may sit in a terminal mustDeliver send on a full applyResults
-					// — that strands closeApplyChannels and wedges pe.wait.
+					// Keep draining after either an operational failure or an invalid-block
+					// verdict. Exiting the apply loop early can block producers during shutdown.
 					failInfra := func(err error) {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, err)
 						finalized = true
 						deliberateCancel()
 					}
-					// StartChange + NotifyAccumulator must both run in the apply
-					// goroutine — keeps all accumulator access single-threaded
-					// (avoids data race with the executor goroutine).
-					// StartChange must come BEFORE NotifyAccumulator because it
-					// initialises the latestChange entry that ChangeAccount etc. write into.
-					if pe.accumulator != nil && applyResult.Header != nil {
-						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
-						if marshalErr != nil {
-							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
-							continue
-						}
-						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
-						for _, writes := range pendingAccumulatorWrites {
-							state.NotifyAccumulator(pe.accumulator, writes)
-						}
-						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+					if foldErr != nil {
+						failInfra(foldErr)
+						foldErr = nil
+						continue
 					}
-
-					// Cache flush happens in the execLoop (before blockResult is sent).
-					// sd.mem already has all TX writes when we reach here.
-
+					// This block's writes are now in the shared domain: drop it from the
+					// tail of the prev-block list so later blocks read it from the domain.
+					// The tail must be exactly the block just committed; a mismatch is a
+					// push/remove desync that would drop the wrong overlay.
+					if tb, ok := pe.prevBlocks.TailBlockNum(); ok && tb != applyResult.BlockNum {
+						panic(fmt.Sprintf("prevBlocks tail block %d != committed block %d", tb, applyResult.BlockNum))
+					}
+					pe.prevBlocks.RemoveTail()
 					var blockValidatorWaiter *blockValidator
-					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
-						b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
-
-						if err != nil {
-							failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
-							continue
+						header, txs := applyResult.Header, applyResult.Txs
+						if header == nil {
+							b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
+							if err != nil {
+								failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
+								continue
+							}
+							if b == nil {
+								failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
+								continue
+							}
+							header, txs = b.HeaderNoCopy(), b.Transactions()
 						}
-						if b == nil {
-							failInfra(fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash))
-							continue
-						}
 
-						lastHeader = b.HeaderNoCopy()
+						lastHeader = header
 
 						if lastHeader.Number.Uint64() != applyResult.BlockNum {
 							failInfra(fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash))
@@ -708,15 +753,52 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 							continue
 						}
 
-						// Spawn per-block validation in a goroutine — the result is
-						// joined via Wait() below, after the other per-result work
-						// has had a chance to run in parallel with validation.
+						// Spawn per-block validation concurrently; joined via Wait() below
+						// after the other per-result work has run alongside it.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger)
-
+							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !execStage.CurrentSyncCycle.IsInitialCycle && applyResult.Header != nil {
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					var computedBAL types.BlockAccessList
+					var balErr error
+					var storedBAL []byte
+					if isAmsterdam && lastHeader != nil {
+						storedBAL, balErr = rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+						storedBAL = bytes.Clone(storedBAL)
+					}
+					balDone := make(chan struct{})
+					h, txIO := lastHeader, applyResult.TxIO
+					go func() {
+						defer close(balDone)
+						if balErr == nil {
+							computedBAL, balErr = bal.Process(storedBAL, h, built, txIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						}
+					}()
+
+					// StartChange + NotifyAccumulator both run in the apply goroutine to
+					// keep accumulator access single-threaded. StartChange must precede
+					// NotifyAccumulator: it initialises the latestChange entry the notify
+					// writes into.
+					if pe.accumulator != nil && applyResult.Header != nil {
+						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
+						if marshalErr != nil {
+							<-balDone
+							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr))
+							continue
+						}
+						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						notifyErr := pe.rs.NotifyAccumulator(pe.accumulator, rwTx, pendingAccumulatorWrites)
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+						if notifyErr != nil {
+							<-balDone
+							failInfra(fmt.Errorf("notify accumulator, block %d: %w", applyResult.BlockNum, notifyErr))
+							continue
+						}
+					}
+
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -729,97 +811,53 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					// ClearAccountsCache moved to execLoop (producer side).
-					// blockApplied removed — state writes and Flush happen in
-					// the execLoop before the blockResult crosses the channel.
-					// The apply loop only does indexes.
-
-					// Commitment is computed by the commitmentCalculator goroutine.
-					// Post-execution validation (receipts, BAL) runs here. The
-					// per-block blockValidator was spawned earlier (~30 LOC up)
-					// and runs concurrently with the work above; Wait() joins it.
+					<-balDone
+					// Join the per-block validator spawned above; its verdict wins over
+					// a bal.Process error.
 					if err := blockValidatorWaiter.Wait(); err != nil {
-						// Block-validity verdict from post-execution validation. Route it
-						// through failCandidate (earliest-block-wins, exec supersedes a
-						// commit wrong-root at the same block) and keep draining rather
-						// than bare-returning — a bare return here would strand the exec
-						// loop in a terminal mustDeliver send on a full applyResults and
-						// wedge pe.wait. No cancel: mirror the blockResult.Err path.
-						appliedBlocks[applyResult.BlockNum] = struct{}{}
-						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err))
-						finalized = true
+						failInfra(fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						continue
 					}
 
-					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						if err != nil {
-							failInfra(err)
-							continue
-						}
+					if balErr != nil {
+						failInfra(balErr)
+						continue
+					}
+					if (isAmsterdam || pe.cfg.experimentalBAL) && pe.cfg.balSink != nil {
+						pe.cfg.balSink(applyResult.BlockNum, computedBAL)
 					}
 
-					// The BAL was the last reader of the recorded write sets;
-					// return their map containers to the pools.
-					applyResult.TxIO.ReleaseOutputMaps()
-
-					// Mark this block as fully applied. The exit-completeness
-					// check at channel-close compares this set against the
-					// expected [startBlockNum, maxBlockNum] range to detect
-					// "block silently missed".
 					appliedBlocks[applyResult.BlockNum] = struct{}{}
 
-					// If a commit wrong-root was deferred for this (or an earlier)
-					// block, exec has now applied it cleanly — exec agrees the
-					// block is valid, so the divergence is real. Finalize on that
-					// earliest block and stop dispatching further work.
+					// A commit wrong-root deferred for this (or an earlier) block: exec
+					// has now applied it cleanly, so the divergence is real. Finalize on
+					// that earliest block and stop dispatching further work.
 					if fail.set && !fail.exec && applyResult.BlockNum >= fail.block {
 						finalized = true
 						deliberateCancel()
 					}
 
-					// SavePastChangesetAccumulator + SetChangesetAccumulator(nil) +
-					// rotation-to-next-block accumulator are all driven by the exec
-					// loop now (see execLoop's blockResult handling), so the apply
-					// loop must NOT touch SharedDomains.mem here. Doing so used to
-					// race with the exec loop's ApplyStateWrites for the next block.
-
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)
-						// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
-						// capture state at exactly N blocks executed. The DB is left as it
-						// was *before* this block was applied so the next run reproduces
-						// the stop point with the same input. Returning would run deferred
-						// commit/flush paths and overwrite the very state we want to
-						// preserve. Mirrors the design documented in PR #19803 — debug
-						// only, never set in production.
+						// Intentional os.Exit (debug only): returning would run deferred
+						// commit/flush and overwrite the state we want to capture unchanged.
 						os.Exit(0)
 					}
 				}
 
 			case cr, ok := <-rootResults:
 				if !ok {
-					// rootResults closed by the calculator on Stop.
-					//
-					// Do NOT return here. The apply loop must keep draining
-					// applyResults until the EXEC LOOP closes that channel —
-					// otherwise we race with sendResult and drop the trailing
-					// blockResult, which makes invalid blocks become canonical
-					// without ever reaching the per-block validator.
-					//
-					// Switch the rootResults case to the never-ready nil channel
-					// so this select arm doesn't busy-spin on the closed channel.
-					// rootResultsClosed makes the applyResults-close branch
-					// skip the `for cr := range rootResults` drain (which would
-					// hang forever on the nil channel).
+					// rootResults closed by the calculator on Stop. Do NOT return: the
+					// apply loop must keep draining applyResults until the exec loop
+					// closes it, else we race sendResult and drop the trailing
+					// blockResult (invalid block becomes canonical, validator never
+					// fired). Nil the arm so it doesn't busy-spin; rootResultsClosed
+					// makes the close branch skip its drain (which would hang on nil).
 					rootResults = nil
 					rootResultsClosed = true
 					continue
 				}
-				if err := processCommit(cr); err != nil {
-					return err
-				}
+				processCommit(cr)
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
 					hasLoggedExecution = true
@@ -841,7 +879,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(ctx); waitErr != nil {
+	if waitErr := pe.wait(); waitErr != nil {
 		if execErr == nil {
 			execErr = waitErr
 		} else {
@@ -852,50 +890,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
 
-	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(0, stepsInDb, lastProgress)
-	}
-
+	// execErr now carries only an operational failure or cancellation — a block
+	// verdict and a resumable boundary ride pe.verdict / pe.exhausted as data. A
+	// concurrent operational failure (incl. a worker drain error joined above)
+	// therefore outranks a recorded verdict at the stage boundary.
 	if execErr != nil {
-		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+		if !errors.Is(execErr, context.Canceled) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
 			}
-			if errors.Is(execErr, rules.ErrInvalidBlock) {
-				if pe.cfg.badBlockHalt {
-					return nil, rwTx, execErr
-				}
-				if u != nil && lastHeader != nil {
-					unwindTo := uint64(0)
-					if lastHeader.Number.Uint64() > 0 {
-						unwindTo = lastHeader.Number.Uint64() - 1
-					}
-					if err := u.UnwindTo(unwindTo, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
-						return nil, rwTx, err
-					}
-				}
-			}
 			return nil, rwTx, execErr
-		}
-	}
-
-	// Do NOT flush here — the stageloop owns flush/commit lifecycle.
-	// pe.exec() returns with sd.mem containing the batch's writes.
-	// The stageloop will flush, commit the rwTx, and create a new sd.
-	//
-	// But DO update stage progress so the stageloop knows we advanced.
-	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil {
-		overlay := pe.doms.BlockOverlay()
-		if overlay != nil {
-			if err := execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
-				return nil, rwTx, err
-			}
-		} else {
-			if err := execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
-				return nil, rwTx, err
-			}
 		}
 	}
 
@@ -924,32 +930,16 @@ func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsIn
 	}
 }
 
-// triggerBatchCommitment sends a commitComputeRequest to the calculator so it
-// computes the batch commitment before the exec loop exits and closes channels.
+// triggerBatchCommitment sends a commitComputeRequest so the calculator computes
+// the batch commitment before the exec loop exits and closes channels. Delivery is
+// unconditional: honouring ctx.Done would drop the batch-end commitment when the
+// buffer is momentarily full, leaving commitment behind sd.mem. The calculator
+// keeps draining until its channel closes, so blocking is safe.
 func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
-	if pe.commitResultsCh == nil {
+	if pe.consumers == nil {
 		return
 	}
-	defer func() {
-		// The exec loop closes commitResultsCh on shutdown; a concurrent send
-		// here would panic with "send on closed channel". That race is benign:
-		// the calculator is already shutting down and the request would be
-		// dropped anyway. Recover only that specific panic and re-raise anything
-		// else so real bugs still surface.
-		if rec := recover(); rec != nil {
-			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
-				return
-			}
-			panic(rec)
-		}
-	}()
-	// Send unconditionally: a terminal stop publishes the stopCause (cancelling
-	// ctx) before this runs, but the calculator keeps draining commitResultsCh
-	// until it's closed, so blocking is safe (a closed channel is caught by the
-	// recover above). Honouring ctx.Done here would drop the batch-end commitment
-	// when the buffer is momentarily full — the tail commitment then never
-	// computes while stage progress advances, leaving commitment behind sd.mem.
-	pe.commitResultsCh <- &commitComputeRequest{}
+	pe.consumers.sendControl("commitResults", &commitComputeRequest{})
 }
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
@@ -962,29 +952,71 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	}
 }
 
-func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, _ kv.TemporalTx) error {
+func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 	pe.Lock()
 	defer pe.Unlock()
 
 	for _, worker := range pe.execWorkers {
-		// Parallel workers hold their own transaction.
-		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		// parallel workers hold thier own tx don't pass in an externals tx
+		_ = worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
+}
 
-	return nil
+// newExecWorker mints an extra WorkerContext when the runSem pool is empty
+// because in-flight workers are parked mid-EVM on a dependency (holding their
+// context). Reset against the same shared state; tracked for teardown.
+func (pe *parallelExecutor) newExecWorker() *exec.WorkerContext {
+	w := exec.NewWorkerContext(pe.workersCtx, true, pe.taskExecMetrics, pe.cfg.db,
+		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
+	_ = w.ResetState(pe.rs, nil, nil, state.NewNoopWriter(), nil)
+	w.EnablePrevBlockReads(pe.prevBlocks)
+	pe.mintMu.Lock()
+	pe.mintedWorkers = append(pe.mintedWorkers, w)
+	pe.mintMu.Unlock()
+	return w
+}
+
+// prevBlockBase wraps a freshly-built committed-base reader with the prev-block
+// layers for blockNum, so those reads also see prior blocks' not-yet-committed
+// writes — matching the per-task worker reader. Without this, coinbase
+// materialization reads a stale sd.mem base and writes a stale account into the
+// current block's versionMap.
+func (pe *parallelExecutor) prevBlockBase(raw state.StateReader, blockNum uint64) state.StateReader {
+	return state.PrevBlockBase(raw, pe.prevBlocks, blockNum)
+}
+
+// acquireWorker takes a context from the pool, or grows the pool when it is
+// empty (paused workers hold their contexts). Returns nil on shutdown.
+func (pe *parallelExecutor) acquireWorker() *exec.WorkerContext {
+	select {
+	case w := <-pe.runSem:
+		return w
+	case <-pe.workersCtx.Done():
+		return nil
+	default:
+	}
+	return pe.newExecWorker()
+}
+
+// releaseWorker returns a context to the pool for reuse. The pool buffer is sized
+// to the elastic peak, so this never blocks; excess is reclaimed at teardown.
+func (pe *parallelExecutor) releaseWorker(w *exec.WorkerContext) {
+	// Merge this run's reads into sd.metrics before the worker returns to the pool,
+	// so the slow-block emitter sees them. Off the critical path (the result is
+	// already sent) and safe: RunTxTask has returned, so readMetrics is quiescent.
+	w.PublishReadMetrics()
+	select {
+	case pe.runSem <- w:
+	default:
+	}
 }
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
-	// The exec loop is the owner of shutdown sequencing. On exit it
-	// closes commitResults then applyResults, causing the calculator
-	// and apply loop to drain and exit.
-	//
-	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
-	// Do NOT rollback it here — the stageloop owns its lifecycle.
-
-	// The exec loop owns the workers' inner context: whatever exit path it takes
-	// (clean stop, wrong-root drain, error), the workers must not outlive it.
+	// The exec loop owns shutdown sequencing: on exit it closes commitResults then
+	// applyResults, draining the calculator and apply loop. It owns the workers'
+	// inner context too — whatever exit path it takes, the workers must not outlive it.
 	defer pe.cancelWorkers()
 	defer pe.closeApplyChannels()
 	defer func() {
@@ -997,6 +1029,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
+			// Propagate the panic as the loop's error; otherwise execLoopGroup.Wait
+			// returns nil and the apply-loop heuristics can mistake it for a resumable
+			// partial batch and spin. A loop panic is an internal invariant failure,
+			// not a consensus-invalid block, so surface it as a plain error.
+			if err == nil {
+				err = fmt.Errorf("exec loop panic: %v", rec)
+			}
 		} else if err != nil && !errors.Is(err, context.Canceled) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
@@ -1009,27 +1048,28 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pe.RUnlock()
 
 	// sizeCutPending: on a size-limit cut, execute one more block so state catches
-	// up to any block the fold computed ahead, then stop at a boundary where state
-	// and commitment agree. Under the current C=1 contiguous fold this is
-	// scaffolding, not load-bearing: cause-before-send means B+1's fold gate never
-	// opens past the terminal block B (blockResult(B) reaches the calculator only
-	// after B's stop decision), so nothing is ever folded ahead of the cut and this
-	// path only overshoots the batch budget by one block. It is kept for a future
-	// explicit C>1 fold-ahead mode, where state would genuinely need to reach the
-	// folded-ahead frontier before stopping.
+	// up to any block the fold computed ahead, then stop where state and commitment
+	// agree.
 	sizeCutPending := false
+
+	// np-phase exec-loop attribution: wall spent waiting for the next in-order
+	// result vs serial per-tx processing. Reset per completed block.
+	var npWait, npProc time.Duration
+	var npWaitStart, npProcStart time.Time
+
+	if pe.enableChaosMonkey && pe.chaosFaults.ExecLoopPanic != nil {
+		panic(pe.chaosFaults.ExecLoopPanic)
+	}
 
 	for {
 		if applyTx, err = pe.refreshApplyTx(ctx, applyTx); err != nil {
 			return err
 		}
 
-		// Limit how many blocks can be pending in pe.blockExecutors simultaneously.
-		// processRequest is non-blocking (it just stores blocks in the map), so
-		// without this check execRequests drains instantly and pe.blockExecutors
-		// grows unbounded — holding all decoded TxTask objects in RAM.
-		// Setting pendingCh to nil causes the select to skip that case entirely,
-		// applying backpressure that propagates to executeBlocks.func1.
+		// Bound the blocks pending in pe.blockExecutors: processRequest is
+		// non-blocking, so without this execRequests drains instantly and the map
+		// grows unbounded, holding all decoded TxTask objects in RAM. A nil pendingCh
+		// skips that select case, applying backpressure to executeBlocks.
 		const maxPendingBlocks = 32
 		pe.RLock()
 		pendingBlocks := len(pe.blockExecutors)
@@ -1039,6 +1079,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pendingCh = pe.execRequests
 		}
 
+		if logNpPhases {
+			npWaitStart = time.Now()
+		}
+		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
 			if err := pe.processRequest(ctx, exec); err != nil {
@@ -1046,34 +1090,173 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 			continue
 		case <-ctx.Done():
-			return pe.drainOnCancel(ctx, applyTx)
-		case nextResult, ok := <-pe.rws.ResultCh():
+			for {
+				select {
+				case txResult, ok := <-pe.results:
+					if !ok {
+						return pe.execLoopExitCheck(ctx, "ctx-done-drain: results closed")
+					}
+					br, e := pe.processSingleResult(ctx, applyTx, txResult)
+					if e != nil {
+						return e
+					}
+					if br != nil {
+						pe.RLock()
+						blockExecutor, exists := pe.blockExecutors[br.BlockNum]
+						pe.RUnlock()
+						if exists {
+							pe.lastExecutedBlockNum.Store(int64(br.BlockNum))
+							if err := blockExecutor.sendResult(ctx, br, false); err != nil {
+								return err
+							}
+							if br.Err != nil {
+								return nil
+							}
+							pe.Lock()
+							delete(pe.blockExecutors, br.BlockNum)
+							pe.Unlock()
+							pe.scheduleNextPending(ctx)
+						}
+					}
+				default:
+					return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more results")
+				}
+			}
+		case txResult, ok := <-pe.results:
 			if !ok {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
+				return pe.execLoopExitCheck(ctx, "main-select: results closed")
 			}
-			closed, err := pe.rws.Drain(ctx, nextResult)
-			if err != nil {
-				return err
+			if logNpPhases {
+				npWait += time.Since(npWaitStart)
+				npProcStart = time.Now()
 			}
-			if closed {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.Drain returned closed")
-			}
+			blockResult, err = pe.processSingleResult(ctx, applyTx, txResult)
+		}
+		if logNpPhases {
+			npProc += time.Since(npProcStart)
 		}
 
-		blockResult, err := pe.processResults(ctx, applyTx)
 		if err != nil {
 			return err
 		}
-		if blockResult == nil {
-			continue
-		}
 
-		exit, err := pe.completeBlock(ctx, blockResult, &sizeCutPending)
-		if err != nil {
-			return err
-		}
-		if exit {
-			return nil
+		if blockResult != nil {
+			pe.RLock()
+			blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]
+			pe.RUnlock()
+
+			if ok {
+				pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
+				pe.execCount.Add(int64(blockExecutor.cntExec))
+				pe.invalidCount.Add(int64(blockExecutor.cntValidationFail))
+				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
+				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
+
+				pe.recordBlockExecMetrics(blockExecutor)
+				if logNpPhases {
+					busy := time.Duration(blockExecutor.execCpuNanos.Load())
+					wall := npWait + npProc
+					var occ float64
+					if wall > 0 && pe.workerCount > 0 {
+						occ = float64(busy) / (float64(pe.workerCount) * float64(wall))
+					}
+					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
+						"wait", npWait, "process", npProc,
+						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
+						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
+						"spec", blockExecutor.cntSpecExec,
+						"valFail", blockExecutor.cntValidationFail,
+						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
+					npWait, npProc = 0, 0
+				}
+				// Covers an empty block that created no accumulator via a tx-result; the
+				// save must land before the blockResult, else the calculator races ahead,
+				// looks up an unsaved CS and leaks branch deltas into the next block's CS.
+				pe.ensureChangesetAccumulator(blockResult.BlockNum, blockResult.BlockHash)
+
+				// Decide the stop BEFORE sending, so a terminal stop publishes the
+				// stopCause before blockResult(M) crosses the channel: the calculator
+				// then holds the coalesce block M before blockResult(M) opens the fold
+				// gate for M+1, otherwise a fold could advance commitment past the state
+				// exec stops at (orphan → wrong root on restart).
+				terminal, startCatchup := false, false
+				if blockResult.Err == nil {
+					// AfterCommitment estimate in per-block mode (commitment already
+					// computed); BeforeCommitment in batch mode.
+					var sizeEst uint64
+					if dbg.BatchCommitments {
+						sizeEst = pe.rs.SizeEstimateBeforeCommitment()
+					} else {
+						sizeEst = pe.rs.SizeEstimateAfterCommitment()
+					}
+					batchLimit := pe.cfg.batchSize.Bytes()
+					switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
+					case execLoopExitMaxReached, execLoopExitExhausted, execLoopExitStopAfter:
+						terminal = true
+					case execLoopExitSizeLimit:
+						// Catch-up only matters when a block may have been folded ahead;
+						// with BAL-driven commitment off nothing folds, so cut at the budget.
+						if dbg.BALDrivenCommitment && !sizeCutPending && blockResult.Exhausted == nil && blockResult.BlockNum < pe.maxBlockNum {
+							startCatchup = true
+						} else {
+							terminal = true
+						}
+					}
+					if terminal {
+						kind := stopMoreWork
+						if blockResult.BlockNum >= pe.maxBlockNum {
+							kind = stopReachedMax
+						}
+						pe.cancelExecLoop(&stopCause{block: blockResult.BlockNum, kind: kind})
+					}
+				}
+
+				// mustDeliver: a terminal stop may have just cancelled ctx, but
+				// blockResult(M) must still reach the apply loop.
+				if err := blockExecutor.sendResult(ctx, blockResult, terminal); err != nil {
+					return err
+				}
+				pe.clearChangesetAccumulator()
+
+				// Leave failure reporting and cancellation to the apply loop so it can
+				// still select an earlier commitment failure while draining results.
+				if blockResult.Err != nil {
+					return nil
+				}
+
+				pe.Lock()
+				delete(pe.blockExecutors, blockResult.BlockNum)
+				pe.Unlock()
+				blockExecutor.releaseSelfLoop()
+
+				if terminal {
+					// The calculator drains commitResults on its own uncancelled ctx;
+					// trigger the batch commitment, then deferred closeApplyChannels
+					// closes commitResults → applyResults.
+					pe.triggerBatchCommitment(ctx)
+					return nil
+				}
+				if startCatchup {
+					sizeCutPending = true
+				}
+				pe.scheduleNextPending(ctx)
+			}
+
+			// No need to wait for the apply loop before scheduling the next block: its
+			// reads layer over the prev-block versionMap overlay until the apply loop
+			// (the sole sd.mem writer) folds this block's state.
+			pe.RLock()
+			blockExecutor, ok = pe.blockExecutors[blockResult.BlockNum+1]
+			pe.RUnlock()
+
+			if ok {
+				// Fast-path install of the next block's changeset accumulator, still in
+				// the exec loop (single-writer); lazily installed on first apply otherwise.
+				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
+				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
+				blockExecutor.execStarted = time.Now()
+				blockExecutor.scheduleExecution(ctx, pe)
+			}
 		}
 	}
 }
@@ -1097,214 +1280,8 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 	return applyTx, nil
 }
 
-// drainOnCancel runs after the exec loop's ctx is cancelled (executeBlocks
-// returned from the errgroup, or executor cleanup ran): drain any remaining
-// worker results, forward any completed blockResults to the apply loop +
-// commitment calculator, then exit. Without forwarding the trailing
-// blockResult, the apply loop sees only the channel close and never observes
-// that maxBlockNum was reached — which makes single-block fork validation
-// see "more work pending" when there is none.
-func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.TemporalTx) error {
-	for {
-		select {
-		case nextResult, ok := <-pe.rws.ResultCh():
-			if !ok {
-				return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.ResultCh closed")
-			}
-			if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
-				if err != nil {
-					return err
-				}
-				return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.Drain returned closed")
-			}
-			blockResult, err := pe.processResults(ctx, applyTx)
-			if err != nil {
-				return err
-			}
-			if blockResult == nil {
-				continue
-			}
-			pe.RLock()
-			blockExecutor, exists := pe.blockExecutors[blockResult.BlockNum]
-			pe.RUnlock()
-			if !exists {
-				continue
-			}
-			pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
-			if err := blockExecutor.sendResult(ctx, blockResult, false); err != nil {
-				return err
-			}
-			// See completeBlock: invalid blockResult is the apply loop's
-			// signal — don't schedule next.
-			if blockResult.Err != nil {
-				return nil
-			}
-			pe.Lock()
-			delete(pe.blockExecutors, blockResult.BlockNum)
-			pe.Unlock()
-			pe.scheduleNextPending(ctx)
-		default:
-			return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
-		}
-	}
-}
-
-// completeBlock finalizes a fully-executed block: records metrics, saves its
-// changeset, decides whether the batch stops here, fans the blockResult out to
-// the apply loop and commitment calculator, and schedules the next block.
-// exit=true means the exec loop should return cleanly — a terminal stop, or an
-// invalid block whose Err the apply loop surfaces.
-func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *blockResult, sizeCutPending *bool) (exit bool, err error) {
-	pe.RLock()
-	blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]
-	pe.RUnlock()
-
-	if ok {
-		pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
-		pe.recordBlockExecMetrics(blockExecutor)
-
-		// Snapshot the just-completed block's changeset BEFORE sending the
-		// blockResult, so that the commitment calculator (which consumes
-		// blockResults on a separate goroutine) can find this block's
-		// saved changeset via GetChangesetByBlockNum at compute time.
-		// In per-block compute mode (changeset window), the
-		// calculator switches the accumulator to this saved CS for the
-		// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-		// so branch writes land in block N's CS rather than whatever the
-		// exec loop has installed as current. If we saved AFTER sendResult,
-		// the calculator could race ahead and look up an unsaved CS,
-		// causing branch deltas to leak into the next block's CS and
-		// produce wrong-trie-root chains on subsequent reorg-driven
-		// re-execution (see TestRecreateAndRewind reproducer). Clearing
-		// the live accumulator and the local pointer must still happen
-		// here (in the exec loop) so the next block's accumulator install
-		// below is serialized with the exec loop's other sd.mem writes
-		// (system calls, finalize, ApplyStateWrites for the next block).
-		// Belt-and-braces: an empty block (no tx-results reaching
-		// processResults) may not have triggered the install — create
-		// its (empty) accumulator so it gets saved like every other block.
-		pe.ensureChangesetAccumulator(blockResult.BlockNum)
-		if pe.currentChangeSet != nil {
-			pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
-		}
-
-		terminal, startCatchup := pe.decideStop(blockResult, *sizeCutPending)
-
-		// mustDeliver: a terminal stop may have just published the stopCause
-		// (cancelling ctx); blockResult(M) must still reach the apply loop.
-		if err := blockExecutor.sendResult(ctx, blockResult, terminal); err != nil {
-			return false, err
-		}
-		pe.clearChangesetAccumulator()
-
-		// Block-validity rejection: the apply loop consumes blockResult and
-		// returns its Err; the calculator skips the commitment compute. Exit
-		// here so we don't schedule the next block on discarded state — the
-		// apply loop's Err is the canonical signal. No cancel: exec self-exits
-		// and cancelling would join context.Canceled onto the reported error.
-		if blockResult.Err != nil {
-			return true, nil
-		}
-
-		pe.Lock()
-		delete(pe.blockExecutors, blockResult.BlockNum)
-		pe.Unlock()
-
-		if terminal {
-			// commitResults is drained by the calculator on its own
-			// uncancelled ctx; trigger the batch commitment, then the deferred
-			// closeApplyChannels closes commitResults → applyResults.
-			pe.triggerBatchCommitment(ctx)
-			return true, nil
-		}
-		if startCatchup {
-			*sizeCutPending = true
-		}
-		pe.scheduleNextPending(ctx)
-	}
-
-	// State writes and Flush happen in the execLoop (before the
-	// blockResult is sent). sd.mem is already up to date.
-	// No need to wait for the apply loop — it only does indexes.
-	pe.RLock()
-	next, ok := pe.blockExecutors[blockResult.BlockNum+1]
-	pe.RUnlock()
-
-	if ok {
-		// Fast-path install of the next block's changeset accumulator,
-		// still in the exec loop (single-writer). If the next block's
-		// executor isn't in the map yet this is a no-op; processResults
-		// then installs it lazily on the block's first apply.
-		pe.ensureChangesetAccumulator(next.blockNum)
-		pe.onBlockStart(ctx, next.blockNum, next.blockHash)
-		next.execStarted = time.Now()
-		next.scheduleExecution(ctx, pe)
-	}
-	return false, nil
-}
-
-func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
-	pe.execCount.Add(int64(be.cntExec))
-	pe.abortCount.Add(int64(be.cntAbort))
-	pe.invalidCount.Add(int64(be.cntValidationFail))
-	pe.readCount.Add(be.blockIO.ReadCount())
-	// Runs before sendResult, so the apply loop has not released the write-set
-	// maps yet - see blockExecutor.completeBlock.
-	pe.writeCount.Add(be.blockIO.WriteCount())
-	if !be.execStarted.IsZero() {
-		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
-		pe.blockExecMetrics.BlockCount.Add(1)
-	}
-}
-
-// decideStop evaluates the per-blockResult exit conditions and, on a terminal
-// stop, publishes the stopCause BEFORE the caller sends blockResult(M): the
-// calculator must hold the coalesce block M by the time blockResult(M) opens
-// the fold gate for M+1 — otherwise a fold could advance commitment past the
-// state exec stops at (orphan → wrong root on restart). The size cut still
-// catches up: the first over-budget block defers (produce one more so state
-// reaches any block already folded ahead), and its successor is the terminal
-// stop.
-func (pe *parallelExecutor) decideStop(blockResult *blockResult, sizeCutPending bool) (terminal, startCatchup bool) {
-	if blockResult.Err != nil {
-		return false, false
-	}
-	var sizeEst uint64
-	if dbg.BatchCommitments {
-		sizeEst = pe.rs.SizeEstimateBeforeCommitment() // 2x
-	} else {
-		sizeEst = pe.rs.SizeEstimateAfterCommitment() // 1x
-	}
-	switch execLoopShouldExit(blockResult, sizeEst, pe.cfg.batchSize.Bytes(), pe.maxBlockNum, dbg.StopAfterBlock) {
-	case execLoopExitMaxReached, execLoopExitExhausted, execLoopExitStopAfter:
-		terminal = true
-	case execLoopExitSizeLimit:
-		// Catch-up only matters when a block may have been folded ahead;
-		// with BAL-driven commitment off nothing folds, so cut at the
-		// budget exactly like main instead of running one extra block.
-		if dbg.BALDrivenCommitment && !sizeCutPending && blockResult.Exhausted == nil && blockResult.BlockNum < pe.maxBlockNum {
-			startCatchup = true
-		} else {
-			terminal = true
-		}
-	}
-	if terminal {
-		kind := stopMoreWork
-		if blockResult.BlockNum >= pe.maxBlockNum {
-			kind = stopReachedMax
-		}
-		pe.cancelExecLoop(&stopCause{block: blockResult.BlockNum, kind: kind})
-	}
-	return terminal, startCatchup
-}
-
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	// The state cache is a SharedDomain implementation detail: it is populated
-	// only at flush (committed, fork-agnostic state) and invalidated only on
-	// unwind (txNum/epoch — see StateCache.Unwind). The executor does not touch
-	// it during forward execution.
-
-	prevSenderTx := map[accounts.Address]int{}
+	prevAccountTx := map[common.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -1322,25 +1299,32 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				// Set the coinbase once, before any worker runs, so self-loop workers
+				// can read it during validation without racing the exec loop.
+				if h := txTask.BlockHeader(); h != nil {
+					executor.coinbase = accounts.InternAddress(h.Coinbase)
+				}
+				go executor.selfLoopWatchdog(pe.workersCtx)
 			}
 		}
 
 		executor.tasks = append(executor.tasks, t)
 		executor.results = append(executor.results, nil)
-		executor.txIncarnations = append(executor.txIncarnations, 0)
 		executor.execFailed = append(executor.execFailed, 0)
-		executor.execAborted = append(executor.execAborted, 0)
-
-		executor.estimateDeps[len(executor.tasks)-1] = []int{}
 
 		executor.execTasks.pushPending(i)
-		executor.validateTasks.pushPending(i)
 
 		switch {
 		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
-				executor.execTasks.addDependency(depTxIndex+1, i)
+				// Dependencies() are versionMap TxIndexes; translate to task-index space.
+				depTask := executor.taskIndexOf(depTxIndex)
+				if depTask >= i {
+					panic(fmt.Sprintf("[self-loop] block %d: task %d declares dependency on HIGHER task %d (dep TxIndex %d) — forward dependency",
+						executor.blockNum, i, depTask, depTxIndex))
+				}
+				executor.execTasks.addDependency(depTask, i)
 			}
 			executor.execTasks.clearPending(i)
 		case len(execRequest.accessList) != 0:
@@ -1350,19 +1334,26 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// optimistically without needing to worry about
 			// clashes, this should signifigatly improve tx
 			// concurrency
-			break
 		default:
 			sender, err := t.TxSender()
 			if err != nil {
 				return err
 			}
+			addresses := make([]common.Address, 0, 2)
+			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
+				sender = accounts.NilAddress
+			}
 			if !sender.IsNil() {
-				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i)
+				addresses = append(addresses, sender.Value())
+			}
+			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
+				addresses = append(addresses, *tx.GetTo())
+			}
+			for _, address := range addresses {
+				if tx, ok := prevAccountTx[address]; ok && executor.execTasks.addDependency(tx, i) {
 					executor.execTasks.clearPending(i)
 				}
-
-				prevSenderTx[sender] = i
+				prevAccountTx[address] = i
 			}
 		}
 
@@ -1383,7 +1374,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		pe.blockExecMetrics.BlockCount.Add(1)
 		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe)
 	}
@@ -1391,19 +1381,12 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	return nil
 }
 
-// applyLoopMissingBlocks returns the blockNums in txResultBlocks that
-// did not produce a corresponding blockResult — meaning the per-block
-// validator never fired for them and an invalid block could become
-// canonical. Returns nil if every block whose tx-results arrived also
-// produced a blockResult.
-//
-// Does NOT flag a short maxBlockNum: a partial batch
-// (size-limit hit) legitimately stops short of maxBlockNum, and the
-// stage loop's ErrLoopExhausted handling resumes from the next block
-// in a follow-up call. Flagging maxBlockNum here turns that legitimate
-// path into a spurious InvalidBlock error — the BenchmarkFeeHistory
-// 200-block fixture exhausts the 5MB batch budget at block 114 and
-// previously errored despite blocks 1..114 being applied cleanly.
+// applyLoopMissingBlocks returns the blockNums in txResultBlocks that did not
+// produce a corresponding blockResult — the per-block validator never fired for
+// them and an invalid block could become canonical. Returns nil when every block
+// whose tx-results arrived also produced a blockResult. Does NOT flag a short
+// maxBlockNum: a size-limit-cut partial batch legitimately stops short and resumes
+// via the stage loop's ErrLoopExhausted handling.
 func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
@@ -1414,14 +1397,16 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 	return missing
 }
 
-// applyLoopFlushAsComplete returns the `complete` flag for
-// versionMap.FlushVersionedWrites. cntInvalid counts prior VersionTooEarly
-// and VersionInvalid txs seen earlier in this iteration but excludes the
-// current tx's own verdict, so the `valid` term is required to prevent an
-// invalidated tx's writes being flushed as Done and read as committed by
-// downstream OCC consumers.
-func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
-	return valid && cntInvalid == 0
+// blockVerdict is a definitive invalid-block verdict from the apply loop's
+// fail-candidate decision point: err wraps rules.ErrInvalidBlock (a wrong trie
+// root additionally matches ErrWrongTrieRoot). It travels as data, not as an
+// error, and only out of a run whose executor stayed healthy — an operational
+// failure in the same batch withholds it, because the machinery that produced the
+// verdict was itself failing.
+type blockVerdict struct {
+	blockNum  uint64
+	blockHash common.Hash
+	err       error
 }
 
 // failCandidate is the apply loop's running "worst" block-validity failure across
@@ -1446,14 +1431,13 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 	}
 }
 
-// wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
-// preserving the real origErr as OriginError instead of the zero-value an
-// inline type-assertion would substitute on the failure branch.
-func wrapAsExecAbort(origErr error, depTxIndex int) error {
-	if _, ok := origErr.(protocol.ErrExecAbortError); ok {
-		return origErr
-	}
-	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
+// deferVerdictToOperational reports whether a recorded failure should yield to a
+// concurrent operational abort instead of surfacing as a block verdict. A generic
+// commit wrong-root (failExec false) can be a symptom of an infrastructure failure
+// that left state incomplete, so an in-flight operational stop supersedes it (the
+// error is retryable, no bad block). An authoritative exec verdict never yields.
+func deferVerdictToOperational(failExec bool, stop *stopCause) bool {
+	return !failExec && stop != nil && stop.kind == stopOperational
 }
 
 // execLoopExitDecision is the result of evaluating the exec-loop's
@@ -1464,37 +1448,23 @@ type execLoopExitDecision int
 const (
 	// execLoopContinue: keep processing — no exit condition met.
 	execLoopContinue execLoopExitDecision = iota
-	// execLoopExitSizeLimit: rs.SizeEstimate*Commitment crossed the
-	// configured batch budget; the partial-batch flush path runs.
+	// execLoopExitSizeLimit: size estimate crossed the batch budget; partial-batch
+	// flush path runs.
 	execLoopExitSizeLimit
-	// execLoopExitMaxReached: blockResult.BlockNum >= maxBlockNum;
-	// the caller publishes a stopReachedMax cause so the apply loop
-	// returns nil (clean batch end) rather than ErrLoopExhausted.
+	// execLoopExitMaxReached: blockResult.BlockNum >= maxBlockNum; a stopReachedMax
+	// cause makes the apply loop return nil (clean batch end).
 	execLoopExitMaxReached
-	// execLoopExitExhausted: executeBlocks dispatched its final
-	// blockResult with .Exhausted set (per-cycle block limit hit).
-	// Without honoring this the exec loop parks forever waiting
-	// for work the dispatcher will never produce.
+	// execLoopExitExhausted: executeBlocks dispatched its final blockResult with
+	// .Exhausted set; without honoring this the exec loop parks forever.
 	execLoopExitExhausted
 	// execLoopExitStopAfter: dbg.StopAfterBlock crossed (debug only).
 	execLoopExitStopAfter
 )
 
-// execLoopShouldExit evaluates the exec-loop's per-blockResult exit
-// decision in priority order. Pure function so the precedence is
-// unit-testable; the exec loop calls this and dispatches on the result.
-//
-// Priority order (matches production):
-//  1. sizeEst > batchLimit         (size-limit batch flush — most urgent)
-//  2. blockResult.BlockNum >= max  (clean end — stopReachedMax cause)
-//  3. blockResult.Exhausted != nil (per-cycle dispatch limit hit)
-//  4. dbg.StopAfterBlock crossed   (debug-only halt)
-//  5. otherwise execLoopContinue   (schedule next block)
-//
-// Reordering any of these silently changes which exit branch wins when
-// two conditions overlap (e.g. final block of a cycle that also crosses
-// the size limit), which is why the test pins the exact precedence.
-// See TestExecLoopShouldExitPriority.
+// execLoopShouldExit evaluates the exec-loop's per-blockResult exit decision in
+// priority order (size-limit > max-reached > exhausted > stop-after). Pure so the
+// precedence is unit-testable: reordering silently changes which branch wins when
+// two conditions overlap.
 func execLoopShouldExit(blockResult *blockResult, sizeEst, batchLimit, maxBlockNum, stopAfterBlock uint64) execLoopExitDecision {
 	if sizeEst > batchLimit {
 		return execLoopExitSizeLimit
@@ -1523,78 +1493,39 @@ func applyLoopCloseIsClean(lastBlockNum, maxBlockNum uint64, txResultCount int) 
 	return txResultCount == 0 && lastBlockNum == 0
 }
 
-// closeApplyChannels closes the apply-loop-bound channels in the order
-// the calculator and apply loop require: commitResults FIRST so the
-// calculator drains and closes rootResults, then applyResults so the
-// apply loop sees its channel close after the calculator is done. The
-// inverse order would let the apply loop exit while the calculator is
-// still publishing — the trailing commitment write would land on a
-// closed channel and panic.
-//
-// "close of closed channel" panics inside safeClose are benign — it
-// just means the channel was already closed by another shutdown path.
-// Recover only that specific panic and re-raise anything else so real
-// bugs still surface.
-//
-// Returns the names of the channels closed in the order they were
-// closed. The production call site discards this (deferred-call
-// return values are ignored); tests use it to deterministically
-// verify the close order without racing on observer-goroutine
-// wakeups. See TestApplyLoopChannelCloseOrder.
+// closeApplyChannels closes the apply-loop-bound channels in the required order:
+// commitResults FIRST so the calculator drains and closes rootResults, then
+// applyResults. The inverse order would let the apply loop exit while the
+// calculator is still publishing, landing a trailing commitment write on a closed
+// channel. Returns the close order (used by tests).
 func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
-	safeClose := func(ch chan applyResult, name string) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
-					return
-				}
-				panic(rec)
-			}
-		}()
-		close(ch)
-		closedOrder = append(closedOrder, name)
+	if pe.consumers == nil {
+		return nil
 	}
-	if pe.commitResultsCh != nil {
-		safeClose(pe.commitResultsCh, "commitResults")
-		pe.commitResultsCh = nil
-	}
-	// blockRequests is closed by its sole sender (the executeBlocks dispatch
-	// goroutine), not here — closing it from this goroutine would race that
-	// goroutine's send select and panic on "send on closed channel".
-	if pe.applyResultsCh != nil {
-		safeClose(pe.applyResultsCh, "applyResults")
-		pe.applyResultsCh = nil
-	}
-	return
+	return pe.consumers.close()
 }
 
-// execLoopExitCheck enforces the completeness invariant for the exec
-// loop's clean exit paths: all blocks the loop was asked to process must
-// be drained from pe.blockExecutors. A non-empty map at exit means a
-// block was scheduled (or queued) but never produced a blockResult,
-// which previously caused "block accepted when it should have been
-// rejected" failures (the apply loop never received the block, post-
-// validation never fired). Converts that silent-success path into a
-// loud InvalidBlock error so the failure surfaces through InsertChain.
-//
-// The reason argument tags the call site (which silent-return path
-// triggered the check) so a failure log identifies the exit path
-// involved without needing a stack trace.
+// execLoopExitCheck enforces the completeness invariant for the exec loop's clean
+// exit paths: pe.blockExecutors must be drained. A non-empty map means a block was
+// scheduled but never produced a blockResult (post-validation never fired, so an
+// invalid block could be accepted) — surface it as a loud InvalidBlock error. The
+// reason argument tags the call site in the failure log.
 func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	// Only a deliberate stopCause exempts the pending-blocks completeness check;
-	// an unrelated cancel (shutdown, parent cancel) with blocks still pending is a
-	// genuine silent-miss and must surface.
+	// A deliberate stopCause, or any context cancellation (shutdown, parent/CL
+	// cancel), explains the exit — pending blocks are then not a silent miss.
+	// Cancellation is operational, never a block-validity verdict. Only an
+	// uncancelled exit with blocks still pending is a genuine silent miss.
 	if _, ok := stopCauseOf(ctx); ok {
+		return nil
+	}
+	if ctx.Err() != nil {
 		return nil
 	}
 	pe.RLock()
 	pendingBlocks := len(pe.blockExecutors)
 	var pendingNums []uint64
 	if pendingBlocks > 0 {
-		pendingNums = make([]uint64, 0, pendingBlocks)
-		for n := range pe.blockExecutors {
-			pendingNums = append(pendingNums, n)
-		}
+		pendingNums = slices.Collect(maps.Keys(pe.blockExecutors))
 	}
 	pe.RUnlock()
 	if pendingBlocks > 0 {
@@ -1604,14 +1535,18 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 	return nil
 }
 
-// scheduleNextPending picks the lowest-numbered block still queued in
-// pe.blockExecutors and starts its execution. Called after a completed
-// block is removed from the map so that any block previously enqueued by
-// processRequest while the slot was busy actually gets scheduled. Without
-// this, processRequest only schedules when the map was empty at insert
-// time — a block enqueued while the previous block is still in flight
-// becomes orphaned in the map, the apply loop never receives its result,
-// and post-block validation silently never fires.
+// scheduleNextPending starts the lowest-numbered block still queued in
+// pe.blockExecutors. Called after a completed block is removed so a block enqueued
+// by processRequest while the slot was busy gets scheduled — processRequest itself
+// only schedules when the map was empty at insert time, so without this a block
+// enqueued mid-flight would orphan in the map and never be validated.
+func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
+	if !be.execStarted.IsZero() {
+		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+		pe.blockExecMetrics.BlockCount.Add(1)
+	}
+}
+
 func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
@@ -1632,90 +1567,94 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 		// Already running (or scheduled).
 		return
 	}
-	pe.blockExecMetrics.BlockCount.Add(1)
 	next.execStarted = time.Now()
 	next.scheduleExecution(ctx, pe)
 }
 
-func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
-	rwsIt := pe.rws.Iter()
-	for rwsIt.HasNext() && blockResult == nil {
-		txResult := rwsIt.PopNext()
+// processSingleResult routes one worker result to its block executor's
+// nextResult.
+func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.TemporalTx, txResult *exec.TxResult) (*blockResult, error) {
+	pe.RLock()
+	blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
+	pe.RUnlock()
 
-		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
-			chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
-			if chaosErr != nil {
-				log.Warn("Monkey in consensus")
-				return blockResult, chaosErr
-			}
-		}
-
-		pe.RLock()
-		blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
-		pe.RUnlock()
-
-		if !ok {
-			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
-		}
-
-		// Ensure this block's changeset accumulator is installed before its
-		// writes are applied — covers blocks scheduled out of band (with no
-		// preceding blockResult to trigger the fast-path install above).
-		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
-
-		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
-
-		if err != nil {
-			return blockResult, err
-		}
+	if !ok {
+		return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
 	}
 
-	return blockResult, nil
+	// Ensure this block's changeset accumulator is installed before its
+	// writes are applied — covers blocks scheduled out of band (with no
+	// preceding blockResult to trigger the fast-path install above).
+	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
+
+	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
-	// execRequests holds one entry per decoded block (each containing all its TxTasks).
-	// A large buffer causes the block-loader goroutine to race far ahead of the apply
-	// loop, accumulating all decoded transaction objects in memory simultaneously.
-	// 128 blocks (~25 k txns on mainnet) is sufficient to keep workers busy.
+	// execRequests holds one entry per decoded block. A large buffer lets the
+	// block-loader race far ahead of the apply loop, accumulating all decoded
+	// transaction objects in memory; 128 keeps workers busy without that.
 	pe.execRequests = make(chan *execRequest, 128)
-	// Clear stale blockExecutors from previous batch — unprocessed blocks left
-	// in the map after a "batch full" exit would prevent the first block of the
-	// new batch from being scheduled (processRequest only schedules when map is empty).
+	// Clear stale blockExecutors from a previous batch — leftovers after a "batch
+	// full" exit would block the new batch's first block from being scheduled
+	// (processRequest only schedules when the map is empty).
 	pe.blockExecutors = nil
-	// in is the per-transaction work queue consumed by OCC workers.
-	// 2048 entries keeps all workers saturated without unbounded accumulation.
-	pe.in = exec.NewQueueWithRetry(2_048)
 
 	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
 
-	// execLoopCtx (outer) carries the stopCause signal and is where the exec loop
-	// runs. workersCtx (inner) is its child: the OCC workers run on it so the exec
-	// loop — the controller — decides when they halt via cancelWorkers, rather
-	// than a worker sharing the controller's own context. The exec loop's exit
-	// path must call cancelWorkers so the workers can't outlive the controller.
+	// execLoopCtx (outer) carries the stopCause signal and runs the exec loop.
+	// workersCtx (inner, its child) runs the OCC workers, so the exec loop decides
+	// when they halt via cancelWorkers rather than a worker sharing the controller's
+	// context — the exit path calls cancelWorkers so workers can't outlive it.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
-	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
+	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
 	pe.cancelExecLoop = execLoopCtxCancel
 
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
+	pe.workersCtx = workersCtx
+	pe.idleGo = make(chan func())
 
+	// The pool runs one worker beyond the configured count, except for a count
+	// of one (--exec.serial), which must run one transaction at a time.
+	poolSize := pe.workerCount + 1
+	if pe.workerCount <= 1 {
+		poolSize = 1
+	}
 	var err error
-	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
-		workersCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
+	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
+		workersCtx, nil, true, pe.cfg.db, nil, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
-
+		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+	)
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
 	}
 
+	// Worker-pool startup fault: surface synchronously (before the apply loop waits on
+	// results) so it aborts the batch cleanly rather than deadlocking on unclosed
+	// channels. Deterministic — the fault is decided here, not in a speculative worker.
+	if chaosErr := pe.chaosFaults.WorkerError; pe.enableChaosMonkey && chaosErr != nil {
+		return execLoopCtx, execLoopCtxCancel, chaosErr
+	}
+
+	pe.slotTxs = make(chan kv.TemporalTx, len(pe.execWorkers))
 	pe.execLoopGroup.Go(func() error {
-		defer pe.rws.Close()
-		defer pe.in.Release()
-		pe.resetWorkers(workersCtx, pe.rs, nil)
+		pe.resetWorkers(pe.rs)
+		// Hand the reset worker contexts to the dispatcher as a semaphore. The buffer
+		// is oversized so the pool can grow elastically (acquireWorker mints extras
+		// when workers park mid-EVM) and return without blocking.
+		pe.runSem = make(chan *exec.WorkerContext, elasticWorkerCap)
+		for _, w := range pe.execWorkers {
+			pe.runSem <- w
+		}
+		slots := len(pe.execWorkers)
+		pe.execSem = make(chan struct{}, slots)
+		for range slots {
+			pe.execSem <- struct{}{}
+		}
+		pe.results = make(chan *exec.TxResult, len(pe.execWorkers)*8)
 		return pe.execLoop(execLoopCtx)
 	})
 
@@ -1723,36 +1662,40 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		execLoopCtxCancel(cause)
 		cancelWorkers()
 
-		pe.in.Release()
+		// Join the scheduler before draining workers: it may still add to runWG.
+		_ = pe.wait()
+		pe.runWG.Wait()
+		for drained := false; !drained; {
+			select {
+			case tx := <-pe.slotTxs:
+				tx.Rollback()
+			default:
+				drained = true
+			}
+		}
+
 		pe.stopWorkers()
 
-		_ = pe.wait(ctx)
+		// Reclaim elastically-minted contexts (the base pool is torn down by
+		// stopWorkers); each may hold its own roTx.
+		pe.mintMu.Lock()
+		for _, w := range pe.mintedWorkers {
+			w.Close()
+		}
+		pe.mintedWorkers = nil
+		pe.mintMu.Unlock()
 	}, nil
 }
 
-func (pe *parallelExecutor) wait(ctx context.Context) error {
-	doneCh := make(chan error, 1)
-
-	go func() {
-		if pe.execLoopGroup != nil {
-			err := pe.execLoopGroup.Wait()
-			if err != nil && !errors.Is(err, context.Canceled) {
-				doneCh <- err
-				return
-			}
-			pe.waitWorkers()
-		}
-		doneCh <- nil
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-doneCh:
-			return err
-		}
+// wait blocks for the exec-loop group and returns its verdict. The caller
+// cancels the executor context before calling wait, so the group is already
+// unwinding; blocking on it (rather than racing a ctx.Done escape that returned
+// nil) is what surfaces a real execLoop failure instead of hiding it.
+func (pe *parallelExecutor) wait() error {
+	if pe.execLoopGroup == nil {
+		return nil
 	}
+	return pe.execLoopGroup.Wait()
 }
 
 type applyResult any
@@ -1761,9 +1704,9 @@ type blockResult struct {
 	BlockNum         uint64
 	BlockTime        uint64
 	BlockHash        common.Hash
-	ParentHash       common.Hash
 	StateRoot        common.Hash
 	Err              error
+	Operational      bool // Err is an infrastructure failure, not a block-validity verdict
 	BlockGasUsed     uint64
 	BlobGasUsed      uint64
 	lastTxNum        uint64
@@ -1779,7 +1722,11 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
-	blockStateCache  *state.BlockStateCache
+
+	// Exec window for newPayload wall attribution; the calculator pairs these with
+	// its own commit-window timestamps to measure exec/commit overlap.
+	execStartedAt time.Time
+	execEndedAt   time.Time
 }
 
 type txResult struct {
@@ -1792,25 +1739,459 @@ type txResult struct {
 	logs                  []*types.Log
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
-	writes                *state.WriteSet
+	writes                state.WriteSetView
 	rules                 *chain.Rules
-	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
+	// balTxs carries the sealed reads and writes of txs before the block's final one,
+	// so the apply loop builds the block access list while the block runs.
+	balTxs []balTx
+	// isFinalize marks the block-end result. It shares the last regular tx's txNum,
+	// so its indexing skips the receipt cache; its logs are the block-end syscall
+	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
+	isFinalize bool
 }
 
-// blockRequest is the commitment calculator's per-block heads-up, sent by the
-// dispatch layer on its own channel — ahead of, and separate from, the
-// block's txResult/blockResult stream so it is never trapped behind a prior
-// block's results. It carries the block identity and the block's BAL (nil
-// when none), from which the calculator selects its per-block mode.
+type balTx struct {
+	index  int
+	reads  state.ReadSet
+	writes *state.WriteSet
+}
+
+// Block-STM model: workers own execution AND validation. Each worker flushes its
+// writes to the versionMap speculatively (as estimate), validates its own read-set,
+// and loops — parking on the commit-frontier signal until every read-dependency has
+// committed — returning only a stable-valid result. The exec loop is a pure in-order
+// commit loop: flush the result's writes as complete, run the coinbase/finalize
+// sweep, broadcast the advanced frontier.
+//
+// Mid-flow dep-pause is the sole dependency mechanism: a read that observes an
+// in-flight estimate pauses (via the IBS waitCommit hook) until that writer commits,
+// then re-reads the committed value — execution continues in place instead of
+// aborting. A paused worker holds its context (mid-EVM), so the context pool grows
+// elastically (see acquireWorker) to avoid dependency starvation.
+
+// elasticWorkerCap bounds the runSem buffer so the context pool can grow past the
+// base worker count when workers park mid-EVM. A backstop, not a target: CPU
+// concurrency is bounded by execSem.
+const elasticWorkerCap = 4096
+
+// goReused runs f on an idle task goroutine when there is one, so f starts on an
+// already grown stack instead of growing a new one.
+func (pe *parallelExecutor) goReused(f func()) {
+	// If a goroutine is idle and waiting for a task, send f to it by this channel.
+	// If none is idle, start a new goroutine.
+	select {
+	case pe.idleGo <- f:
+		return
+	default:
+	}
+	idle, done := pe.idleGo, pe.workersCtx.Done()
+	pe.runWG.Go(func() {
+		for {
+			f()
+			f = nil
+			select {
+			case f = <-idle:
+			case <-done:
+				return
+			}
+		}
+	})
+}
+
+// dispatchRunSelfLoop runs one task on a worker context, looping until its result
+// is stable-valid: execute, flush its writes to the versionMap so downstream workers
+// read them speculatively, validate its own read-set, and — when valid but a
+// read-dependency has not yet committed — park on the commit frontier and
+// re-validate. Only a stable-valid result is sent to the exec loop, which commits it
+// in order. The context is released while parked so dependencies can run.
+func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
+	pe.goReused(func() {
+		// The roTx is bound to the execution slot, not the goroutine: opened on slot
+		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
+		// count rather than the far larger parked-goroutine count, so idle parked
+		// workers can't exhaust the MDBX read-tx limiter and deadlock the in-order task.
+		var goRoTx kv.TemporalTx
+		var w *exec.WorkerContext
+		acquire := func() bool {
+			w = pe.acquireWorker()
+			return w != nil
+		}
+		// Execution-slot gate: held only while executing, released while resting
+		// mid-EVM on a dependency, so a resting worker does not reduce concurrency.
+		slotHeld := false
+		// slotErr carries the last acquireSlot failure cause: nil means shutdown
+		// (workersCtx cancelled — return silently), non-nil means an infrastructure
+		// failure the caller must surface as an operational result.
+		var slotErr error
+		// Only a finished run pools its roTx: a paused EVM stays bound to it until
+		// the rebind, so pooling it would share one MDBX tx between two workers.
+		releaseSlot := func(pool bool) {
+			if !slotHeld {
+				return
+			}
+			if goRoTx != nil && pool {
+				select {
+				case pe.slotTxs <- goRoTx:
+					goRoTx = nil
+				default:
+				}
+			}
+			if goRoTx != nil {
+				goRoTx.Rollback()
+				goRoTx = nil
+			}
+			pe.execSem <- struct{}{}
+			slotHeld = false
+		}
+		// acquireSlot takes an execution slot and opens the slot's roTx. Binding the
+		// roTx to the worker is the caller's job because the lock discipline differs:
+		// the loop binds via ResetTx (lock-free), the mid-EVM waitCommit rebinds via
+		// BindTxHeld (RunTxTask already holds the worker lock).
+		acquireSlot := func() bool {
+			slotErr = nil
+			select {
+			case <-pe.execSem:
+				slotHeld = true
+			case <-pe.workersCtx.Done():
+				return false
+			}
+			select {
+			case goRoTx = <-pe.slotTxs:
+				return true
+			default:
+			}
+			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx) //nolint:gocritic // slot-tied rotx: rolled back on slot release (releaseSlot), not a defer here — it outlives this function
+			if err != nil {
+				pe.execSem <- struct{}{}
+				slotHeld = false
+				slotErr = err
+				return false
+			}
+			goRoTx = tx
+			return true
+		}
+		defer releaseSlot(false)
+		// aborted latches once a terminal result (fatal verdict or operational infra
+		// failure) is sent. A mid-EVM waitCommit failure sends its result but cannot
+		// stop RunTxTask from continuing to completion, so the worker would otherwise
+		// send a second result for the same task; the latch drops it. Ordinary
+		// self-loop results (send) are non-terminal and may legitimately be sent
+		// across incarnations until a terminal one latches.
+		aborted := false
+		rawSend := func(r *exec.TxResult) {
+			select {
+			case pe.results <- r:
+			case <-pe.workersCtx.Done():
+			}
+		}
+		send := func(r *exec.TxResult) {
+			if aborted {
+				return
+			}
+			rawSend(r)
+		}
+		// A worker must never vanish on a terminal condition — the exec loop would
+		// wait forever for a result that never arrives. sendOperational reports it as
+		// an infrastructure failure that fails the stage retryably (transient
+		// roTx/read error, worker panic, non-convergence) without a block verdict.
+		sendOperational := func(err error) {
+			if aborted {
+				return
+			}
+			aborted = true
+			rawSend(&exec.TxResult{Task: tv, Err: err, Operational: true})
+		}
+		// Mid-flow dep-pause hook: a read observing an in-flight (estimate) write
+		// releases this worker's slot, waits for that writer's task to commit,
+		// reacquires a slot, and retries the read against the final value.
+		tv.waitCommit = func(dep int) bool {
+			releaseSlot(false)
+			// dep is a versionMap TxIndex; translate to task-index frontier space.
+			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
+				return false
+			}
+			if !acquireSlot() {
+				if slotErr != nil {
+					sendOperational(fmt.Errorf("block %d tx %d: reopen roTx: %w", be.blockNum, tv.index, slotErr))
+				}
+				return false
+			}
+			// RunTxTask holds the worker lock across this mid-EVM rebind. A bind
+			// failure leaves the EVM reading through a dead roTx, so report it as an
+			// infrastructure failure rather than continuing.
+			if err := w.BindTxHeld(goRoTx); err != nil {
+				sendOperational(fmt.Errorf("block %d tx %d: rebind roTx: %w", be.blockNum, tv.index, err))
+				return false
+			}
+			return true
+		}
+		defer func() {
+			if rec := recover(); rec != nil {
+				sendOperational(fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
+					be.blockNum, tv.index, rec, dbg.Stack()))
+			}
+		}()
+		bumpInc := func() bool {
+			tv.version.Incarnation++
+			if int(tv.version.Incarnation) > len(be.tasks)+8 {
+				// Failing to converge is the executor giving up, not a block-validity
+				// verdict — route it operationally (like the panic handler above), never
+				// as ErrInvalidBlock, so a valid block is not reported INVALID to the CL.
+				sendOperational(fmt.Errorf("block %d tx %d exceeded the self-loop incarnation limit (%d) without a settled verdict",
+					be.blockNum, tv.index, len(be.tasks)+8))
+				return false
+			}
+			return true
+		}
+		// reExec is called holding NO context; it bumps the incarnation. Returns false on
+		// the incarnation limit.
+		reExec := bumpInc
+		// waitTo waits for the commit frontier to reach t. Returns false on shutdown.
+		waitTo := func(t int) bool {
+			return be.waitDep(tv.index, t)
+		}
+		var prevWrites *state.WriteSet
+		for {
+			// Whether this run executes against fully-committed state below it. Captured
+			// BEFORE execution: the frontier is monotonic and finalized tasks never
+			// un-commit, so if every lower task is committed now it stays so for the
+			// whole run and an error is authoritative. Capturing after would
+			// mis-classify a speculative error (frontier advanced mid-run) as genuine.
+			finalExec := be.frontier() >= tv.index-1
+			if !acquireSlot() {
+				if slotErr != nil {
+					sendOperational(fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, slotErr))
+				}
+				return
+			}
+			// The context is taken after the slot, so tasks queued for a slot do not
+			// grow the context pool.
+			if !acquire() {
+				return
+			}
+			if err := w.ResetTx(goRoTx); err != nil {
+				releaseSlot(false)
+				sendOperational(fmt.Errorf("block %d tx %d: reset roTx: %w", be.blockNum, tv.index, err))
+				return
+			}
+			// Invariant: each RUN of a tx uses a strictly ascending incarnation. Two
+			// runs sharing one incarnation is the scheduling bug behind stale-flush
+			// corruption.
+			for {
+				last := be.runInc[tv.index].Load()
+				if int64(tv.version.Incarnation) <= last {
+					panic(fmt.Sprintf("self-loop: tx %d run at incarnation %d <= last-run %d (two runs share an incarnation)",
+						tv.index, tv.version.Incarnation, last))
+				}
+				if be.runInc[tv.index].CompareAndSwap(last, int64(tv.version.Incarnation)) {
+					break
+				}
+			}
+			result := w.RunTxTask(tv)
+			releaseSlot(!aborted)
+			// A mid-EVM waitCommit failure already sent a terminal result and left the
+			// tx running against a dead roTx; its result is meaningless — stop here.
+			if aborted {
+				pe.releaseWorker(w)
+				return
+			}
+			// A run without the sender checks that failed or used the sender's account
+			// re-runs with the checks on: serial execution reports a sender error first.
+			if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
+				(result.Err != nil || touchedSenderAccount(txTask, result)) {
+				pe.releaseWorker(w)
+				if !waitTo(tv.index-1) || !reExec() {
+					return
+				}
+				continue
+			}
+			if result.Err != nil {
+				pe.releaseWorker(w)
+				if finalExec {
+					send(result)
+					return
+				}
+				if !waitTo(tv.index-1) || !reExec() {
+					return
+				}
+				continue
+			}
+			// Intra-tx read-consistency verdict: the tx read an in-flight or
+			// mid-execution-changed value, so it did not run against a settled
+			// snapshot. Re-execute once that predecessor commits.
+			if result.Dep >= 0 {
+				pe.releaseWorker(w)
+				if !waitTo(be.taskIndexOf(result.Dep)) || !reExec() {
+					return
+				}
+				continue
+			}
+			be.selfLoopFlush(tv.version, result, prevWrites)
+			prevWrites = result.TxOut
+			pe.releaseWorker(w)
+
+			valid, target, blocker := be.selfLoopEvaluate(tv, result)
+			if !valid {
+				if blocker > be.frontier() && !waitTo(blocker) {
+					return
+				}
+				if !reExec() {
+					return
+				}
+				continue
+			}
+			// Valid: wait for its dependencies to commit, then re-validate — a
+			// dependency may have re-executed to a new value, forcing a re-exec;
+			// otherwise the verdict is authoritative and we commit out of order.
+			// A BAL block does not wait, so nothing changed since the check above.
+			if !be.versionMap.HasBAL {
+				if !waitTo(target) {
+					return
+				}
+				valid, _, _ = be.selfLoopEvaluate(tv, result)
+			}
+			if valid {
+				send(result)
+				// Stay alive rather than exit: the committed-dependent re-check signals
+				// slReexec (via a sticky flag, so a dropped wake is recovered on the next
+				// one) if a later write invalidates us. slFin closes when we finalize
+				// (never un-committed again), slDone on shutdown.
+				reexec := false
+				for {
+					if be.slReexecFlag[tv.index].Swap(false) {
+						reexec = true
+						break
+					}
+					done := false
+					select {
+					case <-be.slReexec[tv.index]:
+					case <-be.slFin[tv.index]:
+						done = true
+					case <-be.slDone:
+						done = true
+					}
+					if done {
+						break
+					}
+				}
+				if !reexec {
+					return
+				}
+				if !reExec() {
+					return
+				}
+				continue
+			}
+			if !reExec() {
+				return
+			}
+		}
+	})
+}
+
+// selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
+// the previous incarnation wrote that this one dropped.
+func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
+	if prevWrites != nil {
+		for h := range prevWrites.AllHeaders() {
+			if !result.TxOut.Has(h) {
+				// checkExists=false: the previous incarnation's write-set may hold a
+				// net-zero storage write that was never materialized in the versionMap
+				// (net-zero writes are skipped at flush), so deleting it must be a no-op,
+				// not a "path must already exist" panic.
+				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, false)
+			}
+		}
+	}
+	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
+	// dependency and pauses until this tx commits.
+	be.versionMap.FlushVersionedWrites(result.TxOut, false)
+}
+
+// taskIndexOf maps a versionMap block-TxIndex into this block's dense task-list
+// index space (what waitDep/committedFrontier use), offsetting by the block's first
+// task TxIndex. Without it a dependency's park target lands in versionMap space and
+// can exceed the frontier's reach on a partial block, deadlocking the worker.
+func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
+	return versionTxIndex - be.tasks[0].Version().TxIndex
+}
+
+// selfLoopEvaluate validates tv's read-set against the versionMap and, when valid,
+// returns the commit target (task-index space) the tx must reach to be stable — the
+// highest task it actually read from, so it can commit as soon as those deps commit,
+// out of order rather than behind the whole linear prefix. valid=false forces
+// re-exec; blocker is the highest stale writer to wait for.
+func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
+	blocker = -1
+	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
+		func(rv, wv state.Version) state.VersionValidity {
+			if rv != wv {
+				// A same-writer re-publication names no blocker: the value tiebreaker
+				// may forgive it, and parking would wait on a writer that did not
+				// invalidate this read. If the value did change, re-executing at once is
+				// right — the new value is already published.
+				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
+					// Invariant: a read can only be invalidated by a PREDECESSOR write.
+					// A blocker >= this task is a forward dependency (a future write
+					// invalidating a past read) — impossible in Block-STM; fail loud.
+					if b >= tv.index {
+						panic(fmt.Sprintf("[self-loop] block %d: task %d (TxIndex %d) invalidated by HIGHER task %d (writer TxIndex %d) — forward validation dependency",
+							be.blockNum, tv.index, tv.version.TxIndex, b, wv.TxIndex))
+					}
+					blocker = b
+				}
+				return state.VersionInvalid
+			}
+			return state.VersionValid
+		}, false, "")
+	if v != state.VersionValid {
+		if blocker == -1 {
+			// Invalid but no Done writer named: the invalidation is an in-flight
+			// ESTIMATE (MVReadResultDependency), which ValidateReadSet resolves without
+			// calling checkVersion. Find the estimate's writer so the caller waits for
+			// it — re-executing now would re-read the estimate and busy-loop. Validation
+			// also cross-checks the account's AddressPath and SelfDestructPath.
+			noteEstimate := func(a accounts.Address, p state.AccountPath, k accounts.StorageKey) {
+				rr := be.versionMap.ReadStatus(a, p, k, tv.version.TxIndex)
+				if rr.Status() == state.MVReadResultDependency {
+					if b := be.taskIndexOf(rr.DepIdx()); b > blocker && b < tv.index {
+						blocker = b
+					}
+				}
+			}
+			result.TxIn.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+				noteEstimate(a, p, k)
+				noteEstimate(a, state.AddressPath, accounts.NilKey)
+				noteEstimate(a, state.SelfDestructPath, accounts.NilKey)
+				return true
+			})
+		}
+		return false, -1, blocker
+	}
+	target = -1
+	result.TxIn.EachHeader(func(hdr state.ReadHeader) bool {
+		if hdr.Source != state.MapRead {
+			return true
+		}
+		if t := be.taskIndexOf(hdr.Version.TxIndex); t >= 0 && t < tv.index && t > target {
+			target = t
+		}
+		return true
+	})
+	return true, target, -1
+}
+
+// blockRequest is the commitment calculator's per-block heads-up, sent on its own
+// channel ahead of the block's txResult/blockResult stream so it is never trapped
+// behind a prior block's results. Carries the block identity and BAL (nil when none).
 type blockRequest struct {
 	blockNum  uint64
 	blockHash common.Hash
 	stateRoot common.Hash
-	// firstTxNum/lastTxNum bound the block's txNum range. lastTxNum (the block-end
-	// system tx) positions asOfReader/ComputeCommitment for the fold; the pair lets
-	// the calculator detect a block that crosses a step boundary — such a block is
-	// left to the incremental path, since folding it would need a mid-block
-	// step-boundary checkpoint the atomic fold doesn't emit.
+	// firstTxNum/lastTxNum bound the block's txNum range. lastTxNum positions
+	// asOfReader/ComputeCommitment for the fold; the pair lets the calculator detect
+	// a step-boundary-crossing block, which is left to the incremental path (the
+	// atomic fold emits no mid-block step-boundary checkpoint).
 	firstTxNum uint64
 	lastTxNum  uint64
 	blockTime  uint64
@@ -1839,8 +2220,15 @@ type execTask struct {
 
 type execResult struct {
 	*exec.TxResult
-	writes                *state.WriteSet
+	writes                state.WriteSetView
 	cumulativeBlobGasUsed uint64
+}
+
+// isFeeRecipient returns a predicate that reports whether calcFees credits an address after the
+// tx of result is validated: the coinbase, or the burnt-fee recipient.
+func (be *blockExecutor) isFeeRecipient(result *execResult) func(accounts.Address) bool {
+	burnt := result.ExecutionResult.BurntContractAddress
+	return func(addr accounts.Address) bool { return addr == be.coinbase || addr == burnt }
 }
 
 func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
@@ -1870,16 +2258,14 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 	}
 
 	if txIndex < 0 || task.IsBlockEnd() {
-		// System TXs use full IBS reconstruction — they don't go through
-		// the worker execution path so fee splitting doesn't apply.
-		// Strip coinbase/burnt for these since they may have stale writes.
-		txOut, coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
+		// System TXs use full IBS reconstruction (no worker path, so no fee split).
+		// Strip coinbase/burnt since they may carry stale writes.
+		txOut, _, _, _ := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
 		result.TxOut = txOut
 		txOut, _, _, _ = result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 		result.TxOut = txOut
 		result.TxIn.Delete(result.Coinbase)
 		result.TxIn.Delete(result.ExecutionResult.BurntContractAddress)
-		_, _, _ = coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta
 		return result.finalizeSystemTx(task, txTask, vm, stateReader)
 	}
 
@@ -1899,27 +2285,40 @@ func (result *execResult) finalizeSystemTx(
 	txIndex := task.Version().TxIndex
 	txIncarnation := task.Version().Incarnation
 
-	// Use an empty ReadSet so all reads go through the versionMap (which
-	// has all prior TX writes). The execution-phase ReadSet (result.TxIn)
-	// may be stale if the system TX ran speculatively before all regular
-	// TXs completed — cached reads would return pre-block values instead
-	// of the post-block state needed by syscalls (withdrawal/consolidation).
+	// Empty ReadSet so all reads go through the versionMap (which holds all prior TX
+	// writes). result.TxIn may be stale if the system TX ran speculatively before the
+	// regular TXs completed, returning pre-block values instead of the post-block
+	// state syscalls (withdrawal/consolidation) need.
 	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	// Use the block's versionMap so the IBS's versionedRead (used by
-	// GetState for storage reads) can see writes from prior TXs.
-	// The system TX's syscalls read withdrawal/consolidation contract
-	// storage which was modified by regular TXs in this block.
 	ibs.SetVersionMap(vm)
 	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes := ibs.FinalizedWrites(txTask.Rules())
+	rules := txTask.Rules()
+	if blockNum == 0 {
+		// Genesis runs with empty rules, so its alloc keeps empty accounts (EIP-161 off).
+		rules = &chain.Rules{}
+	}
+	writes, stateErr := ibs.FinalizedWrites(rules)
+	if stateErr != nil {
+		return nil, state.ReadSet{}, nil, fmt.Errorf("finalize system tx block %d: state read: %w", blockNum, stateErr)
+	}
 	return nil, ibs.VersionedReads(), writes, nil
+}
+
+// finalizedBlockWrites is the block-end write-set. Deciding EIP-161 removals reads pre-block
+// state, so a read failure there is checked here, after the write-set is built.
+func finalizedBlockWrites(ibs *state.IntraBlockState, rules *chain.Rules, blockNum uint64) (*state.WriteSet, error) {
+	writes, stateErr := ibs.FinalizedWrites(rules)
+	if stateErr != nil {
+		return nil, fmt.Errorf("can't finalize block %d: state read: %w", blockNum, stateErr)
+	}
+	return writes, nil
 }
 
 func (result *execResult) calcFees(
@@ -1931,21 +2330,33 @@ func (result *execResult) calcFees(
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
-	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
-	// own prior incarnations that would double-apply the tip on re-execution.
-	// Worker writes for the current tx are picked up below via TxOut.
+	// Read at txIndex (floor txIndex-1): strictly prior tx, excluding this tx's own
+	// prior incarnations that would double-apply the tip on re-execution. Current-tx
+	// worker writes are picked up below via TxOut.
 	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
 		return nil, err
 	}
+	// The tip credits only Balance, so seed the coinbase's whole-account origin into
+	// the versionMap — else the apply compose has no base and wipes its committed
+	// nonce/code/balance.
+	state.SeedOrigin(vm, result.Coinbase, coinbaseAcc)
 	var newCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
+	coinbaseFee := result.ExecutionResult.FeeTipped
+	// Two entries for one account would overwrite each other, so a single entry carries both fees.
+	if hasBurnt && burntAddr == result.Coinbase {
+		if chainRules.IsLondon {
+			coinbaseFee.Add(&coinbaseFee, &result.ExecutionResult.FeeBurnt)
+		}
+		hasBurnt = false
+	}
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
@@ -1953,13 +2364,13 @@ func (result *execResult) calcFees(
 		if err != nil {
 			return nil, err
 		}
+		state.SeedOrigin(vm, burntAddr, burntAcc)
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
 	}
-	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
-	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
-	// alongside Balance so the EIP-161 empty-removal check below sees the
+	// The worker writes coinbase/burnt to TxOut when sender matches. Track Nonce /
+	// CodeHash alongside Balance so the EIP-161 empty-removal check below sees the
 	// worker's post-write coinbase state, not the stale pre-tx snapshot.
 	coinbaseNonce := uint64(0)
 	coinbaseHasCodeHashWrite := false
@@ -1969,14 +2380,20 @@ func (result *execResult) calcFees(
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
+	cbOverride := false
+	cbBalanceDeleted := false
 	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
 		newCoinbaseBalance = bw.Val
+		cbOverride = true
+		cbBalanceDeleted = bw.Deletes()
 	}
 	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
 		coinbaseNonce = nw.Val
 	}
-	if _, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
+	coinbaseCodeHash := accounts.EmptyCodeHash
+	if cw, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
 		coinbaseHasCodeHashWrite = true
+		coinbaseCodeHash = cw.Val
 	}
 	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
 		coinbaseSelfdestructed = sw.Val
@@ -1984,10 +2401,36 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
+	burntOverride := false
+	burntBalanceDeleted := false
+	burntSelfdestructed := false
+	burntWasContract := false
+	burntCreatedContract := false
+	burntNonce := uint64(0)
+	burntHasCodeHashWrite := false
+	burntEmptyCodeHash := burntAcc == nil || burntAcc.IsEmptyCodeHash()
+	if burntAcc != nil {
+		burntNonce = burntAcc.Nonce
+	}
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
+			burntOverride = true
+			burntBalanceDeleted = bw.Deletes()
 		}
+		if sw, ok := result.TxOut.GetSelfDestruct(burntAddr); ok {
+			burntSelfdestructed = sw.Val
+		}
+		if nw, ok := result.TxOut.GetNonce(burntAddr); ok {
+			burntNonce = nw.Val
+		}
+		if _, ok := result.TxOut.GetCodeHash(burntAddr); ok {
+			burntHasCodeHashWrite = true
+		}
+		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
+			burntCreatedContract = true
+		}
+		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -1996,44 +2439,74 @@ func (result *execResult) calcFees(
 	// re-creates the account) to match serial.
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
+	// A contract coinbase self-destructed with no same-tx re-create is net-absent:
+	// its code/nonce are wiped and a later fee credit revives it balance-only
+	// (EmptyCodeHash). coinbaseAcc still carries the stale live code, so the emit
+	// below must materialize the revived-codeless account rather than propagate it.
+	coinbaseNetDestructed := burnCoinbaseTip && !coinbaseCreatedContract
 	if !burnCoinbaseTip {
-		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseFee)
 	}
+	// Before EIP-8246, a SELFDESTRUCT of a contract burnt recipient burns the fee
+	// credited to it, like a destroyed coinbase tip. Mirrors burnCoinbaseTip.
+	burnBurntFee := !chainRules.IsAmsterdam && burntSelfdestructed && burntWasContract
+	burntNetDestructed := burnBurntFee && !burntCreatedContract
 	oldBurntBalance := newBurntBalance
-	if hasBurnt && chainRules.IsLondon {
+	if hasBurnt && chainRules.IsLondon && !burnBurntFee {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 
-	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
-	// the coinbase must be "touched" so the commitment calculator sees the
-	// empty-account delete. Matches serial executor's AddBalance(coinbase, 0)
-	// → TouchAccount → MakeWriteSet emits a SelfDestructPath delete.
-	//
-	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
-	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
-	// mistakenly treated as empty here when FeeTipped==0.
-	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
-	// nil pre-state must not short-circuit to empty=true: a worker may
-	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
-	// must respect those writes — otherwise SelfDestructPath is emitted
-	// and Normalize's sdSet filter drops them.
-	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
-		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
-	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
-		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
+	// cbOverride: a sender==coinbase tx's worker wrote the coinbase balance directly
+	// (the gas debit). calcFees must then re-materialize the coinbase (Balance + its
+	// AddressPath sibling) even when the net change is zero, else the worker's raw
+	// gas-debit value is left behind and a later whole-account read gets a stale balance.
+	// The worker destroyed the coinbase (its balance write is stamped ValueDeleted) and
+	// the destruct leaves it gone: either the fee left it empty, or it was a tip-burning
+	// destruct (burnCoinbaseTip), which removes the account regardless of a non-zero
+	// residual from a later same-tx credit. Emit the removal so the deletion verdict
+	// rides the write-set directly — otherwise WriteSet.Merge copies this fee phase's
+	// live balance over the worker's ValueDeleted and the deletion survives only because
+	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
+	// the destroyed account.
+	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
+	// Pre-EIP-161 the fee touch creates and persists the coinbase even at a zero tip, so a
+	// later CALL sees it as existing (no new-account gas). EIP-161+ prunes the empty touch
+	// instead (coinbaseEmptied below). Matching serial.
+	coinbaseCreatedEmpty := !chainRules.IsEIP161Enabled() && coinbaseAcc == nil && !coinbaseSelfdestructed &&
+		newCoinbaseBalance.IsZero() && !coinbaseNetDeleted
+	emitCoinbase := (newCoinbaseBalance != oldCoinbaseBalance || (cbOverride && !coinbaseNetDestructed) || coinbaseCreatedEmpty) && !coinbaseNetDeleted
+	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
+	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
+
+	// A destroyed burnt recipient whose fee was burned (or left it empty) is removed,
+	// matching serial; mirrors coinbaseNetDeleted.
+	burntNetDeleted := burntOverride && burntBalanceDeleted && (newBurntBalance.IsZero() || burnBurntFee)
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || (burntOverride && !burntNetDestructed)) && !burntNetDeleted
+	// A zero base-fee transfer still touches the burnt recipient, so EIP-161 removes
+	// an empty one with its storage. Mirrors coinbaseEmptied above.
+	burntEmptied := hasBurnt && chainRules.IsLondon && !emitBurnt && !burntSelfdestructed && burntAcc != nil &&
+		newBurntBalance.IsZero() && burntNonce == 0 && burntEmptyCodeHash && !burntHasCodeHashWrite &&
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr)
 
 	addWrites := &state.WriteSet{}
+	if coinbaseNetDeleted || coinbaseEmptied {
+		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+	}
+	if burntEmptied || burntNetDeleted {
+		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
+	}
+	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
+	// serial credits the tip before the tx's empty-account sweep, so the account and its
+	// storage survive.
+	if coinbaseSelfdestructed && !coinbaseWasContract && !newCoinbaseBalance.IsZero() {
+		addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
+		})
+	}
 	if emitCoinbase {
-		if coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
-			addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
-				WriteHeader: state.WriteHeader{
-					Address: result.Coinbase,
-					Path:    state.SelfDestructPath,
-					Version: taskVersion,
-				},
-				Val: true,
-			})
-		} else {
+		{
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
@@ -2043,35 +2516,66 @@ func (result *execResult) calcFees(
 				},
 				Val: newCoinbaseBalance,
 			})
-			// Emit an AddressPath sibling write so downstream parallel txs
-			// reading this address see an account record. Serial's AddBalance
-			// implicitly creates the account on first credit; parallel calcFees
-			// must mirror that, otherwise getVersionedAccount returns nil for
-			// a freshly-credited coinbase (no pre-block storage entry, no
-			// versionMap AddressPath) and Empty() returns true — charging the
-			// stale CallNewAccountGas (+25000) for a CALL-with-value to the
-			// coinbase mid-tx. Mainnet block 25151825 tx 31's SD+CREATE2-on-
-			// coinbase MEV pattern surfaced this divergence.
+			// Emit an AddressPath sibling so downstream txs reading this address see
+			// an account record. Serial's AddBalance implicitly creates the account on
+			// first credit; without mirroring that, getVersionedAccount returns nil for
+			// a freshly-credited coinbase and Empty() returns true — charging a stale
+			// CallNewAccountGas for a mid-tx CALL-with-value to the coinbase.
+			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
+			// On a BAL block the record of a live coinbase already exists; re-emitting it each tx
+			// misses the pre-seeded cells and takes the coinbase's write lock on every validation.
+			skipAddress := vm.HasBAL && coinbaseAcc != nil && !coinbaseNetDestructed && !cbOverride && !coinbaseSelfdestructed && cbLifecycle == state.LifecycleLive
 			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
-			if coinbaseAcc != nil {
+			if coinbaseAcc != nil && !coinbaseNetDestructed {
 				addrAcc.Nonce = coinbaseAcc.Nonce
 				addrAcc.Incarnation = coinbaseAcc.Incarnation
 				addrAcc.CodeHash = coinbaseAcc.CodeHash
 			} else {
-				addrAcc.Nonce = coinbaseNonce
 				addrAcc.CodeHash = accounts.EmptyCodeHash
+				if !coinbaseNetDestructed {
+					addrAcc.Nonce = coinbaseNonce
+					addrAcc.CodeHash = coinbaseCodeHash
+				}
 			}
-			addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
-				WriteHeader: state.WriteHeader{
-					Address: result.Coinbase,
-					Path:    state.AddressPath,
-					Version: taskVersion,
-				},
-				Val: addrAcc,
-			})
+			if !skipAddress {
+				addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
+					WriteHeader: state.WriteHeader{
+						Address: result.Coinbase,
+						Path:    state.AddressPath,
+						Version: taskVersion,
+					},
+					Val: addrAcc,
+				})
+			}
+			// When the fee credit revives a coinbase absent from the committed domain,
+			// a CodeHashPath read resolves from its own cell, not the AddressPath
+			// account — so without this sibling it reads back NilCodeHash instead of
+			// the revived account's EmptyCodeHash, and a later EXTCODEHASH is wrong. The
+			// per-path revival check needs a CodeHashPath write strictly above the
+			// destruct. Gated to revival cases: an unconditional emit would add a
+			// spurious block-access-list entry for an ordinary fee credit.
+			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && !coinbaseHasCodeHashWrite && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
+			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
+				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
+					WriteHeader: state.WriteHeader{
+						Address: result.Coinbase,
+						Path:    state.CodeHashPath,
+						Version: taskVersion,
+					},
+					Val: addrAcc.CodeHash,
+				})
+			}
 		}
 	}
-	if hasBurnt && newBurntBalance != oldBurntBalance {
+	// The worker's EIP-161 removal of a codeless burnt recipient is undone by the
+	// base-fee credit: serial credits the fee before the tx's empty-account sweep,
+	// so the account and its storage survive. Mirrors the coinbase revival above.
+	if hasBurnt && burntSelfdestructed && !burntWasContract && !newBurntBalance.IsZero() {
+		addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
+		})
+	}
+	if emitBurnt {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2083,7 +2587,7 @@ func (result *execResult) calcFees(
 		})
 		// Mirror the AddressPath emission above for the burnt address.
 		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
-		if burntAcc != nil {
+		if burntAcc != nil && !burntNetDestructed {
 			burntAddrAcc.Nonce = burntAcc.Nonce
 			burntAddrAcc.Incarnation = burntAcc.Incarnation
 			burntAddrAcc.CodeHash = burntAcc.CodeHash
@@ -2112,7 +2616,7 @@ func (result *execResult) finalizeTx(
 	vm *state.VersionMap,
 	stateReader state.StateReader,
 ) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
-	// Engine post-apply message (e.g. Bor fee-transfer logs).
+	// Engine post-apply message hook.
 	if err := result.runPostApplyMessageOnMinIBS(task, txTask, engine, vm, stateReader); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
@@ -2125,10 +2629,9 @@ func (result *execResult) finalizeTx(
 	return receipt, state.ReadSet{}, nil, nil
 }
 
-// runPostApplyMessageOnMinIBS runs the engine's PostApplyMessage callback
-// (e.g. Bor's AddFeeTransferLog) on a minimal IntraBlockState that serves as
-// the log buffer, and appends the emitted logs to result.Logs so they reach
-// the receipt.
+// runPostApplyMessageOnMinIBS runs the engine's PostApplyMessage callback on a
+// minimal IntraBlockState (the log buffer) and appends the emitted logs to
+// result.Logs so they reach the receipt.
 func (result *execResult) runPostApplyMessageOnMinIBS(
 	task *taskVersion,
 	txTask *exec.TxTask,
@@ -2167,13 +2670,67 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	return nil
 }
 
+// touchedSenderAccount reports whether a run that charges the sender at validation read or wrote the sender's nonce or balance.
+func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
+	sender, err := txTask.TxSender()
+	if err != nil {
+		return true
+	}
+	_, readBalance := result.TxIn.GetBalance(sender)
+	_, readNonce := result.TxIn.GetNonce(sender)
+	_, wroteBalance := result.TxOut.GetBalance(sender)
+	_, wroteNonce := result.TxOut.GetNonce(sender)
+	return readBalance || readNonce || wroteBalance || wroteNonce
+}
+
+// chargeSenderAtValidation returns the sender charge writes and the account it charged, or nil when the sender's nonce or balance after prior txs rejects the tx.
+func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, *accounts.Account, error) {
+	msg, err := txTask.TxMessage()
+	if err != nil {
+		return nil, nil, err
+	}
+	sender := msg.From()
+	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
+	if err != nil {
+		return nil, nil, err
+	}
+	if acc == nil || acc.Nonce != msg.Nonce() || acc.Nonce == math.MaxUint64 {
+		return nil, nil, nil
+	}
+	// The charge writes only Balance and Nonce; the origin keeps the rest of the account.
+	state.SeedOrigin(vm, sender, acc)
+	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
+	if !overflow {
+		limit, overflow = u256.AddOverflow(limit, *msg.Value())
+	}
+	if overflow || acc.Balance.Lt(&limit) {
+		return nil, nil, nil
+	}
+	charge := u256.Mul(u256.U64(result.ExecutionResult.ReceiptGasUsed), *msg.GasPrice())
+	if result.ExecutionResult.Err == nil {
+		charge = u256.Add(charge, *msg.Value())
+	}
+	ws := &state.WriteSet{}
+	ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
+		Val:         u256.Sub(acc.Balance, charge),
+	})
+	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
+		Val:         acc.Nonce + 1,
+	})
+	return ws, acc, nil
+}
+
 type taskVersion struct {
 	*execTask
-	version    state.Version
-	versionMap *state.VersionMap
-	profile    bool
-	stats      map[int]ExecutionStat
-	statsMutex *sync.Mutex
+	version      state.Version
+	versionMap   *state.VersionMap
+	profile      bool
+	stats        map[int]ExecutionStat
+	statsMutex   *sync.Mutex
+	execCpuNanos *atomic.Int64
+	waitCommit   func(depTxIndex int) bool
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2188,10 +2745,10 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) (result *exec.TxResult) {
-
+	calcFees bool,
+) (result *exec.TxResult) {
 	var start time.Time
-	if ev.profile {
+	if ev.profile || logNpPhases {
 		start = time.Now()
 	}
 
@@ -2203,20 +2760,28 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
-	if ibs.HadInvalidRead() || result.Err != nil {
-		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
+	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so
+	// occupancy reveals whether workers are starved or compute-bound.
+	if logNpPhases && ev.execCpuNanos != nil {
+		ev.execCpuNanos.Add(time.Since(start).Nanoseconds())
 	}
+
+	// Carry the read-dependency verdict: >= 0 means the tx read an in-flight or
+	// mid-execution-changed value and must re-execute once that predecessor commits
+	// — a scheduler verdict, not an execution error.
+	result.Dep = ibs.DepTxIndex()
 
 	if result.Err != nil {
 		return result
 	}
 
 	if ev.profile {
+		end := time.Now()
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
 			TxIdx:       ev.version.TxIndex,
-			Incarnation: ev.version.Incarnation,
-			Duration:    time.Since(start),
+			Incarnation: int(ev.version.Incarnation),
+			Duration:    end.Sub(start),
 		}
 		ev.statsMutex.Unlock()
 	}
@@ -2229,8 +2794,13 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 		return err
 	}
 	ibs.SetVersionMap(ev.versionMap)
-	ibs.SetNoMaterialize(true)
+	// Point the per-task reader at this task's block: it reads finished-but-uncommitted
+	// blocks < this one in front of the raw base.
+	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
+		r.SetBlock(ev.version.BlockNum)
+	}
 	ibs.SetVersion(ev.version.Incarnation)
+	ibs.SetWaitCommit(ev.waitCommit)
 	return nil
 }
 
@@ -2260,15 +2830,14 @@ func (d *blockDuration) Add(i time.Duration) {
 }
 
 type execRequest struct {
-	blockNum      uint64
-	blockHash     common.Hash
-	gasPool       *protocol.GasPool
-	accessList    types.BlockAccessList
-	tasks         []exec.Task
-	applyResults  chan applyResult
-	commitResults chan applyResult
-	profile       bool
-	exhausted     *ErrLoopExhausted
+	blockNum   uint64
+	blockHash  common.Hash
+	gasPool    *protocol.GasPool
+	accessList types.BlockAccessList
+	tasks      []exec.Task
+	consumers  *resultStream
+	profile    bool
+	exhausted  *ErrLoopExhausted
 }
 
 type blockExecutor struct {
@@ -2279,28 +2848,6 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// feeMergeTemp[tx] is the write set the fee merge created and recorded for
-	// tx. A revalidation round merges again and supersedes it; every other
-	// recorded set is some execResult's TxOut, which stays live.
-	feeMergeTemp map[int]*state.WriteSet
-
-	// settledInput[tx]==true marks a task that was dispatched when every
-	// preceding task had already validated — so it executed against fully
-	// settled MVCC state, with no lower-indexed worker still in flight.
-	//
-	// It is set at dispatch time (scheduleExecution), which is the only point
-	// the "ran on settled input" property can be asserted: a result-time check
-	// would miss that the task may have executed speculatively, earlier, on
-	// state a since-validated predecessor has since changed.
-	//
-	// Used solely to classify a genuine (IsError) execution abort: an error
-	// raised against settled input is real invalid-block data, not a
-	// speculative-execution artifact, so the block can be rejected on the
-	// first such error instead of re-executing to the incarnation limit.
-	// It is NEVER consulted by the validator verdict — a result is committed
-	// only if validation explicitly passes it (issue #21319).
-	settledInput map[int]bool
-
 	// Execution tasks stores the state of each execution task
 	execTasks execStatusList
 
@@ -2309,21 +2856,14 @@ type blockExecutor struct {
 
 	// Publish tasks stores the state tasks ready for publication
 	publishTasks execStatusList
+	// balAttached counts the tx indexes, from -1, whose sets went out on a txResult.
+	balAttached int
 
 	// Multi-version map
 	versionMap *state.VersionMap
 
 	// Stores the inputs and outputs of the last incarnation of all transactions
 	blockIO *state.VersionedIO
-
-	// Tracks the incarnation number of each transaction
-	txIncarnations []int
-
-	// A map that stores the estimated dependency of a transaction if it is aborted without any known dependency
-	estimateDeps map[int][]int
-
-	// A map that records whether a transaction result has been speculatively validated
-	preValidated map[int]bool
 
 	// Time records when the parallel execution starts
 	begin time.Time
@@ -2332,117 +2872,179 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
+	cntExec, cntSpecExec, cntValidationFail int
 
-	// finalizedResults stores the finalized execResult snapshot per TX.
-	// Prevents the publish loop from seeing a different incarnation's
-	// result if be.results[tx] is overwritten between finalize and publish.
+	// finalizedResults stores the finalized execResult snapshot per TX, so the
+	// publish loop can't see a different incarnation if be.results[tx] is overwritten
+	// between finalize and publish.
 	finalizedResults map[int]*execResult
 
-	// cumulative gas for this block.
-	// blockExecutionGasUsed and blockStateGasUsed are tracked separately so the
-	// final blockGasUsed = max(execution, state) matches EIP-8037 / EIP-7778
-	// block-level accounting and equals what the builder set in header.GasUsed
-	// via protocol.SetGasUsed (= max(cumExecution, cumState)).
+	// blockExecutionGasUsed and blockStateGasUsed are tracked separately so
+	// blockGasUsed = max(execution, state) matches EIP-8037 / EIP-7778 block-level
+	// accounting and equals the builder's header.GasUsed via protocol.SetGasUsed.
 	blockExecutionGasUsed uint64
 	blockStateGasUsed     uint64
 	blockGasUsed          uint64
 	blobGasUsed           uint64
 	gasPool               *protocol.GasPool
 
-	execFailed, execAborted []int
+	execFailed []int
 
 	// Stores the execution statistics for the last incarnation of each task
 	stats map[int]ExecutionStat
 
-	applyResults  chan applyResult
-	commitResults chan applyResult // fan-out: same stream goes to commitment calculator
+	consumers *resultStream // fan-out to the apply loop + commitment calculator
 
 	execStarted time.Time
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
 
-	// blockStateCache provides a stable pre-block snapshot of account data
-	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
-	blockStateCache *state.BlockStateCache
+	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
+	// for worker-occupancy attribution vs the npWait/npProc wall.
+	execCpuNanos atomic.Int64
+
+	// coinbase is the block's fee recipient, cached from the first tx result so
+	// dependency-ordered validation can gate coinbase readers.
+	coinbase accounts.Address
+
+	// coinbaseFlushedUpTo is the contiguous tx prefix whose fee tips the calcFees
+	// sweep has flushed to the versionMap. Coinbase readers gate on it; -1 == none.
+	coinbaseFlushedUpTo int
+
+	// writeChangedPrev holds the PREVIOUS write-set of a tx whose re-executed
+	// write-set differs from the incarnation its dependents were validated against.
+	// The old set is needed alongside the new one so a dependent that read a key the
+	// new incarnation DROPPED is still re-checked.
+	writeChangedPrev map[int]*state.WriteSet
+	// readerByAddr: reverse index (address -> reader task indices) so a published write
+	// re-checks only txs that read its address, not every later task. A per-cell index
+	// costs several map operations per read on the serial execLoop; the exact cell is
+	// checked against the reader's read set instead, once per written address.
+	readerByAddr map[accounts.Address][]int
+
+	// revalidate[tx]: since tx last passed validation, a write to a cell it read has
+	// published, so it must be re-validated at the finalize boundary. A clean tx is
+	// provably still valid there — every predecessor is final and any write to one of
+	// its read cells went through markReadersDirty. Maintained only on the execLoop
+	// (the single result-processing/finalize goroutine), like readerByAddr, so no lock.
+	revalidate map[int]bool
+
+	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
+	// Fan-out: each worker waits for its actual dependency target, not the linear
+	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
+	// wakes exactly wakeAt[F] via their slWake channels (directed, no broadcast).
+	// slDone closes on shutdown to release all.
+	committedFrontier atomic.Int64
+	slWake            []chan struct{}
+	wakeMu            sync.Mutex
+	wakeAt            map[int][]int
+	// After committing, a self-loop worker stays parked on slReexec rather than
+	// exiting: the committed-dependent re-check signals it to re-execute in place
+	// (own monotonic incarnation, no respawn); slFin closes when the task finalizes.
+	slReexec     []chan struct{}
+	slReexecFlag []atomic.Bool
+	// runInc[i] is the highest incarnation ever RUN for task i, enforcing that each
+	// execution uses a strictly ascending incarnation. Init -1.
+	runInc     []atomic.Int64
+	slFin      []chan struct{}
+	slDone     chan struct{}
+	slDoneOnce sync.Once
+	// selfLoopDispatched guards against re-dispatching a task the self-loop worker
+	// already owns: the worker owns all re-execution, so the scheduler dispatches
+	// each task exactly once. Touched only on the exec-loop goroutine.
+	selfLoopDispatched map[int]bool
 }
 
-// sendResult fans out an applyResult to both the apply loop and
-// the commitment calculator. Blocks if either channel is full.
-// Channels may be closed by executeBlocks — recover from panic.
-func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) (err error) {
-	defer func() {
-		// "send on closed channel" panics here are benign — executeBlocks
-		// finished and closed applyResults/commitResults during batch
-		// shutdown. Re-raise anything else so real bugs still surface.
-		if rec := recover(); rec != nil {
-			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
-				err = context.Canceled
-				return
-			}
-			panic(rec)
+// readyForDepOrderValidation decides whether tx may be validated out of contiguous
+// order: exec-complete and not already validated. The self-loop worker only sends a
+// result once its read-set re-validates, so no dependency/coinbase gate is needed.
+func (be *blockExecutor) readyForDepOrderValidation(tx int) bool {
+	if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
+		return false
+	}
+	return true
+}
+
+// sendResult fans out an applyResult to every registered consumer. The
+// backpressure, mustDeliver and closed-channel semantics live in the registry.
+func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) error {
+	return be.consumers.publish(ctx, r, mustDeliver)
+}
+
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+	be := &blockExecutor{
+		blockNum:            blockNum,
+		blockHash:           blockHash,
+		begin:               time.Now(),
+		stats:               map[int]ExecutionStat{},
+		finalizedResults:    map[int]*execResult{},
+		blockIO:             &state.VersionedIO{},
+		versionMap:          state.NewVersionMap(accessList),
+		profile:             profile,
+		consumers:           consumers,
+		gasPool:             gasPool,
+		exhausted:           exhausted,
+		coinbaseFlushedUpTo: -1,
+		writeChangedPrev:    map[int]*state.WriteSet{},
+		readerByAddr:        map[accounts.Address][]int{},
+		revalidate:          map[int]bool{},
+		selfLoopDispatched:  map[int]bool{},
+		slDone:              make(chan struct{}),
+	}
+	be.committedFrontier.Store(-1)
+	return be
+}
+
+// indexReads records taskIdx as a reader of every address in rs. Append-only across
+// incarnations; the DependsOn re-check filters stale entries, so over-inclusion
+// only costs a redundant check.
+func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
+	rs.RangeFullHeaders(func(a accounts.Address, _ state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
+		l := be.readerByAddr[a]
+		if i, found := slices.BinarySearch(l, taskIdx); !found {
+			be.readerByAddr[a] = slices.Insert(l, i, taskIdx)
 		}
-	}()
-	if err := be.deliver(ctx, be.applyResults, r, mustDeliver); err != nil {
-		return err
-	}
-	return be.deliver(ctx, be.commitResults, r, mustDeliver)
+		return true
+	})
 }
 
-// deliver sends r to ch using a two-phase select: first try a non-blocking send
-// (even if ctx is cancelled), then if the buffer is full wait for room or ctx.Done.
-// If mustDeliver is true, ctx is ignored and the send blocks until it succeeds.
-func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r applyResult, mustDeliver bool) error {
-	if ch == nil {
-		return nil
-	}
-	if mustDeliver {
-		ch <- r
-		return nil
-	}
-	select { // data-arm-first: take a free send even under cancellation
-	case ch <- r:
-		return nil
-	default:
-	}
-	select { // buffer full: wait for room, or bail if the consumer is gone
-	case ch <- r:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+// balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
+const balDispatchWindow = 32
+
+// readersAbove returns the readers in the ascending list l that are > tx.
+func readersAbove(l []int, tx int) []int {
+	i, _ := slices.BinarySearch(l, tx+1)
+	return l[i:]
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
-	return &blockExecutor{
-		blockNum:         blockNum,
-		blockHash:        blockHash,
-		begin:            time.Now(),
-		stats:            map[int]ExecutionStat{},
-		finalizedResults: map[int]*execResult{},
-		feeMergeTemp:     map[int]*state.WriteSet{},
-		settledInput:     map[int]bool{},
-		estimateDeps:     map[int][]int{},
-		preValidated:     map[int]bool{},
-		blockIO:          &state.VersionedIO{},
-		versionMap:       state.NewVersionMap(accessList),
-		profile:          profile,
-		applyResults:     applyResults,
-		commitResults:    commitResults,
-		gasPool:          gasPool,
-		blockStateCache:  state.NewBlockStateCache(),
-		exhausted:        exhausted,
+// markReadersDirty flags every successor reader (> writerTx) of a cell writerTx
+// just published as needing finalize-boundary re-validation: a value it read may
+// have changed. Only successors can be invalidated by writerTx's write. Runs only
+// on the execLoop, so the readerByAddr read and revalidate write need no lock. A missed
+// reader is unsafe; the finalize oracle (ERIGON_ASSERT) guards against that.
+func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
+	if ws == nil {
+		return
+	}
+	seen := map[accounts.Address]struct{}{}
+	for h := range ws.AllHeaders() {
+		if _, ok := seen[h.Address]; ok {
+			continue
+		}
+		seen[h.Address] = struct{}{}
+		for _, tx := range readersAbove(be.readerByAddr[h.Address], writerTx) {
+			if !be.revalidate[tx] && be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex).DependsOnAt(ws, h.Address) {
+				be.revalidate[tx] = true
+			}
+		}
 	}
 }
 
-// invalidBlockResult wraps a block-validity failure (insufficient funds, gas
-// overflow, finalize rejection, etc.) as a *blockResult carrying Err. Returning
-// this from the worker-result processing path lets the apply loop see that the
-// block completed (with a rejection) rather than treating the dangling
-// tx-results as a silent miss. The apply loop's case *blockResult fast-paths
-// Err != nil at the top: marks the block applied so the channel-close
-// completeness check doesn't double-report, and surfaces the error.
+// invalidBlockResult wraps a block-validity failure as a *blockResult carrying Err.
+// Returning this (rather than (nil, err)) lets the apply loop see the block
+// completed with a rejection rather than treating the dangling tx-results as a
+// silent miss.
 func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	return &blockResult{
 		BlockNum:  be.blockNum,
@@ -2451,31 +3053,500 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// recordFeeMerge takes ownership of the set the fee merge just recorded for tx
-// and reclaims the one it superseded. Only a set an earlier fee merge created
-// may be released: prev is otherwise some execResult's TxOut, which stays live.
-// MergeInto shares VersionedWrite pointers rather than the maps holding them,
-// so pooling prev's maps leaves the writes merged now holds intact.
-func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
-	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		temp.ReleaseMaps()
+// operationalBlockResult carries an infrastructure failure (transient read/roTx
+// error, worker panic) that must fail the stage retryably rather than condemn
+// the block. Err is left unwrapped by ErrInvalidBlock so the apply loop routes
+// it through cancelOperational.
+func (be *blockExecutor) operationalBlockResult(err error) *blockResult {
+	return &blockResult{
+		BlockNum:    be.blockNum,
+		BlockHash:   be.blockHash,
+		Err:         err,
+		Operational: true,
 	}
-	be.feeMergeTemp[tx] = merged
 }
 
-// tooManyRetries returns an invalid-block result when tx has exceeded its
-// retry budget, otherwise nil. origin may be nil (validator-invalid path)
-// or carry the worker's underlying error.
-func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin error) *blockResult {
-	if be.txIncarnations[tx] <= len(be.tasks) {
-		return nil
+// finalizeValidatedTx runs the in-order finalize tail for a validated tx: receipt
+// cumulative-gas offsets, block-gas accounting, finalize, write normalization, and
+// queueing for publish. stateReader is the loop-shared reader, lazily created here
+// when nil. Returns a non-nil *blockResult (or error) when the block must be
+// rejected; (nil, nil) on success.
+func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.TemporalTx, tx int, txTask exec.Task, txResult *execResult, txVersion state.Version, stateReader *state.StateReader) (*blockResult, error) {
+	be.finalizedResults[tx] = txResult
+
+	// Chaos injection fires here, at the in-order finalize of the last valid
+	// incarnation — never on a speculative execution that Block-STM may discard — so
+	// an induced failure is deterministic and attributable rather than lost in
+	// re-execution churn. A task panic is an executor fault, routed operationally
+	// (not a block verdict); the random consensus fault is a block-invalid verdict.
+	if pe.enableChaosMonkey && pe.chaosFaults.TaskPanic != nil {
+		return be.operationalBlockResult(fmt.Errorf("exec task panic: %w", pe.chaosFaults.TaskPanic)), nil
 	}
-	if origin != nil {
-		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many %s retries: %d, expected: %d",
-			rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), origin, label, be.txIncarnations[tx], len(be.tasks)))
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		if chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txVersion.TxIndex, pe.cfg.badBlockHalt, txResult.Err); chaosErr != nil {
+			pe.logger.Warn("[" + pe.logPrefix + "] monkey in consensus")
+			return be.invalidBlockResult(chaosErr), nil
+		}
 	}
-	return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many %s retries: %d, expected: %d",
-		rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
+
+	var cumulativeGasUsed uint64
+	var firstLogIndex uint32
+	// Receipt offsets only exist for real chain txs; other task types (tests) carry
+	// no receipt.
+	_, isChainTx := txTask.(*exec.TxTask)
+	if isChainTx && txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
+		if tx > 0 {
+			// In-order finalization guarantees the previous regular tx already has its
+			// receipt; a miss would persist corrupted offsets, so fail loudly.
+			prevRes := be.finalizedResults[tx-1]
+			if prevRes == nil || prevRes.Receipt == nil {
+				return nil, fmt.Errorf("parallel exec: missing finalized receipt for tx %d (task %d) in block %d", txVersion.TxIndex-1, tx-1, be.blockNum)
+			}
+			cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
+			firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
+		} else {
+			cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
+			if err != nil {
+				return nil, err
+			}
+			cumulativeGasUsed = cumGasUsed
+			firstLogIndex = logIndexAfterTx
+			be.blobGasUsed = cumBlobGasUsed
+		}
+	}
+
+	if txn := txTask.Tx(); txn != nil {
+		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
+		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution, txn.GetBlobGas()); err != nil {
+			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+		}
+	}
+
+	if err := be.gasPool.ConsumeExecution(txResult.ExecutionResult.BlockExecutionGasUsed); err != nil {
+		return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block execution gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
+	}
+	if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
+		return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
+	}
+
+	if txTask.Tx() != nil {
+		blobGasUsed := txTask.Tx().GetBlobGas()
+		if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
+			return be.invalidBlockResult(fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)), nil
+		}
+		be.blobGasUsed += blobGasUsed
+	}
+
+	if *stateReader == nil {
+		if txTask.IsHistoric() {
+			*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), txTask.Version().TxNum), be.blockNum)
+		} else {
+			// finalize reads sd.mem for the committed base; the IBS's versionMap
+			// composes the intra-block view.
+			*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
+		}
+	}
+
+	_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, *stateReader)
+	if err != nil {
+		return nil, err
+	}
+	addWrites := finalizeWrites
+
+	// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
+	if addReads.Len() > 0 {
+		existing := be.blockIO.ReadSet(txVersion.TxIndex)
+		existing.MergeFrom(addReads)
+		be.blockIO.RecordReads(txVersion, existing)
+	}
+	if !addWrites.IsEmpty() {
+		// Merge finalization writes with existing execution writes.
+		existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+		merged := existingWrites.Merge(addWrites)
+		be.blockIO.RecordWrites(txVersion, merged)
+
+		// Flush the merged writes (including fee changes) so subsequent per-tx
+		// finalizations see the full post-tx state via the versionMap fallback chain.
+		be.versionMap.FlushVersionedWrites(merged, true)
+		be.markReadersDirty(tx, merged)
+	}
+
+	// A read-only versionMap-slice view over the tx's raw write-set; apply and
+	// the calculator resolve each account's base from the versionMap.
+	rawWrites, err := state.WithoutVanished(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap, txVersion.TxIndex, txTask.Rules().IsAmsterdam, *stateReader)
+	if err != nil {
+		return nil, err
+	}
+	txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
+
+	// Snapshot before pushing so the publish loop can't see a later incarnation if
+	// be.results[tx] is overwritten by a concurrent worker.
+	be.finalizedResults[tx] = txResult
+	txResult.cumulativeBlobGasUsed = be.blobGasUsed
+	be.publishTasks.pushPending(tx)
+	return nil, nil
+}
+
+// advanceCoinbaseAndFinalize runs the in-order tail over the contiguous validated
+// prefix not yet finalized. For each tx it computes the calcFees coinbase credit
+// (flushing the tip and advancing coinbaseFlushedUpTo, which coinbase readers gate
+// on), then runs the finalize tail. Both need the contiguous validated prefix:
+// calcFees needs FeeTipped final, the finalize tail needs the predecessor's receipt.
+func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyTx kv.TemporalTx, stateReader *state.StateReader) (*blockResult, error) {
+	maxValidated := be.validateTasks.maxComplete()
+	for tx := be.coinbaseFlushedUpTo + 1; tx <= maxValidated; tx++ {
+		// Use the validated snapshot, not be.results[tx]: a concurrent worker may
+		// have overwritten be.results[tx] with a later incarnation between passes.
+		txTask := be.tasks[tx].Task
+		txResult := be.finalizedResults[tx]
+		txVersion := txResult.Task.Version()
+
+		// Authoritative re-validation at the finalize boundary: every predecessor
+		// < tx is now final, so this is the last point a stale read can be caught.
+		// Incremental: a tx untouched since it validated (no write to a cell it read
+		// has published — tracked via markReadersDirty) is provably still valid here,
+		// so only dirty txs are re-checked. Under ERIGON_ASSERT clean txs are checked
+		// too and a failure panics, proving the dirty-tracking is complete. If stale,
+		// un-commit and stop the sweep; the fixpoint loop re-executes it.
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
+			dirty := be.revalidate[tx]
+			if dirty || dbg.AssertEnabled {
+				if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+					func(rv, wv state.Version) state.VersionValidity {
+						if rv != wv {
+							return state.VersionInvalid
+						}
+						return state.VersionValid
+					}, false, "") != state.VersionValid {
+					if !dirty {
+						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
+					}
+					be.validateTasks.clearComplete(tx)
+					be.signalSelfLoopReexec(tx)
+					break
+				}
+				delete(be.revalidate, tx)
+			}
+		}
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
+			taskVer, ok := txResult.Task.(*taskVersion)
+			if !ok {
+				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
+			}
+			if *stateReader == nil {
+				if txTask.IsHistoric() {
+					*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), txTask.Version().TxNum), be.blockNum)
+				} else {
+					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
+				}
+			}
+			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
+				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
+				if err != nil {
+					return nil, err
+				}
+				if senderWrites == nil {
+					be.validateTasks.clearComplete(tx)
+					be.signalSelfLoopReexec(tx)
+					break
+				}
+				// Serial execution reads the sender before charging it; the block access list
+				// needs that read to tell a balance spent to zero from a no-op touch.
+				reads := be.blockIO.ReadSet(txVersion.TxIndex)
+				for sender := range senderWrites.Balances() {
+					reads.SetBalance(sender, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Balance})
+					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
+				}
+				be.blockIO.RecordReads(txVersion, reads)
+				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
+				be.versionMap.FlushVersionedWrites(senderWrites, false)
+				be.markReadersDirty(tx, senderWrites)
+				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
+				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
+				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
+				txResult.TxOut = txResult.TxOut.Merge(senderWrites)
+			}
+			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
+			if err != nil {
+				return nil, err
+			}
+			if !tipWrites.IsEmpty() {
+				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+				merged := existingWrites.Merge(tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
+				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
+				// seal point below.
+				be.versionMap.FlushVersionedWrites(tipWrites, false)
+				be.markReadersDirty(tx, tipWrites)
+			}
+		}
+		be.coinbaseFlushedUpTo = tx
+		// Promote the whole tx Estimate->Done and seal in one step. Done is granted
+		// only at the seal frontier, so no committed-dependent re-exec can downgrade a
+		// Done cell a reader already consumed, and a later write to a sealed cell trips
+		// assertUnsealed. System/init and block-end txs are seal-exempt (final already).
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+			be.versionMap.SealUpTo(txVersion.TxIndex)
+		}
+
+		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
+			return r, ferr
+		}
+		be.signalCommitted(tx)
+	}
+	return nil, nil
+}
+
+// signalCommitted advances the commit frontier to tx and wakes exactly the tasks
+// waiting for that frontier value — directed, no broadcast.
+func (be *blockExecutor) signalCommitted(tx int) {
+	be.wakeMu.Lock()
+	be.committedFrontier.Store(int64(tx))
+	waiters := be.wakeAt[tx]
+	delete(be.wakeAt, tx)
+	be.wakeMu.Unlock()
+	for _, t := range waiters {
+		select {
+		case be.slWake[t] <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// signalSelfLoopReexec wakes the parked worker of an already-sent tx to re-execute
+// in place (it owns its incarnation, so no re-dispatch).
+func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+	be.slReexecFlag[tx].Store(true)
+	select {
+	case be.slReexec[tx] <- struct{}{}:
+	default:
+	}
+}
+
+func (be *blockExecutor) frontier() int {
+	return int(be.committedFrontier.Load())
+}
+
+// waitDep blocks until the commit frontier reaches target (every task tx read from
+// has committed), or shutdown. Registers tx under the wake lock so a concurrent
+// signalCommitted(target) can't be missed. Returns false on shutdown.
+func (be *blockExecutor) waitDep(tx, target int) bool {
+	// A target beyond the last task can never be signalled — the worker would park
+	// forever. That means a versionMap (block-TxIndex) dependency reached here
+	// without a taskIndexOf translation; fail loud at the exact site.
+	if target >= len(be.tasks) {
+		panic(fmt.Sprintf("[self-loop] block %d: park target %d out of task range [-1,%d) for task %d — "+
+			"a dependency reached waitDep in versionMap space (missing taskIndexOf translation); "+
+			"block start TxIndex=%d", be.blockNum, target, len(be.tasks), tx, be.tasks[0].Version().TxIndex))
+	}
+	// Invariant: a task never waits for a HIGHER task — a forward dependency the
+	// in-order frontier can never satisfy (deadlock). Fail loud.
+	if target > tx {
+		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
+			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
+	}
+	for {
+		be.wakeMu.Lock()
+		if int(be.committedFrontier.Load()) >= target {
+			be.wakeMu.Unlock()
+			return true
+		}
+		be.wakeAt[target] = append(be.wakeAt[target], tx)
+		be.wakeMu.Unlock()
+		select {
+		case <-be.slWake[tx]:
+		case <-be.slDone:
+			return be.frontier() >= target
+		}
+	}
+}
+
+// selfLoopWatchdog wakes every parked self-loop worker when the workers' context
+// is cancelled, so shutdown/error never strands one in waitFrontier.
+func (be *blockExecutor) selfLoopWatchdog(ctx context.Context) {
+	// Exit as soon as the block is done (releaseSelfLoop closed slDone) so the
+	// blockExecutor and its versionMap/IO/receipts can be collected, rather than
+	// pinning them for the whole batch on workersCtx.
+	select {
+	case <-ctx.Done():
+		be.slDoneOnce.Do(func() { close(be.slDone) })
+	case <-be.slDone:
+	}
+}
+
+// releaseSelfLoop closes slDone, waking any still-parked self-loop worker and
+// letting the watchdog return. Called once the block is published and dropped
+// from the executor map.
+func (be *blockExecutor) releaseSelfLoop() {
+	be.slDoneOnce.Do(func() { close(be.slDone) })
+}
+
+// revalidateCommittedDependents re-checks changedTx's committed-but-not-published
+// dependents against the current versionMap: a still-valid tx stays committed so
+// maxValidated does not regress; one that now fails is un-committed and re-queued,
+// cascading to its own dependents. Published txs are excluded (already streamed to
+// commitment). A dependent is any committed tx reading a key in changedTx's OLD ∪
+// NEW write-set — NEW for added/revalued keys, OLD for dropped ones. oldWrites is
+// nil for a validation failure (no prior incarnation).
+func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites *state.WriteSet) {
+	// be.tasks / status lists are keyed by task index; be.blockIO by block-level
+	// TxIndex. They differ by the block's leading system tx, so blockIO reads map
+	// through be.tasks[i].Task.Version().TxIndex.
+	newWrites := be.blockIO.WriteSet(be.tasks[changedTx].Task.Version().TxIndex)
+	for _, tx := range be.revalCandidates(changedTx, newWrites, oldWrites) {
+		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
+			continue
+		}
+		rs := be.blockIO.ReadSet(be.tasks[tx].Task.Version().TxIndex)
+		hasDep := state.HasReadDep(newWrites, rs) || (oldWrites != nil && state.HasReadDep(oldWrites, rs))
+		// A task past the coinbase/finalize frontier is final: un-committing it would
+		// leave coinbaseFlushedUpTo ahead of maxValidated and the sweep could never
+		// re-finalize it (permanent stall). The finalize→publish window makes this
+		// reachable.
+		if tx <= be.coinbaseFlushedUpTo {
+			continue
+		}
+		if !hasDep {
+			continue
+		}
+		txResult := be.finalizedResults[tx]
+		if txResult == nil {
+			continue
+		}
+		txVersion := txResult.Task.Version()
+		if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+			func(rv, wv state.Version) state.VersionValidity {
+				if rv != wv {
+					return state.VersionInvalid
+				}
+				return state.VersionValid
+			}, false, "") == state.VersionValid {
+			continue
+		}
+		be.cntValidationFail++
+		be.execFailed[tx]++
+		be.validateTasks.clearComplete(tx)
+		// Signal the parked worker to re-execute in place; leave execTasks complete so
+		// the re-sent result re-validates without going through the dispatch path.
+		be.signalSelfLoopReexec(tx)
+	}
+}
+
+// revalCandidates returns the task indices > changedTx to re-check: the readers the
+// reverse index records for changedTx's changed keys (new ∪ old write-sets), sorted
+// ascending so the cascade order matches the scan.
+func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
+	set := map[int]struct{}{}
+	seen := map[accounts.Address]struct{}{}
+	add := func(ws *state.WriteSet, skipBALSeeded bool) {
+		if ws == nil {
+			return
+		}
+		for h := range ws.AllHeaders() {
+			if skipBALSeeded && h.Path.BALSeeded() {
+				continue
+			}
+			if _, ok := seen[h.Address]; ok {
+				continue
+			}
+			seen[h.Address] = struct{}{}
+			for _, tx := range readersAbove(be.readerByAddr[h.Address], changedTx) {
+				set[tx] = struct{}{}
+			}
+		}
+	}
+	// A BAL-seeded cell the tx still writes already holds its final value, so a reader of
+	// it stays valid; a wrong BAL fails the block. A dropped write may not be in the BAL,
+	// so its readers are always re-checked.
+	add(newWrites, be.versionMap.HasBAL)
+	add(oldWrites, false)
+	return slices.Sorted(maps.Keys(set))
+}
+
+// runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
+// contiguous validated-but-not-finalized prefix, then validates the dependency-ready
+// txs out of order, committing each or cascading a re-validation of successors on
+// failure. It does NOT use the contiguous VersionTooEarly gate (inherently in-order,
+// would block every out-of-order tx); read stability for base reads is instead
+// enforced by the write-change re-validation in nextResult.
+func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.TemporalTx, stateReader *state.StateReader) (*blockResult, error) {
+	// Run to a fixpoint: advancing the frontier at the end of a pass can unblock more
+	// txs, which would otherwise wait for a worker result that may never arrive once
+	// the pipeline drains (the dep-order hang). Loop until a pass validates nothing
+	// and the frontier is stable.
+	for {
+		beforeCb := be.coinbaseFlushedUpTo
+		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
+			return r, ferr
+		}
+
+		toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
+			return be.readyForDepOrderValidation(t)
+		})
+
+		for _, tx := range toValidate {
+			txResult := be.results[tx]
+			txVersion := txResult.Task.Version()
+
+			// Re-validate against the CURRENT versionMap, not the worker's verdict: a
+			// predecessor may have changed or sealed since (including an in-flight
+			// Validated cell the reader early-broke on), so trusting the stale verdict
+			// would commit against a value that has moved.
+			valid := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+				func(rv, wv state.Version) state.VersionValidity {
+					if rv != wv {
+						return state.VersionInvalid
+					}
+					return state.VersionValid
+				}, false, "") == state.VersionValid
+
+			if valid {
+				// A regular OCC tx's writes go Validated here, not Done: a reader
+				// continues on them (early break) but they stay revertible until the
+				// in-order seal promotes them to Done. System and block-end txs are
+				// seal-exempt and final now.
+				if txVersion.TxIndex < 0 || be.tasks[tx].Task.IsBlockEnd() {
+					be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
+				} else {
+					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
+				}
+				be.validateTasks.markComplete(tx)
+				// Validated against current state; only a later write to one of its
+				// read cells (markReadersDirty) re-flags it for finalize re-validation.
+				delete(be.revalidate, tx)
+				be.finalizedResults[tx] = txResult
+				// This tx's writes are now flushed. A committed dependent may have
+				// validated earlier against the pre-flush state (reading a key from base,
+				// or against an older incarnation carried in writeChangedPrev), so
+				// re-check dependents against both the new and old write-sets.
+				prev, ok := be.writeChangedPrev[tx]
+				if ok {
+					delete(be.writeChangedPrev, tx)
+				}
+				be.revalidateCommittedDependents(tx, prev)
+				continue
+			}
+
+			be.cntValidationFail++
+			be.execFailed[tx]++
+			be.validateTasks.clearInProgress(tx)
+			be.revalidateCommittedDependents(tx, nil)
+			// Signal the parked worker whose stale verdict we rejected to re-exec in
+			// place; leave execTasks complete so the re-sent result re-validates
+			// without going through the dispatch path.
+			be.signalSelfLoopReexec(tx)
+		}
+
+		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
+			return r, ferr
+		}
+		// Fixpoint reached: this pass validated nothing and the frontier did not
+		// advance, so no further validation can proceed without a fresh worker result.
+		if len(toValidate) == 0 && be.coinbaseFlushedUpTo == beforeCb {
+			return nil, nil
+		}
+	}
 }
 
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
@@ -2488,410 +3559,77 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
-		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
-			if res.Version().Incarnation > len(be.tasks) {
-				// Parallel scheduler exhausted retries for this tx. Surface
-				// through blockResult.Err for the same reason as the other
-				// block-validity bailouts above: (nil, err) would race with
-				// the apply loop's channel-close completeness check and
-				// produce a doubled error chain. The underlying scheduler
-				// behaviour (why this test ordering hits the incarnation
-				// limit) is a separate investigation — see
-				// TestDeleteRecreateSlotsAcrossManyBlocks under
-				// GOMAXPROCS=2 -race for a stress repro.
-				if execErr.IsError() {
-					return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))), nil
-				}
-				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))), nil
-			}
-			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-				fmt.Println(be.blockNum, "err", execErr)
-			}
-			be.blockIO.RecordReads(res.Version(), res.TxIn)
-
-			if execErr.IsError() {
-				// Genuine, non-dependency execution error (issue #21319).
-				// Classify it only when this task executed against fully
-				// settled input — settledInput[tx] means every predecessor had
-				// validated when it was dispatched. Validate the held result
-				// post-hoc against the current version map: that catches a
-				// predecessor re-validated since dispatch, and a clean verdict
-				// then confirms the error is genuinely caused by invalid block
-				// data — reject the block. Surface it through a blockResult so
-				// the apply loop counts the block as completed-as-invalid;
-				// returning (nil, err) would race with the channel-close
-				// completeness check and double the error chain.
-				//
-				// The settledInput gate also makes this cascade-safe: a task
-				// after a genuine error can never be settledInput, since its
-				// erroring predecessor never validates — so out of a cascade of
-				// speculative errors only the genuinely-first one is returned.
-				if be.settledInput[tx] {
-					txVersion := res.Version()
-					validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-						func(readVersion, writtenVersion state.Version) state.VersionValidity {
-							if readVersion != writtenVersion {
-								return state.VersionInvalid
-							}
-							return state.VersionValid
-						}, false, "")
-					if validity == state.VersionValid {
-						return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), execErr.OriginError)), nil
-					}
-				}
-				// Not settled input, or a predecessor changed since dispatch —
-				// the error may be speculative. Defer for re-execution; the
-				// drain predicate re-dispatches it once every predecessor has
-				// validated, so the re-run is itself settledInput and a still-
-				// failing error is then returned by the branch above. (Some
-				// re-execution is wasted here — bounded and marginal.)
-				be.execTasks.clearInProgress(tx)
-				be.execTasks.pushDeferred(tx)
-				be.execAborted[tx]++
-				be.txIncarnations[tx]++
-				be.cntAbort++
-			} else {
-				// Dependency abort: re-execute against the named blocker.
-				dependency := execErr.DependencyTxIndex + 1
-
-				l := len(be.estimateDeps[tx])
-				for l > 0 && be.estimateDeps[tx][l-1] > dependency {
-					be.execTasks.removeDependency(be.estimateDeps[tx][l-1])
-					be.estimateDeps[tx] = be.estimateDeps[tx][:l-1]
-					l--
-				}
-
-				addedDependencies := be.execTasks.addDependency(dependency, tx)
-				be.execAborted[tx]++
-
-				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", dependency, "err", execErr.OriginError)
-				}
-
-				be.execTasks.clearInProgress(tx)
-
-				if !addedDependencies {
-					// addDependency couldn't register a real wait (named blocker
-					// already complete). Defer — scheduleExecution's predicate
-					// gates retry on predecessor-validated + no-lower-IP.
-					be.execTasks.pushDeferred(tx)
-				}
-				be.txIncarnations[tx]++
-				be.cntAbort++
-			}
-		} else {
-			// Non-ErrExecAbortError from the worker (e.g. raw error from
-			// TxTask.Reset: TxMessage rejection, signer rejection, EIP-7702
-			// empty authorization list). Surface it as a block-validity
-			// failure through blockResult.Err so the apply loop returns
-			// ErrInvalidBlock the same way the other invalidBlockResult
-			// sites do. Returning (nil, err) instead silently exits the
-			// exec loop with no blockResult ever reaching the apply loop;
-			// the apply-channel-closed branch then sees blks=0 and
-			// fabricates ErrLoopExhausted, which the stage loop reports as
-			// "unexpected state step has more work" — engine API
-			// mis-categorises that as a state-machine error rather than the
-			// real block-validation failure (eest fork_Prague
-			// test_empty_authorization_list).
-			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Err)), nil
-		}
-	} else {
+		// The worker sends an error only after executing against the full committed
+		// prefix, so it is authoritative. Surface through blockResult.Err, not
+		// (nil, err) which would race the channel-close check. An infrastructure
+		// failure (Operational) fails the stage retryably; anything else is a
+		// block-validity verdict.
 		txVersion := res.Version()
+		if res.Operational {
+			return be.operationalBlockResult(fmt.Errorf("could not apply tx %d:%d [%d:%v]: %w", be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), res.Err)), nil
+		}
+		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), res.Err)), nil
+	}
 
-		be.blockIO.RecordReads(txVersion, res.TxIn)
+	txVersion := res.Version()
 
-		if res.Version().Incarnation == 0 {
-			be.blockIO.RecordWrites(txVersion, res.TxOut)
-		} else {
-			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
+	be.blockIO.RecordReads(txVersion, res.TxIn)
+	be.indexReads(tx, res.TxIn)
+	// This tx's writes just published; flag any successor that already read one of
+	// its cells for finalize-boundary re-validation.
+	be.markReadersDirty(tx, res.TxOut)
 
-			// Remove entries that were previously written but are no longer
-			// written — res.TxOut.Has answers membership directly, no cmp map.
-			for h := range prevWrites.AllHeaders() {
-				if !res.TxOut.Has(h) {
-					hasWriteChange = true
-					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
-				}
-			}
+	if res.Version().Incarnation == 0 {
+		be.blockIO.RecordWrites(txVersion, res.TxOut)
+	} else {
+		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-			be.blockIO.RecordWrites(txVersion, res.TxOut)
-
-			if hasWriteChange {
-				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+		// Remove entries the previous incarnation wrote but this one dropped. Like
+		// selfLoopFlush, tolerate a net-zero BAL write that was never materialized.
+		for h := range prevWrites.AllHeaders() {
+			if !res.TxOut.Has(h) {
+				hasWriteChange = true
+				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
 			}
 		}
 
-		if dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex) {
-			tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
-			be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
-			for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
-				fmt.Println(tracePrefix, "WRT", h.String())
+		be.blockIO.RecordWrites(txVersion, res.TxOut)
+
+		if hasWriteChange {
+			// Defer dependent re-validation until this tx's new writes are
+			// flushed during validation (they aren't in the versionMap yet).
+			if _, ok := be.writeChangedPrev[tx]; !ok {
+				be.writeChangedPrev[tx] = prevWrites
 			}
 		}
+	}
 
-		be.validateTasks.pushPending(tx)
+	tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+
+	var trace bool
+	if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+		fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
+		be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
+		for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
+			fmt.Println(tracePrefix, "WRT", h.String())
+		}
+	}
+
+	be.validateTasks.pushPending(tx)
+	// A re-executed self-loop result already has execTasks complete (only its
+	// validation was cleared); markComplete would panic on the non-in-progress task,
+	// so skip it and let the re-validation below re-commit it.
+	if !be.execTasks.checkComplete(tx) {
 		be.execTasks.markComplete(tx)
-		be.cntSuccess++
-
 		be.execTasks.removeDependency(tx)
 	}
 
 	// do validations ...
-	maxComplete := be.execTasks.maxComplete()
-	toValidate := make(sort.IntSlice, 0, 2)
-
-	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
-		toValidate = append(toValidate, be.validateTasks.takeNextPending())
-	}
-
-	cntInvalid := 0
 	var stateReader state.StateReader
 
-	for i := 0; i < len(toValidate); i++ {
-
-		be.cntTotalValidations++
-
-		tx := toValidate[i]
-		txTask := be.tasks[tx].Task
-		txResult := be.results[tx]
-		// txResult.Task is the *taskVersion wrapper from this scheduled run,
-		// carrying the current Incarnation. be.tasks[tx].Task is the bare
-		// TxTask whose Version().Incarnation never advances past 0.
-		txVersion := txResult.Task.Version()
-
-		var trace bool
-		var tracePrefix string
-
-		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-		}
-
-		// Credit tip pre-validate for regular TXs so the validator sees the
-		// post-tip coinbase write. Caveat: the tip write is stamped at the
-		// same (TxIndex, Incarnation) as the worker's coinbase write, so a
-		// downstream tx that read coinbase via versionMap between the worker
-		// write and the tip write records the same Version the validator
-		// observes — the version-only validator will NOT catch that case.
-		// In practice this is unusual: only sender==coinbase produces a
-		// worker coinbase write, and downstream BALANCE(coinbase) reads
-		// across this window are rare. Value-aware validation would close
-		// the gap if it surfaces.
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
-			taskVer, ok := txResult.Task.(*taskVersion)
-			if !ok {
-				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
-			}
-			if stateReader == nil {
-				if txTask.IsHistoric() {
-					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
-				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
-				}
-			}
-			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
-			if err != nil {
-				return nil, err
-			}
-			if !tipWrites.IsEmpty() {
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.MergeInto(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
-				be.recordFeeMerge(tx, existingWrites, merged)
-			}
-		}
-
-		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-			func(readVersion, writtenVersion state.Version) state.VersionValidity {
-				vv := state.VersionValid
-
-				if readVersion != writtenVersion {
-					vv = state.VersionInvalid
-				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
-					vv = state.VersionTooEarly
-				}
-
-				return vv
-			}, trace, tracePrefix)
-		be.versionMap.SetTrace(false)
-
-		if validity == state.VersionTooEarly {
-			cntInvalid++
-			continue
-		}
-
-		// The validator verdict is the single source of truth (issue #21319):
-		// a result is committed only if validation explicitly passed it.
-		valid := validity == state.VersionValid
-
-		be.versionMap.SetTrace(trace)
-		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
-		be.versionMap.SetTrace(false)
-
-		if valid {
-			if cntInvalid == 0 {
-				be.validateTasks.markComplete(tx)
-
-				be.finalizedResults[tx] = txResult
-
-				var cumulativeGasUsed uint64
-				var firstLogIndex uint32
-				// Receipt offsets only exist for real chain txs — finalize()
-				// skips receipt creation for other task types (tests), whose
-				// results legitimately carry no receipt.
-				_, isChainTx := txTask.(*exec.TxTask)
-				if isChainTx && txVersion.TxIndex > 0 && !txTask.IsBlockEnd() {
-					if tx > 0 {
-						// In-order finalization guarantees the previous regular tx
-						// already has its receipt; a miss means corrupted offsets
-						// would be persisted, so fail loudly instead.
-						prevRes := be.finalizedResults[tx-1]
-						if prevRes == nil || prevRes.Receipt == nil {
-							return nil, fmt.Errorf("parallel exec: missing finalized receipt for tx %d (task %d) in block %d", txVersion.TxIndex-1, tx-1, be.blockNum)
-						}
-						cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
-						firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
-					} else {
-						cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
-						if err != nil {
-							return nil, err
-						}
-						cumulativeGasUsed = cumGasUsed
-						firstLogIndex = logIndexAfterTx
-						be.blobGasUsed = cumBlobGasUsed
-					}
-				}
-
-				if txn := txTask.Tx(); txn != nil {
-					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
-					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution, txn.GetBlobGas()); err != nil {
-						return be.invalidBlockResult(fmt.Errorf("%w: tx exceeds block gas budget at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
-					}
-				}
-
-				if err := be.gasPool.ConsumeExecution(txResult.ExecutionResult.BlockExecutionGasUsed); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block execution gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
-				}
-				if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
-				}
-
-				if txTask.Tx() != nil {
-					blobGasUsed := txTask.Tx().GetBlobGas()
-					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-						return be.invalidBlockResult(fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)), nil
-					}
-					be.blobGasUsed += blobGasUsed
-				}
-
-				if stateReader == nil {
-					if txTask.IsHistoric() {
-						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
-					} else {
-						// Use CachedReaderV3 with readCurrent=true so the
-						// finalize (including system TXs) reads from the
-						// BlockStateCache write buffer. This ensures the
-						// system TX sees all accumulated state from prior
-						// TXs in the block, not stale sd.mem values.
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
-					}
-				}
-
-				_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader)
-				if err != nil {
-					return nil, err
-				}
-				addWrites := finalizeWrites
-
-				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
-				if addReads.Len() > 0 {
-					existing := be.blockIO.ReadSet(txVersion.TxIndex)
-					existing.MergeFrom(addReads)
-					be.blockIO.RecordReads(txVersion, existing)
-				}
-				if !addWrites.IsEmpty() {
-					// Merge finalization writes with existing execution writes.
-					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					merged := existingWrites.MergeInto(addWrites)
-					be.blockIO.RecordWrites(txVersion, merged)
-
-					// Flush the merged writes (including fee calc changes)
-					// to the version map so that subsequent per-tx
-					// finalizations see the full post-tx state (execution
-					// + fees) when reading via the version map fallback
-					// chain.
-					be.versionMap.FlushVersionedWrites(merged, true, "")
-				}
-
-				{
-					// Build a clean write set from the validated incarnation's
-					// versioned writes. Normalize filters no-ops and stale
-					// incarnations, and resolves account values from the version map.
-					resultIncarnation := txResult.Version().Incarnation
-					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					// domainStorageKeys: enumerate every storage slot currently
-					// committed for addr (sd.mem + domain files), so a self-destruct
-					// emits the full StoragePath=0 cascade — covers genesis-allocated
-					// and prior-block storage that vm.StorageKeys doesn't see.
-					var domainKeysErr error
-					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-						var keys []accounts.StorageKey
-						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
-							return nil
-						}
-						return keys
-					}
-					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
-					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-					if domainKeysErr != nil {
-						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
-					if normErr != nil {
-						return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
-					}
-					txResult.writes = normWrites
-				}
-
-				// Snapshot the finalized result before pushing — prevents
-				// the publish loop from seeing a later incarnation if
-				// be.results[tx] is overwritten by a concurrent worker.
-				be.finalizedResults[tx] = txResult
-				txResult.cumulativeBlobGasUsed = be.blobGasUsed
-				be.publishTasks.pushPending(tx)
-			}
-		} else {
-			cntInvalid++
-			be.cntValidationFail++
-			be.execFailed[tx]++
-
-			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
-			}
-
-			// 'create validation tasks for all transactions > tx ...'
-			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
-			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
-			be.execTasks.clearComplete(tx)
-			// Defer: validator-invalid may be race-induced (worker raced an
-			// exec-loop flush). Drain predicate in scheduleExecution waits.
-			be.execTasks.pushDeferred(tx)
-			be.preValidated[tx] = false
-			be.txIncarnations[tx]++
-			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
-				return r, nil
-			}
-		}
+	if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
+		return r, derr
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
@@ -2922,50 +3660,43 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				// EIP-8037 / EIP-7778: block-level gas is max(cum execution,
-				// cum state) — NOT sum of per-tx receipt gas. Receipt gas
-				// accounts for refunds and (post-Amsterdam) carries the
-				// FloorGasCost floor; summing it bears no fixed relationship
-				// to header.GasUsed, which the builder sets via
-				// protocol.SetGasUsed = max(cumBlockExecution, cumBlockState).
+				// EIP-8037 / EIP-7778: block-level gas is max(cum execution, cum state),
+				// NOT the sum of per-tx receipt gas — summing receipt gas (which carries
+				// refunds and the post-Amsterdam FloorGasCost) bears no fixed relation to
+				// header.GasUsed.
 				be.blockExecutionGasUsed += result.ExecutionResult.BlockExecutionGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 				be.blockGasUsed = max(be.blockExecutionGasUsed, be.blockStateGasUsed)
-				// applyResult.blockGasUsed is the per-tx contribution used for
-				// progress / uncommittedGas tracking; receipt gas is fine here.
+				// Per-tx contribution for progress / uncommittedGas tracking.
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
-				receipt := *result.Receipt
-				applyResult.receipt = &receipt
-				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
+				applyResult.receipt = result.Receipt.Copy()
 				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
 			maps.Copy(applyResult.traceTos, result.TraceTos)
-			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
+			// Published: the re-check no longer considers tx, so its parked worker can
+			// never be re-signalled — release it. Closing earlier (at finalize) would
+			// let a re-check in the finalize→publish window signal an exited worker.
+			if tx >= 0 && tx < len(be.slFin) {
+				close(be.slFin[tx])
+			}
+
+			// The final task's sets are recorded again at block end, so it is left to the block result.
+			finalIndex := be.tasks[len(be.tasks)-1].Task.Version().TxIndex
+			buildsBAL := task.Rules().IsAmsterdam || pe.cfg.experimentalBAL
+			for i := be.balAttached - 1; buildsBAL && i <= task.Version().TxIndex && i < finalIndex; i = be.balAttached - 1 {
+				applyResult.balTxs = append(applyResult.balTxs, balTx{i, be.blockIO.ReadSet(i), be.blockIO.WriteSet(i)})
+				be.balAttached++
+			}
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
-			}
-
-			// Apply state writes to sd.mem and block cache.
-			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-				nil, applyResult.rules, be.blockStateCache); err != nil {
-				return nil, err
-			}
-
-			// Apply per-tx indexes (logs, traces, receipt cache) here in the
-			// exec loop, on the SAME goroutine that owns sd.mem mutations.
-			// Doing this in the apply loop instead used to race with the next
-			// tx / block-end ApplyStateWrites on SharedDomains.mem.
-			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
-				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
-				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
 
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
@@ -2989,7 +3720,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask := be.tasks[len(be.tasks)-1].Task
 
 		var blockReceipts types.Receipts
-		for _, txResult := range be.results {
+		for i := range be.results {
+			// Prefer the finalized snapshot: a worker may overwrite be.results[i]
+			// with a later receiptless incarnation after finalize set the receipt on
+			// finalizedResults[i]. Falls back to be.results[i] when unfinalized.
+			txResult := be.finalizedResults[i]
+			if txResult == nil {
+				txResult = be.results[i]
+			}
 			if receipt := txResult.Receipt; receipt != nil {
 				blockReceipts = append(blockReceipts, receipt)
 			}
@@ -3005,10 +3743,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		receiptsComplete := !isPartial
 		if isPartial && be.blockNum > 0 && header != nil {
 			startTxIndex := be.tasks[0].Version().TxIndex
+			blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex)
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum)
+				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum+1)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
@@ -3017,15 +3755,43 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					receiptsComplete = true
 				}
 			}
-			// The post-exec validator, which fills receipt blooms for full
-			// blocks, skips partial ones — do it here, even when prior receipts
-			// couldn't be reconstructed (the suffix receipts still need blooms).
+			// The post-exec validator fills receipt blooms for full blocks but skips
+			// partial ones — do it here (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.blockHash)
+
+			if pe.cfg.chainConfig.IsAmsterdam(header.Time) {
+				err := state.RequireStateHistory(applyTx.Debug(), blockStartTxNum, be.tasks[0].Version().TxNum)
+				var block *types.Block
+				if err == nil {
+					block, _, err = pe.cfg.blockReader.BlockWithSenders(ctx, applyTx, be.blockHash, be.blockNum)
+				}
+				if err == nil && block == nil {
+					err = fmt.Errorf("block %d %x not found", be.blockNum, be.blockHash)
+				}
+				var vio *state.VersionedIO
+				if err == nil {
+					vio, err = bal.RederiveFromHistory(ctx, pe.cfg.chainConfig, pe.cfg.engine, pe.cfg.blockReader, applyTx, block, blockStartTxNum, pe.logger)
+				}
+				var storedBAL []byte
+				if err == nil {
+					storedBAL, err = rawdb.ReadBlockAccessListBytes(applyTx, be.blockHash, be.blockNum)
+				}
+				if err == nil {
+					_, err = bal.Process(storedBAL, header, nil, vio, true, false, pe.cfg.dirs.DataDir, pe.logger)
+				}
+				if errors.Is(err, rules.ErrInvalidBlock) {
+					return be.invalidBlockResult(fmt.Errorf("block %d resumed mid-block: %w", be.blockNum, err)), nil
+				}
+				if err != nil {
+					return be.operationalBlockResult(fmt.Errorf("block %d resumed mid-block: cannot validate its block access list: %w", be.blockNum, err)), nil
+				}
+			}
 		}
 
-		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
-		// side so finalize writes go to the BlockStateCache before the Flush.
-		var finalizeWrites *state.WriteSet
+		// Block finalize: run engine.Finalize so finalize writes land in the
+		// versionMap and the block writeset.
+		var finalizeWrites state.WriteSetView
+		var blockEndLogs []*types.Log
 		if be.blockNum > 0 {
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
@@ -3034,41 +3800,26 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RLock()
 			var reader state.StateReader
 			if finalTask.IsHistoric() {
-				// Chain blockCache → sd.mem → applyTx so the block-finalize
-				// IBS (withdrawals, EIP-7002/7251 system calls) sees every
-				// prior-tx write from the current block. Omitting blockCache
-				// here was the root cause of the trie-root race at block
-				// 24839300: a tip-adjacent historic block's withdrawal read
-				// the pre-block balance and stomped tx 28's in-block update.
-				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
+				// Historic finalize chains sd.mem → applyTx so withdrawals see prior-tx in-block writes.
+				reader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), finalVersion.TxNum), be.blockNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
+				reader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 			}
 			pe.RUnlock()
 
 			ibs := state.New(reader)
 			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
-			localVersionMap := state.NewVersionMap(nil)
-			ibs.SetVersionMap(localVersionMap)
+			ibs.SetVersionMap(be.versionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
-				// Syscalls share the main ibs so their writes (EIP-7002/7251
-				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
-				// and then in finalizeWrites via Normalize below. If we instead
-				// create a separate syscallIBS in historic mode, the syscall
-				// writes land only in BlockStateCache and never reach the
-				// commitment calculator's txResult feed — producing a wrong
-				// trie root whenever an EIP-7002/7251 SSTORE changes a
-				// previously-untouched slot (see the 24839762 race where
-				// slots 0x01/0x03 of the EIP-7002 predeploy ended with
-				// stale value 0x01 instead of cleared).
-				//
-				// Main ibs uses HistoryReaderV3WithBlockCache in historic
-				// mode (see finalTask.IsHistoric() branch above), so it can
-				// still see intra-batch writes from the blockCache.
+				// Syscalls share the main ibs so their writes land in
+				// ibs.VersionedWrites and reach finalizeWrites. A separate syscallIBS
+				// would strand those writes and never feed them to the commitment
+				// calculator, producing a wrong trie root when an EIP-7002/7251 SSTORE
+				// changes a previously-untouched slot.
 				syscallIBS := ibs
 
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -3081,90 +3832,76 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-				if _, err := pe.cfg.engine.Finalize(
+				_, finErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
+					tt.Withdrawals, chainReader, syscall, false, pe.logger,
+				)
+				// A system-contract read can fail during Finalize and be applied as a
+				// zero value without surfacing through finErr; treat it as an
+				// infrastructure failure, not an invalid block.
+				if stateErr := ibs.StateReadError(); stateErr != nil {
+					return be.operationalBlockResult(fmt.Errorf("can't finalize block %d: state read: %w", be.blockNum, stateErr)), nil
 				}
+				if finErr != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.blockNum, finErr)), nil
+				}
+
+				// Block-end logs belong to no receipt, so the per-tx publish loop,
+				// which indexes receipt logs only, never sees them. Carry them on the
+				// finalize result so the apply loop — now the sole sd.mem writer —
+				// indexes them; doing it here on the exec loop would race the apply
+				// loop on the NotThreadSafe inverted-index writer.
+				blockEndLogs = syscallIBS.GetRawLogs(tt.TxIndex)
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				writes := ibs.FinalizedWrites(lastResult.Rules())
-				if !writes.IsEmpty() {
-					be.blockIO.RecordWrites(finalVersion, writes)
-					be.versionMap.FlushVersionedWrites(writes, true, "")
+				ivw, err := finalizedBlockWrites(ibs, tt.Rules(), be.blockNum)
+				if err != nil {
+					return be.operationalBlockResult(err), nil
+				}
+				if !ivw.IsEmpty() {
+					be.blockIO.RecordWrites(finalVersion, ivw)
+					be.versionMap.FlushVersionedWrites(ivw, true)
 				}
 
-				// Commit finalize writes from the versionMap write-set, the
-				// same Normalize path regular txs use, rather than from
-				// so.data via MakeWriteSet. This keeps the parallel commit sourced
-				// solely from versionedWrites so the write-path stateObject is
-				// redundant.
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
-				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-				var normErr error
-				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
-				if domainKeysErr != nil {
-					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
-				}
-				if normErr != nil {
-					return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
-				}
+				// A read-only versionMap-slice view over the finalize write-set.
+				finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
 				be.applyCount += finalizeWrites.Count()
-
-				// Apply finalize writes to the BlockStateCache.
-				if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
-					finalizeWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
-					return nil, err
-				}
 			}
 		}
 
-		// Send finalize txResult through the channel for index writes.
-		// State writes are already in the BlockStateCache.
-		if !finalizeWrites.IsEmpty() {
+		// Send the finalize txResult; the apply loop folds its state writes and
+		// indexes its block-end logs at block end. Sent when there are finalize
+		// writes OR block-end logs to index (a block-end syscall may emit logs
+		// without a net state change).
+		if (finalizeWrites != nil && !finalizeWrites.IsEmpty()) || len(blockEndLogs) > 0 {
 			lastResult := be.results[len(be.results)-1]
+			// The finalize result carries the block-end syscall logs (no receipt, no
+			// per-tx traces — the last tx's own result already indexed those). The
+			// apply loop indexes them with skipReceiptCache, since finalize shares the
+			// last regular tx's txNum.
 			if err := be.sendResult(ctx, &txResult{
-				blockNum:              be.blockNum,
-				blockHash:             be.blockHash,
-				txNum:                 txTask.Version().TxNum,
-				rules:                 lastResult.Rules(),
-				writes:                finalizeWrites,
-				logs:                  lastResult.Logs,
-				traceFroms:            lastResult.TraceFroms,
-				traceTos:              lastResult.TraceTos,
-				cumulativeBlobGasUsed: be.blobGasUsed,
-				isFinalize:            true,
+				blockNum:   be.blockNum,
+				blockHash:  be.blockHash,
+				txNum:      txTask.Version().TxNum,
+				rules:      lastResult.Rules(),
+				writes:     finalizeWrites,
+				logs:       blockEndLogs,
+				isFinalize: true,
 			}, false); err != nil {
 				return nil, err
 			}
 		}
 
-		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
-		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
-			return nil, err
-		}
+		// Block fully finalized: every tx sealed, block-end writes in the versionMap.
+		// Publish it as an overlay so the next block reads its writes before apply
+		// drains them to sd.mem; dropped on commit.
+		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
 			BlockTime:        txTask.BlockTime(),
 			BlockHash:        txTask.BlockHash(),
-			ParentHash:       txTask.ParentHash(),
 			StateRoot:        txTask.BlockRoot(),
 			BlockGasUsed:     be.blockGasUsed,
 			BlobGasUsed:      be.blobGasUsed,
@@ -3181,122 +3918,92 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
-			blockStateCache:  be.blockStateCache,
+			execStartedAt:    be.execStarted,
+			execEndedAt:      time.Now(),
 		}
 		return be.result, nil
 	}
 
-	// Block not yet complete — return nil. The caller (processResults)
-	// only acts on complete blockResults (blockResult.complete == true).
+	// Block not yet complete — the caller only acts on complete blockResults.
 	return nil, nil
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
-	// Drain deferred tx N when its predecessor is validated AND no worker
-	// at index < N is in flight. Lower-indexed workers' flushes land at
-	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
-	// ones don't. Non-deferred txs keep dispatching via pending.
-	drainMaxValidated := be.validateTasks.maxComplete()
-	drainMinIP := be.execTasks.minInProgress()
-	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		return drainMaxValidated >= tx-1 && (drainMinIP < 0 || drainMinIP >= tx)
-	})
+	if be.slWake == nil && len(be.tasks) > 0 {
+		be.slWake = make([]chan struct{}, len(be.tasks))
+		be.slReexec = make([]chan struct{}, len(be.tasks))
+		be.slReexecFlag = make([]atomic.Bool, len(be.tasks))
+		be.slFin = make([]chan struct{}, len(be.tasks))
+		be.runInc = make([]atomic.Int64, len(be.tasks))
+		for i := range be.slWake {
+			be.slWake[i] = make(chan struct{}, 1)
+			be.slReexec[i] = make(chan struct{}, 1)
+			be.slFin[i] = make(chan struct{})
+			be.runInc[i].Store(-1)
+		}
+		be.wakeAt = map[int][]int{}
+	}
 
 	maxValidated := be.validateTasks.maxComplete()
 
-	// dispatch drains pending, enqueuing each tx. Budget bounds only fresh
-	// (incarnation 0) enqueues, which occupy an input-channel slot; retries go
-	// to the retry heap (unbounded) and don't consume budget. Txs that can't go
-	// now (gate-rejected retry, or fresh with no free slot) are held aside and
-	// re-added after the loop so they aren't re-taken in the same call.
+	// dispatch drains pending, enqueuing each tx. Budget bounds enqueues, which each
+	// occupy an input-channel slot. Txs that can't go now are left in pending.
 	dispatch := func() (dispatched int) {
 		if be.execTasks.minPending() < 0 {
 			return 0
 		}
-		budget := pe.in.Capacity() - pe.in.NewTasksLen()
-		var holdBack sort.IntSlice
+		budget := len(be.tasks)
+		// Dispatch at most window tasks past the commit frontier, so results arrive
+		// close to block order and the per-result reader scans stay short.
+		lastTx := len(be.tasks) - 1
+		if be.versionMap.HasBAL {
+			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
+		}
 		for {
 			nextTx := be.execTasks.minPending()
-			if nextTx < 0 {
+			if nextTx < 0 || nextTx > lastTx {
 				break
 			}
-			incarnation := be.txIncarnations[nextTx]
-			// A fresh tx needs a free input-channel slot. If none, leave it in
-			// pending (peek, don't take): taking then re-inserting the lowest
-			// index at the front would be O(pending) shift churn per call.
-			if incarnation == 0 && budget <= 0 {
+			// A tx needs a free input-channel slot. If none, leave it in pending
+			// (peek, don't take): re-inserting the lowest index would be O(pending) churn.
+			if budget <= 0 {
 				break
 			}
 			be.execTasks.takeNextPending()
 			execTask := be.tasks[nextTx]
 			isNextValidated := nextTx == maxValidated+1
 
-			if !isNextValidated && incarnation > 0 {
-				txIndex := execTask.Version().TxIndex
-				if be.execTasks.isBlocked(nextTx) || !be.blockIO.HasReads(txIndex) ||
-					be.versionMap.ValidateVersion(txIndex, be.blockIO,
-						func(_, writtenVersion state.Version) state.VersionValidity {
-							wi := writtenVersion.TxIndex + 1
-							if wi >= 0 && wi < len(be.txIncarnations) &&
-								writtenVersion.TxIndex < maxValidated &&
-								writtenVersion.Incarnation == be.txIncarnations[wi] {
-								return state.VersionValid
-							}
-							return state.VersionInvalid
-						}, false, "") != state.VersionValid {
-					holdBack = append(holdBack, nextTx)
-					continue
-				}
-			}
-
 			tv := &taskVersion{
-				execTask:   execTask,
-				versionMap: be.versionMap,
-				profile:    be.profile,
-				stats:      be.stats,
-				statsMutex: &be.Mutex,
+				execTask:     execTask,
+				versionMap:   be.versionMap,
+				profile:      be.profile,
+				stats:        be.stats,
+				statsMutex:   &be.Mutex,
+				execCpuNanos: &be.execCpuNanos,
 			}
 
-			if incarnation == 0 {
-				tv.version = execTask.Version()
-				if !pe.in.TryAdd(tv) {
-					holdBack = append(holdBack, nextTx)
-					break
-				}
-				budget--
-			} else {
-				version := execTask.Version()
-				version.Incarnation = incarnation
-				tv.version = version
-				pe.in.ReTry(tv)
+			// The worker owns its own re-execution loop, so the scheduler dispatches
+			// each task exactly once; re-execution is signalled in place via slReexec.
+			if be.selfLoopDispatched[nextTx] {
+				be.cntExec++
+				dispatched++
+				continue
 			}
+			be.selfLoopDispatched[nextTx] = true
+			version := execTask.Version()
+			version.Incarnation = 0
+			tv.version = version
+			pe.dispatchRunSelfLoop(be, tv)
+			budget--
 
-			// Commit side-effects only after successful enqueue. Record whether
-			// this dispatch runs against fully settled input (every predecessor
-			// already validated) so a genuine error from it can be classified
-			// without re-execution — see the settledInput field doc.
-			be.settledInput[nextTx] = isNextValidated
 			if !isNextValidated {
 				be.cntSpecExec++
-			}
-			if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
-				fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
 			}
 			be.cntExec++
 			dispatched++
 		}
-		for _, tx := range holdBack {
-			be.execTasks.pushPending(tx)
-		}
 		return dispatched
 	}
 
-	// Forward-progress net: release deferred (past its predicate) only when nothing
-	// dispatched, pending is empty, and nothing is in flight. Guarded on empty
-	// pending because the next-to-validate tx is never gate-rejected, so non-empty
-	// pending is always dispatchable — the net must not force-drain past it.
-	if dispatch() == 0 && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
-		be.execTasks.drainDeferred()
-		dispatch()
-	}
+	dispatch()
 }

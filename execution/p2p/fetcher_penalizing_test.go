@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
@@ -386,7 +387,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	headers := []*types.Header{{Number: *uint256.NewInt(1)}}
+	headers := []*types.Header{newMockHeaderForBody(1, &types.Body{})}
 	hashes := []common.Hash{headers[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
@@ -412,6 +413,66 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 		require.ErrorAs(t, err, &errTooManyBodies)
 		require.Equal(t, 1, errTooManyBodies.requested)
 		require.Equal(t, 2, errTooManyBodies.received)
+		require.Nil(t, bodies.Data)
+	})
+}
+
+func TestPenalizingFetcherFetchBodiesRejectsMismatchBeforeNextPage(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	headers := newMockBlockHeaders(2)
+	body := &types.Body{Transactions: types.Transactions{
+		types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21_000, uint256.NewInt(0), nil),
+	}}
+	mockResponse := requestResponseMock{
+		requestId: requestId,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, requestId, body),
+			},
+		},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: []common.Hash{headers[0].Hash(), headers[1].Hash()},
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId, requestId+1))
+	test.mockSentryStreams(mockResponse)
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
+		require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+		require.Nil(t, bodies.Data)
+	})
+}
+
+func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenInvalidBodyRLP(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := newMockBlockHeaders(1)[0]
+	response := requestResponseMock{
+		requestId: requestId,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockRawBlockBodiesPacketBytes(t, requestId, rlp.RawValue{0x80}),
+		}},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: []common.Hash{header.Hash()},
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(response)
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.ErrorIs(t, err, rlp.ErrExpectedList)
+		require.ErrorIs(t, err, ErrInvalidBodyRLP)
 		require.Nil(t, bodies.Data)
 	})
 }
@@ -499,6 +560,47 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrToo
 		require.ErrorAs(t, err, &errTooManyBodies)
 		require.Equal(t, 1, errTooManyBodies.requested)
 		require.Equal(t, 2, errTooManyBodies.received)
+		require.Nil(t, blocks.Data)
+	})
+}
+
+func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenInvalidBodyRLP(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId1 := uint64(1233)
+	requestId2 := uint64(1234)
+	headers := newMockBlockHeaders(1)
+	hash := headers[0].Hash()
+	headersResponse := requestResponseMock{
+		requestId: requestId1,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{{
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId1, headers),
+		}},
+		wantRequestPeerId:     peerId,
+		wantRequestOriginHash: hash,
+		wantRequestAmount:     1,
+		wantReverse:           true,
+	}
+	bodiesResponse := requestResponseMock{
+		requestId: requestId2,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockRawBlockBodiesPacketBytes(t, requestId2, rlp.RawValue{0x80}),
+		}},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: []common.Hash{hash},
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(headersResponse, bodiesResponse)
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		blocks, err := test.penalizingFetcher.FetchBlocksBackwardsByHash(ctx, hash, 1, peerId)
+		require.ErrorIs(t, err, rlp.ErrExpectedList)
 		require.Nil(t, blocks.Data)
 	})
 }

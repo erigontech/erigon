@@ -28,6 +28,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func TestBytesConversion(t *testing.T) {
@@ -67,7 +71,7 @@ func TestIsHexAddress(t *testing.T) {
 }
 
 func TestHashJsonValidation(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		Prefix string
 		Size   int
 		Error  string
@@ -96,7 +100,7 @@ func TestHashJsonValidation(t *testing.T) {
 }
 
 func TestAddressUnmarshalJSON(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		Input     string
 		ShouldErr bool
 		Output    *big.Int
@@ -127,7 +131,7 @@ func TestAddressUnmarshalJSON(t *testing.T) {
 }
 
 func TestAddressHexChecksum(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		Input  string
 		Output string
 	}{
@@ -150,15 +154,7 @@ func TestAddressHexChecksum(t *testing.T) {
 	}
 }
 
-func BenchmarkAddressHex(b *testing.B) {
-	testAddr := HexToAddress("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
-	for b.Loop() {
-		testAddr.Hex()
-	}
-}
-
 func TestMixedcaseAccount_Address(t *testing.T) {
-
 	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-55.md
 	// Note: 0X{checksum_addr} is not valid according to spec above
 
@@ -181,7 +177,7 @@ func TestMixedcaseAccount_Address(t *testing.T) {
 		}
 	}
 
-	//These should throw exceptions:
+	// These should throw exceptions:
 	var r2 []MixedcaseAddress
 	for _, r := range []string{
 		`["0x11111111111111111111122222222222233333"]`,     // Too short
@@ -195,9 +191,7 @@ func TestMixedcaseAccount_Address(t *testing.T) {
 		if err := json.Unmarshal([]byte(r), &r2); err == nil {
 			t.Errorf("Expected failure, input %v", r)
 		}
-
 	}
-
 }
 
 func TestHash_Scan(t *testing.T) {
@@ -537,6 +531,32 @@ func TestHash_Format(t *testing.T) {
 			if tt.out != tt.want {
 				t.Errorf("%s does not render as expected:\n got %s\nwant %s", tt.name, tt.out, tt.want)
 			}
+		})
+	}
+}
+
+// TestHashU256MatchesBigIntBehaviour pins U256/U256ToHash to the big.Int
+// conversion they replace: same value from the same 32 bytes, same hex
+// rendering, and a lossless round-trip back to the hash.
+func TestHashU256MatchesBigIntBehaviour(t *testing.T) {
+	hashes := []Hash{
+		{},
+		BytesToHash([]byte{1}),
+		BytesToHash([]byte{0xff}),
+		HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001"),
+		HexToHash("0x00000000000000000000000000000000000000000000000000000000ffffffff"),
+		HexToHash("0x760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1"),
+		HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+	}
+	for _, h := range hashes {
+		t.Run(h.Hex(), func(t *testing.T) {
+			want := new(big.Int).SetBytes(h[:]) // what Hash.Big did
+			u := h.U256()
+
+			require.Equal(t, want.String(), u.Dec(), "same integer value")
+			require.Equal(t, hexutil.EncodeBig(want), u.Hex(), "same hex rendering")
+			require.Equal(t, h, U256ToHash(u), "round-trip back to the hash")
+			require.Equal(t, BytesToHash(want.Bytes()), U256ToHash(u), "same as BigToHash")
 		})
 	}
 }

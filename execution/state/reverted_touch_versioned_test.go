@@ -11,8 +11,8 @@ import (
 // A touch of an existing empty account records a BalancePath=0 versioned write
 // paired only with a touchAccount journal entry whose revert is a no-op. If the
 // frame is reverted, the address leaves journal.dirties but the write must not
-// survive into the published write set — otherwise Normalize's EIP-161 pass would
-// delete an account whose touch was rolled back (the ripeMD wrong-root shape).
+// survive into the published write set — otherwise rw_v3's EIP-161 empty-removal
+// would delete an account whose touch was rolled back (the ripeMD wrong-root shape).
 func TestNoMaterialize_RevertedTouchNotPublished(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0x11, 0x22, 0x33})
@@ -21,7 +21,6 @@ func TestNoMaterialize_RevertedTouchNotPublished(t *testing.T) {
 
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
 

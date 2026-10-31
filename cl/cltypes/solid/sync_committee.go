@@ -67,14 +67,13 @@ func (s *SyncCommittee) Bytes() []byte {
 }
 
 func (s *SyncCommittee) CommitteeSize() int {
-	if s.committeeSize == 0 && len(s.data) > 0 {
-		// Backwards compat: infer from data length
-		s.committeeSize = len(s.data)/48 - 1
+	if s.committeeSize != 0 {
+		return s.committeeSize
 	}
-	if s.committeeSize == 0 {
-		return defaultSyncCommitteeSize
+	if len(s.data) > 0 {
+		return len(s.data)/48 - 1
 	}
-	return s.committeeSize
+	return defaultSyncCommitteeSize
 }
 
 func (s *SyncCommittee) ensureData() {

@@ -85,11 +85,39 @@ func TestMemoryCopy(t *testing.T) {
 	}
 }
 
-func BenchmarkResize(b *testing.B) {
-	memory := NewMemory()
-	var i uint64
-	for b.Loop() {
-		memory.Resize(i)
-		i++
+// TestMemoryResizeZeroesReusedBuffer pins the fast path Resize takes once the
+// buffer is warm: a frame must not see the previous frame's bytes.
+func TestMemoryResizeZeroesReusedBuffer(t *testing.T) {
+	t.Parallel()
+	var m Memory
+	m.Resize(64)
+	for i := range m.store {
+		m.store[i] = 0xFF
+	}
+	m.reset()
+
+	m.Resize(64)
+	if want := make([]byte, 64); !bytes.Equal(m.store, want) {
+		t.Fatalf("reused buffer not zeroed: %#x", m.store)
+	}
+}
+
+func TestMemoryResizeCapacity(t *testing.T) {
+	t.Parallel()
+	var m Memory
+	m.Resize(32)
+	if got := cap(m.store); got != memoryPageSize {
+		t.Fatalf("cold resize to 32: cap %d, want %d", got, memoryPageSize)
+	}
+
+	m.Resize(memoryPageSize + 32)
+	if got := cap(m.store); got != 2*memoryPageSize {
+		t.Fatalf("grow past one page: cap %d, want %d", got, 2*memoryPageSize)
+	}
+
+	// Doubling wins over page alignment here: align-only would give 3 pages.
+	m.Resize(2*memoryPageSize + 32)
+	if got := cap(m.store); got != 4*memoryPageSize {
+		t.Fatalf("grow past two pages: cap %d, want %d", got, 4*memoryPageSize)
 	}
 }

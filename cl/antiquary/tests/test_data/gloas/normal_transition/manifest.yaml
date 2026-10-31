@@ -1,0 +1,6 @@
+preset: mainnet
+fork: gloas
+runner: transition
+handler: core
+suite: pyspec_tests
+case: normal_transition

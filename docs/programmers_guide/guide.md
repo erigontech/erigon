@@ -43,8 +43,8 @@ Binary 32-byte (256-bit) string.
 
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts
 cannot have storage, therefore root makes sense only for smart contract accounts. For non-contract accounts, the root
-field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `EmptyRoot` in
-[execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go). For contract accounts, the root is computed using member function `Hash`
+field is assumed to be equal to the Merkle root of an empty tree, which is hard-coded in the variable `RootHash` in
+[common/empty/empty_hashes.go](../../common/empty/empty_hashes.go). For contract accounts, the root is computed using member function `Hash`
 of type `Trie` [execution/commitment/trie/trie.go](../../execution/commitment/trie/trie.go), once the storage of the contract has been organised into
 the tree by calling member functions
 `Update` and `Delete` on the same type.
@@ -550,7 +550,7 @@ demand. It looks up the state at the point just before the transaction in questi
 re-executes transaction, and re-generates the receipt. This can only work if the history of the state is available for
 the period of time including the transaction.
 
-[See more about blocks and transactions processing here](/docs/readthedocs/source/stagedsync.rst)
+[See more about blocks and transactions processing here](/execution/stagedsync/README.md)
 
 
 Dev Net with Geth nodes

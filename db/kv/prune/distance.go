@@ -89,6 +89,17 @@ func parseDistanceNumber(s, flag, aliasHint string) (uint64, error) {
 	return n, nil
 }
 
+// stateHistoryDistanceCLIValue renders a state-history-style distance as its
+// operator-facing argument. Each flag maps "keep-all" to its own sentinel, so
+// only keepAll — the same sentinel parseStateHistoryDistance takes — may render
+// as the alias; any other sentinel stays a number the parser still accepts.
+func stateHistoryDistanceCLIValue(v uint64, keepAll Distance) string {
+	if Distance(v) == keepAll {
+		return "keep-all"
+	}
+	return strconv.FormatUint(v, 10)
+}
+
 // blocksDistanceCLIValue renders a Blocks retention value as the operator-facing
 // --prune.distance.blocks argument, preferring the named alias for sentinels.
 func blocksDistanceCLIValue(v uint64) string {

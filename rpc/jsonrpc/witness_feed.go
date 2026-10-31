@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"encoding/json"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -32,9 +31,9 @@ const _ = uint(witnessFeedBuffer - 2)
 
 // witnessPush is one completed witness ready to fan out to subscribers.
 type witnessPush struct {
-	num  uint64
-	hash common.Hash
-	json json.RawMessage
+	num    uint64
+	hash   common.Hash
+	result *ExecutionWitnessResult
 }
 
 // witnessFeed never blocks on publish: a full subscriber channel drops its oldest

@@ -8,17 +8,18 @@ on:
         type: boolean
         required: false
         default: false
-      commitment_mode:
-        description: 'Erigon commitment mode ("default" leaves ERIGON_COMMITMENT_PARALLEL unset)'
-        type: choice
+      run_nethermind:
+        description: 'Run the Nethermind benchmark besides the Erigon one'
+        type: boolean
         required: false
-        default: default
-        options:
-          - default
-          - serial
-          - parallel
+        default: false
+      run_reth:
+        description: 'Run the Reth benchmark besides the Erigon one'
+        type: boolean
+        required: false
+        default: false
   schedule:
-    - cron: '0 2 * * *'  # Run daily at 02:00 UTC
+    - cron: '0 2 * * *'   # Run daily at 02:00 UTC
 
 concurrency:
   group: rpc-performance-latest-${{ github.ref }}
@@ -38,86 +39,97 @@ jobs:
     outputs:
       run_id: ${{ steps.vars.outputs.run_id }}
       network: ${{ steps.vars.outputs.network }}
-      run_geth: ${{ steps.vars.outputs.run_geth }}
+      matrix: ${{ steps.vars.outputs.matrix }}
+      coordinated: ${{ steps.vars.outputs.coordinated }}
     steps:
       - name: Compute shared variables
         id: vars
         shell: bash
         env:
           INPUT_RUN_GETH: ${{ github.event.inputs.run_geth }}
+          INPUT_RUN_NETHERMIND: ${{ github.event.inputs.run_nethermind }}
+          INPUT_RUN_RETH: ${{ github.event.inputs.run_reth }}
         run: |
           set -euo pipefail
 
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Decide whether to run geth:
-          # - schedule: only on Sunday (UTC)
-          # - workflow_dispatch: controlled by input
-          RUN_GETH="false"
+          # Decide which clients, if any, run besides erigon:
+          # - schedule: all of them, every day
+          # - workflow_dispatch: controlled by inputs, any combination of them
+          PEERS=()
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            DOW="$(date -u +%w)"
-            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
-              RUN_GETH="true"
-            fi
+            PEERS=(geth nethermind reth)
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$INPUT_RUN_GETH" = "true" ]; then
-              RUN_GETH="true"
-            fi
+            for input in "geth:$INPUT_RUN_GETH" "nethermind:$INPUT_RUN_NETHERMIND" "reth:$INPUT_RUN_RETH"; do
+              [ "${input#*:}" = "true" ] && PEERS+=("${input%%:*}")
+            done
           fi
-          
+
+          # Every client joins the start barrier with all the other clients as its remotes.
+          declare -A INSTALL_DIR=([erigon]="" [geth]=/opt/go-ethereum [nethermind]=/opt/nethermind [reth]=/opt/reth)
+          CLIENTS=(erigon "${PEERS[@]}")
+          MATRIX=""
+          for client in "${CLIENTS[@]}"; do
+            remotes=$(printf '%s\n' "${CLIENTS[@]}" | { grep -vx "$client" || true; } | paste -sd, -)
+            MATRIX+="${MATRIX:+,}{\"client\":\"$client\",\"remotes\":\"$remotes\",\"runs-on\":[\"self-hosted\",\"qa\",\"Ethereum\",\"rpc-latest-$client\"],\"install_dir\":\"${INSTALL_DIR[$client]}\"}"
+          done
+
           # Variables
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
-          echo "run_geth=${RUN_GETH}" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"include\":[${MATRIX}]}" >> "$GITHUB_OUTPUT"
+          echo "coordinated=$([ ${#PEERS[@]} -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "peers=$(IFS=,; echo "${PEERS[*]}")" >> "$GITHUB_OUTPUT"
 
       - name: Print configuration (for logs)
         shell: bash
         env:
           RUN_ID: ${{ steps.vars.outputs.run_id }}
           NETWORK: ${{ steps.vars.outputs.network }}
-          RUN_GETH: ${{ steps.vars.outputs.run_geth }}
+          PEERS: ${{ steps.vars.outputs.peers }}
         run: |
           set -euo pipefail
           echo "Run ID:             $RUN_ID"
           echo "Network:            $NETWORK"
           echo "Run Erigon:         true"
-          echo "Run Geth:           $RUN_GETH"
+          echo "Peer clients:       ${PEERS:-none}"
 
       - name: Prepare Redis database
-        if: steps.vars.outputs.run_geth == 'true'
+        if: steps.vars.outputs.coordinated == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         env:
           RUN_ID: ${{ steps.vars.outputs.run_id }}
           NETWORK: ${{ steps.vars.outputs.network }}
+          MATRIX: ${{ steps.vars.outputs.matrix }}
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "erigon" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
-          python3 coordinated_start.py --client "geth" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+          python3 -c 'import json, sys; [print(e["client"], e["remotes"]) for e in json.loads(sys.argv[1])["include"]]' "$MATRIX" |
+            while read -r client remotes; do
+              python3 coordinated_start.py --client "$client" --remote "$remotes" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+            done
 
   test:
     name: Benchmark Latest ${{ matrix.client }}
     needs: [setup]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - client: erigon
-            runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
-          - client: geth
-            runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 480
     permissions:
       contents: read
+      actions: read
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       NETWORK: ${{ needs.setup.outputs.network }}
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       TOTAL_TIME_SECONDS: 1200 # 20 minutes
-      GETH_INSTALL_DIR: /opt/go-ethereum
+      CLIENT_INSTALL_DIR: ${{ matrix.install_dir }}
       CLIENT: ${{ matrix.client }}
+      REMOTES: ${{ matrix.remotes }}
 
     steps:
       - name: Set reference data dir based on branch
@@ -137,6 +149,9 @@ jobs:
           echo "ERIGON_REFERENCE_DIR=${ERIGON_REFERENCE_DIR}" >> $GITHUB_ENV
           echo "ERIGON_REFERENCE_DATA_DIR=${ERIGON_REFERENCE_DIR}/datadir" >> $GITHUB_ENV
 
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
@@ -146,21 +161,33 @@ jobs:
           filter: blob:none
 
       - name: Sanity check Redis config
-        if: needs.setup.outputs.run_geth == 'true'
+        if: needs.setup.outputs.coordinated == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+
+      - name: Checkout the rpc-tests version file
+        if: matrix.client != 'erigon'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts/rpc_version.env
+          sparse-checkout-cone-mode: false
 
       - name: Checkout RPC Tests Repository
-        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
+          source .github/workflows/scripts/rpc_version.env
           rm -rf "$RUNNER_WS/rpc-tests"
-          git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
+          make rpc_perf
+          if [ "$CLIENT" = "erigon" ]; then
+            make rpc_pattern_gen
+          fi
 
       - name: Clean Erigon Build Directory
         if: matrix.client == 'erigon'
@@ -202,24 +229,9 @@ jobs:
         if: matrix.client == 'erigon'
         id: erigon_running_step
         working-directory: ${{ github.workspace }}/build/bin
-        env:
-          COMMITMENT_MODE: ${{ github.event.inputs.commitment_mode }}
         run: |
           set +e # Disable exit on error
           echo "Starting Erigon..."
-
-          # Only set ERIGON_COMMITMENT_PARALLEL on an explicit choice; otherwise ensure it's
-          # unset so erigon uses its built-in default (and doesn't inherit runner env).
-          if [ "$COMMITMENT_MODE" = "parallel" ]; then
-            export ERIGON_COMMITMENT_PARALLEL=true
-            echo "Set ERIGON_COMMITMENT_PARALLEL=true (parallel mode)"
-          elif [ "$COMMITMENT_MODE" = "serial" ]; then
-            export ERIGON_COMMITMENT_PARALLEL=false
-            echo "Set ERIGON_COMMITMENT_PARALLEL=false (serial mode)"
-          else
-            unset ERIGON_COMMITMENT_PARALLEL
-            echo "Leaving ERIGON_COMMITMENT_PARALLEL unset (default behavior)"
-          fi
 
           ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
@@ -238,9 +250,8 @@ jobs:
           echo "Erigon started"
 
       - name: Wait for port 8545 to be opened
-        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
-          # Geth is expected to be pre-running for the rpc-latest-geth runner
+          # Geth, Nethermind and Reth are expected to be pre-running on their rpc-latest-* runners
           # Erigon was started above
           for i in {1..30}; do
             if nc -z localhost 8545; then
@@ -256,8 +267,105 @@ jobs:
             exit 1
           fi
 
+      - name: Wait for Erigon to reach the tip
+        if: matrix.client == 'erigon'
+        run: |
+          # Same tip condition as the barrier: not syncing and the latest block at most 2 slots old.
+          python3 - <<'EOF'
+          import json, os, sys, time, urllib.request
+
+          def rpc(method, params):
+              req = urllib.request.Request("http://localhost:8545", headers={"Content-Type": "application/json"},
+                                           data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode())
+              with urllib.request.urlopen(req, timeout=10) as rsp:
+                  return json.load(rsp)["result"]
+
+          deadline = time.time() + int(os.environ["TOTAL_TIME_SECONDS"])
+          while time.time() < deadline:
+              try:
+                  block = rpc("eth_getBlockByNumber", ["latest", False])
+                  age = time.time() - int(block["timestamp"], 16)
+                  if rpc("eth_syncing", []) is False and age <= 24:
+                      print(f"Erigon at the tip: block {int(block['number'], 16)}, {age:.0f}s old")
+                      sys.exit(0)
+                  print(f"Waiting for the tip: block {int(block['number'], 16)}, {age:.0f}s old")
+              except Exception as e:
+                  print(f"Waiting for the tip: {e}")
+              time.sleep(10)
+          print("::error::Erigon did not reach the tip in time")
+          sys.exit(1)
+          EOF
+
+      - name: Generate the latest patterns
+        if: matrix.client == 'erigon'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
+        run: |
+          # Generated once from Erigon and shared with the other clients' jobs, so all clients replay the same requests.
+          # Each count covers the largest step of its test, e.g. 30000:20 for eth_call, 6000:20 for mixed.
+          cd "$RUNNER_WS/rpc-tests"
+          ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
+            --counts 600000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen eth_getLogs --url http://localhost:8545 \
+            --counts 100000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_head.profile" --url http://localhost:8545 \
+            --counts 200000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_head_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_topics.profile" --url http://localhost:8545 \
+            --counts 100000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_topics_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_wide.profile" --url http://localhost:8545 \
+            --counts 20000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_wide_gen_latest.tar"
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
+            --counts 120000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
+            --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
+
+      - name: Share the latest patterns with the other clients' jobs
+        if: matrix.client == 'erigon' && needs.setup.outputs.coordinated == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: latest-patterns-${{ github.run_attempt }}
+          path: |
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_call_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_head_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_topics_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_wide_gen_latest.tar
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.tar
+          retention-days: 1
+
+      - name: Wait for the latest patterns from the erigon job
+        if: matrix.client != 'erigon'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ARTIFACT: latest-patterns-${{ github.run_attempt }}
+        run: |
+          for i in {1..360}; do
+            count=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs/$GITHUB_RUN_ID/artifacts?name=$ARTIFACT" |
+              python3 -c "import json, sys; print(json.load(sys.stdin)['total_count'])" || true)
+            if [ "$count" = "1" ]; then
+              echo "Artifact $ARTIFACT available"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Artifact $ARTIFACT not uploaded by the erigon job in time"
+          exit 1
+
+      - name: Download the latest patterns
+        if: matrix.client != 'erigon'
+        uses: actions/download-artifact@v8
+        with:
+          name: latest-patterns-${{ github.run_attempt }}
+          path: ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}
+
       - name: Find a consensus on a common time to run the benchmark
-        if: needs.setup.outputs.run_geth == 'true'
+        if: needs.setup.outputs.coordinated == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
@@ -266,14 +374,14 @@ jobs:
           echo "Context:"
           echo "  RUN_ID=${RUN_ID}"
           echo "  NETWORK=${NETWORK}"
-          # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
+          # Wait for an agreement between all the clients
+          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
 
       - name: Run RPC Performance Tests
         id: test_step
-        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
           RUNNER_WS: ${{ runner.workspace }}
+          COORDINATED: ${{ needs.setup.outputs.coordinated }}
         run: |
           set +e # Disable exit on error
 
@@ -282,7 +390,7 @@ jobs:
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
-            commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
+            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo no-version)
           fi
           
           # Prepare historical test results directory
@@ -311,24 +419,34 @@ jobs:
             pattern=$4
             sequence=$5
             client=$6
-          
-            result_file=$client-$method-result.json            
+            label=${7:-$method} # names the results; set it to run the same method with another pattern
+            verbose=${8:-false}
+
+            verbose_flag=()
+            if [ "$verbose" == "true" ]; then
+              verbose_flag=(--verbose)
+            fi
+
+            result_file=$client-$label-result.json
           
             # clean temporary area
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network/*
-          
-            python3 ./run_perf_tests.py --blockchain "$network" \
+
+            # Move to home dir of rpc-tests
+            cd ..
+            ./build/bin/rpc_perf --blockchain "$network" \
                                       --test-type "$method" \
-                                      --pattern-file pattern/"$network"/"$pattern".tar \
+                                      --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
-                                      --repetitions 5 \
-                                      --erigon-dir "/" \
-                                      --silk-dir "/" \
-                                      --test-mode 2 \
+                                      --repetitions 4 \
+                                      --response-timeout 30s \
+                                      --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-daemon $client 2>&1 | tee -a $output_log
+                                      --testing-client $client \
+                                      --more-percentiles \
+                                      "${verbose_flag[@]}" 2>&1 | tee -a $output_log
           
             # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
             perf_exit_status=${PIPESTATUS[0]}
@@ -355,9 +473,9 @@ jobs:
               echo "Execute Latency Percentile HDR Analysis"
               cd $result_dir
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
-                --test_name $client-$method \
+                --test_name $client-$label \
                 --input_file ./$result_file \
-                --output_file ./$client-$method-latency_hdr_analysis.pdf
+                --output_file ./$client-$label-latency_hdr_analysis.pdf
               perf_hdr_status=$?
               if [ $perf_hdr_status -ne 0 ]; then
                 echo "::warning::perf_hdr_analysis.py failed with exit code $perf_hdr_status"
@@ -389,7 +507,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}-$method \
+              --test_name rpc-performance-test-latest-$label \
               --chain $CHAIN \
               --runner "$RUNNER_NAME" \
               --db_version $db_version \
@@ -409,12 +527,30 @@ jobs:
             fi
           }
 
+          # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
+          sync_clients () {
+            if [ "$COORDINATED" != "true" ]; then
+              return 0
+            fi
+            (cd "$ERIGON_QA_PATH/test_system/qa-tests/rpc-tests" &&
+              python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-$1" --chain "$NETWORK") ||
+              { echo "::error::No agreement with the other clients before $1"; exit 1; }
+          }
+
           # Launch the RPC performance test runner
 
-          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
-          #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          #run_perf "$RUNNER_WS" $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client> [label] [verbose]
+          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 100:20,1000:20,3000:20,6000:20 $CLIENT mixed true
+          sync_clients eth_call_gen
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 $CLIENT eth_call_gen false
+          sync_clients eth_getLogs_gen
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,5000:20 $CLIENT eth_getLogs_gen false
+          sync_clients eth_getLogs_head
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_head_gen_latest 2000:20,10000:20 $CLIENT eth_getLogs_head false
+          sync_clients eth_getLogs_topics
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_topics_gen_latest 1000:20,5000:20 $CLIENT eth_getLogs_topics false
+          sync_clients eth_getLogs_wide
+          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 $CLIENT eth_getLogs_wide false
           
           # Move output.log to result_dir after all tests
           mv $output_log $result_dir/
@@ -462,10 +598,10 @@ jobs:
           cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
-        if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}${{ (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'parallel' && '-commitment-parallel') || (matrix.client == 'erigon' && github.event.inputs.commitment_mode == 'serial' && '-commitment-serial') || '' }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
 
       - name: Stop Erigon
@@ -485,7 +621,7 @@ jobs:
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: erigon-logs-${{ env.CHAIN }}${{ (github.event.inputs.commitment_mode == 'parallel' && '-parallel') || (github.event.inputs.commitment_mode == 'serial' && '-serial') || '' }}
+          name: erigon-logs-${{ env.CHAIN }}
           path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Delete Erigon Testbed Data Directory
@@ -498,9 +634,42 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-      - name: Send an error status to the other client
-        if: failure()
+      - name: Send an error status to the other clients
+        if: failure() && needs.setup.outputs.coordinated == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-error "workflow failed"
+          for run_id in "$RUN_ID" "$RUN_ID-eth_call_gen" "$RUN_ID-eth_getLogs_gen" \
+            "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide"; do
+            python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
+          done
+
+  compare:
+    name: Compare clients
+    needs: [setup, test]
+    if: always() && needs.setup.outputs.coordinated == 'true'
+    runs-on: [self-hosted, qa]
+    permissions:
+      contents: read
+    steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      - name: Checkout the comparison script
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts/compare_rpc_perf.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download the test results of all clients
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-${{ env.CHAIN }}-*
+          path: ${{ runner.temp }}/perf-results
+
+      - name: Generate the comparison summary
+        env:
+          RESULTS_DIR: ${{ runner.temp }}/perf-results
+        run: |
+          python3 .github/workflows/scripts/compare_rpc_perf.py --results-dir "$RESULTS_DIR" | tee -a "$GITHUB_STEP_SUMMARY"

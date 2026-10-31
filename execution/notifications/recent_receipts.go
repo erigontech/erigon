@@ -17,6 +17,8 @@
 package notifications
 
 import (
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -29,11 +31,12 @@ import (
 // - need support unwind of receipts
 // - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
 type RecentReceipts struct {
-	receipts map[uint64]types.Receipts
-	txs      map[uint64][]types.Transaction
-	headers  map[uint64]*types.Header
-	limit    uint64
-	mu       sync.Mutex
+	receipts    map[uint64]types.Receipts
+	txs         map[uint64][]types.Transaction
+	headers     map[uint64]*types.Header
+	removedLogs []*LogNotification
+	limit       uint64
+	mu          sync.Mutex
 }
 
 func NewRecentReceipts(limit uint64) *RecentReceipts {
@@ -52,17 +55,31 @@ func (r *RecentReceipts) Clear() {
 	clear(r.receipts)
 	clear(r.txs)
 	clear(r.headers)
+	r.removedLogs = nil
 }
 
-// NotifyLogs sends log notifications in native types (no protobuf conversion).
-// [from,to)
-func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, isUnwind bool) {
+// Snapshot returns a function that restores the cache to its state at the time of the call.
+func (r *RecentReceipts) Snapshot() (restore func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	receipts, txs, headers, removedLogs := maps.Clone(r.receipts), maps.Clone(r.txs), maps.Clone(r.headers), slices.Clone(r.removedLogs)
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.receipts, r.txs, r.headers, r.removedLogs = receipts, txs, headers, removedLogs
+	}
+}
+
+// NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to).
+func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	defer func() { r.removedLogs = nil }()
 	if !n.HasLogSubscriptions() {
 		return
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for bn, receipts := range r.receipts {
+	reply := r.removedLogs
+	for _, bn := range slices.Sorted(maps.Keys(r.receipts)) {
 		if bn+r.limit < from { // evict old
 			delete(r.receipts, bn)
 			delete(r.txs, bn)
@@ -72,21 +89,46 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, isUnw
 		if bn < from || bn >= to {
 			continue
 		}
-
-		reply := make([]*LogNotification, 0, len(receipts))
-		for _, receipt := range receipts {
-			if receipt == nil {
-				continue
-			}
-			for _, l := range receipt.Logs {
-				reply = append(reply, &LogNotification{
-					Log:     l,
-					Removed: isUnwind,
-				})
-			}
-		}
-
+		reply = append(reply, logNotifications(r.receipts[bn], r.headers[bn], false)...)
+	}
+	if len(reply) > 0 {
 		n.OnLogs(reply)
+	}
+}
+
+func logNotifications(receipts types.Receipts, header *types.Header, removed bool) []*LogNotification {
+	var blockTimestamp uint64
+	if header != nil {
+		blockTimestamp = header.Time
+	}
+	reply := make([]*LogNotification, 0, len(receipts))
+	for _, receipt := range receipts {
+		if receipt == nil {
+			continue
+		}
+		for _, l := range receipt.Logs {
+			reply = append(reply, &LogNotification{
+				Log:            l,
+				BlockTimestamp: blockTimestamp,
+				Removed:        removed,
+			})
+		}
+	}
+	return reply
+}
+
+// Unwind moves entries above unwindPoint out of the active cache for the next removed-log notification.
+func (r *RecentReceipts) Unwind(unwindPoint uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, blockNum := range slices.Sorted(maps.Keys(r.receipts)) {
+		if blockNum <= unwindPoint {
+			continue
+		}
+		r.removedLogs = append(r.removedLogs, logNotifications(r.receipts[blockNum], r.headers[blockNum], true)...)
+		delete(r.receipts, blockNum)
+		delete(r.txs, blockNum)
+		delete(r.headers, blockNum)
 	}
 }
 
@@ -126,16 +168,16 @@ func (r *RecentReceipts) Add(receipts types.Receipts, txs []types.Transaction, h
 	}
 }
 
-// NotifyReceipts sends receipt notifications in native types (no protobuf conversion).
-// [from,to)
-func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64, isUnwind bool) {
+// NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to).
+func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 	if !n.HasReceiptSubscriptions() {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for blockNum, receipts := range r.receipts {
+	var reply []*ReceiptNotification
+	for _, blockNum := range slices.Sorted(maps.Keys(r.receipts)) {
 		if blockNum+r.limit < from { // evict old
 			delete(r.receipts, blockNum)
 			delete(r.txs, blockNum)
@@ -146,13 +188,13 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64, i
 			continue
 		}
 
+		receipts := r.receipts[blockNum]
 		txs := r.txs[blockNum]
 		header := r.headers[blockNum]
 		if len(receipts) == 0 || len(txs) == 0 || header == nil {
 			continue
 		}
 
-		var reply []*ReceiptNotification
 		for _, receipt := range receipts {
 			if receipt == nil {
 				continue
@@ -165,13 +207,11 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64, i
 				Receipt: receipt,
 				Tx:      txs[txIndex],
 				Header:  header,
-				Removed: isUnwind,
 			})
 		}
-
-		if len(reply) > 0 {
-			n.OnReceipts(reply)
-		}
+	}
+	if len(reply) > 0 {
+		n.OnReceipts(reply)
 	}
 }
 

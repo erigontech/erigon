@@ -64,15 +64,11 @@ func ValidateAATransaction(
 	}
 	validationGasUsed = preTxCost
 
-	if err := chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
+	if err := chargeGas(header, tx, gasPool, ibs); err != nil {
 		return nil, 0, err
 	}
 
-	var originalEvmHook tracing.EnterHook
 	entryPointTracer := EntryPointTracer{}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnEnter != nil {
-		entryPointTracer = EntryPointTracer{OnEnterSuper: originalEvmHook}
-	}
 	vmConfig.Tracer = entryPointTracer.Hooks()
 	innerEvm := vm.NewEVM(evm.Context, evm.TxContext, ibs, evm.ChainConfig(), vmConfig)
 
@@ -181,7 +177,7 @@ func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraB
 	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
-			"error getting code for sender:%s err:%s",
+			"error getting code for sender:%s err:%w",
 			tx.SenderAddress.String(), err,
 		))
 	}
@@ -317,7 +313,11 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	totalGasLimit, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: RIP-7560 gas limits sum overflows uint64", protocol.ErrGasLimitReached)
+	}
+	gasPool.AddGas(totalGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }
@@ -362,14 +362,12 @@ func PerformTxnStaticValidation(
 			"deployer data of size %d is provided but deployer address is not set",
 			len(txn.DeployerData),
 		)
-
 	}
 	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
 		return fmt.Errorf(
 			"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
 			len(txn.DeployerData), txn.PaymasterValidationGasLimit,
 		)
-
 	}
 
 	if hasPaymaster {
@@ -378,7 +376,6 @@ func PerformTxnStaticValidation(
 				"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
 				txn.Paymaster.String(),
 			)
-
 		}
 		hasCodePaymaster := paymasterCodeSize != 0
 		if !hasCodePaymaster {
@@ -386,7 +383,6 @@ func PerformTxnStaticValidation(
 				"paymaster address %s is provided but contract has no code deployed",
 				txn.Paymaster.String(),
 			)
-
 		}
 	}
 
@@ -396,7 +392,6 @@ func PerformTxnStaticValidation(
 				"deployer address %s is provided but contract has no code deployed",
 				txn.Deployer.String(),
 			)
-
 		}
 		if hasCodeSender {
 			return fmt.Errorf(
@@ -441,8 +436,7 @@ func newValidationPhaseError(
 	revertEntityName string,
 	frameReverted bool,
 ) *ValidationPhaseError {
-	var vpeCast *ValidationPhaseError
-	if errors.As(innerErr, &vpeCast) {
+	if vpeCast, ok := errors.AsType[*ValidationPhaseError](innerErr); ok {
 		return vpeCast
 	}
 	var errorMessage string

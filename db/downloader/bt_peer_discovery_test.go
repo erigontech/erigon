@@ -38,11 +38,7 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(seederDir, testFile), testData, 0o644))
 
 	// Start seeder torrent client.
-	seederCfg := torrent.NewDefaultClientConfig()
-	seederCfg.DataDir = seederDir
-	seederCfg.ListenPort = 0 // OS-assigned port
-	seederCfg.NoDHT = true
-	seederCfg.DisableTrackers = true
+	seederCfg := newTestClientConfig(t, seederDir)
 	seederCfg.Seed = true
 
 	seeder, err := torrent.NewClient(seederCfg)
@@ -71,13 +67,7 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	assert.Equal(t, [20]byte(infoHash), best.ChainToml.InfoHash)
 
 	// Start leecher torrent client.
-	leecherCfg := torrent.NewDefaultClientConfig()
-	leecherCfg.DataDir = leecherDir
-	leecherCfg.ListenPort = 0
-	leecherCfg.NoDHT = true
-	leecherCfg.DisableTrackers = true
-
-	leecher, err := torrent.NewClient(leecherCfg)
+	leecher, err := torrent.NewClient(newTestClientConfig(t, leecherDir))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -117,12 +107,7 @@ func TestBTPeerDiscovery_NoBTPort(t *testing.T) {
 
 	peer := &ChainTomlPeer{ChainToml: *ct, Node: node}
 
-	// Create a minimal torrent client for the test.
-	cfg := torrent.NewDefaultClientConfig()
-	cfg.DataDir = t.TempDir()
-	cfg.ListenPort = 0
-	cfg.NoDHT = true
-	client, err := torrent.NewClient(cfg)
+	client, err := torrent.NewClient(newTestClientConfig(t, t.TempDir()))
 	require.NoError(t, err)
 	defer client.Close()
 
@@ -132,6 +117,20 @@ func TestBTPeerDiscovery_NoBTPort(t *testing.T) {
 	// Should not panic and should not add any peers.
 	addTorrentPeerFromENR(torr, peer)
 	assert.Zero(t, torr.Stats().TotalPeers)
+}
+
+// newTestClientConfig returns a client that talks to nobody it was not handed
+// directly. DisableUTP also keeps the listener off UDP, which the OS may refuse
+// on the dynamic port the TCP listener already took.
+func newTestClientConfig(t *testing.T, dataDir string) *torrent.ClientConfig {
+	t.Helper()
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir = dataDir
+	cfg.ListenPort = 0
+	cfg.NoDHT = true
+	cfg.DisableTrackers = true
+	cfg.DisableUTP = true
+	return cfg
 }
 
 func buildTestMetainfo(t *testing.T, dir, filename string) metainfo.MetaInfo {

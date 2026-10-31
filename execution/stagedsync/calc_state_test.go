@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -43,6 +44,8 @@ func newTestCalcState() *calcState {
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		sdSubtree:    make(map[accounts.Address]bool),
+		fieldMask:    make(map[accounts.Address]uint8),
 	}
 }
 
@@ -84,6 +87,7 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 		Deleted:     true,
 		dirty:       true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -98,6 +102,34 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 	assert.True(t, got.Balance.IsZero(), "balance must be zero")
 	assert.Equal(t, uint64(0), got.Nonce, "nonce must be zero")
 	assert.Equal(t, empty.CodeHash, got.CodeHash, "codeHash must be empty.CodeHash")
+}
+
+// TestApplyWrites_CodeHashSingleSourced pins that codeHash is sourced solely
+// from CodeHashes(): a Codes() entry that composes a different hash (e.g. the
+// versionMap-view's 7702 short-circuit, where a codeHash-bearing account has no
+// code cell so the composed code is empty) must NOT clobber the authoritative
+// codeHash. Before single-sourcing, the Codes() loop ran after CodeHashes() and
+// overwrote acc.CodeHash with keccak(empty)=EmptyCodeHash → wrong trie leaf.
+func TestApplyWrites_CodeHashSingleSourced(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress([20]byte{0x69, 0x00, 0x77, 0x02})
+	realHash := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
+
+	ws := &state.WriteSet{}
+	ws.SetCodeHash(addr, &state.VersionedWrite[accounts.CodeHash]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath},
+		Val:         realHash,
+	})
+	// Code composes empty (the view desync): its Hash is EmptyCodeHash.
+	ws.SetCode(addr, &state.VersionedWrite[accounts.Code]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.CodePath},
+		Val:         accounts.NewCode(nil),
+	})
+
+	cs.ApplyWrites(ws)
+
+	require.Equal(t, realHash.Value(), common.Hash(cs.accounts[addr].CodeHash),
+		"codeHash must come from CodeHashes(), not be clobbered by an empty Codes() entry")
 }
 
 // TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete verifies that a
@@ -124,6 +156,7 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 		Deleted:     true,
 		dirty:       true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -141,8 +174,22 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 // values, the trie leaf must survive with the actual values rather
 // than being zeroed by the SD-with-incarnation branch.
 //
-// ApplyWrites normally clears Deleted when applying a retained balance.
-// Populate cs.accounts directly to cover this defensive FlushToUpdates branch.
+// Note: under the *current* ApplyWrites semantics this state is
+// unreachable from a real worker writeset, because
+// `BalancePath` always clears `Deleted` (see
+// TestApplyWrites_BalancePathClearsDeleted) and the writeset carries
+// `SelfDestructPath` before the `BalancePath` reset. The test
+// populates cs.accounts directly to cover the FlushToUpdates branch
+// in isolation against future ApplyWrites changes (e.g. write-order
+// races, refactors that drop the Deleted-clearing in BalancePath, or
+// new code paths that produce Deleted+RetainedBalance writesets).
+//
+// The actual `extcodehash_subcall_create2_oog[fork_Amsterdam-...]`
+// regression that prompted this defensive case is fixed upstream by
+// the removal of the redundant `IncarnationPath > 0` clause in
+// `Normalize` (the OOG path leaves Nonce=0 → empty-account
+// → DeleteUpdate, not Deleted+RetainedBalance). End-to-end coverage
+// of that path lives in the eest_devnet suite, not in this unit test.
 func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing.T) {
 	cs := newTestCalcState()
 	// 0x2adc25... is the CREATE2 deterministic address from the failing
@@ -158,6 +205,7 @@ func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing
 		Deleted:     true,
 		dirty:       true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -190,6 +238,7 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 		Deleted:  false,
 		dirty:    true,
 	}
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -224,7 +273,7 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 		inc(addr, state.Version{}, uint64(1)).
 		selfDestruct(addr, state.Version{}, true).
 		build()
-	cs.ApplyWrites(writes, false)
+	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok, "ensureAccount should have created an entry")
@@ -244,11 +293,27 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 		"Deleted+isAllZero routes through the EIP-161 DeleteUpdate branch (matches serial's DomainDel)")
 }
 
-// TestApplyWrites_BalancePathClearsDeleted verifies that a non-empty
-// account write after a SelfDestructPath resets the Deleted flag — the
-// same way TouchAccount drops the DeleteUpdate flag in serial when a
-// non-empty value arrives after a delete.
-func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
+// TestApplyWrites_SelfDestructBalanceNotRevived verifies a burn (SELFDESTRUCT
+// with preserveBalance=false) is not revived by its balance write: the write is
+// stamped ValueDeleted, so the calculator keeps the account Deleted and deletes
+// the leaf regardless of the pre-destruct balance. The burn writeset comes from
+// a real IntraBlockState.Selfdestruct so the stamp — not a hand-crafted cell —
+// drives the decision.
+func TestApplyWrites_SelfDestructBalanceNotRevived(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress([20]byte{0xd1})
+
+	cs.ApplyWrites(selfDestructBurnWrites(t, addr, *uint256.NewInt(42)))
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.True(t, acc.Deleted, "a burn (ValueDeleted stamp) is not revived by its balance write")
+	assert.True(t, acc.Balance.IsZero(), "a burned balance is zeroed")
+}
+
+// TestApplyWrites_SelfDestructBalanceRetained_EIP8246 verifies the EIP-8246
+// counterpart: a non-zero post-SD balance survives as a balance-only account.
+func TestApplyWrites_SelfDestructBalanceRetained_EIP8246(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0xd1})
 
@@ -256,58 +321,29 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, *uint256.NewInt(42)).
 		build()
-	cs.ApplyWrites(writes, false)
+	cs.ApplyWrites(writes)
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
-	assert.False(t, acc.Deleted, "subsequent BalancePath write must clear Deleted")
+	assert.False(t, acc.Deleted, "EIP-8246 keeps a non-zero post-SD balance-only account")
 	assert.Equal(t, uint64(42), acc.Balance.Uint64())
 }
-
-// preBlockReader is a minimal StateReader stub for the integration test
-// below — returns the configured pre-block account for a single address.
-type preBlockReader struct {
-	addr accounts.Address
-	acc  *accounts.Account
-}
-
-func (r *preBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
-	if a == r.addr {
-		return r.acc, nil
-	}
-	return nil, nil
-}
-func (r *preBlockReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
-	return nil, nil
-}
-func (r *preBlockReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
-	return uint256.Int{}, false, nil
-}
-func (r *preBlockReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
-func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
-func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
-func (r *preBlockReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
-func (r *preBlockReader) SetTrace(bool, string)                                   {}
-func (r *preBlockReader) Trace() bool                                             { return false }
-func (r *preBlockReader) TracePrefix() string                                     { return "" }
 
 // TestSDOfPreExistingContract_FullPipeline drives the production pipeline
 // end-to-end for an SD-of-pre-existing-contract scenario:
 //
-//	IBS.Selfdestruct (intra_block_state.go ~1430) emits via versionWritten:
-//	    IncarnationPath = original.Incarnation
+//	IBS.Selfdestruct emits via versionWritten:
+//	    IncarnationPath = 0 (the fixture writes a synthetic non-zero value
+//	                       to check that the calculator zeroes it)
 //	    SelfDestructPath = true
 //	    BalancePath = 0
 //	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
-//	  → those land in blockIO.WriteSet → rawWrites
-//	  → rawWrites.Normalize(vm, txIndex, incarnation, stateReader, nil, true, false)
-//	  → calcState.ApplyWrites(normalized)
+//	  → those land in blockIO.WriteSet → rawWrites → the raw versionMap view
+//	  → calcState.ApplyWrites(rawView)
 //	  → calcState.FlushToUpdates(updates)
 //
-// This test populates `vm` with the same versionWritten emits IBS.Selfdestruct
-// publishes in production (concern #1 from yperbasis review on PR #21032 —
-// the prior version of this test had an empty vm and so the completion
-// loop's vm.Read fallback never fired, masking the actual production flow).
+// This test also populates `vm` with these writes, so the completion loop's
+// vm.Read fallback runs as in production; only the incarnation value differs.
 //
 // What it locks in (post-#21088 corrected semantics):
 //  1. Normalize detects SD'd addresses by scanning for
@@ -334,60 +370,12 @@ func (r *preBlockReader) TracePrefix() string                                   
 func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
 
-	preBlockBalance := *uint256.NewInt(1_000_000)
-	preBlockNonce := uint64(7)
-	preBlockCodeHash := accounts.InternCodeHash(common.Hash{0xab, 0xcd, 0xef})
-	preBlockIncarnation := uint64(3)
-
-	original := &accounts.Account{
-		Balance:     preBlockBalance,
-		Nonce:       preBlockNonce,
-		CodeHash:    preBlockCodeHash,
-		Incarnation: preBlockIncarnation,
-	}
-
-	// Build the authoritative versioned writes produced by self-destruct.
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, uint256.Int{}).
-		build()
-
-	// Populate vm with the same writes — IBS.Selfdestruct calls versionWritten
-	// which goes through the version map, so by the time Normalize's
-	// completion loop runs, vm.Read sees these values.
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, uint256.Int{}, true)
-
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, false)
-	// SD-aware filtering: only SelfDestructPath survives in the normalized
-	// writeset for the SD'd address. The raw IncarnationPath/BalancePath
-	// writes are dropped, and the completion loop skips this address.
-	pathSeen := map[state.AccountPath]struct{}{}
-	for h := range normalized.AllHeaders() {
-		switch h.Path {
-		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.IncarnationPath, state.SelfDestructPath:
-			pathSeen[h.Path] = struct{}{}
-		}
-	}
-	require.Contains(t, pathSeen, state.SelfDestructPath,
-		"SelfDestructPath=true must survive normalize for the pure-delete branch in applyVersionedWrites")
-	assert.NotContains(t, pathSeen, state.IncarnationPath,
-		"IncarnationPath must be filtered for SD'd address — otherwise applyVersionedWrites takes cleanup-before-recreate")
-	assert.NotContains(t, pathSeen, state.BalancePath,
-		"BalancePath must be filtered for SD'd address — same reason")
-	assert.NotContains(t, pathSeen, state.NoncePath,
-		"NoncePath must not be filled by completion-loop fallback for SD'd address")
-	assert.NotContains(t, pathSeen, state.CodeHashPath,
-		"CodeHashPath must not be filled by completion-loop fallback for SD'd address")
-
-	// Drive ApplyWrites + FlushToUpdates.
+	// A real burn of a pre-existing contract (incarnation 3, balance 1M). The
+	// calc's SelfDestructPath handling drops the field writes and marks the
+	// account deleted — the SD-aware collapse Normalize used to do up front. The
+	// assertions below pin that result.
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized, false)
+	cs.ApplyWrites(sdPreExistingWrites(t, addr, *uint256.NewInt(1_000_000), false))
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
@@ -435,60 +423,21 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	preSDValue1 := *uint256.NewInt(0xaaaa)
 	preSDValue2 := *uint256.NewInt(0xbbbb)
 
-	original := &accounts.Account{
-		Balance:     *uint256.NewInt(1),
-		Nonce:       1,
-		Incarnation: 5,
-	}
-
-	// Pre-load cs.storageState with the pre-SD slot values, simulating
-	// IBS having read those slots earlier in the block. ApplyWrites'
-	// SelfDestructPath case marks them dirty without zeroing — so the
-	// load-bearing question is whether Normalize appends the
-	// StoragePath=0 entries needed to overwrite these values.
+	// Pre-load cs.storageState with the pre-SD slot values, simulating IBS
+	// having read those slots earlier in the block. The load-bearing question
+	// is whether the SD path zeroes these touched slots (zeroTouchedStorage) so
+	// they emit per-slot deletes instead of leaking their pre-SD values.
 	cs := newTestCalcState()
 	cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{
 		slot1: preSDValue1,
 		slot2: preSDValue2,
 	}
 
-	// Populate vm with StoragePath entries for both slots (this is what
-	// IBS' versionWritten does when EVM SLOAD/SSTORE touches a slot).
-	// Without these, vm.StorageKeys(addr) returns nil and the cascade
-	// never fires.
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	vm := state.NewVersionMap(nil)
-	vm.WriteStorage(addr, slot1, ver, preSDValue1, true)
-	vm.WriteStorage(addr, slot2, ver, preSDValue2, true)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, uint256.Int{}, true)
-
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, uint256.Int{}).
-		build()
-
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, false)
-	// Sanity: Normalize should have appended one StoragePath=0
-	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing
-	// emit. If it's gone, the assertions below will still catch the
-	// effect (slots leak pre-SD values into the trie), but check it
-	// here too so a regression points directly at the offending loop.
-	storageZeroCount := 0
-	for _, inner := range normalized.Storages() {
-		for _, w := range inner {
-			assert.True(t, w.Val.IsZero(),
-				"Normalize must emit StoragePath=0 for SD'd slots, got %v", w.Val)
-			storageZeroCount++
-		}
-	}
-	assert.Equal(t, 2, storageZeroCount,
-		"Normalize must emit one StoragePath=0 entry per vm.StorageKeys(addr) — this is the storage cascade")
-
-	cs.ApplyWrites(normalized, false)
+	// SD'd account with touched slots: the calc's zeroTouchedStorage zeroes and
+	// dirties the touched slots (the cascade Normalize did via vm.StorageKeys),
+	// so FlushToUpdates below emits a DeleteUpdate per slot rather than leaking
+	// the pre-SD value.
+	cs.ApplyWrites(sdPreExistingWrites(t, addr, *uint256.NewInt(1_000_000), false))
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -514,62 +463,57 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
-// mockStorageEnum returns a fixed persisted-slot set per address.
-type mockStorageEnum struct {
-	slots map[accounts.Address][]accounts.StorageKey
-}
-
-func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
-	for _, k := range m.slots[addr] {
-		if err := fn(k); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete pins that a
-// self-destruct emits no per-slot deletes for untouched on-disk storage: the
-// account DeleteUpdate collapses the subtree, so the injected enumerator must
-// not be consulted.
-func TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete(t *testing.T) {
+// TestSDOfPreExistingContract_MarksSubtreeReset checks that a self-destruct sets
+// the empty-base signal on the account update and does NOT enumerate untouched
+// on-disk slots. The whole storage subtree is dropped by the trie's empty-base
+// signal and GC'd from the CommitmentDomain by the committer — not by per-slot
+// deletes.
+func TestSDOfPreExistingContract_MarksSubtreeReset(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
-	untouched1 := accounts.InternKey(common.Hash{0x11})
-	untouched2 := accounts.InternKey(common.Hash{0x22})
 
 	cs := newTestCalcState()
-	cs.storageEnum = &mockStorageEnum{slots: map[accounts.Address][]accounts.StorageKey{
-		addr: {untouched1, untouched2},
-	}}
 
 	cs.ApplyWrites(newWS().
 		inc(addr, state.Version{}, uint64(3)).
 		selfDestruct(addr, state.Version{}, true).
 		bal(addr, state.Version{}, uint256.Int{}).
-		build(), false)
+		build())
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
 
 	addrBytes := addr.Value()
-	storageUpdates := 0
-	var accountUpdate *commitment.Update
+	var acctUpdate *commitment.Update
+	slotUpdates := 0
 	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
 		switch {
-		case len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]):
-			storageUpdates++
 		case len(k) == 20 && bytes.Equal(k, addrBytes[:]):
 			cp := *u
-			accountUpdate = &cp
+			acctUpdate = &cp
+		case len(k) == 52 && bytes.Equal(k[:20], addrBytes[:]):
+			slotUpdates++
 		}
 		return nil
 	}))
 
-	assert.Zero(t, storageUpdates,
-		"self-destruct must not enumerate/emit per-slot deletes for untouched on-disk slots — the account delete collapses the subtree")
-	require.NotNil(t, accountUpdate, "the self-destructed account must emit an update")
-	assert.Equal(t, commitment.DeleteUpdate, accountUpdate.Flags,
-		"a fully self-destructed account emits DeleteUpdate, which collapses its storage subtree in the trie")
+	require.NotNil(t, acctUpdate, "account update must be emitted")
+	assert.True(t, acctUpdate.DeleteStorageSubtree,
+		"self-destruct must set the empty-base signal so the trie drops the whole storage subtree")
+	assert.Equal(t, 0, slotUpdates,
+		"untouched on-disk slots must NOT be enumerated (dropped by the empty-base signal + committer GC)")
+}
+
+// updatesSnapshot captures every emitted Update keyed by plainKey, in a form
+// comparable across two Updates instances (flags + account fields + storage).
+func updatesSnapshot(t *testing.T, updates *commitment.Updates) map[string]string {
+	t.Helper()
+	out := make(map[string]string)
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		out[string(k)] = fmt.Sprintf("flags=%d bal=%s nonce=%d code=%x stor=%x delSubtree=%v",
+			u.Flags, u.Balance.String(), u.Nonce, u.CodeHash, u.Storage[:u.StorageLen], u.DeleteStorageSubtree)
+		return nil
+	}))
+	return out
 }
 
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {
@@ -602,14 +546,10 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 	vm.WriteNonce(zeroAddr, ver, uint64(0), true)
 	vm.WriteCodeHash(zeroAddr, ver, accounts.EmptyCodeHash, true)
 
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, nil, nil, false, false, false)
-	for h := range normalized.AllHeaders() {
-		assert.NotEqual(t, state.SelfDestructPath, h.Path,
-			"emptyRemoval=false must suppress SelfDestructPath emission for empty accounts")
-	}
-
+	// emptyRemoval=false (genesis bypass): the empty account is retained, so no
+	// EIP-161 removal pass runs and the account is not deleted.
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized, false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
 	acc, ok := cs.accounts[zeroAddr]
 	require.True(t, ok)
 	assert.False(t, acc.Deleted)
@@ -622,6 +562,45 @@ func TestNormalizeWriteSet_GenesisBypassRetainsEmptyAccount(t *testing.T) {
 		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
 		got.Flags,
 		"empty account at genesis must emit full UPDATE, matching serial's TrieContext.Account")
+}
+
+// A touch of a pre-existing empty account with an incarnation (it held storage)
+// removes it under EIP-161: the removal the touching tx writes keeps the leaf deleted.
+func TestApplyWrites_TouchedEmptyAccountWithIncarnationDeletes(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x0e, 0x49, 0x72})
+	acc := &accounts.Account{Incarnation: 1, CodeHash: accounts.EmptyCodeHash}
+	reader := &seededReader{NoopReader: state.NewNoopReader(), addr: addr, acc: acc}
+	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
+
+	cs := newTestCalcState()
+	cs.accounts[addr] = &calcAccountState{CodeHash: empty.CodeHash, Incarnation: 1}
+	cs.ApplyWrites(writes)
+	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
+	assert.True(t, cs.accounts[addr].Deleted)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+	keyVal := addr.Value()
+	assert.Equal(t, commitment.DeleteUpdate, lookupKeyUpdate(t, updates, string(keyVal[:])).Flags)
+}
+
+// A BAL block carries no removal marker, so the block-end pass alone must delete
+// a touched empty account, also one that keeps an incarnation.
+func TestApplyEIP161Removal_TouchedEmptyAccountWithIncarnation(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x0e, 0x49, 0x73})
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	rawWrites := newWS().bal(addr, ver, uint256.Int{}).build()
+	vm := state.NewVersionMap(nil)
+	vm.WriteBalance(addr, ver, uint256.Int{}, true)
+
+	cs := newTestCalcState()
+	cs.accounts[addr] = &calcAccountState{CodeHash: empty.CodeHash, Incarnation: 1}
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
+	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
+	assert.True(t, cs.accounts[addr].Deleted)
 }
 
 // TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161 pins that emptyRemoval=true
@@ -640,15 +619,12 @@ func TestNormalizeWriteSet_PostGenesisEmptyAccountTriggersEIP161(t *testing.T) {
 	vm.WriteNonce(addr, ver, uint64(0), true)
 	vm.WriteCodeHash(addr, ver, accounts.EmptyCodeHash, true)
 
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, nil, nil, true, false, false)
-	sdSeen := false
-	if w, ok := normalized.GetSelfDestruct(addr); ok {
-		sdSeen = w.Val
-	}
-	require.True(t, sdSeen, "emptyRemoval=true must emit SelfDestructPath=true for empty account")
-
+	// emptyRemoval=true: the block-end EIP-161 pass marks the touched-empty
+	// account deleted (the removal Normalize used to synthesize as a
+	// SelfDestructPath entry up front).
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized, false)
+	cs.ApplyWrites(state.NewVersionMapWriteView(rawWrites, vm, 0))
+	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
 	assert.True(t, acc.Deleted)
@@ -681,32 +657,16 @@ func sdEIP8246Original() *accounts.Account {
 
 // buildSDWithPostBalance runs the production normalize+apply pipeline for a
 // pre-existing contract that self-destructs and ends the block holding
-// postSDBalance, under the given eip8246 flag. It returns the resulting
-// calcState so callers can inspect the account and flush to updates.
-func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *calcState {
+// postSDBalance, with preserve selecting the EIP-8246 balance-preserving
+// destruct. It returns the resulting calcState so callers can inspect the
+// account and flush to updates. The preserve/burn decision reaches calc_state as
+// the balance write's valStatus stamp — produced by the real IBS.Selfdestruct,
+// not a hand-crafted cell.
+func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance uint256.Int, preserve bool) *calcState {
 	t.Helper()
-	original := sdEIP8246Original()
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-
-	// IBS.Selfdestruct emits IncarnationPath=preInc, SelfDestructPath=true and
-	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
-	// moved-in/retained balance).
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
-
 	cs := newTestCalcState()
-	cs.ApplyWrites(normalized, eip8246)
+	cs.ApplyWrites(sdPreExistingWrites(t, addr, postSDBalance, preserve))
+	cs.ApplyEIP161Removal(true /*emptyRemoval*/, false /*isAura*/)
 	return cs
 }
 
@@ -729,7 +689,12 @@ func TestEIP8246_NormalizeApply_PreservedBalanceSurvives(t *testing.T) {
 		"eip8246=true must preserve the post-SD balance instead of burning it")
 	assert.Equal(t, uint64(0), acc.Nonce, "SD must still reset Nonce")
 	assert.Equal(t, [32]byte(empty.CodeHash), acc.CodeHash, "SD must still reset CodeHash to empty")
-	assert.Equal(t, uint64(0), acc.Incarnation, "SD must still reset Incarnation")
+	// Incarnation is intentionally not asserted here: a balance-revived account
+	// is NOT Deleted, so FlushToUpdates takes the plain-UPDATE branch, which
+	// never consults Incarnation (only a Deleted+all-zero account branches on it,
+	// to choose DeleteUpdate vs ZeroAccountUpdate). The account's authoritative
+	// incarnation lives in the domain record and is 0 there — see
+	// TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord.
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -804,37 +769,18 @@ func TestEIP8246_NormalizeApply_PreVsPost_BalanceHandling(t *testing.T) {
 // applySDToDomains seeds a pre-block contract into real domains, runs the
 // production normalize+apply pipeline for its self-destruct ending the tx with
 // postSDBalance (eip8246=true), and returns the accounts-domain record left
-// behind. useBlockCache selects the parallel-executor route (writes buffered
-// in a BlockStateCache and flushed at block end) vs direct domain writes.
-func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache bool) []byte {
+// behind.
+func applySDToDomains(t *testing.T, postSDBalance uint256.Int) []byte {
 	t.Helper()
 	tx, domains := setup2CacheTest(t)
 	addr := accounts.InternAddress(common.HexToAddress("0x8246E"))
 	original := sdEIP8246Original()
 	addrVal := addr.Value()
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(original), 0, nil))
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, true)
+	rawView := sdPreExistingWrites(t, addr, postSDBalance, true)
 	rs := state.NewStateV3(domains, false, log.New())
-	var blockCache *state.BlockStateCache
-	if useBlockCache {
-		blockCache = state.NewBlockStateCache()
-	}
-	err := rs.ApplyStateWrites(context.Background(), tx, 1, 1, normalized, nil, &chain.Rules{IsAmsterdam: true}, blockCache)
+	err := rs.ApplyStateWrites(context.Background(), tx, 1, 1, rawView, nil, &chain.Rules{IsAmsterdam: true})
 	require.NoError(t, err)
-	if useBlockCache {
-		require.NoError(t, blockCache.Flush(domains, tx))
-	}
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
 	return enc
@@ -850,17 +796,9 @@ func TestEIP8246_ApplySDWrites_ZeroBalanceDeletesDomainRecord(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires mdbx")
 	}
-	for _, useBlockCache := range []bool{true, false} {
-		name := "direct"
-		if useBlockCache {
-			name = "blockCache"
-		}
-		t.Run(name, func(t *testing.T) {
-			enc := applySDToDomains(t, uint256.Int{}, useBlockCache)
-			assert.Empty(t, enc,
-				"zero-balance EIP-8246 self-destruct must delete the accounts-domain record, got %x", enc)
-		})
-	}
+	enc := applySDToDomains(t, uint256.Int{})
+	assert.Empty(t, enc,
+		"zero-balance EIP-8246 self-destruct must delete the accounts-domain record, got %x", enc)
 }
 
 func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testing.T) {
@@ -868,10 +806,115 @@ func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testin
 		t.Skip("requires mdbx")
 	}
 	postSDBalance := *uint256.NewInt(5)
-	enc := applySDToDomains(t, postSDBalance, true)
+	enc := applySDToDomains(t, postSDBalance)
 	require.NotEmpty(t, enc, "preserved-balance EIP-8246 self-destruct must leave an account record")
 	expected := accounts.NewAccount()
 	expected.Balance = postSDBalance
 	assert.Equal(t, accounts.SerialiseV3(&expected), enc,
 		"record must be balance-only: nonce, code hash and incarnation cleared")
+}
+
+func TestFlushToUpdates_EmitsOnlyAccountsWrittenSinceReset(t *testing.T) {
+	cs := newTestCalcState()
+	a := accounts.InternAddress(common.Address{0xa1})
+	b := accounts.InternAddress(common.Address{0xb2})
+
+	cs.ApplyWrites(newWS().
+		bal(a, state.Version{}, *uint256.NewInt(1)).
+		bal(b, state.Version{}, *uint256.NewInt(2)).
+		build())
+	first := newTestUpdates()
+	cs.FlushToUpdates(first)
+	require.Len(t, updatesSnapshot(t, first), 2)
+	cs.ResetBlockFlags()
+
+	cs.ApplyWrites(newWS().nonce(b, state.Version{}, 7).build())
+	second := newTestUpdates()
+	cs.FlushToUpdates(second)
+	got := updatesSnapshot(t, second)
+	require.Len(t, got, 1, "an account untouched since ResetBlockFlags must not be re-emitted")
+	bKey := b.Value()
+	require.Contains(t, got[string(bKey[:])], "bal=2 nonce=7", "the accumulated balance must survive the reset")
+}
+
+func TestApplyWrites_EveryPathListsTheAccountAfterReset(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{0xc3})
+	addrKey := addr.Value()
+	cases := map[string]func(*wsb) *wsb{
+		"balance": func(w *wsb) *wsb { return w.bal(addr, state.Version{}, *uint256.NewInt(5)) },
+		"nonce":   func(w *wsb) *wsb { return w.nonce(addr, state.Version{}, 5) },
+		"codeHash": func(w *wsb) *wsb {
+			return w.codeHash(addr, state.Version{}, accounts.InternCodeHash(common.Hash{0x11}))
+		},
+		"code":         func(w *wsb) *wsb { return w.code(addr, state.Version{}, accounts.NewCode([]byte{0x60, 0x00})) },
+		"incarnation":  func(w *wsb) *wsb { return w.inc(addr, state.Version{}, 1) },
+		"selfDestruct": func(w *wsb) *wsb { return w.selfDestruct(addr, state.Version{}, true) },
+	}
+	for name, write := range cases {
+		t.Run(name, func(t *testing.T) {
+			cs := newTestCalcState()
+			cs.ApplyWrites(newWS().bal(addr, state.Version{}, *uint256.NewInt(1)).build())
+			cs.ResetBlockFlags()
+			cs.ApplyWrites(write(newWS()).build())
+			updates := newTestUpdates()
+			cs.FlushToUpdates(updates)
+			require.Contains(t, updatesSnapshot(t, updates), string(addrKey[:]),
+				"a %s write after ResetBlockFlags must list the account for the next flush", name)
+		})
+	}
+}
+
+func TestApplyWrites_RepeatedWritesListTheAccountOnce(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress(common.Address{0xd4})
+	for i := uint64(1); i <= 3; i++ {
+		cs.ApplyWrites(newWS().
+			bal(addr, state.Version{}, *uint256.NewInt(i)).
+			nonce(addr, state.Version{}, i).
+			build())
+	}
+	require.Len(t, cs.dirtyAccounts, 1)
+	cs.ResetBlockFlags()
+	require.Empty(t, cs.dirtyAccounts)
+}
+
+func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
+	cs := newTestCalcState()
+	a := accounts.InternAddress(common.Address{0xe5})
+	b := accounts.InternAddress(common.Address{0xf6})
+	aKey, bKey := a.Value(), b.Value()
+
+	cs.ApplyWrites(newWS().bal(a, state.Version{}, *uint256.NewInt(1)).build())
+	checkpoint := newTestUpdates()
+	cs.FlushToUpdates(checkpoint)
+	require.Len(t, updatesSnapshot(t, checkpoint), 1)
+
+	cs.ApplyWrites(newWS().bal(b, state.Version{}, *uint256.NewInt(2)).build())
+	blockEnd := newTestUpdates()
+	cs.FlushToUpdates(blockEnd)
+	got := updatesSnapshot(t, blockEnd)
+	require.Len(t, got, 2, "a flush without ResetBlockFlags must keep earlier dirty accounts for the block-end flush")
+	require.Contains(t, got, string(aKey[:]))
+	require.Contains(t, got, string(bKey[:]))
+	require.Len(t, cs.dirtyAccounts, 2, "a mid-block flush must not list an account twice")
+}
+
+// A field missing from the writes must still load from the domain, else it
+// would flush as zero.
+func TestApplyWrites_ReadsBaselineWhenWritesIncomplete(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe2})
+	_, tx, doms := setupStepTest(t)
+	baseline := accounts.Account{Nonce: 7, Balance: *uint256.NewInt(99), CodeHash: accounts.EmptyCodeHash}
+	addrVal := addr.Value()
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&baseline), 1, nil))
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 2, dr: state.NewLayeredDomainReader(doms, nil, nil).CloneWithTx(tx)}
+	cs := newCalcState(reader, log.New(), "test")
+
+	cs.ApplyWrites(newWS().bal(addr, state.Version{}, *uint256.NewInt(5)).build())
+	require.NoError(t, cs.LazyLoadErr())
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "the write wins over the baseline")
+	assert.Equal(t, uint64(7), acc.Nonce, "the untouched nonce comes from the baseline")
 }

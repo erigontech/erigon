@@ -38,7 +38,7 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
-func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
+func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	cfg := m.snCfg
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
@@ -90,7 +90,6 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 
 func (m *Merger) mergeSubSegment(
 	ctx context.Context,
-	v *View,
 	sn snaptype.FileInfo,
 	toMerge []*DirtySegment,
 	snapDir string,
@@ -121,7 +120,7 @@ func (m *Merger) mergeSubSegment(
 	if len(toMerge) == 0 {
 		return
 	}
-	if newDirtySegment, err = m.merge(ctx, v, toMerge, sn, snapDir, nil); err != nil {
+	if newDirtySegment, err = m.merge(ctx, toMerge, sn, snapDir); err != nil {
 		err = fmt.Errorf("mergeByAppendSegments: %w", err)
 		return
 	}
@@ -144,7 +143,7 @@ func (m *Merger) mergeSubSegment(
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//log.Info("[snapshots] build idx", "file", sn.Name())
 	if err := sn.Type.BuildIndexes(ctx, sn, indexBuilder, chainConfig, tmpDir, p, lvl, logger); err != nil {
-		return fmt.Errorf("buildIdx: %s: %s", sn.Type, err)
+		return fmt.Errorf("buildIdx: %s: %w", sn.Type, err)
 	}
 	//log.Info("[snapshots] finish build idx", "file", fName)
 	return nil
@@ -222,7 +221,6 @@ func (m *Merger) Merge(
 		for _, t := range snapTypes {
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
-				v,
 				t.FileInfo(snapDir, r.From(), r.To()),
 				toMerge[t.Enum()],
 				snapDir,
@@ -247,7 +245,7 @@ func (m *Merger) Merge(
 			}
 		}
 
-		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
+		// TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
 		toMergeFileNames := make([]string, 0, 16)
 		for _, segments := range toMerge {
 			for _, segment := range segments {
@@ -329,16 +327,22 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out m
 	}
 }
 
-func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, error) {
-	var word = make([]byte, 0, 4096)
+func (m *Merger) merge(ctx context.Context, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string) (*DirtySegment, error) {
+	word := make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
+	defer func() {
+		for _, d := range cList {
+			if d != nil {
+				d.Close()
+			}
+		}
+	}()
 	for i, cFile := range toMerge {
 		d, err := seg.NewDecompressor(cFile.FilePath())
 		if err != nil {
 			return nil, err
 		}
-		defer d.Close()
 		cList[i] = d
 		expectedTotal += d.Count()
 	}
@@ -356,17 +360,22 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		view, err := d.OpenSequentialView(true)
-		if err != nil {
-			return nil, err
-		}
-		defer view.Close()
-		g := view.MakeGetter()
-		for g.HasNext() {
-			word, _ = g.Next(word[:0])
-			if err := f.AddWord(word); err != nil {
-				return nil, err
+		if err := func() error {
+			view, err := d.OpenSequentialView()
+			if err != nil {
+				return err
 			}
+			defer view.Close()
+			g := view.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				if err := f.AddWord(word); err != nil {
+					return err
+				}
+			}
+			return nil
+		}(); err != nil {
+			return nil, err
 		}
 	}
 	if f.Count() != expectedTotal {

@@ -134,7 +134,7 @@ func StartServe(
 	srvCfg *ServerConfig,
 	creds credentials.TransportCredentials,
 ) {
-	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
+	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr) //nolint:noctx
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 		return

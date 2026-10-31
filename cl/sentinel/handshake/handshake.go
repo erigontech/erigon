@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 
 	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
@@ -125,7 +126,7 @@ func (h *HandShaker) IsSet() bool {
 	return h.set
 }
 
-func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
+func (h *HandShaker) ValidatePeer(ctx context.Context, id peer.ID) (bool, error) {
 	// Always validate fork digest — the constructor initialises it from
 	// ethClock, so we can reject wrong-network peers even before the CL
 	// stages call SetStatus with finalized/head info.
@@ -155,7 +156,7 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	if err := ssz_snappy.EncodeAndWrite(buf, status); err != nil {
 		return false, err
 	}
-	req, err := http.NewRequest("GET", "http://service.internal/", buf)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", buf)
 	if err != nil {
 		return false, err
 	}
@@ -170,9 +171,18 @@ func (h *HandShaker) ValidatePeer(id peer.ID) (bool, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
-		a, _ := io.ReadAll(resp.Body)
-		return false, fmt.Errorf("hand shake error: %s, %s", resp.Header.Get("REQRESP-RESPONSE-CODE"), string(a))
+	responseCodeText := resp.Header.Get("REQRESP-RESPONSE-CODE")
+	if responseCodeText != "0" {
+		code, err := strconv.Atoi(responseCodeText)
+		if err != nil {
+			message, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+			return false, fmt.Errorf("hand shake error: %s, %s", responseCodeText, message)
+		}
+		message, err := httpreqresp.ResponseCode(code).ErrorMessage(resp)
+		if err != nil {
+			return false, fmt.Errorf("hand shake error: %s, %w", responseCodeText, err)
+		}
+		return false, fmt.Errorf("hand shake error: %s, %s", responseCodeText, message)
 	}
 	responseStatus := &cltypes.Status{}
 

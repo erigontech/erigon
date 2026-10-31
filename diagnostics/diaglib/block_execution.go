@@ -16,15 +16,6 @@
 
 package diaglib
 
-import (
-	"sync"
-)
-
-type BlockEexcStatsData struct {
-	data BlockExecutionStatistics
-	mu   sync.Mutex
-}
-
 type BlockExecutionStatistics struct {
 	From        uint64  `json:"from"`
 	To          uint64  `json:"to"`

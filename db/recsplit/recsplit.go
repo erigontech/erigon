@@ -146,14 +146,14 @@ type RecSplit struct {
 	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
 	dataStructureVersion version.DataStructureVersion
 
-	//v0 fields
+	// v0 fields
 	existenceFV0 *os.File
 	existenceWV0 *bufio.Writer
 
-	//v1 fields
+	// v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
-	//v2 fields
+	// v2 fields
 	existenceFV2 *fusefilter.WriterSharded
 
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
@@ -235,8 +235,10 @@ type Timings struct {
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
 // sizes gives more compact structures (1.56 bits per key), at the	price of a slower construction time
-const DefaultLeafSize = 8
-const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
+const (
+	DefaultLeafSize   = 8
+	DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
+)
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
@@ -248,9 +250,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 
 	if len(args.StartSeed) == 0 {
-		args.StartSeed = []uint64{0x106393c187cae2a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+		args.StartSeed = []uint64{
+			0x106393c187cae2a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a,
+		}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	if bucketCount > math.MaxUint32 {
@@ -302,7 +306,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			}
 			rs.existenceWV0 = bufiopool.Writer(rs.existenceFV0)
 		}
-
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
 		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
@@ -385,6 +388,7 @@ func (sc *recsplitScratch) golombParamSlow(m uint16) int {
 	}
 	return int(sc.golombRice[m] >> 27)
 }
+
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		_ = rs.indexF.Close()
@@ -448,8 +452,9 @@ func remap16(x uint64, n uint16) uint16 {
 }
 
 // ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
-// when mapping keys to 64-bit values
-func (rs *RecSplit) ResetNextSalt() {
+// when mapping keys to 64-bit values. Everything the failed attempt accumulated has to go:
+// the encoders append into their existing buffers, so leftovers land in the rebuilt index.
+func (rs *RecSplit) ResetNextSalt() error {
 	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
@@ -468,11 +473,39 @@ func (rs *RecSplit) ResetNextSalt() {
 		_, _ = rs.offsetFile.Seek(0, 0)
 		rs.offsetWriter.Reset(rs.offsetFile)
 	}
+	rs.gr.Reset()
+	rs.ef = eliasfano16.DoubleEliasFano{}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	rs.maxOffset = 0
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
 	rs.bucketPosAcc = rs.bucketPosAcc[:1]   // First entry is always zero
+
+	if rs.existenceFV0 != nil {
+		// a completed Build closes this file, so start a fresh one rather than rewind
+		_ = rs.existenceFV0.Close()
+		_ = dir.RemoveFile(rs.existenceFV0.Name())
+		f, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return err
+		}
+		rs.existenceFV0 = f
+		rs.existenceWV0.Reset(f)
+	}
+	if rs.existenceFV1 != nil || rs.existenceFV2 != nil {
+		if rs.existenceFV1 != nil {
+			rs.existenceFV1.Close()
+		}
+		if rs.existenceFV2 != nil {
+			rs.existenceFV2.Close()
+		}
+		var err error
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
@@ -889,11 +922,13 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 	}
 
 	mmapSize := int(rs.keysAdded * 8)
-	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	mmapHandle1, err := mmap.OpenRo(rs.offsetFile, mmapSize)
 	if err != nil {
 		return fmt.Errorf("mmap offset file: %w", err)
 	}
-	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+	// Discarded, not folded into retErr: an Unmap failure here would trigger the
+	// retErr-triggered cleanup above and discard an offsetEf that finished building correctly.
+	defer func() { _ = mmapHandle1.Unmap() }()
 
 	data := mmapHandle1[:mmapSize]
 	for i := uint64(0); i < rs.keysAdded; i++ {
@@ -943,24 +978,25 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
 	}
 
-	var err error
-	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
+	indexF, createErr := dir.CreateTemp(rs.filePath)
+	if createErr != nil {
+		return fmt.Errorf("create index file %s: %w", rs.filePath, createErr)
 	}
-
+	rs.indexF = indexF
 	defer rs.indexF.Close()
 	rs.indexW = bufiopool.Writer(rs.indexF)
 	defer bufiopool.PutWriter(rs.indexW)
+
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 
 	// Write number of keys
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
@@ -969,7 +1005,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	} else {
 		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
-	if err = rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
+	if err := rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
@@ -1088,7 +1124,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	if err = os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
+	if err := os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
 		rs.logger.Warn("[index] rename", "file", rs.indexF.Name(), "err", err)
 		return err
 	}
@@ -1101,7 +1137,7 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	if rs.dataStructureVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
 		defer rs.existenceFV0.Close()
 
-		//Write len of array
+		// Write len of array
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 		if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 			return err

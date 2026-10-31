@@ -35,3 +35,41 @@ func f(h *[8]uint64, m *[16]uint64, c0, c1 uint64, flag uint64, rounds uint64) {
 		fGeneric(h, m, c0, c1, flag, rounds)
 	}
 }
+
+//go:noescape
+func fAVX2Rounds(v *[16]uint64, m *[16]uint64, rounds uint64)
+
+// fRounds must not be inlined: its prologue carries the stack-growth check that
+// is the only preemption point of the chunk loop in fLong. Inlined, the loop
+// would call NOSPLIT assembly directly and become unpreemptible again.
+//
+//go:noinline
+func fRounds(v *[16]uint64, m *[16]uint64, rounds uint64) {
+	fAVX2Rounds(v, m, rounds)
+}
+
+func fLong(h *[8]uint64, m *[16]uint64, c0, c1 uint64, flag uint64, rounds uint64) {
+	if !useAVX2 {
+		// Deliberately not f(): fAVX and fSSE4 are one-shot, deriving the
+		// working vector from h and folding it back inside a single call, so
+		// they cannot be handed a chunk and have no bounded variant. Only
+		// fGeneric is safe here, being preemptible Go. Do not route this to
+		// f() without adding a chunked entry point for those two.
+		fGeneric(h, m, c0, c1, flag, rounds)
+		return
+	}
+	var v [16]uint64
+	copy(v[:8], h[:])
+	copy(v[8:], iv[:])
+	v[12] ^= c0
+	v[13] ^= c1
+	v[14] ^= flag
+	for rounds > 0 {
+		n := min(rounds, maxAsmRounds)
+		fRounds(&v, m, n)
+		rounds -= n
+	}
+	for i := range h {
+		h[i] ^= v[i] ^ v[i+8]
+	}
+}

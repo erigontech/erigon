@@ -41,27 +41,27 @@ func NewHashList(c int) HashListSSZ {
 	}
 }
 
-func (arr *hashList) Bytes() []byte {
-	return arr.u[:arr.l*length.Hash]
+func (h *hashList) Bytes() []byte {
+	return h.u[:h.l*length.Hash]
 }
 
-func (arr *hashList) MarshalJSON() ([]byte, error) {
-	list := make([]common.Hash, arr.l)
-	for i := 0; i < arr.l; i++ {
-		list[i] = arr.Get(i)
+func (h *hashList) MarshalJSON() ([]byte, error) {
+	list := make([]common.Hash, h.l)
+	for i := 0; i < h.l; i++ {
+		list[i] = h.Get(i)
 	}
 	return json.Marshal(list)
 }
 
-func (arr *hashList) UnmarshalJSON(buf []byte) error {
+func (h *hashList) UnmarshalJSON(buf []byte) error {
 	var list []common.Hash
 
 	if err := json.Unmarshal(buf, &list); err != nil {
 		return err
 	}
-	arr.Clear()
+	h.Clear()
 	for _, elem := range list {
-		arr.Append(elem)
+		h.Append(elem)
 	}
 	return nil
 }

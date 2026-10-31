@@ -18,10 +18,13 @@ package chain
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -317,4 +320,52 @@ func TestCheckConfigForkOrder(t *testing.T) {
 			}
 		})
 	}
+}
+
+// forkTimestamps is the one inventory both the compatibility comparison and the ordering
+// check walk, so a time-based fork missing from it escapes both silently.
+func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
+	listed := make(map[string]bool)
+	for _, fork := range (&Config{}).forkTimestamps() {
+		listed[fork.name] = true
+	}
+
+	cfg := reflect.TypeFor[Config]()
+	for field := range cfg.Fields() {
+		if field.Type != reflect.TypeFor[*uint64]() {
+			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if !strings.HasSuffix(name, "Time") {
+			continue
+		}
+		require.True(t, listed[name], "%s is time-based but missing from forkTimestamps()", name)
+	}
+}
+
+// A shared config is read and copied by value from many goroutines at once, so reading the
+// blob schedule must not write to it.
+func TestGetBlobConfigDoesNotWriteConfig(t *testing.T) {
+	c := AllProtocolChanges.Copy()
+	before := *c
+	c.GetBlobConfig(0)
+	require.Equal(t, before, *c)
+}
+
+func TestIsPostMerge(t *testing.T) {
+	assert.False(t, (&Config{}).IsPostMerge(1_000_000, 1_000_000))
+
+	assert.True(t, (&Config{TerminalTotalDifficulty: uint256.NewInt(0)}).IsPostMerge(0, 0))
+
+	mergeHeight := &Config{TerminalTotalDifficulty: uint256.NewInt(1), MergeHeight: common.NewUint64(100), ShanghaiTime: common.NewUint64(1000)}
+	assert.False(t, mergeHeight.IsPostMerge(99, 0))
+	assert.True(t, mergeHeight.IsPostMerge(100, 0))
+
+	netsplit := &Config{MergeNetsplitBlock: common.NewUint64(100)}
+	assert.False(t, netsplit.IsPostMerge(99, 0))
+	assert.True(t, netsplit.IsPostMerge(100, 0))
+
+	shanghai := &Config{ShanghaiTime: common.NewUint64(1000)}
+	assert.False(t, shanghai.IsPostMerge(0, 999))
+	assert.True(t, shanghai.IsPostMerge(0, 1000))
 }

@@ -38,10 +38,12 @@ const syncedReorgRange = 8
 func (n *Notifications) PublishSyncState(tx kv.Getter, frozenBlocks uint64) error {
 	n.syncStateLock.Lock()
 	defer n.syncStateLock.Unlock()
-	reply, err := n.BuildSyncingReply(tx, frozenBlocks)
+	reply, err := n.buildSyncingReply(tx, frozenBlocks)
 	if err != nil {
 		return err
 	}
+	n.repinStartingBlock(reply)
+	n.withStartingBlock(reply)
 	stillSynced := n.lastSyncState != nil && !n.lastSyncState.Syncing && !reply.Syncing
 	if stillSynced || proto.Equal(n.lastSyncState, reply) {
 		return nil
@@ -73,11 +75,50 @@ func (n *Notifications) SubscribeSyncState(tx kv.Getter, frozenBlocks uint64) (c
 	return ch, seed, clean, nil
 }
 
+// repinStartingBlock pins the block the current sync session started from when a
+// new session begins. Only the publish path may pin it, since polls read
+// unordered tx views.
+//
+// A new session never lowers the pin: execution goes backwards only on an
+// unwind, and after one the report is already clamped to the current block.
+// A lower block here comes instead from a publish that read a pipeline tx later
+// rolled back — the same rollback that can make the node look briefly synced
+// and open this bogus session in the first place.
+func (n *Notifications) repinStartingBlock(reply *remoteproto.SyncingReply) {
+	if !reply.Syncing || (n.lastSyncState != nil && n.lastSyncState.Syncing) {
+		return
+	}
+	if pin := n.startingBlock.Load(); pin == nil || reply.CurrentBlock > *pin {
+		n.startingBlock.Store(proto.Uint64(reply.CurrentBlock))
+	}
+}
+
+// withStartingBlock reports the pin clamped to the current block: an unwind can
+// take execution below the pin, and a starting block above the current one
+// makes the progress ratio negative.
+func (n *Notifications) withStartingBlock(reply *remoteproto.SyncingReply) *remoteproto.SyncingReply {
+	start := reply.CurrentBlock
+	if pin := n.startingBlock.Load(); pin != nil {
+		start = min(*pin, reply.CurrentBlock)
+	}
+	reply.StartingBlock = &start
+	return reply
+}
+
 // BuildSyncingReply computes the sync status served by eth_syncing and
-// published on the SYNCING event stream. While the highest block is still
-// unknown (e.g. snapshots are downloading) it reports syncing with no stage
-// detail.
+// published on the SYNCING event stream.
 func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*remoteproto.SyncingReply, error) {
+	reply, err := n.buildSyncingReply(tx, frozenBlocks)
+	if err != nil {
+		return nil, err
+	}
+	return n.withStartingBlock(reply), nil
+}
+
+// buildSyncingReply builds the reply without the starting block. While the
+// highest block is still unknown (e.g. snapshots are downloading) it reports
+// syncing with no stage detail.
+func (n *Notifications) buildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*remoteproto.SyncingReply, error) {
 	highestBlock := max(n.LastNewBlockSeen.Load(), frozenBlocks)
 
 	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
@@ -88,8 +129,34 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 	reply := &remoteproto.SyncingReply{
 		CurrentBlock:     currentBlock,
 		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: highestBlock,
+		LastNewBlockSeen: max(currentBlock, highestBlock),
 		Syncing:          true,
+	}
+
+	if snap := n.snapDownload.Load(); snap != nil {
+		switch snap.phase {
+		case snapHandoff:
+			// Stop reporting the pin once this tx sees execution at the commitment
+			// block, but leave the state alone: the observing tx can be the pipeline's
+			// own rw tx, ahead of the committed view every poller reads. Ending the
+			// handoff belongs to the pipeline exit that owns it.
+			if currentBlock < snap.commitBlock {
+				reply.CurrentBlock = snap.commitBlock
+				reply.LastNewBlockSeen = max(snap.commitBlock, highestBlock)
+				return reply, nil
+			}
+		case snapDownloading:
+			// Map the byte-completion ratio onto the block-based fields so dashboards
+			// show smooth progress: currentBlock = ratio * blocks_to_be_downloaded.
+			// The ratio scales the snapshots' target, not the live head, which an FCU
+			// can push past what the snapshots actually cover. Committed progress is
+			// the floor: a node downloading further snapshots must not report a
+			// position below the one it already reached.
+			ratio := float64(snap.done) / float64(snap.total)
+			reply.CurrentBlock = max(currentBlock, uint64(ratio*float64(snap.targetBlock)))
+			reply.LastNewBlockSeen = max(reply.CurrentBlock, snap.targetBlock, highestBlock)
+			return reply, nil
+		}
 	}
 
 	if highestBlock == 0 {

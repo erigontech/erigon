@@ -72,7 +72,7 @@ func SetStatePruneProgress(tx kv.RwTx, table string, slot uint64) error {
 	return tx.Put(kv.StatesPruneProgress, []byte(table), base_encoding.Encode64ToBytes4(slot))
 }
 
-func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) (*SlotData, error) {
+func ReadSlotData(getFn GetValFn, slot uint64) (*SlotData, error) {
 	sd := &SlotData{}
 	v, err := getFn(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
@@ -83,7 +83,8 @@ func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) 
 	}
 	buf := bytes.NewBuffer(v)
 
-	return sd, sd.ReadFrom(buf, cfg)
+	err = sd.ReadFrom(buf)
+	return sd, err
 }
 
 func ReadEpochData(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconChainConfig) (*EpochData, error) {
@@ -100,7 +101,8 @@ func ReadEpochData(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconCha
 	}
 	buf := bytes.NewBuffer(v)
 
-	return ed, ed.ReadFrom(buf)
+	err = ed.ReadFrom(buf)
+	return ed, err
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized

@@ -28,6 +28,7 @@ var (
 	parentBlockWaitSecs    = metrics.GetOrCreateSummary("shutter_parent_block_wait_secs")
 	parentBlockOnTime      = metrics.GetOrCreateCounter("shutter_parent_block_on_time")
 	parentBlockMissed      = metrics.GetOrCreateCounter("shutter_parent_block_missed")
+	parentBlockWaitStopped = metrics.GetOrCreateCounter("shutter_parent_block_wait_stopped")
 	decryptionMarkWaitSecs = metrics.GetOrCreateSummary("shutter_decryption_mark_wait_secs")
 	decryptionMarkOnTime   = metrics.GetOrCreateCounter("shutter_decryption_mark_on_time")
 	decryptionMarkMissed   = metrics.GetOrCreateCounter("shutter_decryption_mark_missed")

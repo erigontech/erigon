@@ -1,0 +1,846 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package execctx_test
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+)
+
+func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.BindStateCache(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(unwindDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	events.PublishOverlay(nil)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the pre-reorg RPC view still sees the discarded fork")
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the pre-reorg RPC view must not refill the discarded fork")
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.BindStateCache(stateCache)
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestEmbeddedRPCViewOpenedAfterCommitCanFillStateCache(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+
+	commitTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer commitTx.Rollback()
+	publishedDomains, err := execctx.NewSharedDomains(ctx, commitTx, log.New())
+	require.NoError(t, err)
+	defer publishedDomains.Close()
+	publishedDomains.BindStateCache(stateCache)
+
+	written := make([]byte, 20)
+	written[0] = 0x01
+	publishedDomains.SetTxNum(5)
+	require.NoError(t, publishedDomains.DomainPut(kv.AccountsDomain, commitTx, written, encAccount(1), 5, nil))
+	require.NoError(t, publishedDomains.Commit(ctx, commitTx))
+
+	events := shards.NewEvents()
+	events.PublishOverlay(publishedDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	missing := make([]byte, 20)
+	missing[0] = 0x02
+	got, err := rpcView.Get(missing)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
+	require.True(t, ok, "a fresh RPC transaction must retain fill authority after the published SharedDomains commits")
+}
+
+func TestEmbeddedRPCViewCreatedDuringStagedUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	publishedTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer publishedTx.Rollback()
+	publishedDomains, err := execctx.NewSharedDomains(ctx, publishedTx, log.New())
+	require.NoError(t, err)
+	defer publishedDomains.Close()
+	publishedDomains.BindStateCache(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(publishedDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.BindStateCache(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the database still holds the old canonical state before unwind commit")
+
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the commit must invalidate fills admitted during the staged unwind")
+	lateRPCView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+	got, err = lateRPCView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the previous published SD still serves its old durable snapshot")
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the committed state version must reject later fills from the previous published SD")
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.BindStateCache(stateCache)
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.BindStateCache(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.BindStateCache(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(freshDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the old RPC transaction still sees the discarded fork")
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "binding an old RPC transaction after unwind must not refill the discarded fork")
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.BindStateCache(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.BindStateCache(stateCache)
+	require.NoError(t, freshDomains.InitBlockOverlay(freshTx))
+
+	overlayTx := freshDomains.BlockOverlay().NewReadView(rpcTx)
+	events := shards.NewEvents()
+	events.PublishOverlay(freshDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, overlayTx)
+	require.NoError(t, err)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the overlay read view still reads from the old RPC transaction")
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "an overlay around an old RPC transaction must not refill the discarded fork")
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	selectedDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
+	require.NoError(t, err)
+	defer selectedDomains.Close()
+	require.NoError(t, selectedDomains.InitBlockOverlay(rpcTx))
+
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	selectedValue := encAccount(1)
+	selectedDomains.SetTxNum(1)
+	require.NoError(t, selectedDomains.DomainPut(kv.AccountsDomain, rpcTx, key, selectedValue, 1, nil))
+
+	events := shards.NewEvents()
+	selectedTx := selectedDomains.BlockOverlay().NewReadView(rpcTx)
+
+	replacementDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
+	require.NoError(t, err)
+	defer replacementDomains.Close()
+	replacementDomains.SetTxNum(2)
+	require.NoError(t, replacementDomains.DomainPut(kv.AccountsDomain, rpcTx, key, encAccount(2), 2, nil))
+	events.PublishOverlay(replacementDomains)
+
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	for _, tc := range []struct {
+		name string
+		tx   kv.TemporalTx
+		want []byte
+	}{
+		{"overlay read view", selectedTx, selectedValue},
+		{"pinned overlay", rpchelper.PinToOverlay(rpcTx, selectedDomains.BlockOverlay()), selectedValue},
+		{"pinned without overlay", rpchelper.PinToOverlay(rpcTx, nil), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view, err := rpcCache.View(ctx, tc.tx)
+			require.NoError(t, err)
+			got, err := view.Get(key)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got, "the cache view must use the state generation selected by its transaction")
+		})
+	}
+}
+
+func TestEmbeddedRPCCacheViewHistoricalReads(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		history bool
+		pinned  bool
+	}{
+		{"pinned/history enabled", true, true},
+		{"pinned/history disabled", false, true},
+		{"unpinned/history enabled", true, false},
+		{"unpinned/history disabled", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			db := newTestDb(t, 16)
+			address, slot := common.Address{0xaa}, common.Hash{0xbb}
+			storageKey := make([]byte, 0, len(address)+len(slot))
+			storageKey = append(append(storageKey, address[:]...), slot[:]...)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			seed, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer seed.Close()
+			seed.SetTxNum(10)
+			require.NoError(t, seed.DomainPut(kv.AccountsDomain, rwTx, address[:], encAccount(1), 10, nil))
+			require.NoError(t, seed.DomainPut(kv.StorageDomain, rwTx, storageKey, []byte{1}, 10, nil))
+			require.NoError(t, rawdbv3.TxNums.Append(rwTx, 0, 19))
+			require.NoError(t, seed.Commit(ctx, rwTx))
+
+			tx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			newDomains := func(value byte, history bool) *execctx.SharedDomains {
+				t.Helper()
+				domains, createErr := execctx.NewSharedDomains(ctx, tx, log.New())
+				require.NoError(t, createErr)
+				t.Cleanup(domains.Close)
+				domains.SetInMemHistoryReads(history)
+				require.NoError(t, domains.InitBlockOverlay(tx))
+				domains.SetTxNum(20)
+				require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(uint64(value)), 20, encAccount(1)))
+				require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{value}, 20, []byte{1}))
+				domains.SetTxNum(22)
+				require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address[:], encAccount(uint64(value+1)), 22, encAccount(uint64(value))))
+				require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{value + 1}, 22, []byte{value}))
+				return domains
+			}
+			selected := newDomains(2, tc.history)
+			published := newDomains(4, tc.history || tc.pinned)
+
+			rpcTx := tx
+			want := uint64(4)
+			if tc.pinned {
+				rpcTx = rpchelper.PinToOverlay(tx, selected.BlockOverlay())
+				want = 2
+			}
+			rpcCache := &execmodule.Cache{}
+			rpcCache.SetPublishedSD(func() *execctx.SharedDomains { return published })
+			view, err := rpcCache.View(ctx, rpcTx)
+			require.NoError(t, err)
+			// Read at txNum 21, between the overlay writes: neither the database
+			// value nor the latest overlay value is the correct historical state.
+			reader, err := rpchelper.CreateHistoryCachedStateReader(ctx, view, rpcTx, 1, 0, rawdbv3.TxNums)
+			require.NoError(t, err)
+			for _, phase := range []string{"before teardown", "after teardown"} {
+				t.Run(phase, func(t *testing.T) {
+					t.Run("account", func(t *testing.T) {
+						account, err := reader.ReadAccountByPlainAddr(address)
+						if !tc.history {
+							require.ErrorIs(t, err, kv.ErrInMemHistoryDisabled)
+							return
+						}
+						require.NoError(t, err)
+						require.NotNil(t, account)
+						require.Equal(t, want, account.Nonce)
+					})
+					t.Run("storage", func(t *testing.T) {
+						value, found, err := reader.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
+						if !tc.history {
+							require.ErrorIs(t, err, kv.ErrInMemHistoryDisabled)
+							return
+						}
+						require.NoError(t, err)
+						require.True(t, found)
+						require.Equal(t, *uint256.NewInt(want), value)
+					})
+				})
+				selected.Close()
+				published.Close()
+			}
+		})
+	}
+}
+
+func TestEmbeddedRPCPinnedViewIgnoresLaterCachePublications(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		domain   kv.Domain
+		keyLen   int
+		oldValue []byte
+		newValue []byte
+	}{
+		{"account", kv.AccountsDomain, 20, encAccount(2), encAccount(3)},
+		{"storage", kv.StorageDomain, 52, []byte{1}, []byte{2}},
+		{"code", kv.CodeDomain, 20, []byte{0x60, 1}, []byte{0x60, 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			db := newTestDb(t, 16)
+			stateCache := newSmallStateCache()
+			t.Cleanup(stateCache.Close)
+			key := make([]byte, tc.keyLen)
+			key[0] = 0xaa
+			commitValue := func(txNum uint64, value, previous []byte) {
+				t.Helper()
+				tx, err := db.BeginTemporalRw(ctx)
+				require.NoError(t, err)
+				defer tx.Rollback()
+				domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+				require.NoError(t, err)
+				defer domains.Close()
+				domains.BindStateCache(stateCache)
+				domains.SetTxNum(txNum)
+				require.NoError(t, domains.DomainPut(tc.domain, tx, key, value, txNum, previous))
+				require.NoError(t, domains.Commit(ctx, tx))
+			}
+			commitValue(10, tc.oldValue, nil)
+
+			rpcTx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer rpcTx.Rollback()
+			selectedDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
+			require.NoError(t, err)
+			defer selectedDomains.Close()
+			selectedDomains.BindStateCache(stateCache)
+			require.NoError(t, selectedDomains.InitBlockOverlay(rpcTx))
+			// Leave the queried key outside this overlay so its reads reach the shared cache.
+			otherKey := make([]byte, 20)
+			otherKey[0] = 0xbb
+			selectedDomains.SetTxNum(20)
+			require.NoError(t, selectedDomains.DomainPut(kv.AccountsDomain, rpcTx, otherKey, encAccount(1), 20, nil))
+
+			events := shards.NewEvents()
+			events.PublishOverlay(selectedDomains)
+			rpcCache := &execmodule.Cache{}
+			rpcCache.SetPublishedSD(events.LatestSD)
+			countedTx := &rpcCountingTx{TemporalTx: rpcTx}
+			rpcView, err := rpcCache.View(ctx, rpchelper.PinToOverlay(countedTx, selectedDomains.BlockOverlay()))
+			require.NoError(t, err)
+			read := rpcView.Get
+			if tc.domain == kv.CodeDomain {
+				read = rpcView.GetCode
+			}
+			value, err := read(key)
+			require.NoError(t, err)
+			require.Equal(t, tc.oldValue, value)
+			require.Zero(t, countedTx.reads, "values visible to this snapshot should still use the cache")
+
+			commitTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer commitTx.Rollback()
+			require.NoError(t, selectedDomains.Commit(ctx, commitTx))
+			events.PublishOverlay(nil)
+			selectedDomains.Close()
+			commitValue(30, tc.newValue, tc.oldValue)
+
+			cached, hit := stateCache.View(nil).Get(tc.domain, key)
+			require.True(t, hit)
+			require.Equal(t, tc.newValue, cached)
+			committed, _, err := rpcTx.GetLatest(tc.domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, tc.oldValue, committed)
+			value, err = read(key)
+			require.NoError(t, err)
+			require.Equal(t, tc.oldValue, value, "a later cache publication must not change the pinned RPC state")
+			require.Equal(t, 1, countedTx.reads, "a newer cache value must fall back to the original transaction")
+			cached, hit = stateCache.View(nil).Get(tc.domain, key)
+			require.True(t, hit)
+			require.Equal(t, tc.newValue, cached, "a stale RPC read must not replace a newer shared-cache entry")
+			overlaid, err := rpcView.Get(otherKey)
+			require.NoError(t, err)
+			require.Equal(t, encAccount(1), overlaid, "overlay data remains readable after teardown")
+		})
+	}
+}
+
+type rpcCountingTx struct {
+	kv.TemporalTx
+	reads int
+}
+
+func (tx *rpcCountingTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.reads++
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	presentKey := make([]byte, 20)
+	presentKey[0] = 0xaa
+	missingKey := make([]byte, 20)
+	missingKey[0] = 0xbb
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:   1,
+		Balance: *uint256.NewInt(1),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.SetTxNum(10)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, presentKey, account, 10, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	budget := 1 * datasize.MB
+	stateCache := cache.NewStateCache(budget, budget, budget, budget)
+	t.Cleanup(stateCache.Close)
+
+	readTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer readTx.Rollback()
+	visibleEnd, ok := readTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.NotZero(t, visibleEnd)
+
+	readDomains, err := execctx.NewSharedDomains(ctx, readTx, log.New())
+	require.NoError(t, err)
+	defer readDomains.Close()
+	readDomains.BindStateCache(stateCache)
+	got, _, err := readDomains.GetLatest(kv.AccountsDomain, readTx, missingKey)
+	require.NoError(t, err)
+	require.Empty(t, got)
+
+	cached, ok := stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
+	require.True(t, ok)
+	require.Empty(t, cached)
+
+	stateCache.Applier().Unwind(visibleEnd)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
+	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
+
+	stateCache.Applier().Unwind(visibleEnd - 1)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
+	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
+}
+
+// The account-deletion mirror of TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode.
+// DomainDel(AccountsDomain) cascades a code-domain delete at the SD layer, so the
+// commit applies it and the code frontier advances past every pre-deletion view —
+// and the cache-level code-fill admission also checks the accounts frontier. This
+// pins both layers: losing either must not let a pre-deletion RPC view refill the
+// deleted account's code.
+func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	budget := 1 * datasize.MB
+	stateCache := cache.NewStateCache(budget, budget, budget, budget)
+	t.Cleanup(stateCache.Close)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xab
+	code := []byte{0xaa, 1, 2, 3}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		Balance:  *uint256.NewInt(1),
+		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.BindStateCache(stateCache)
+	seedDomains.SetTxNum(10)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 10, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, addr, code, 10, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	deleteTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer deleteTx.Rollback()
+	deleteDomains, err := execctx.NewSharedDomains(ctx, deleteTx, log.New())
+	require.NoError(t, err)
+	defer deleteDomains.Close()
+	deleteDomains.BindStateCache(stateCache)
+	deleteDomains.SetTxNum(20)
+	require.NoError(t, deleteDomains.DomainDel(kv.AccountsDomain, deleteTx, addr, 20, account))
+
+	events := shards.NewEvents()
+	events.PublishOverlay(deleteDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	require.NoError(t, deleteDomains.Commit(ctx, deleteTx))
+	events.PublishOverlay(nil)
+	// The view outlives the overlay teardown on purpose, as above.
+	deleteDomains.Close()
+
+	_, ok := stateCache.View(nil).Get(kv.CodeDomain, addr)
+	require.False(t, ok, "the account deletion must drop the cached code entry")
+
+	got, err := rpcView.GetCode(addr)
+	require.NoError(t, err)
+	require.Empty(t, got, "the view keeps serving the published SD's state after teardown, so the deletion stays visible")
+
+	_, ok = stateCache.View(nil).Get(kv.CodeDomain, addr)
+	require.False(t, ok, "a pre-deletion RPC view must not refill the deleted account's code")
+}
+
+func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedAccount(t *testing.T) {
+	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.AccountsDomain)
+}
+
+func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedStorage(t *testing.T) {
+	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.StorageDomain)
+}
+
+func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode(t *testing.T) {
+	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.CodeDomain)
+}
+
+func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain kv.Domain) {
+	t.Helper()
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	budget := 1 * datasize.MB
+	stateCache := cache.NewStateCache(budget, budget, budget, budget)
+	t.Cleanup(stateCache.Close)
+
+	keyLen := 20
+	if domain == kv.StorageDomain {
+		keyLen = 52
+	}
+	key := make([]byte, keyLen)
+	key[0] = 0xab
+	value := accounts.SerialiseV3(&accounts.Account{
+		Nonce:   1,
+		Balance: *uint256.NewInt(1),
+	})
+	switch domain {
+	case kv.StorageDomain:
+		value = []byte{0x01}
+	case kv.CodeDomain:
+		value = []byte{0xaa, 1, 2, 3}
+	}
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.BindStateCache(stateCache)
+	seedDomains.SetTxNum(10)
+	require.NoError(t, seedDomains.DomainPut(domain, seedTx, key, value, 10, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	deleteTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer deleteTx.Rollback()
+	deleteDomains, err := execctx.NewSharedDomains(ctx, deleteTx, log.New())
+	require.NoError(t, err)
+	defer deleteDomains.Close()
+	deleteDomains.BindStateCache(stateCache)
+	deleteDomains.SetTxNum(20)
+	require.NoError(t, deleteDomains.DomainDel(domain, deleteTx, key, 20, value))
+
+	events := shards.NewEvents()
+	events.PublishOverlay(deleteDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	require.NoError(t, deleteDomains.Commit(ctx, deleteTx))
+	events.PublishOverlay(nil)
+	// The view outlives the overlay teardown on purpose: a production RPC view
+	// built during a background commit keeps reading after PublishOverlay(nil)
+	// and the SD's Close.
+	deleteDomains.Close()
+
+	oldValue, _, err := rpcTx.GetLatest(domain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, oldValue)
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshValue, _, err := freshTx.GetLatest(domain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, freshValue)
+
+	if domain == kv.CodeDomain {
+		_, err = rpcView.GetCode(key)
+	} else {
+		_, err = rpcView.Get(key)
+	}
+	require.NoError(t, err)
+
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.BindStateCache(stateCache)
+	got, _, err := freshDomains.GetLatest(domain, freshTx, key)
+	require.NoError(t, err)
+	require.Empty(t, got, "the old RPC read view must not repopulate the shared cache after the deletion")
+}
+
+func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
+	tb.Helper()
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
+
+	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
+	tb.Cleanup(agg.Close)
+	err := agg.OpenFolder(db)
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(tb, err)
+	return tdb
+}
+
+func encAccount(nonce uint64) []byte {
+	a := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce * 1000)}
+	return accounts.SerialiseV3(&a)
+}
+
+// twoStepRows commits two versions of one account key so MDBX holds rows at
+// step 0 (txNum 5, v1) and step 1 (txNum 20, v2), and returns a delete-only
+// unwind diff for the step-1 row — the legacy-changeset shape that makes the
+// mem overlay publish a per-key maxStep bound while MDBX still holds the
+// dying row.
+func twoStepRows(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache) (key, v1, v2 []byte, diffs [kv.DomainLen][]kv.DomainEntryDiff) {
+	t.Helper()
+	ctx := t.Context()
+	key = make([]byte, 20)
+	key[0] = 0xaa
+	v1, v2 = encAccount(1), encAccount(2)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	sd.SetTxNum(5)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
+	sd.SetTxNum(20)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v2, 20, v1))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	return key, v1, v2, diffs
+}
+
+func newSmallStateCache() *cache.StateCache {
+	b := 1 * datasize.MB
+	return cache.NewStateCache(b, b, b, b)
+}

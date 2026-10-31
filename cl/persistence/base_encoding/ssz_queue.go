@@ -2,63 +2,113 @@ package base_encoding
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
-type SSZQueueEncoder[T solid.EncodableHashableSSZ] struct {
-	previousQueueSize int
-	previousLastElem  T
+var ErrCorruptQueueDiff = errors.New("corrupt queue diff")
 
-	equalFunc func(a, b T) bool
+type queueElement interface {
+	solid.EncodableHashableSSZ
+	comparable
 }
 
-func NewSSZQueueEncoder[T solid.EncodableHashableSSZ](equalFunc func(a, b T) bool) *SSZQueueEncoder[T] {
+type SSZQueueEncoder[T queueElement] struct {
+	previousQueue []T
+	prefix        []int
+	equalFunc     func(a, b T) bool
+}
+
+func NewSSZQueueEncoder[T queueElement](equalFunc func(a, b T) bool) *SSZQueueEncoder[T] {
 	return &SSZQueueEncoder[T]{equalFunc: equalFunc}
 }
 
 func (q *SSZQueueEncoder[T]) Initialize(oldQueue *solid.ListSSZ[T]) {
-	q.previousQueueSize = oldQueue.Len()
-	if oldQueue.Len() > 0 {
-		q.previousLastElem = oldQueue.Get(oldQueue.Len() - 1)
+	clear(q.previousQueue)
+	q.previousQueue = q.previousQueue[:0]
+	for i := 0; i < oldQueue.Len(); i++ {
+		q.previousQueue = append(q.previousQueue, oldQueue.Get(i))
 	}
 }
 
-func findEndIndex[T solid.EncodableHashableSSZ](updatedQueue *solid.ListSSZ[T], equalFunc func(a, b T) bool, previousLastElem T) int {
-	notFoundIndex := -1
-	endIndex := notFoundIndex
-
-	for i := updatedQueue.Len() - 1; i >= 0; i-- {
-		if equalFunc(updatedQueue.Get(i), previousLastElem) {
-			endIndex = i
-			break
+// Queue elements are copy-on-write, so equal pointers hold equal values.
+func (q *SSZQueueEncoder[T]) sharedPointerOverlap(updatedQueue *solid.ListSSZ[T]) (int, bool) {
+	if updatedQueue.Len() == 0 {
+		return 0, false
+	}
+	start := slices.Index(q.previousQueue, updatedQueue.Get(0))
+	if start < 0 {
+		return 0, false
+	}
+	overlap := len(q.previousQueue) - start
+	if overlap > updatedQueue.Len() {
+		return 0, false
+	}
+	for i := 1; i < overlap; i++ {
+		if q.previousQueue[start+i] != updatedQueue.Get(i) {
+			return 0, false
 		}
 	}
-	return endIndex
+	return overlap, true
+}
+
+func (q *SSZQueueEncoder[T]) longestOverlap(updatedQueue *solid.ListSSZ[T]) int {
+	if overlap, ok := q.sharedPointerOverlap(updatedQueue); ok {
+		return overlap
+	}
+	patternLength := min(len(q.previousQueue), updatedQueue.Len())
+	if patternLength == 0 {
+		return 0
+	}
+
+	q.prefix = slices.Grow(q.prefix[:0], patternLength)[:patternLength]
+	q.prefix[0] = 0
+	for i := 1; i < patternLength; i++ {
+		matched := q.prefix[i-1]
+		for {
+			if q.equalFunc(updatedQueue.Get(i), updatedQueue.Get(matched)) {
+				matched++
+				break
+			}
+			if matched == 0 {
+				break
+			}
+			matched = q.prefix[matched-1]
+		}
+		q.prefix[i] = matched
+	}
+
+	matched := 0
+	for i := len(q.previousQueue) - patternLength; i < len(q.previousQueue); i++ {
+		for {
+			if q.equalFunc(q.previousQueue[i], updatedQueue.Get(matched)) {
+				matched++
+				break
+			}
+			if matched == 0 {
+				break
+			}
+			matched = q.prefix[matched-1]
+		}
+	}
+	return matched
 }
 
 func (q *SSZQueueEncoder[T]) WriteDiff(w io.Writer, updatedQueue *solid.ListSSZ[T]) error {
-	var lengthToTruncate uint32
-	endIndex := -1
-
-	if q.previousQueueSize != 0 {
-		endIndex = findEndIndex(updatedQueue, q.equalFunc, q.previousLastElem)
-		// the format is: length to truncate at the beginning + elements count count + elements to add
-		if endIndex != -1 {
-			lengthToTruncate = uint32(q.previousQueueSize - (endIndex + 1))
-		} else {
-			lengthToTruncate = uint32(q.previousQueueSize)
-		}
-	}
+	overlap := q.longestOverlap(updatedQueue)
+	lengthToTruncate := uint32(len(q.previousQueue) - overlap)
 	// write length to truncate
 	if err := binary.Write(w, binary.LittleEndian, lengthToTruncate); err != nil {
 		return err
 	}
 
 	// each element is [length, element]
-	for i := endIndex + 1; i < updatedQueue.Len(); i++ {
+	for i := overlap; i < updatedQueue.Len(); i++ {
 		sszEncodedElement, err := updatedQueue.Get(i).EncodeSSZ(nil)
 		if err != nil {
 			return err
@@ -78,13 +128,16 @@ func ApplySSZQueueDiff[T solid.EncodableHashableSSZ](r io.Reader, queue *solid.L
 	if err := binary.Read(r, binary.LittleEndian, &lengthToTruncate); err != nil {
 		return err
 	}
+	if uint64(lengthToTruncate) > uint64(queue.Len()) {
+		return fmt.Errorf("%w: truncate %d exceeds queue length %d", ErrCorruptQueueDiff, lengthToTruncate, queue.Len())
+	}
 	// truncate the queue
 	queue.Cut(int(lengthToTruncate))
 
 	for {
 		var length uint32
 		if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return err

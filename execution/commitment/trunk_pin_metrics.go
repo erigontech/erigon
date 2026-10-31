@@ -17,28 +17,35 @@
 package commitment
 
 import (
+	"time"
+
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// Per-contract labels omitted to keep cardinality bounded; per-contract
-// detail is in the [adaptive-pin] structured log line.
-
+// No per-contract labels (Prometheus cardinality); detail in [adaptive-pin] log.
 var (
 	mxPinnedHits    = metrics.GetOrCreateCounter("commitment_branchcache_pinned_hits_total")
 	mxPinnedMisses  = metrics.GetOrCreateCounter("commitment_branchcache_pinned_misses_total")
 	mxPinnedEntries = metrics.GetOrCreateGauge("commitment_branchcache_pinned_entries")
+	mxStaleEvicted  = metrics.GetOrCreateCounter("commitment_branchcache_stale_evicted_total")
 
 	mxAdaptivePromoted = metrics.GetOrCreateCounter("commitment_adaptive_pin_promoted_total")
 	mxAdaptiveExtended = metrics.GetOrCreateCounter("commitment_adaptive_pin_extended_total")
 	mxAdaptiveDemoted  = metrics.GetOrCreateCounter("commitment_adaptive_pin_demoted_total")
+	mxAdaptiveRebuilt  = metrics.GetOrCreateCounter("commitment_adaptive_pin_rebuilt_total")
 	mxAdaptiveActive   = metrics.GetOrCreateGauge("commitment_adaptive_pin_active_contracts")
 
 	mxPreloadDurationSecondsTotal = metrics.GetOrCreateCounter("commitment_trunk_preload_duration_seconds_total")
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
 )
 
-// PublishMetrics emits counter deltas (last-published tracked internally) and
-// sets gauges absolute. Call once per SD.Flush — once-per-batch avoids hot-path cost.
+func recordPreload(started time.Time, bytesPinned int) {
+	mxPreloadDurationSecondsTotal.Add(time.Since(started).Seconds())
+	if bytesPinned > 0 {
+		mxPreloadBytesTotal.AddInt(bytesPinned)
+	}
+}
+
 func (c *BranchCache) PublishMetrics() {
 	hits := c.pinnedHits.Load()
 	misses := c.pinnedMisses.Load()
@@ -48,5 +55,9 @@ func (c *BranchCache) PublishMetrics() {
 	if delta := misses - c.lastPublishedPinnedMisses.Swap(misses); delta > 0 {
 		mxPinnedMisses.AddUint64(delta)
 	}
-	mxPinnedEntries.SetUint64(uint64(c.pinnedEntries.Load()))
+	stale := c.staleEvicted.Load()
+	if delta := stale - c.lastPublishedStaleEvicted.Swap(stale); delta > 0 {
+		mxStaleEvicted.AddUint64(delta)
+	}
+	mxPinnedEntries.SetUint64(uint64(c.PinnedCount()))
 }

@@ -164,7 +164,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	tip := req.ValidateChainTip
-	err = e.chainRW.InsertBlock(ctx, tip, nil)
+	err = e.chainRW.InsertBlock(ctx, tip)
 	if err != nil {
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
@@ -237,7 +237,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		default:
 			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
 		}
-		err := e.chainRW.InsertBlocks(ctx, blocks, batch.BALs)
+		err := e.chainRW.InsertBlocks(ctx, blocks)
 		if err != nil {
 			return err
 		}
@@ -297,9 +297,24 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 			lastValidHash,
 		)
 	}
-	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	fcuStatus, validationErr, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
 	if err != nil {
 		return err
+	}
+	if fcuStatus == execmodule.ExecutionStatusTooFarAway {
+		e.logger.Debug(
+			"[EngineBlockDownloader] continuing block batch download after fork choice answered too far away",
+			"tip", block.Hash(),
+			"latestValidHash", lastValidHash,
+			"err", common.Deref(validationErr),
+		)
+		return nil
+	}
+	if fcuStatus == execmodule.ExecutionStatusBadBlock {
+		ve := common.Deref(validationErr)
+		e.ReportBadHeader(block.Hash(), common.Hash{}, ve)
+		e.ReportBadHeader(requested, common.Hash{}, ve)
+		return fmt.Errorf("bad block when updating fork choice for batch download: tip=%s, err=%s", block.Hash(), ve)
 	}
 	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(

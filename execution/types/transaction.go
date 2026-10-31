@@ -413,6 +413,10 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	authorities      *atomic.Pointer[RecoveredAuthorities]
+	dynamicFeeArgs   bool
+
+	skipExecutionGasCap bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -458,9 +462,24 @@ func (m *Message) Nonce() uint64                   { return m.nonce }
 func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
+
+// RecoveredAuthorities is the authorization list the block pre-pass recovers for the message's tx, waiting for a
+// list it started, or nil when it has not started.
+func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
+	if m.authorities == nil {
+		return nil
+	}
+	r := m.authorities.Load()
+	if r != nil {
+		<-r.done
+	}
+	return r
+}
+
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }
+
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
 }
@@ -476,18 +495,31 @@ func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {
 	m.checkGas = checkGas
 }
+func (m *Message) SkipExecutionGasCap() bool { return m.skipExecutionGasCap }
+func (m *Message) SetSkipExecutionGasCap(skip bool) {
+	m.skipExecutionGasCap = skip
+}
+
+// DynamicFeeArgs reports whether the message was built from call arguments that name
+// maxFeePerGas or maxPriorityFeePerGas, even as zero. A transaction is checked against
+// its fork by AsMessage instead.
+func (m *Message) DynamicFeeArgs() bool { return m.dynamicFeeArgs }
+
+func (m *Message) SetDynamicFeeArgs(dynamicFeeArgs bool) {
+	m.dynamicFeeArgs = dynamicFeeArgs
+}
+
 func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
-	gas := globalGasCap
-	if gas == 0 {
+	gas := desiredGas
+	// Only when no cap is configured does an unset limit mean "no limit": a
+	// desired gas of zero is a limit the caller asked for, not a missing value.
+	if globalGasCap == 0 && gas == 0 {
 		gas = uint64(math.MaxUint64 / 2)
-	}
-	if desiredGas > 0 {
-		gas = desiredGas
 	}
 	if globalGasCap != 0 && globalGasCap < gas {
 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)

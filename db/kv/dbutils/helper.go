@@ -16,12 +16,14 @@
 
 package dbutils
 
+import "slices"
+
 // NextNibblesSubtree does []byte++. Returns false if overflow.
 func NextNibblesSubtree(in []byte, out *[]byte) bool {
 	r := (*out)[:len(in)]
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 15 { // max value of nibbles
+	for i, v := range slices.Backward(r) {
+		if v != 15 { // max value of nibbles
 			r[i]++
 			*out = r
 			return true

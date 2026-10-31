@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -31,16 +30,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func copyConfig(original *chain.Config) *chain.Config {
-	var copy chain.Config
-	if err := copier.CopyWithOption(&copy, original, copier.Option{DeepCopy: true}); err != nil {
-		panic(err)
-	}
-	return &copy
-}
-
 func config() *chain.Config {
-	config := copyConfig(chain.AllProtocolChanges)
+	config := chain.AllProtocolChanges.Copy()
 	config.LondonBlock = common.NewUint64(5)
 	return config
 }

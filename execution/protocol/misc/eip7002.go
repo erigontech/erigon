@@ -18,6 +18,7 @@ package misc
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -41,7 +42,7 @@ func DequeueWithdrawalRequests7002(syscall rules.SystemCall, state *state.IntraB
 	}
 	if res != nil {
 		// Just append the contract output
-		return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: res}, nil
+		return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: slices.Clone(res)}, nil
 	}
 	return nil, nil
 }

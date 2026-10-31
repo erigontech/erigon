@@ -11,10 +11,8 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -31,95 +29,6 @@ import (
 // ErrForwardSyncStale is returned when forward sync makes no progress for an extended period.
 // The stage transition function should skip ForwardSync and go directly to ChainTipSync.
 var ErrForwardSyncStale = errors.New("forward sync stale")
-
-// shouldProcessBlobs checks if any block in the given list of blocks
-// has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
-func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
-	if !cfg.caplinConfig.ArchiveBlobs && !cfg.caplinConfig.ImmediateBlobsBackfilling {
-		return false
-	}
-	blobsExist := false
-	highestSlot := blocks[0].Block.Slot
-	for _, block := range blocks {
-		// Check if block version is greater than or equal to DenebVersion and contains BlobKzgCommitments
-		if block.Version() >= clparams.DenebVersion {
-			if c := block.Block.Body.GetBlobKzgCommitments(); c != nil && c.Len() > 0 {
-				blobsExist = true
-			}
-		}
-		if block.Block.Slot > highestSlot {
-			highestSlot = block.Block.Slot
-		}
-	}
-	// Check if the requested blocks are too old to request blobs
-	// https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/p2p-interface.md#the-reqresp-domain
-
-	// this is bad
-	// highestEpoch := highestSlot / cfg.beaconCfg.SlotsPerEpoch
-	// currentEpoch := cfg.ethClock.GetCurrentEpoch()
-	// minEpochDist := uint64(0)
-	// if currentEpoch > cfg.beaconCfg.MinEpochsForBlobSidecarsRequests {
-	// 	minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobSidecarsRequests
-	// }
-	// finalizedEpoch := currentEpoch - 2
-	// if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist, finalizedEpoch) {
-	// 	return false
-	// }
-
-	return blobsExist
-}
-
-// downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
-// It takes highest slot processed, and a list of signed beacon blocks as input.
-// It returns the highest blob slot processed and an error if any.
-func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
-	var (
-		ids   *solid.ListSSZ[*cltypes.BlobIdentifier]
-		blobs *network2.PeerAndSidecars
-	)
-
-	// Retrieve blob identifiers from the given blocks
-	ids, err = network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
-	if err != nil {
-		// Return an error if blob identifiers could not be retrieved
-		err = fmt.Errorf("failed to get blob identifiers: %w", err)
-		return
-	}
-
-	// If there are no blobs to retrieve, return the highest slot processed
-	if ids.Len() == 0 {
-		return highestSlotProcessed, nil
-	}
-
-	// Request blobs from the network
-	blobs, err = network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-	if errors.Is(err, network2.ErrTimeout) {
-		log.Warn("Blob request timeout", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
-		return highestSlotProcessed, nil
-	}
-	if err != nil {
-		// Return an error if blobs could not be retrieved
-		err = fmt.Errorf("failed to get blobs: %w", err)
-		return
-	}
-
-	var highestProcessed, inserted uint64
-	// Verify and insert blobs into the blob store
-	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-		// Ban the peer if verification fails
-		cfg.rpc.BanPeer(blobs.Peer)
-		// Return an error if blobs could not be verified
-		err = fmt.Errorf("failed to verify blobs: %w", err)
-		return
-	}
-	// If all blobs were inserted successfully, return the highest processed slot
-	if inserted == uint64(ids.Len()) {
-		return highestProcessed, nil
-	}
-
-	// If not all blobs were inserted, return the highest processed slot minus one
-	return highestProcessed - 1, err
-}
 
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, a list of signed beacon blocks,
@@ -146,15 +55,24 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		var hasSignedHeaderInDB bool
 
 		if err = cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
-			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, blockRoot)
+			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(tx, blockRoot)
 			return err
 		}); err != nil {
 			err = fmt.Errorf("failed to read signed header: %w", err)
 			return
 		}
 
-		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
+		previousWrite := cfg.pendingBlockWrite
+		if err = processBlock(ctx, cfg, block, false); err != nil {
+			if cfg.pendingBlockWrite != nil {
+				// Forward sync skips NewPayload, so a new pending write must retain its
+				// collector insertion. A failed retry must keep the earlier write unchanged.
+				if collectExecution && cfg.pendingBlockWrite != previousWrite {
+					cfg.pendingBlockWrite.collectExecution = true
+				}
+				return newHighestBlockProcessed, fmt.Errorf("%w: persist accepted block: %w", network2.ErrUnattributableProcess, err)
+			}
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
 				if newHighestBlockProcessed == 0 {
@@ -209,20 +127,14 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// the payload is delivered separately via a SignedExecutionPayloadEnvelope.
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
-				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
-				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); fceErr != nil {
-					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
-				} else if shouldInsert {
-					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
-						err = fmt.Errorf("failed to add gloas block to collector: %w", err)
-						return
-					}
+				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
+					return highestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
 				}
 			}
 			// Dump state periodically for restart checkpoints.
 			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 				var st *state.CachingBeaconState
-				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot)
 				if err == nil && st != nil {
 					if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 						err = fmt.Errorf("failed to dump state: %w", err)
@@ -240,7 +152,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// Pre-GLOAS: dump state periodically for restart checkpoints.
 		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 			var st *state.CachingBeaconState
-			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot)
 			if err == nil && st != nil {
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 					err = fmt.Errorf("failed to dump state: %w", err)
@@ -253,8 +165,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			}
 		}
 
-		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
-		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
+		if !collectExecution {
 			continue
 		}
 		// Add the block to the block collector (pre-GLOAS only)
@@ -265,6 +176,43 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 	}
 	return
+}
+
+type gloasBlockCollector interface {
+	AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
+}
+
+func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
+	err := store.OnExecutionPayload(ctx, envelope, false, validate)
+	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
+		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
+	if err != nil && !persisted {
+		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
+		return err
+	}
+	if shouldInsert {
+		if err := collector.AddGloasBlock(block, envelope); err != nil {
+			return fmt.Errorf("failed to add gloas block to collector: %w", err)
+		}
+	}
+	return nil
+}
+
+func persistedEnvelopeMatches(store forkchoice.ForkChoiceStorage, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	persisted, err := store.ReadEnvelopeFromDisk(root)
+	if err != nil || persisted == nil || envelope == nil {
+		return false
+	}
+	persistedRoot, err := persisted.HashSSZ()
+	if err != nil {
+		return false
+	}
+	envelopeRoot, err := envelope.HashSSZ()
+	return err == nil && persistedRoot == envelopeRoot
+}
+
+func shouldValidateForwardSyncPayload(cfg *Cfg, shouldInsert bool) bool {
+	return !shouldInsert && canValidateGloasPayloads(cfg)
 }
 
 // forwardSyncProgress returns the slots still to sync and the observed sync rate
@@ -321,13 +269,14 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())
 	downloader.SetMinSlot(startSlot)
+	downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (newHighestSlotProcessed uint64, err error) {
 		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, logger, cfg, initialHighestSlotProcessed, shouldInsert, blocks, envelopes)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
-			return initialHighestSlotProcessed, err
+			return highestSlotProcessed, err
 		}
 		currentSlot.Store(highestSlotProcessed)
 		// Update advertised status so peers don't disconnect us for being too far behind.
@@ -377,6 +326,8 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Before handing off to ChainTipSync, try to set the head state so that
 			// gossip beacon_block messages won't be ignored (Syncing() becomes false).
 			setHeadStateFromForkChoice(cfg, logger)
+			// A failing batch does not advance currentSlot, but its earlier blocks were imported.
+			requestCustodyBackfill(cfg, startSlot, max(currentSlot.Load(), cfg.forkChoice.HighestSeen()))
 			return ErrForwardSyncStale
 		}
 
@@ -401,7 +352,21 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 	}
 
+	if shouldInsert && ctx.Err() == nil {
+		if err := cfg.blockCollector.Flush(ctx); err != nil {
+			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
+		}
+	}
+	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil
+}
+
+// requestCustodyBackfill asks for the custody columns of the blocks forward sync imported: it
+// imports them without checking their data.
+func requestCustodyBackfill(cfg *Cfg, fromSlot, toSlot uint64) {
+	if cfg.peerDas != nil && toSlot > fromSlot {
+		cfg.peerDas.BackfillCustodyColumns(fromSlot, toSlot)
+	}
 }
 
 // setHeadStateFromForkChoice retrieves the current head state from the fork choice store
@@ -412,7 +377,7 @@ func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
 	if err != nil {
 		return
 	}
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot)
 	if err != nil || headState == nil {
 		return
 	}
@@ -460,7 +425,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	// won't exist on the network and the timeout will expire harmlessly.
 	// We use the state's LatestExecutionPayloadBid (not the block) since the anchor
 	// block is not stored in the fork graph under the single-state model.
-	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot, true)
+	anchorState, err := cfg.forkChoice.GetStateAtBlockRoot(anchorRoot)
 	if err != nil || anchorState == nil {
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor state not available, skipping", "err", err)
 		return nil
@@ -515,7 +480,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if err := cfg.forkChoice.StoreAnchorEnvelope(anchorRoot, env); err != nil {
 		return fmt.Errorf("failed to store anchor envelope: %w", err)
 	}
-	if err := validateAnchorPayloadIfLocalEL(ctx, cfg, anchorRoot, bid, env); err != nil {
+	if err := validateAnchorPayloadWithExecutionClient(ctx, cfg, anchorRoot, bid, env); err != nil {
 		return err
 	}
 
@@ -524,82 +489,37 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	return nil
 }
 
-func validateAnchorPayloadIfLocalEL(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if !canRetryGloasPayloads(cfg) {
-		return nil
+func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if !canValidateGloasPayloads(cfg) {
+		return nil // StoreAnchorEnvelope recorded NotValidated
 	}
 	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+	if errors.Is(err, forkchoice.ErrPayloadValidationInterrupted) {
+		return nil // not an EL verdict
+	}
 	if err != nil {
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
-	switch status {
-	case execution_client.PayloadStatusValidated:
-		cfg.forkChoice.MarkPayloadVerified(anchorRoot, env.Message.Payload.BlockHash)
-	case execution_client.PayloadStatusInvalidated:
-		cfg.forkChoice.MarkPayloadInvalid(anchorRoot, env.Message.Payload.BlockHash)
+	status, retained := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		env.Message.Payload.BlockHash,
+		status,
+		env.Message.Payload.GasLimit,
+	)
+	if !retained {
+		return nil
+	}
+	if status == execution_client.PayloadStatusInvalidated {
 		return fmt.Errorf("anchor execution payload invalidated by EL")
 	}
 	return nil
 }
 
 func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if bid == nil {
-		return errors.New("nil execution payload bid")
-	}
-	if env == nil || env.Message == nil || env.Message.Payload == nil {
-		return errors.New("nil execution payload envelope")
-	}
-	envelope := env.Message
-	payload := envelope.Payload
-	if envelope.BeaconBlockRoot != anchorRoot {
-		return fmt.Errorf("beacon block root mismatch: envelope=%v anchor=%v", envelope.BeaconBlockRoot, anchorRoot)
-	}
-	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
-		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
-	}
-	if envelope.BuilderIndex != bid.BuilderIndex {
-		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
-	}
-	if payload.BlockHash != bid.BlockHash {
-		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
-	}
-	if payload.ParentHash != bid.ParentBlockHash {
-		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
-	}
-	if payload.PrevRandao != bid.PrevRandao {
-		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
-	}
-	if payload.FeeRecipient != bid.FeeRecipient {
-		return fmt.Errorf("fee recipient mismatch: envelope=%v bid=%v", payload.FeeRecipient, bid.FeeRecipient)
-	}
-	if payload.GasLimit != bid.GasLimit {
-		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
-	}
-	if payload.SlotNumber != bid.Slot {
-		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
-	}
-	if envelope.ExecutionRequests == nil {
-		return errors.New("nil execution requests")
-	}
-	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("execution requests root: %w", err)
-	}
-	if requestsRoot != bid.ExecutionRequestsRoot {
-		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
-	}
-	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
-	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash)
-	if err != nil {
-		return fmt.Errorf("payload header: %w", err)
-	}
-	if header.Hash() != payload.BlockHash {
-		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
-	}
-	if err := verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot); err != nil {
+	if err := network2.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
 		return err
 	}
-	return nil
+	return verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot)
 }
 
 func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, env *cltypes.SignedExecutionPayloadEnvelope, slot uint64) error {
@@ -649,7 +569,7 @@ func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.Exe
 	if err != nil {
 		return execution_client.PayloadStatusNone, err
 	}
-	return cfg.executionClient.NewPayload(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
+	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
 }
 
 func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {

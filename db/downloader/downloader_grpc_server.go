@@ -31,9 +31,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-var (
-	_ downloaderproto.DownloaderServer = &GrpcServer{}
-)
+var _ downloaderproto.DownloaderServer = &GrpcServer{}
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 	svr := &GrpcServer{
@@ -59,8 +57,8 @@ func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error
 		if name == "" {
 			return errors.New("field 'path' is required")
 		}
-		if filepath.IsAbs(name) {
-			return fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use filepath.Rel(dirs.Snap, filePath) before RPC", name)
+		if !filepath.IsLocal(filepath.FromSlash(name)) {
+			return fmt.Errorf("non-local path %q passed to Downloader.GrpcServer, use a path relative to dirs.Snap", name)
 		}
 	}
 	s.d.log(log.LvlDebug, fmt.Sprintf("Downloader.%s", callName), "files", names)
@@ -113,6 +111,9 @@ func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequ
 // Delete - stop seeding, remove file, remove .torrent
 func (s *GrpcServer) Delete(ctx context.Context, request *downloaderproto.DeleteRequest) (_ *emptypb.Empty, err error) {
 	err = s.checkNamesAndLogCall(request.Paths, "Delete")
+	if err != nil {
+		return
+	}
 	for _, name := range request.Paths {
 		err = errors.Join(err, s.d.Delete(name))
 	}

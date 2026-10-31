@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -25,22 +26,22 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+//	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
+func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, _, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"ots_getBlockTransactions"}, resultsCh)
+		go writePattern(true, []string{"ots_getBlockTransactions"}, resultsCh)
 	}
 
 	var res CallResult
@@ -66,21 +67,21 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 			}
 
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve transactions of block (Erigon) %d: %v\n", bn, res.Err)
+				return fmt.Errorf("could not retrieve transactions of block (Erigon) %d: %w", bn, res.Err)
 			}
 
 			if b.Error != nil {
-				return fmt.Errorf("Error retrieving transactions of block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+				return fmt.Errorf("error retrieving transactions of block (Erigon): %d %s", b.Error.Code, b.Error.Message)
 			}
 
 			if needCompare {
 				var bg OtsBlockTransactions
 				res = reqGen.Geth("ots_getBlockTransactions", reqGen.otsGetBlockTransactions(bn, pageCount, 10), &bg)
 				if res.Err != nil {
-					return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+					return fmt.Errorf("could not retrieve block (geth) %d: %w", bn, res.Err)
 				}
 				if bg.Error != nil {
-					return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
+					return fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
 				}
 				if !compareBlockTransactions(&b, &bg) {
 					if rec != nil {
@@ -88,7 +89,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 						rec.Flush()
 						continue
 					} else {
-						return fmt.Errorf("block %d has different fields\n", bn)
+						return fmt.Errorf("block %d has different fields", bn)
 					}
 				}
 			}

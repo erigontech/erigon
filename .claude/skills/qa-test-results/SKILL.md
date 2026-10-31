@@ -1,6 +1,6 @@
 ---
 name: qa-test-results
-description: Read and interpret the results, logs and artifacts of Erigon's QA workflows (the `qa-*.yml` GitHub Actions workflows - tip tracking, sync from scratch, snapshot download, clean exit, RPC integration/performance). Use when asked why a QA test failed, what a QA run measured, how to read a QA test log, what "Deadline reached" / "total sync time below threshold" / "exec_steps_in_db exceeded threshold" mean, or when triaging a red `QA - ...` check on a PR or release branch.
+description: Read and interpret the results, logs and artifacts of Erigon's QA workflows (the `qa-*.yml` GitHub Actions workflows - tip tracking, sync from scratch, exec from zero, snapshot download, clean exit, RPC integration/performance). Use when asked why a QA test failed, what a QA run measured, how to read a QA test log, what "Deadline reached" / "total sync time below threshold" / "exec_steps_in_db exceeded threshold" / a state-snapshot hash mismatch mean, or when triaging a red `QA - ...` check on a PR or release branch.
 ---
 
 # Reading QA test results
@@ -111,9 +111,9 @@ it before blaming the PR.
 The documentation groups the `qa-*` workflows into three families, each with its
 own log shape:
 
-- **Sync tests** — tip-tracking (pre-built DB) and sync-from-scratch (blank DB).
-  Both drive the same tip-tracking Python driver and share the `***` report and
-  thresholds described below.
+- **Sync tests** — tip-tracking (pre-built DB), sync-from-scratch and
+  exec-from-zero (blank DB). All drive the same tip-tracking Python driver and
+  share the `***` report and thresholds described below.
 - **RPC tests** — integration (response diffs) and performance (latency at rising
   QPS). Different log format entirely: [references/rpc-tests.md](references/rpc-tests.md).
 - **Miscellaneous** — snapshot download and clean exit. See *Other test families*.
@@ -121,7 +121,7 @@ own log shape:
 ## The three ways a Sync test fails
 
 These cover `qa-tip-tracking*`, `qa-constrained-tip-tracking`,
-`qa-sync-from-scratch*`, `qa-sync-with-externalcl` and
+`qa-sync-from-scratch*`, `qa-exec-from-zero`, `qa-sync-with-externalcl` and
 `qa-sync-test-bisection-tool` — they all run the same
 `tip-tracking/run_and_check_tip_tracking.py` driver.
 
@@ -175,6 +175,18 @@ ERROR: ...` (any `[EROR]` line while the test is active), `SIGSEGV`, and
 `SyncSentinel error` — all `outcome: "Unexpected error"` with the cause in
 `reason`. [references/triage.md](references/triage.md) has the full decision
 tree, including which failures are genuinely environmental.
+
+## exec-from-zero's second verdict
+
+That workflow runs Erigon with `--snap.skip-state-snapshot-download`, so
+execution starts from genesis, and then compares the state snapshots Erigon built
+against the published ones. The comparison is a **separate step** with its own
+verdict in `result-state-hashes-<chain>.json` (`--test_name
+state-snapshot-hash-check`), so a red run whose `result-<chain>.json` says
+`SUCCESS` means the node reached the tip but produced state that differs from
+what the project publishes — an execution/collation bug, not a sync problem.
+Only the data files (`domain/*.kv`, `history/*.v`, `idx/*.ef`) are compared, since
+accessors are salt-seeded and never match across nodes.
 
 ## RPC tests
 

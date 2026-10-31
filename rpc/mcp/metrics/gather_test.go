@@ -44,7 +44,10 @@ func TestMatchPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern+"_"+tt.name, func(t *testing.T) {
-			got := matchPattern(tt.pattern, tt.name)
+			got, err := matchPattern(tt.pattern, tt.name)
+			if err != nil {
+				t.Fatalf("matchPattern(%q, %q): %v", tt.pattern, tt.name, err)
+			}
 			if got != tt.want {
 				t.Errorf("matchPattern(%q, %q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
 			}
@@ -99,13 +102,13 @@ func TestGatherMetrics(t *testing.T) {
 	testCounter.Inc()
 	testGauge.Set(42.5)
 
-	metrics, err := GatherMetrics()
+	metrics, err := GatherMetricsFiltered("")
 	if err != nil {
-		t.Fatalf("GatherMetrics() error = %v", err)
+		t.Fatalf("GatherMetricsFiltered: %v", err)
 	}
 
 	if len(metrics) == 0 {
-		t.Error("GatherMetrics() returned empty map")
+		t.Error("GatherMetricsFiltered returned empty map")
 	}
 
 	// Check counter

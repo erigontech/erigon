@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -198,12 +199,35 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	parentBlockWaitTimeout := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
 	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTimeout)
 	defer parentBlockWaitCtxCancel()
+	if provideOpts.ParentBlockWaitStop != nil {
+		go func() {
+			select {
+			case <-provideOpts.ParentBlockWaitStop:
+				parentBlockWaitCtxCancel()
+			case <-parentBlockWaitCtx.Done():
+			}
+		}()
+	}
 	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
+	parentBlockWaitCtxCancel()
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
-			parentBlockMissed.Inc()
+		if ctx.Err() == nil {
+			select {
+			case <-provideOpts.ParentBlockWaitStop:
+				parentBlockWaitStopped.Inc()
+				p.logger.Debug("parent block wait stopped", "parentBlockNum", parentBlockNum,
+					"waited", time.Since(parentBlockWaitStart))
+				return nil, nil
+			default:
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+				parentBlockMissed.Inc()
+				p.logger.Warn("parent block wait timeout, falling back to base txn provider",
+					"parentBlockNum", parentBlockNum, "timeout", parentBlockWaitTimeout)
+				return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+			}
 		}
 
 		return nil, fmt.Errorf("issue while waiting for parent block %d: %w", parentBlockNum, err)
@@ -296,6 +320,31 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
+		executionGas, stateGas := protocol.InclusionContributions(txn.GetGasLimit(), isAmsterdam, false)
+		if executionGas > availableGas.Execution {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient execution gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"executionGas", executionGas,
+				"availableExecution", availableGas.Execution,
+			)
+			continue
+		}
+		if stateGas > availableGas.State {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient state gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"gasLimit", stateGas,
+				"availableState", availableGas.State,
+			)
+			continue
+		}
 		accessList := txn.GetAccessList()
 		isAATxn := txn.Type() == types.AccountAbstractionTxType
 		to := txn.GetTo()
@@ -331,7 +380,6 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
 			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
-		blobGas := txn.GetBlobGas()
 		if intrinsicGas > availableGas.Execution {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
@@ -344,32 +392,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		if isAmsterdam && txn.GetGasLimit() > availableGas.State {
-			sender, _ := txn.GetSender()
-			p.logger.Warn(
-				"skipping decrypted txn: insufficient state gas",
-				"hash", txn.Hash(),
-				"type", txn.Type(),
-				"sender", sender,
-				"gasLimit", txn.GetGasLimit(),
-				"availableState", availableGas.State,
-			)
-			continue
-		}
-		if blobGas > availableGas.Blob {
-			sender, _ := txn.GetSender()
-			p.logger.Warn(
-				"skipping decrypted txn: insufficient blob gas",
-				"hash", txn.Hash(),
-				"type", txn.Type(),
-				"sender", sender,
-				"blobGas", blobGas,
-				"availableBlob", availableGas.Blob,
-			)
-			continue
-		}
 		availableGas.Execution -= intrinsicGas
-		availableGas.Blob -= blobGas
 		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {

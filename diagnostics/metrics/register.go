@@ -195,10 +195,10 @@ func buildLabeledName(baseName string, labelNames, labelValues []string) string 
 	var result strings.Builder
 	result.WriteString(baseName)
 	result.WriteString("{")
-	result.WriteString(fmt.Sprintf(`%s="%s"`, labelNames[0], labelValues[0]))
+	result.WriteString(fmt.Sprintf(`%s=%q`, labelNames[0], labelValues[0]))
 
 	for i := 1; i < len(labelNames); i++ {
-		result.WriteString(fmt.Sprintf(`,%s="%s"`, labelNames[i], labelValues[i]))
+		result.WriteString(fmt.Sprintf(`,%s=%q`, labelNames[i], labelValues[i]))
 	}
 	result.WriteString("}")
 	return result.String()

@@ -27,7 +27,7 @@ func (f *fakeCaller) CallContext(ctx context.Context, result any, method string,
 		return f.err
 	}
 	if f.result != nil {
-		*(result.(*json.RawMessage)) = f.result
+		*result.(*json.RawMessage) = f.result
 	}
 	return nil
 }
@@ -174,6 +174,12 @@ func TestToolArgMapping(t *testing.T) {
 			args:     map[string]any{"toAddress": ` ["0xabc","0xdef"]`},
 			result:   `[]`,
 			wantArgs: []any{map[string]any{"toAddress": []string{"0xabc", "0xdef"}, "count": 100}},
+		},
+		{
+			tool:     "trace_filter",
+			args:     map[string]any{"blockHash": "0xabc", "fromAddress": "0xdef"},
+			result:   `[]`,
+			wantArgs: []any{map[string]any{"blockHash": "0xabc", "fromAddress": []string{"0xdef"}, "count": 100}},
 		},
 		{
 			tool:     "trace_filter",

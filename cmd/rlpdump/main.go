@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"container/list"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -110,7 +111,7 @@ func rlpToText(in *inStream, out io.Writer) error {
 	stream := rlp.NewStream(in, 0)
 	for {
 		if err := dump(in, stream, 0, out); err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				return err
 			}
 			break
@@ -123,7 +124,7 @@ func rlpToText(in *inStream, out io.Writer) error {
 	return nil
 }
 
-func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) error {
+func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) (err error) {
 	if *showpos {
 		fmt.Fprintf(out, "%s: ", in.posLabel())
 	}
@@ -143,8 +144,15 @@ func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) error {
 			fmt.Fprintf(out, "%s%x", ws(depth), str)
 		}
 	case rlp.List:
-		s.List()
-		defer s.ListEnd()
+		// Kind() above already confirmed this element is a list, so List() cannot fail here.
+		if _, err := s.List(); err != nil {
+			return err
+		}
+		defer func() {
+			if listErr := s.ListEnd(); err == nil {
+				err = listErr
+			}
+		}()
 		if size == 0 {
 			fmt.Fprint(out, ws(depth)+"[]")
 		} else {
@@ -153,7 +161,7 @@ func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) error {
 				if i > 0 {
 					fmt.Fprint(out, ",\n")
 				}
-				if err := dump(in, s, depth+1, out); err == rlp.EOL {
+				if err := dump(in, s, depth+1, out); err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 					break
 				} else if err != nil {
 					return err

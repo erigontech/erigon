@@ -52,16 +52,19 @@ func (cr Reader) CurrentHeader() *types.Header {
 	h, _ := cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
 	return h
 }
+
 func (cr Reader) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
 	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
+
 func (cr Reader) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
 	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	return h
 }
+
 func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
@@ -69,14 +72,15 @@ func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
+
 func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
-
 }
+
 func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
@@ -85,6 +89,7 @@ func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
+
 func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
@@ -93,12 +98,12 @@ func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	}
 	return td
 }
-func (cr Reader) FrozenBlocks() uint64              { return cr.blockReader.FrozenBlocks() }
-func (cr Reader) FrozenBorBlocks(align bool) uint64 { return cr.blockReader.FrozenBorBlocks(align) }
+func (cr Reader) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
 func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b
 }
+
 func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil

@@ -425,9 +425,11 @@ func (db *memStoreDB) BeginRwNosync(_ context.Context) (kv.RwTx, error) { return
 func (db *memStoreDB) Update(_ context.Context, f func(tx kv.RwTx) error) error {
 	return f(db.store)
 }
+
 func (db *memStoreDB) UpdateNosync(_ context.Context, f func(tx kv.RwTx) error) error {
 	return f(db.store)
 }
+
 func (db *memStoreDB) View(_ context.Context, f func(tx kv.Tx) error) error {
 	return f(db.store)
 }
@@ -755,7 +757,8 @@ func (c *memStoreCursor) DeleteCurrentDuplicates() error {
 }
 
 func (c *memStoreCursor) PutNoDupData(key, value []byte) error { panic("PutNoDupData not implemented") }
-func (c *memStoreCursor) PutCurrent(key, value []byte) error   { panic("PutCurrent not implemented") }
+
+func (c *memStoreCursor) PutCurrent(key, value []byte) error { panic("PutCurrent not implemented") }
 
 func (c *memStoreCursor) Close() {}
 

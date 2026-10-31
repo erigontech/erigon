@@ -13,7 +13,7 @@ The gRPC server can be explicitly enabled using the `--grpc` flag when running t
 ### Performance Considerations
 
 * gRPC APIs provide better performance than JSON-RPC for high-throughput applications
-* Direct database access via KV interface offers the fastest data retrieval
+* Direct database access via the key-value (KV) interface offers the fastest data retrieval
 * Shared memory access (when running locally) provides optimal performance
 
 ### Data Format and Buckets
@@ -24,7 +24,7 @@ Database bucket names and their formats are documented in `db/kv/tables.go`. Und
 
 * gRPC services can be accessed over the network when properly configured
 * TLS encryption is recommended for production deployments
-* Rate limiting can be configured via `--private.api.ratelimit` flag
+* Rate limiting can be configured via the `--private.api.ratelimit` flag
 
 ### Integration Libraries
 
@@ -33,7 +33,7 @@ Erigon provides Go, Rust, and C++ implementations of the RoKV (read-only key-val
 ### Availability
 
 * gRPC services are available when enabled with the `--grpc` flag on the **standalone `rpcdaemon`** binary
-* Default listening address is configurable via `--grpc.addr` and `--grpc.port`
+* The default listening address is configurable via `--grpc.addr` and `--grpc.port`
 * Services require the main Erigon node to be running and accessible
 
 For more information, visit the [Erigon Interfaces GitHub repository](https://github.com/erigontech/interfaces).
@@ -89,7 +89,6 @@ The ETHBACKEND interface provides access to Ethereum-specific backend services i
 | Peers           | Returns information about connected peers           |
 | AddPeer         | Adds a peer to the node                             |
 | PendingBlock    | Returns the pending block                           |
-| BorEvent        | Returns Bor-specific events (Polygon networks only) |
 
 ***
 
@@ -105,8 +104,8 @@ The TxPool interface provides access to transaction pool operations and status i
 | FindUnknownHashes | Finds unknown transaction hashes          |
 | GetTransactions   | Retrieves transactions from the pool      |
 | All               | Returns all transactions in the pool      |
-| PendingAdd        | Adds transactions to pending pool         |
-| PendingRemove     | Removes transactions from pending pool    |
+| PendingAdd        | Adds transactions to the pending pool         |
+| PendingRemove     | Removes transactions from the pending pool    |
 | OnAdd             | Subscribes to transaction addition events |
 | Mining            | Returns mining-related transaction data   |
 | NonceFromAddress  | Gets the next nonce for an address        |
@@ -121,57 +120,10 @@ The Downloader interface provides access to snapshot downloading and torrent man
 
 | Method       | Description                        |
 | ------------ | ---------------------------------- |
-| Add          | Adds files to download queue       |
-| Delete       | Removes files from download queue  |
+| Add          | Adds files to the download queue       |
+| Delete       | Removes files from the download queue  |
 | Completed    | Checks if downloads are completed  |
 | SetLogPrefix | Sets logging prefix for Downloader |
-
-***
-
-## Polygon Bridge Backend gRPC API
-
-These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism and are only active when running Erigon with Polygon network configuration. The services provide essential functionality for bridge event processing and validator management required by the Polygon network architecture.
-
-### Bridge Backend Methods
-
-**Version Method:**
-
-* `Version()` - Returns the service version number.
-
-**Transaction Lookup:**
-
-* `BorTxnLookup(BorTxnLookupRequest)` - Looks up Bor transaction information by hash.
-
-**Event Retrieval:**
-
-* `BorEvents(BorEventsRequest)` - Retrieves bridge events for a specific block.
-
-### Bridge Backend Implementation
-
-The server implementation is found in `polygon/bridge/server.go` where the `BackendServer` struct implements the `BridgeBackendServer` interface:
-
-* The `BorTxnLookup` method implementation shows how it handles transaction lookups.
-* The `BorEvents` method retrieves bridge events for a given block.
-
-## Heimdall Backend gRPC API
-
-The Heimdall Backend service provides APIs for validator and consensus-related functionality.
-
-### Heimdall Backend Methods
-
-**Version Method:**
-
-* `Version()` - Returns the service version number.
-
-**Producer Information:**
-
-* `Producers(BorProducersRequest)` - Retrieves validator/producer information for a specific block.
-
-## Service Integration
-
-Both services are integrated into the main Ethereum backend when Bor consensus is configured. In the main backend initialization, you can see how these services are set up.
-
-The Bridge and Heimdall services are created with their respective RPC servers.
 
 ***
 

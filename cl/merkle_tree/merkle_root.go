@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"reflect"
 	"unsafe"
 
 	"github.com/prysmaticlabs/gohashtree"
@@ -268,7 +267,7 @@ func hashPair(left, right [32]byte) [32]byte {
 	return sha256.Sum256(pair[:])
 }
 
-// HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header conversion
+// HashByteSlice is gohashtree HashByteSlice over []byte instead of [][32]byte.
 func HashByteSlice(out, in []byte) error {
 	if len(in) == 0 {
 		return errors.New("zero leaves provided")
@@ -280,29 +279,13 @@ func HashByteSlice(out, in []byte) error {
 	if len(in)%64 != 0 {
 		return errors.New("input must be multple of 64")
 	}
-	c_in := convertHeader(in)
-	c_out := convertHeader(out)
+	c_in := unsafe.Slice((*[32]byte)(unsafe.Pointer(unsafe.SliceData(in))), len(in)/32)
+	c_out := unsafe.Slice((*[32]byte)(unsafe.Pointer(unsafe.SliceData(out))), len(out)/32)
 	err := gohashtree.Hash(c_out, c_in)
 	if err != nil {
 		return err
 	}
 	return nil
-}
-
-func convertHeader(xs []byte) [][32]byte {
-	// i won't pretend to understand, but my solution for the problem is as so
-
-	// first i grab the slice header of the input
-	header := (*reflect.SliceHeader)(unsafe.Pointer(&xs))
-	// then i allocate a new result slice of no size - this should make the escape analyzer happy i think?
-	dat := make([][32]byte, 0)
-	// we then get the header of our output  to modify
-	chunkedHeader := (*reflect.SliceHeader)(unsafe.Pointer(&dat))
-	// then we move over the values
-	chunkedHeader.Len = header.Len / 32
-	chunkedHeader.Cap = header.Cap / 32
-	chunkedHeader.Data = header.Data
-	return dat
 }
 
 func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
@@ -331,11 +314,11 @@ func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) 
 
 // Merkle Proof computes the merkle proof for a given schema of objects.
 func MerkleProof(depth, proofIndex int, schema ...any) ([][32]byte, error) {
+	if len(schema) == 0 {
+		return nil, errors.New("empty schema")
+	}
 	// Calculate the total number of leaves needed based on the schema length
 	maxDepth := GetDepth(uint64(len(schema)))
-	if utils.PowerOf2(uint64(maxDepth)) != uint64(len(schema)) {
-		maxDepth++
-	}
 
 	if depth != int(maxDepth) { // TODO: Add support for lower depths
 		return nil, fmt.Errorf("depth is different than maximum depth, have %d, want %d", depth, maxDepth)

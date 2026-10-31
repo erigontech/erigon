@@ -108,7 +108,7 @@ func (m *SlotData) WriteTo(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error {
+func (m *SlotData) ReadFrom(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
 	m.Fork = &cltypes.Fork{}
 	var err error

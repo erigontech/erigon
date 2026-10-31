@@ -10,11 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -59,27 +61,48 @@ func cancunConfig() *chain.Config {
 // interns into.
 func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
-	return newBenchEnv(b, gasLimit, true)
+	return newBenchEnv(b, gasLimit)
 }
 
 // newBenchEnv returns the env, not the runtime.Config it built: NewEnv ignores
 // Config.Value — only runtime.Call reads it — so a Value set here would never
-// reach the call.
-func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
+// reach the call. It builds the cache-free versioned path staged sync runs.
+func newBenchEnv(t testing.TB, gasLimit uint64) *vm.EVM {
 	t.Helper()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	statedb := state.NewWithVersionMap(
-		state.NewReaderV3(domains.AsGetter(tx)),
-		state.NewVersionMap(nil),
-	)
-	statedb.SetNoMaterialize(noMaterialize)
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoConflictDetection()
+	return envFor(statedb, gasLimit)
+}
 
+// newCommittedBenchEnv commits what seed writes to the DB and returns an env
+// over a fresh versioned state, so reads of it come from the state reader as
+// in eth_call, not from the same tx's writes.
+func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraBlockState)) *vm.EVM {
+	t.Helper()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+
+	seeded := state.New(reader)
+	seed(seeded)
+	vmenv := envFor(seeded, gasLimit)
+	require.NoError(t, seeded.CommitBlock(vmenv.ChainRules(), state.NewWriter(domains.AsPutDel(tx), nil, 1)))
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoConflictDetection()
+	return envFor(statedb, gasLimit)
+}
+
+func envFor(statedb *state.IntraBlockState, gasLimit uint64) *vm.EVM {
 	return runtime.NewEnv(&runtime.Config{
 		ChainConfig: cancunConfig(),
 		Origin:      addrSender,
@@ -119,7 +142,7 @@ func setStorage(tb testing.TB, statedb *state.IntraBlockState, addr accounts.Add
 func prepareAndCall(vmenv *vm.EVM, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
 	rules := vmenv.ChainRules()
 	vmenv.IntraBlockState().Prepare(rules, vmenv.Origin, vmenv.Context.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
-	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules)
+	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules, false)
 	ret, left, _, err := vmenv.Call(vmenv.Origin, addr, input, gas, uint256.Int{}, false)
 	return ret, left, err
 }

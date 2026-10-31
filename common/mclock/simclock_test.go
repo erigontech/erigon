@@ -24,8 +24,10 @@ import (
 	"time"
 )
 
-var _ Clock = System{}
-var _ Clock = new(Simulated)
+var (
+	_ Clock = System{}
+	_ Clock = new(Simulated)
+)
 
 func TestSimulatedAfter(t *testing.T) {
 	var (

@@ -80,7 +80,7 @@ func TestPublisher(t *testing.T) {
 
 		// we hear about block1 from peers 1,2,3,4
 		header1 := &types.Header{Number: *uint256.NewInt(1)}
-		block1 := types.NewBlockWithHeader(header1)
+		block1 := types.NewBlockWithHeader(header1, nil)
 		td1 := uint256.NewInt(5)
 		waitPeersMayMissHash := func(peersCount int) func() bool {
 			return func() bool { return len(pt.peerTracker.ListPeersMayMissBlockHash(header1.Hash())) == peersCount }

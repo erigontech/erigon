@@ -60,7 +60,11 @@ type CanonicalReader interface {
 
 type BodyReader interface {
 	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
+	// BodyWithRawTransactions returns the body with its transactions in their binary (canonical
+	// EIP-2718) encoding, skipping the decode where the storage allows.
+	BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.RawBody, err error)
 	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
+	// Body reads body metadata and the user transaction count without loading transactions.
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
@@ -70,6 +74,7 @@ type BodyReader interface {
 type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, ok bool, err error)
+	TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (hash common.Hash, ok bool, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
 	FirstTxnNumNotInSnapshots(tx kv.Getter) uint64
 }
@@ -98,12 +103,13 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
-	FrozenBorBlocks(align bool) uint64
+	// FrozenBlocksObserved reports the count and whether it was observed rather than defaulted.
+	FrozenBlocksObserved() (uint64, bool)
+	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
 	Snapshots() BlockSnapshots
-	BorSnapshots() BlockSnapshots
 
 	Ready(ctx context.Context) <-chan error
 
@@ -118,7 +124,7 @@ type BlockRetire interface {
 	BuildFilesInBackground(
 		ctx context.Context,
 		minBlockNum uint64,
-		maxBlockNum uint64,
+		finalityCtx kv.FinalityContext,
 		lvl log.Lvl,
 		seeder SeederClient,
 		onFinishRetire func() error,
@@ -168,6 +174,23 @@ type DownloaderClient interface {
 	// that we have dbservices.DownloadRequest per path, but haven't yet incorporated the download
 	// "target name" into the API here.
 	Download(context.Context, *downloaderproto.DownloadRequest) error
+}
+
+// DownloadProgressReport is an optional capability of a DownloaderClient: it
+// reports snapshot-download progress in bytes so eth_syncing can surface it.
+type DownloadProgressReport interface {
+	// Completed reports downloaded and total bytes; total == 0 means unknown.
+	Completed() (done, total uint64)
+	// ResetProgress drops any stale sample, so that a phase downloading a small
+	// subset of the files cannot be mistaken for progress on the full set.
+	ResetProgress()
+}
+
+// DownloadProgressProvider is implemented by clients that wrap another
+// downloader client: it exposes the wrapped downloader's progress capability,
+// or nil when that downloader cannot report progress.
+type DownloadProgressProvider interface {
+	DownloadProgress() DownloadProgressReport
 }
 
 // A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.

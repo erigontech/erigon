@@ -19,6 +19,7 @@ package state_test
 import (
 	"bytes"
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -30,6 +31,59 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
+
+func TestCommitmentReadableAfterFailedMergeRetry(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			const stepSize = uint64(10)
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+			writeStepsKeys(t, db, agg, mkAddrs(0x10, 16), 0, 3)
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, unboundedFinalityCtx, false))
+			agg.WaitForFiles()
+
+			badTmpDir := filepath.Join(t.TempDir(), "not-a-directory")
+			require.NoError(t, os.WriteFile(badTmpDir, nil, 0o600))
+			done, err := agg.MergeWithTempDirForTest(t.Context(), 2*stepSize, kv.ReceiptDomain, badTmpDir)
+			require.True(t, done)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "receipt")
+
+			commitmentPath := filepath.Join(agg.Dirs().SnapDomain, "v2.1-commitment.0-2.kv")
+			prefixes := referencedBranchPrefixes(t, commitmentPath)
+			require.NotEmpty(t, prefixes)
+			want := make([][]byte, len(prefixes))
+			ac := agg.BeginFilesRo()
+			defer ac.Close()
+			for i, prefix := range prefixes {
+				v, found, _, _, readErr := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, math.MaxUint64)
+				require.NoError(t, readErr)
+				require.True(t, found)
+				want[i] = bytes.Clone(v)
+			}
+			ac.Close()
+
+			done, err = agg.MergeWithTempDirForTest(t.Context(), 2*stepSize, domain, badTmpDir)
+			require.True(t, done)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), domain.String())
+			require.FileExists(t, commitmentPath)
+
+			db, agg = reopenAggregator(t, db, agg, stepSize)
+			require.NoError(t, agg.OpenFolder(db))
+			ac = agg.BeginFilesRo()
+			defer ac.Close()
+			for i, prefix := range prefixes {
+				v, found, from, to, readErr := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, prefix, math.MaxUint64)
+				require.NoError(t, readErr)
+				require.True(t, found)
+				require.Zero(t, from)
+				require.Equal(t, 2*stepSize, to)
+				require.Equal(t, want[i], v)
+			}
+		})
+	}
+}
 
 // TestCommitmentMergeFlagOffExpandsReferencedInputs exercises the corruption vector: v2.1 referenced
 // commitment files merged with the write flag off. The transformer must expand the referenced inputs
@@ -49,7 +103,7 @@ func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	writeStepsKeys(t, db, agg, setA, 0, 6)
 	writeStepsKeys(t, db, agg, setB, 6, 32)
-	require.NoError(t, agg.BuildFiles(32*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 32*stepSize, unboundedFinalityCtx))
 
 	in016 := filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-16.kv")
 	_, shortIn := branchKeyKinds(t, in016)
@@ -58,7 +112,7 @@ func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
 	// phase 2: flag off -> the merge consuming the v2.1 inputs must produce plain (v2.2) output
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	writeStepsKeys(t, db, agg, setB, 32, 64)
-	require.NoError(t, agg.BuildFiles(64*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 64*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	merged := filepath.Join(dirs.SnapDomain, "v2.2-commitment.0-32.kv")
@@ -68,8 +122,8 @@ func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
 
 	// reopen from disk (file versions parsed from names) and confirm the state still reads back
 	db, agg = reopenAggregator(t, db, agg, stepSize)
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	assertCommitmentVersionConsistency(t, dirs.SnapDomain)
 	require.NotEmpty(t, recomputeRootFromState(t, db))
 }
@@ -92,8 +146,8 @@ func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
 
 	// reopen fresh so commitment file versions come from the on-disk names
 	db, agg = reopenAggregator(t, db, agg, stepSize)
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 
 	referenced := assertCommitmentVersionConsistency(t, dirs.SnapDomain)
 	require.Positive(t, referenced, "squeeze must produce referenced (v2.1) commitment files")
@@ -111,7 +165,7 @@ func TestMergedCommitmentFileVersionStampedInMemory(t *testing.T) {
 
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	writeStepsKeys(t, db, agg, keys, 0, 8)
-	require.NoError(t, agg.BuildFiles(8*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 8*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	tx, err := db.BeginTemporalRw(t.Context())

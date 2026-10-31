@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -52,6 +51,12 @@ type MiningServer struct {
 type IsMining interface {
 	IsMining() bool
 }
+
+// NoMining reports that this process never mines. The standalone txpool and
+// rpcdaemon run without a miner.
+type NoMining struct{}
+
+func (NoMining) IsMining() bool { return false }
 
 func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
 	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
@@ -105,31 +110,11 @@ func (s *MiningServer) Mining(_ context.Context, req *txpoolproto.MiningRequest)
 }
 
 func (s *MiningServer) OnPendingLogs(req *txpoolproto.OnPendingLogsRequest, reply txpoolproto.Mining_OnPendingLogsServer) error {
-	remove := s.pendingLogsStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
-}
-
-func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
-	b, err := rlp.EncodeToBytes(l)
-	if err != nil {
-		return err
-	}
-	reply := &txpoolproto.OnPendingBlockReply{RplBlock: b}
-	s.pendingBlockStreams.Broadcast(reply, s.logger)
-	return nil
+	return s.pendingLogsStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) OnPendingBlock(req *txpoolproto.OnPendingBlockRequest, reply txpoolproto.Mining_OnPendingBlockServer) error {
-	remove := s.pendingBlockStreams.Add(reply)
-	defer remove()
-	select {
-	case <-s.ctx.Done():
-		return nil
-	case <-reply.Context().Done():
-		return nil
-	}
+	return s.pendingBlockStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
@@ -143,10 +128,7 @@ func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
 }
 
 func (s *MiningServer) OnMinedBlock(req *txpoolproto.OnMinedBlockRequest, reply txpoolproto.Mining_OnMinedBlockServer) error {
-	remove := s.minedBlockStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
+	return s.minedBlockStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {

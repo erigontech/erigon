@@ -528,9 +528,37 @@ func TestFetcherFetchBodies(t *testing.T) {
 	// setup 2 request to test "paging"-style fetch logic
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
+	body1 := &types.Body{
+		Transactions: types.Transactions{
+			types.NewEIP1559Transaction(
+				*uint256.NewInt(1),
+				1,
+				common.BigToAddress(big.NewInt(123)),
+				uint256.NewInt(55),
+				0,
+				uint256.NewInt(777),
+				uint256.NewInt(888),
+				nil,
+			),
+		},
+	}
+	body2 := &types.Body{
+		Transactions: types.Transactions{
+			types.NewEIP1559Transaction(
+				*uint256.NewInt(1),
+				2,
+				common.BigToAddress(big.NewInt(321)),
+				uint256.NewInt(21),
+				0,
+				uint256.NewInt(876),
+				uint256.NewInt(765),
+				nil,
+			),
+		},
+	}
 	mockHeaders := []*types.Header{
-		{Number: *uint256.NewInt(1)},
-		{Number: *uint256.NewInt(2)},
+		newMockHeaderForBody(1, body1),
+		newMockHeaderForBody(2, body2),
 	}
 	mockHashes := []common.Hash{
 		mockHeaders[0].Hash(),
@@ -540,21 +568,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId1, &types.Body{
-				Transactions: types.Transactions{
-					types.NewEIP1559Transaction(
-						*uint256.NewInt(1),
-						1,
-						common.BigToAddress(big.NewInt(123)),
-						uint256.NewInt(55),
-						0,
-						uint256.NewInt(666),
-						uint256.NewInt(777),
-						uint256.NewInt(888),
-						nil,
-					),
-				},
-			}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId1, body1),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{
@@ -567,21 +581,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
-				Transactions: types.Transactions{
-					types.NewEIP1559Transaction(
-						*uint256.NewInt(1),
-						2,
-						common.BigToAddress(big.NewInt(321)),
-						uint256.NewInt(21),
-						0,
-						uint256.NewInt(987),
-						uint256.NewInt(876),
-						uint256.NewInt(765),
-						nil,
-					),
-				},
-			}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId2, body2),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{
@@ -599,6 +599,211 @@ func TestFetcherFetchBodies(t *testing.T) {
 		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.NoError(t, err)
 		require.Len(t, bodies.Data, 2)
+		for i, body := range bodies.Data {
+			require.NotNil(t, body)
+			require.NoError(t, body.MatchesHeader(mockHeaders[i]))
+		}
+	})
+}
+
+func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := newMockHeaderForBody(1, &types.Body{})
+	bodyBytes, err := rlp.EncodeToBytes(&types.Body{})
+	require.NoError(t, err)
+	mockInboundMessages := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId,
+				bodyBytes,
+				rlp.RawValue{0x80},
+			),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           []common.Hash{header.Hash()},
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errTooManyBodies *ErrTooManyBodies
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.ErrorAs(t, err, &errTooManyBodies)
+		require.EqualError(t, err, "too many bodies in fetch bodies response: requested=1, received>=2")
+		require.Equal(t, 1, errTooManyBodies.requested)
+		require.Equal(t, 2, errTooManyBodies.received)
+		require.Nil(t, bodies.Data)
+	})
+}
+
+func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
+	encodedBodies, err := rlp.EncodeToBytes(&types.Body{})
+	require.NoError(t, err)
+	encodedBodies = append(encodedBodies, encodedBodies...)
+	headers := []*types.Header{newMockHeaderForBody(1, &types.Body{})}
+
+	// Pool entries may be dropped, so exercise several excess/empty pairs.
+	for range 32 {
+		_, err := decodeBlockBodiesResponse(encodedBodies, headers)
+		require.ErrorIs(t, err, &ErrTooManyBodies{})
+
+		bodies, err := decodeBlockBodiesResponse(nil, headers)
+		require.NoError(t, err)
+		require.Empty(t, bodies)
+	}
+}
+
+func TestDecodeBlockBodiesResponseMatchesHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		body *types.Body
+	}{
+		{
+			name: "uncles",
+			body: &types.Body{Uncles: []*types.Header{newMockBlockHeaders(1)[0]}},
+		},
+		{
+			name: "withdrawals",
+			body: &types.Body{Withdrawals: []*types.Withdrawal{
+				{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4},
+			}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			header := newMockHeaderForBody(1, test.body)
+			encoded, err := rlp.EncodeToBytes(test.body)
+			require.NoError(t, err)
+
+			bodies, err := decodeBlockBodiesResponse(encoded, []*types.Header{header})
+			require.NoError(t, err)
+			require.Len(t, bodies, 1)
+			require.NoError(t, bodies[0].MatchesHeader(header))
+		})
+	}
+}
+
+func TestDecodeBlockBodiesResponseStopsAtFirstMismatch(t *testing.T) {
+	headers := newMockBlockHeaders(2)
+	mismatching, err := rlp.EncodeToBytes(&types.Body{Withdrawals: []*types.Withdrawal{}})
+	require.NoError(t, err)
+	// One invalid empty transaction, followed by an empty uncle list.
+	malformed := rlp.RawValue{0xc3, 0xc1, 0x80, 0xc0}
+
+	decoded, err := decodeBlockBodiesResponse(append(mismatching, malformed...), headers)
+	require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+	require.Nil(t, decoded)
+}
+
+func TestDecodeBlockBodiesResponseRejectsMalformedTransactionBeforeMismatch(t *testing.T) {
+	// One invalid empty transaction, followed by an empty uncle list.
+	body := rlp.RawValue{0xc3, 0xc1, 0x80, 0xc0}
+	header := newMockHeaderForBody(1, &types.Body{})
+
+	decoded, err := decodeBlockBodiesResponse(body, []*types.Header{header})
+	require.ErrorContains(t, err, "short input: 0")
+	require.NotErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+	require.Nil(t, decoded)
+}
+
+func TestDecodeBlockBodiesResponseRejectsWithdrawalPresenceMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		expected []*types.Withdrawal
+		actual   []*types.Withdrawal
+	}{
+		{name: "unexpected", actual: []*types.Withdrawal{}},
+		{name: "missing", expected: []*types.Withdrawal{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := newMockHeaderForBody(1, &types.Body{Withdrawals: test.expected})
+			encoded, err := rlp.EncodeToBytes(&types.Body{Withdrawals: test.actual})
+			require.NoError(t, err)
+
+			decoded, err := decodeBlockBodiesResponse(encoded, []*types.Header{header})
+			require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+			require.False(t, rlp.IsInvalidRLPError(err))
+			require.Nil(t, decoded)
+		})
+	}
+}
+
+func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := newMockHeaderForBody(1, &types.Body{})
+	mockInboundMessages := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId+1,
+				rlp.RawValue{0x80},
+			),
+		},
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           []common.Hash{header.Hash()},
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.NoError(t, err)
+		require.Len(t, bodies.Data, 1)
+	})
+}
+
+func TestFetcherFetchBodiesRejectsInvalidMatchingResponse(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	mockInboundMessages := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId,
+				rlp.RawValue{0x80},
+			),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           []common.Hash{header.Hash()},
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.True(t, rlp.IsInvalidRLPError(err), err)
+		require.Nil(t, bodies.Data)
 	})
 }
 
@@ -655,7 +860,21 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	peerId := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
-	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
+	body := &types.Body{
+		Transactions: types.Transactions{
+			types.NewEIP1559Transaction(
+				*uint256.NewInt(1),
+				1,
+				common.BigToAddress(big.NewInt(123)),
+				uint256.NewInt(55),
+				0,
+				uint256.NewInt(777),
+				uint256.NewInt(888),
+				nil,
+			),
+		},
+	}
+	mockHeaders := []*types.Header{newMockHeaderForBody(1, body)}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
@@ -675,21 +894,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
-				Transactions: types.Transactions{
-					types.NewEIP1559Transaction(
-						*uint256.NewInt(1),
-						1,
-						common.BigToAddress(big.NewInt(123)),
-						uint256.NewInt(55),
-						0,
-						uint256.NewInt(666),
-						uint256.NewInt(777),
-						uint256.NewInt(888),
-						nil,
-					),
-				},
-			}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId2, body),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{

@@ -29,7 +29,7 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -40,7 +40,7 @@ func TestReadHistoryHashVector_MissingEntryIsTyped(t *testing.T) {
 	const size = uint64(64)
 	const slot = 2 * size // needFromGenesis=0; window [slot-size, slot-1]
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	for _, tc := range []struct {
@@ -52,7 +52,7 @@ func TestReadHistoryHashVector_MissingEntryIsTyped(t *testing.T) {
 		{"trailing hole", slot - 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := memdb.NewTestDB(t, dbcfg.ChainDB)
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			tx, err := db.BeginRw(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -85,10 +85,10 @@ func TestReadHistoryHashVector_CorruptEntryIsHardError(t *testing.T) {
 	const slot = 2 * size
 	const corruptAt = slot - size/2
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

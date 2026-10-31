@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -34,8 +35,10 @@ type CurrentTableReader interface {
 	Get([]byte) ([]byte, error)
 }
 
-type ExtractNextFunc func(originalK, k []byte, v []byte) error
-type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error
+type (
+	ExtractNextFunc func(originalK, k []byte, v []byte) error
+	ExtractFunc     func(k []byte, v []byte, next ExtractNextFunc) error
+)
 
 // NextKey generates the possible next key w/o changing the key length.
 // for [0x01, 0x01, 0x01] it will generate [0x01, 0x01, 0x02], etc
@@ -44,7 +47,7 @@ func NextKey(key []byte) ([]byte, error) {
 		return key, errors.New("could not apply NextKey for the empty key")
 	}
 	nextKey := bytes.Clone(key)
-	for i := len(key) - 1; i >= 0; i-- {
+	for i := range slices.Backward(key) {
 		b := nextKey[i]
 		if b < 0xFF {
 			nextKey[i] = b + 1
@@ -61,8 +64,10 @@ func NextKey(key []byte) ([]byte, error) {
 // loaded from files into a DB
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
-type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
-type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []any)
+type (
+	LoadCommitHandler      func(db kv.Putter, key []byte, isDone bool) error
+	AdditionalLogArguments func(k, v []byte) (additionalLogArguments []any)
+)
 
 type TransformArgs struct {
 	Quit              <-chan struct{}

@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -42,7 +43,7 @@ type InternalOperation struct {
 	Type  OperationType    `json:"type"`
 	From  accounts.Address `json:"from"`
 	To    accounts.Address `json:"to"`
-	Value *hexutil.Big     `json:"value"`
+	Value *hexutil.U256    `json:"value"`
 }
 
 type OperationsTracer struct {
@@ -60,30 +61,30 @@ func NewOperationsTracer(ctx context.Context) *OperationsTracer {
 func (t *OperationsTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnEnter: t.OnEnter,
+			OnEnterV2: t.OnEnterV2,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
 	}
 }
 
-func (t *OperationsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *OperationsTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if depth == 0 {
 		return
 	}
 
 	if vm.OpCode(typ) == vm.CALL && !value.IsZero() {
-		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
+		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.U256)(&value)})
 		return
 	}
 	if vm.OpCode(typ) == vm.CREATE {
-		t.Results = append(t.Results, &InternalOperation{OP_CREATE, from, to, (*hexutil.Big)(value.ToBig())})
+		t.Results = append(t.Results, &InternalOperation{OP_CREATE, from, to, (*hexutil.U256)(&value)})
 	}
 	if vm.OpCode(typ) == vm.CREATE2 {
-		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.Big)(value.ToBig())})
+		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.U256)(&value)})
 	}
 	if vm.OpCode(typ) == vm.SELFDESTRUCT {
-		t.Results = append(t.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
+		t.Results = append(t.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.U256)(&value)})
 	}
 }
 

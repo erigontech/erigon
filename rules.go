@@ -18,7 +18,7 @@
 
 package gorules
 
-// to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
+// golangci-lint caches compiled rules; clear the cache after editing this file.
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
 )
@@ -53,7 +53,7 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err = $db.BeginRwNosync($ctx); $chk; $rollback`,
 	).
 		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`) && !m["rollback"].Text.Matches(`t\.Cleanup\(.*\.Rollback\)`)).
-		//At(m["rollback"]).
+		// At(m["rollback"]).
 		Report(`Add "defer $tx.Rollback()" or "t.Cleanup($tx.Rollback)" right after transaction creation error check. 
 			If you are in the loop - consider using "$db.View" or "$db.Update" or extract whole transaction to function.
 			Without rollback in defer - app can deadlock on error or panic.
@@ -73,7 +73,7 @@ func cursorDeferClose(m dsl.Matcher) {
 		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`) && !m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
-		//At(m["close"]).
+		// At(m["close"]).
 		Report(`Add "defer $c.Close()" or "t.Cleanup($c.Close)" right after cursor creation error check`)
 }
 
@@ -87,7 +87,7 @@ func streamDeferClose(m dsl.Matcher) {
 		`$c, $err := $db.Prefix($params); $chk; $close`,
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`) && !m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
-		//At(m["close"]).
+		// At(m["close"]).
 		Report(`Add "defer $c.Close()" or "t.Cleanup($c.Close)" right after cursor creation error check`)
 }
 
@@ -104,10 +104,6 @@ func closeLockedDir(m dsl.Matcher) {
 	m.Match(`$c := dir.OpenRw($*_); $close`).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" after locked.OpenDir`)
-}
-
-func passValuesByContext(m dsl.Matcher) {
-	m.Match(`ctx.WithValue($*_)`).Report(`Don't pass app-level parameters by context, pass them as-is or as typed objects`)
 }
 
 func mismatchingUnlock(m dsl.Matcher) {
@@ -143,7 +139,7 @@ func forbidOsRemove(m dsl.Matcher) {
 }
 
 func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
-	m.Match(`filepath.Walk($dir, $cb)`).Report(`report("Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls")`)
+	m.Match(`filepath.Walk($dir, $cb)`).Report(`Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls`)
 }
 
 func osCreateBlankAssign(m dsl.Matcher) {

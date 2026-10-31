@@ -35,10 +35,8 @@ import (
 
 func TestNewStateTestSharedDomainsUsesSelectedCommitment(t *testing.T) {
 	originalParallel := statecfg.ExperimentalParallelCommitment
-	originalStreaming := statecfg.ExperimentalStreamingCommitment
 	t.Cleanup(func() {
 		statecfg.ExperimentalParallelCommitment = originalParallel
-		statecfg.ExperimentalStreamingCommitment = originalStreaming
 	})
 
 	for _, tc := range []struct {
@@ -51,7 +49,6 @@ func TestNewStateTestSharedDomainsUsesSelectedCommitment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			statecfg.ExperimentalParallelCommitment = tc.parallel
-			statecfg.ExperimentalStreamingCommitment = false
 
 			db, tx := temporaltest.NewTestTx(t)
 			sd, err := newStateTestSharedDomains(db, tx)

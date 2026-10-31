@@ -21,7 +21,6 @@ import (
 )
 
 func TestEnumeration(t *testing.T) {
-
 	if Headers.Enum() != Enums.Headers {
 		t.Fatal("enum mismatch", Headers, Headers.Enum(), Enums.Headers)
 	}
@@ -33,11 +32,9 @@ func TestEnumeration(t *testing.T) {
 	if Transactions.Enum() != Enums.Transactions {
 		t.Fatal("enum mismatch", Transactions, Transactions.Enum(), Enums.Transactions)
 	}
-
 }
 
 func TestNames(t *testing.T) {
-
 	if Headers.Name() != Enums.Headers.String() {
 		t.Fatal("name mismatch", Headers, Headers.Name(), Enums.Headers.String())
 	}

@@ -28,7 +28,7 @@ import (
 func init() {
 	// Initialize global config for tests
 	cfg := clparams.MainnetBeaconConfig
-	clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	clparams.InitGlobalStaticConfig(&cfg)
 }
 
 func TestNewDataColumnSidecar(t *testing.T) {

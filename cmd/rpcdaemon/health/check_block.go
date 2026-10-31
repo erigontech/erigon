@@ -32,7 +32,7 @@ func checkBlockNumber(ctx context.Context, blockNumber rpc.BlockNumber, api EthA
 	if err != nil {
 		return err
 	}
-	if len(data) == 0 { // block not found
+	if data == nil { // block not found
 		return fmt.Errorf("no known block with number %v (%x hex)", blockNumber.Uint64(), blockNumber.Uint64())
 	}
 

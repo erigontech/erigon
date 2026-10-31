@@ -17,17 +17,284 @@
 package execution_client
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+type fcuEngineStub struct {
+	engineapi.EngineAPI
+	response *engine_types.ForkChoiceUpdatedResponse
+	err      error
+}
+
+type assembledPayloadIDModule struct {
+	execmodule.ExecutionModule
+	id    uint64
+	calls int
+}
+
+func (m *assembledPayloadIDModule) GetAssembledBlock(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+	m.id = id
+	m.calls++
+	return execmodule.AssembledBlockResult{}, nil
+}
+
+func TestLocalEnginePayloadIDRoundTrip(t *testing.T) {
+	const id = uint64(0x0102030405060708)
+	module := &assembledPayloadIDModule{}
+	reader := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second)
+	client := &ExecutionClientEngine{
+		chainRW: &reader,
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadId: engine_types.ConvertPayloadId(id),
+		}},
+	}
+	payloadID, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion)
+	require.NoError(t, err)
+	_, _, _, _, err = client.GetAssembledBlock(t.Context(), payloadID, clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Equal(t, id, module.id)
+}
+
+func TestLocalEngineRejectsMalformedPayloadIDs(t *testing.T) {
+	for _, size := range []int{9, 0, 1, 7} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			module := &assembledPayloadIDModule{}
+			reader := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second)
+			client := &ExecutionClientEngine{chainRW: &reader}
+			require.NotPanics(t, func() {
+				_, _, _, _, err := client.GetAssembledBlock(t.Context(), make([]byte, size), clparams.DenebVersion)
+				require.ErrorContains(t, err, "expected 8 bytes")
+			})
+			require.Zero(t, module.calls)
+		})
+	}
+}
+
+func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return s.response, s.err
+}
+
+type getPayloadEngineStub struct {
+	engineapi.EngineAPI
+	response *engine_types.GetPayloadResponse
+	called   string
+}
+
+func (s *getPayloadEngineStub) GetPayloadV3(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V3"
+	return s.response, nil
+}
+
+func (s *getPayloadEngineStub) GetPayloadV4(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V4"
+	return s.response, nil
+}
+
+func (s *getPayloadEngineStub) GetPayloadV5(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V5"
+	return s.response, nil
+}
+
+func (s *getPayloadEngineStub) GetPayloadV6(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V6"
+	return s.response, nil
+}
+
+func TestGetAssembledBlockRoutesByVersion(t *testing.T) {
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		method  string
+	}{
+		{clparams.DenebVersion, "V3"},
+		{clparams.ElectraVersion, "V4"},
+		{clparams.FuluVersion, "V5"},
+		{clparams.GloasVersion, "V6"},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			stub := &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+				ExecutionPayload: &engine_types.ExecutionPayload{},
+				BlobsBundle:      &engine_types.BlobsBundle{},
+			}}
+			cc := &ExecutionClientEngine{engine: stub, beaconCfg: &cfg}
+
+			_, _, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, tc.version)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.method, stub.called)
+		})
+	}
+}
+
+func TestGetAssembledBlockRejectsMissingBlobsBundle(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cc := &ExecutionClientEngine{
+				engine: &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+					ExecutionPayload: &engine_types.ExecutionPayload{},
+				}},
+				beaconCfg: &cfg,
+			}
+
+			payload, bundle, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, version)
+
+			require.Nil(t, payload)
+			require.Nil(t, bundle)
+			require.ErrorIs(t, err, ErrInvalidGetPayloadResponse)
+			require.ErrorContains(t, err, "missing blobs bundle")
+		})
+	}
+}
+
+func TestGetAssembledBlockRejectsMissingExecutionPayload(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cc := &ExecutionClientEngine{
+				engine: &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+					BlobsBundle: &engine_types.BlobsBundle{},
+				}},
+				beaconCfg: &cfg,
+			}
+
+			payload, bundle, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, version)
+
+			require.Nil(t, payload)
+			require.Nil(t, bundle)
+			require.ErrorIs(t, err, ErrInvalidGetPayloadResponse)
+			require.ErrorContains(t, err, "nil execution payload")
+		})
+	}
+}
+
+func TestGetAssembledBlockAcceptsEmptyBlobsBundle(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			bundle := &engine_types.BlobsBundle{}
+			cc := &ExecutionClientEngine{
+				engine: &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+					ExecutionPayload: &engine_types.ExecutionPayload{},
+					BlobsBundle:      bundle,
+				}},
+				beaconCfg: &cfg,
+			}
+
+			payload, gotBundle, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, version)
+
+			require.NoError(t, err)
+			require.NotNil(t, payload)
+			require.Same(t, bundle, gotBundle)
+		})
+	}
+}
+
+// A forkchoice update that ran out of time has not been refused: the execution layer may still
+// apply it, and no payload id came back. Reporting that as success left every caller to infer a
+// timeout from an empty id, which reads identically to an execution layer that is syncing.
+func TestForkChoiceUpdateReportsATimeoutRatherThanAnEmptySuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"wrapped context deadline", fmt.Errorf("wrapped: %w", context.DeadlineExceeded)},
+		{"grpc deadline", status.Error(codes.DeadlineExceeded, "context deadline exceeded")},
+		{"legacy grpc string", errors.New("rpc error: code = DeadlineExceeded desc = context deadline exceeded")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cc := &ExecutionClientEngine{engine: &fcuEngineStub{err: tc.err}, beaconCfg: &cfg}
+
+			id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+
+			require.Nil(t, id)
+			require.ErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+		})
+	}
+}
+
+// A failure that is not a timeout keeps reporting as an ordinary failure, so a caller that retries
+// only on timeouts does not retry a rejection forever.
+func TestForkChoiceUpdateDoesNotCallEveryFailureATimeout(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{engine: &fcuEngineStub{err: errors.New("boom")}, beaconCfg: &cfg}
+
+	_, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+}
+
+func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		beaconCfg: &cfg,
+	}
+
+	id, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
+	)
+
+	require.ErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID)
+	require.Nil(t, id)
+}
+
+func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		beaconCfg: &cfg,
+	}
+
+	id, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion,
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, id)
+}
 
 func TestNewExecutionClientEngineLocalSetsBeaconConfig(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
@@ -102,6 +369,37 @@ func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadFromSSZBlock_TransactionsAreJSONArray(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	tests := []struct {
+		name    string
+		version clparams.StateVersion
+		json    string
+		want    []any
+	}{
+		{name: "pre-Gloas empty", version: clparams.ElectraVersion, json: "[]", want: []any{}},
+		{name: "pre-Gloas non-empty", version: clparams.ElectraVersion, json: `["0x0102"]`, want: []any{"0x0102"}},
+		{name: "Gloas empty", version: clparams.GloasVersion, json: "[]", want: []any{}},
+		{name: "Gloas non-empty", version: clparams.GloasVersion, json: `["0x0102"]`, want: []any{"0x0102"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := cltypes.NewEth1Block(tt.version, &beaconCfg)
+			payload.Extra = solid.NewExtraData()
+			payload.Transactions = &solid.TransactionsSSZ{}
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+			require.NoError(t, payload.Transactions.UnmarshalJSON([]byte(tt.json)))
+
+			raw, err := json.Marshal(engine_types.ExecutionPayloadFromSSZBlock(payload, tt.version))
+			require.NoError(t, err)
+
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(raw, &decoded))
+			require.Equal(t, tt.want, decoded["transactions"])
+		})
+	}
+}
+
 func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 	block := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
 	block.Extra = solid.NewExtraData()
@@ -115,4 +413,46 @@ func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 		block.BlockAccessList = nil
 	}
 	return block
+}
+
+type newPayloadEngineStub struct {
+	engineapi.EngineAPI
+	err error
+}
+
+func (s *newPayloadEngineStub) NewPayloadV4(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return nil, s.err
+}
+
+func (s *newPayloadEngineStub) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return nil, s.err
+}
+
+// A timeout of the client's own request is no EL verdict, whatever the fork: the caller must not
+// import the payload on it (optimistic sync, "Execution Engine Errors").
+func TestNewPayloadReportsAClientTimeoutAsNoVerdict(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clientTimeout := fmt.Errorf("Post: %w (Client.Timeout exceeded while awaiting headers)", context.DeadlineExceeded)
+	electra := cltypes.NewEth1Block(clparams.ElectraVersion, &cfg)
+	electra.Extra = solid.NewExtraData()
+	electra.Transactions = &solid.TransactionsSSZ{}
+	electra.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	for _, payload := range []*cltypes.Eth1Block{gloas(&cfg, nil), electra} {
+		t.Run(payload.Version().String(), func(t *testing.T) {
+			client := &ExecutionClientEngine{engine: &newPayloadEngineStub{err: clientTimeout}, beaconCfg: &cfg}
+			status, err := client.NewPayload(t.Context(), payload, nil, nil, nil)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.EqualValues(t, PayloadStatusNone, status)
+		})
+	}
+}
+
+func TestValidationInterrupted(t *testing.T) {
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.True(t, ValidationInterrupted(cancelled, PayloadStatusNone, context.Canceled))
+	require.False(t, ValidationInterrupted(t.Context(), PayloadStatusNone, errors.New("connection refused")))
+	require.False(t, ValidationInterrupted(cancelled, PayloadStatusInvalidated, context.Canceled))
+	require.False(t, ValidationInterrupted(cancelled, PayloadStatusNone, nil))
 }

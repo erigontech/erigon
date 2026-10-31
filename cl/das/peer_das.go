@@ -1,9 +1,11 @@
 package das
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
@@ -31,11 +34,18 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-// BlockGetter is an interface for getting blocks by root.
+// The worker tick is a quarter of the shortest custody grace, within these bounds.
+const (
+	deferredColumnSyncMinTick = 100 * time.Millisecond
+	deferredColumnSyncMaxTick = time.Second
+)
+
+// BlockGetter is an interface for getting blocks by root and the fork-choice slot.
 // Used to avoid import cycle with forkchoice package.
 // [New in Gloas:EIP7732]
 type BlockGetter interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	Slot() uint64
 }
 
 // gloasBlockData holds only the fields needed from a block for GLOAS sidecar verification.
@@ -48,12 +58,17 @@ type gloasBlockData struct {
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
+	Start(ctx context.Context)
 	// [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
 	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
+	// BackfillCustodyColumns fetches, in the background, the custody columns of blocks imported
+	// between fromSlot and toSlot without them.
+	BackfillCustodyColumns(fromSlot, toSlot uint64)
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
-	Prune(keepSlotDistance uint64) error
+	ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error)
+	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
 	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
@@ -65,6 +80,11 @@ type PeerDas interface {
 }
 
 var numOfBlobRecoveryWorkers = 8
+
+const (
+	blobRecoveryValidationRetryInterval = 500 * time.Millisecond
+	maxBlobRecoveryResultBytes          = 16 << 20
+)
 
 type peerdas struct {
 	state             *peerdasstate.PeerDasState
@@ -79,19 +99,37 @@ type peerdas struct {
 	gossipManager     gossipmgr.Gossip
 	recoverBlobsQueue chan recoverBlobsRequest
 
-	recoveringMutex   sync.Mutex
-	isRecovering      map[common.Hash]bool
-	blocksToCheckSync sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
+	recoveringMutex     sync.Mutex
+	isRecovering        map[common.Hash]bool
+	recoveryRequests    map[common.Hash]recoverBlobsRequest
+	recoveryGenerations map[common.Hash]uint64
+	recoveryResults     map[common.Hash]*blobRecoveryResult
+	recoveryResultOrder []common.Hash
+	recoveryResultBytes int
+	recoveryRetryOnce   sync.Once
+	recoveryRetryMutex  sync.Mutex
+	recoveryRetries     map[common.Hash]*delayedRecoverBlobsRequest
+	recoveryRetryQueue  blobRecoveryRetryHeap
+	recoveryRetryAfter  time.Time
+	recoveryRetryWake   chan struct{}
+	recoveryPreferRetry bool
+	recoverySlots       map[uint64]*blobRecoverySlot
+	recoverySlotQueue   blobRecoverySlotHeap
+	recoveryPruneFloor  uint64
+	blocksToCheckSync   deferredColumnSyncs
+	backfills           chan struct{}
+	backfillMu          sync.Mutex
+	backfillPending     *slotRange
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
 	blockReader    freezeblocks.BeaconSnapshotReader
-	indiciesDB     kv.RoDB
+	indiciesDB     kv.RwDB
 	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
+	startOnce      sync.Once
 }
 
 func NewPeerDas(
-	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	caplinConfig *clparams.CaplinConfig,
@@ -103,7 +141,7 @@ func NewPeerDas(
 	peerDasState *peerdasstate.PeerDasState,
 	gossipManager gossipmgr.Gossip,
 	blockReader freezeblocks.BeaconSnapshotReader, // [New in Gloas:EIP7732]
-	indiciesDB kv.RoDB, // [New in Gloas:EIP7732]
+	indiciesDB kv.RwDB, // [New in Gloas:EIP7732]
 ) PeerDas {
 	kzg.InitKZGCtx()
 	gloasDataCache, _ := lru.New[common.Hash, *gloasBlockData]("gloasDataCache", 128)
@@ -119,21 +157,56 @@ func NewPeerDas(
 		ethClock:          ethClock,
 		gossipManager:     gossipManager,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
+		backfills:         make(chan struct{}, 1),
 
-		recoveringMutex:   sync.Mutex{},
-		isRecovering:      make(map[common.Hash]bool),
-		blocksToCheckSync: sync.Map{},
+		recoveringMutex:     sync.Mutex{},
+		isRecovering:        make(map[common.Hash]bool),
+		recoveryRequests:    make(map[common.Hash]recoverBlobsRequest),
+		recoveryGenerations: make(map[common.Hash]uint64),
+		recoveryResults:     make(map[common.Hash]*blobRecoveryResult),
+		recoveryRetries:     make(map[common.Hash]*delayedRecoverBlobsRequest),
+		recoveryRetryWake:   make(chan struct{}, numOfBlobRecoveryWorkers),
 
 		blockReader:    blockReader,
 		indiciesDB:     indiciesDB,
 		gloasDataCache: gloasDataCache,
 	}
-	p.resubscribeGossip()
-	for range numOfBlobRecoveryWorkers {
-		go p.blobsRecoverWorker(ctx)
-	}
-	go p.syncColumnDataWorker(ctx)
 	return p
+}
+
+func (d *peerdas) Start(ctx context.Context) {
+	d.startOnce.Do(func() {
+		var storedCgc, raiseSlot uint64
+		if err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
+			var err error
+			if storedCgc, err = beacon_indicies.ReadHighestCustodyGroupCount(tx); err != nil {
+				return err
+			}
+			raiseSlot, err = beacon_indicies.ReadCustodyRaiseSlot(tx)
+			return err
+		}); err != nil {
+			log.Warn("[peerdas] failed to read highest custody group count and custody raise slot", "err", err)
+		} else {
+			d.state.RaiseAdvertisedCgc(storedCgc)
+			if raiseSlot == 0 && storedCgc > d.beaconConfig.SamplesPerSlot {
+				raiseSlot = d.nextSlot()
+				d.state.SetCustodyRaiseSlot(raiseSlot)
+				if err := d.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+					return beacon_indicies.WriteCustodyRaiseSlot(tx, raiseSlot)
+				}); err != nil {
+					log.Warn("[peerdas] failed to write custody raise slot", "err", err)
+				}
+			} else {
+				d.state.SetCustodyRaiseSlot(raiseSlot)
+			}
+		}
+		d.resubscribeGossip()
+		for range numOfBlobRecoveryWorkers {
+			go d.blobsRecoverWorker(ctx)
+		}
+		go d.syncColumnDataWorker(ctx)
+		go d.custodyBackfillWorker(ctx)
+	})
 }
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
@@ -210,7 +283,7 @@ func (d *peerdas) extractGloasData(block *cltypes.SignedBeaconBlock) *gloasBlock
 // getKzgCommitmentsForGloas retrieves kzg_commitments for GLOAS sidecar verification.
 // For GLOAS, kzg_commitments come from block.body.signed_execution_payload_bid.message.blob_kzg_commitments.
 // [New in Gloas:EIP7732]
-func (d *peerdas) getKzgCommitmentsForGloas(slot uint64, blockRoot common.Hash) (*solid.ListSSZ[*cltypes.KZGCommitment], error) {
+func (d *peerdas) getKzgCommitmentsForGloas(blockRoot common.Hash) (*solid.ListSSZ[*cltypes.KZGCommitment], error) {
 	data, err := d.getGloasData(blockRoot)
 	if err != nil {
 		return nil, err
@@ -242,6 +315,89 @@ func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 		return false
 	}
 	return count > 0
+}
+
+type blobRecoveryMetadata struct {
+	slot        uint64
+	blockRoot   common.Hash
+	version     clparams.StateVersion
+	signature   common.Bytes96
+	commitments []common.Bytes48
+}
+
+func newBlobRecoveryMetadata(block cltypes.ColumnSyncableSignedBlock, blockRoot common.Hash) (*blobRecoveryMetadata, error) {
+	commitments := block.GetBlobKzgCommitments()
+	if commitments == nil {
+		return nil, errors.New("missing blob commitments")
+	}
+	metadata := &blobRecoveryMetadata{
+		slot:        block.GetSlot(),
+		blockRoot:   blockRoot,
+		version:     block.Version(),
+		commitments: make([]common.Bytes48, commitments.Len()),
+	}
+	// Read through the interface: a concrete type switch here let a wrapper that overrides the root
+	// skip the signature, which turned the mismatch rejections below into no-ops.
+	metadata.signature = block.BlockSignature()
+	for i := range commitments.Len() {
+		commitment := commitments.Get(i)
+		if commitment == nil {
+			return nil, errors.New("nil blob commitment")
+		}
+		metadata.commitments[i] = common.Bytes48(*commitment)
+	}
+	return metadata, nil
+}
+
+type blobRecoveryValidation uint8
+
+const (
+	blobRecoveryUnavailable blobRecoveryValidation = iota
+	blobRecoveryInvalid
+	blobRecoveryComplete
+)
+
+func (d *peerdas) validateStoredBlobRecoveryMetadata(ctx context.Context, metadata *blobRecoveryMetadata, count uint32) blobRecoveryValidation {
+	if metadata == nil || len(metadata.commitments) == 0 || int(count) != len(metadata.commitments) {
+		if metadata != nil && len(metadata.commitments) == 0 {
+			return blobRecoveryComplete
+		}
+		return blobRecoveryInvalid
+	}
+	sidecars, found, err := d.blobStorage.ReadBlobSidecars(ctx, metadata.slot, metadata.blockRoot)
+	if err != nil {
+		return blobRecoveryUnavailable
+	}
+	if !found || len(sidecars) != len(metadata.commitments) {
+		return blobRecoveryInvalid
+	}
+	seen := make([]bool, len(metadata.commitments))
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil || sidecar.Index >= uint64(len(metadata.commitments)) || seen[sidecar.Index] {
+			return blobRecoveryInvalid
+		}
+		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil || root != metadata.blockRoot || sidecar.SignedBlockHeader.Header.Slot != metadata.slot || sidecar.SignedBlockHeader.Signature != metadata.signature || sidecar.KzgCommitment != metadata.commitments[sidecar.Index] {
+			return blobRecoveryInvalid
+		}
+		seen[sidecar.Index] = true
+	}
+	if blob_storage.VerifyBlobSidecars(sidecars, metadata.version, nil) != nil {
+		return blobRecoveryInvalid
+	}
+	return blobRecoveryComplete
+}
+
+func (d *peerdas) storedBlobRecoveryValidation(ctx context.Context, metadata *blobRecoveryMetadata) (blobRecoveryValidation, uint32) {
+	if metadata == nil {
+		return blobRecoveryInvalid, 0
+	}
+	count, err := d.blobStorage.KzgCommitmentsCount(ctx, metadata.blockRoot)
+	if err != nil {
+		log.Warn("failed to get kzg commitments count", "err", err, "blockRoot", metadata.blockRoot)
+		return blobRecoveryUnavailable, 0
+	}
+	return d.validateStoredBlobRecoveryMetadata(ctx, metadata, count), count
 }
 
 func (d *peerdas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
@@ -319,9 +475,28 @@ func (d *peerdas) resubscribeGossip() {
 	}
 }
 
+// nextSlot is the custody raise slot of a raise made now: a block up to the current slot may
+// already be checked with the old custody columns. Fork choice admits blocks up to its own slot,
+// which does not follow the wall clock back.
+func (d *peerdas) nextSlot() uint64 {
+	slot := d.ethClock.GetCurrentSlot()
+	if d.forkChoice != nil {
+		slot = max(slot, d.forkChoice.Slot())
+	}
+	return slot + 1
+}
+
 func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
-	adCgcChanged := d.state.SetCustodyGroupCount(cgc)
+	adCgcChanged := d.state.SetCustodyGroupCount(cgc, d.nextSlot)
 	if adCgcChanged {
+		if err := d.indiciesDB.Update(context.Background(), func(tx kv.RwTx) error {
+			if err := beacon_indicies.WriteHighestCustodyGroupCount(tx, cgc); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteCustodyRaiseSlot(tx, d.state.GetCustodyRaiseSlot())
+		}); err != nil {
+			log.Warn("[peerdas] failed to write highest custody group count and custody raise slot", "err", err)
+		}
 		if !d.IsArchivedMode() {
 			// subscribe more topics, advertised cgc is increased
 			d.resubscribeGossip()
@@ -329,175 +504,740 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	}
 }
 
-func (d *peerdas) Prune(keepSlotDistance uint64) error {
-	if err := d.columnStorage.Prune(keepSlotDistance); err != nil {
+func (d *peerdas) PruneBelow(slot uint64) error {
+	err := d.columnStorage.PruneBelow(slot)
+	if errors.Is(err, blob_storage.ErrPruneNotStarted) {
 		return err
 	}
+	d.pruneBlobRecoveriesBelow(slot)
+	// A partial failure still advances the floor: pruneBelow attempts every bucket, so it
+	// leaves stragglers rather than an untouched store, and the floor only understates them.
+	// The prune floor does not mean the columns above it are stored, so advertise the lowest
+	// stored bucket when it is higher. It drops when a backfill fills lower buckets.
+	stored, storedErr := d.columnStorage.EarliestStoredSlot()
+	if storedErr == nil {
+		d.state.SetEarliestAvailableSlot(max(slot, stored))
+		return err
+	}
+	log.Warn("[peerdas] failed to read the earliest stored column slot", "err", storedErr)
+	if slot == 0 || slot > d.state.GetEarliestAvailableSlot() {
+		d.state.SetEarliestAvailableSlot(slot)
+	}
+	return err
+}
 
-	curSlot := d.ethClock.GetCurrentSlot()
-	if curSlot < keepSlotDistance {
-		d.state.SetEarliestAvailableSlot(0)
-	} else {
-		earliestSlot := curSlot - keepSlotDistance
-		if earliestSlot > d.state.GetEarliestAvailableSlot() {
-			d.state.SetEarliestAvailableSlot(earliestSlot)
+func (d *peerdas) pruneBlobRecoveriesBelow(slot uint64) {
+	d.initBlobRecoveryRetries()
+	d.recoveryRetryMutex.Lock()
+	d.recoveringMutex.Lock()
+	d.initBlobRecoveryOwnershipLocked()
+	if slot > d.recoveryPruneFloor {
+		d.recoveryPruneFloor = slot
+	}
+	for d.recoverySlotQueue.Len() > 0 && d.recoverySlotQueue[0].slot < d.recoveryPruneFloor {
+		ownedSlot := heap.Pop(&d.recoverySlotQueue).(*blobRecoverySlot)
+		delete(d.recoverySlots, ownedSlot.slot)
+		for root := range ownedSlot.roots {
+			d.removeBlobRecoveryResultLocked(root)
+			if d.isRecovering[root] {
+				continue
+			}
+			d.removeDelayedBlobRecoveryLocked(root)
+			delete(d.isRecovering, root)
+			delete(d.recoveryRequests, root)
+			delete(d.recoveryGenerations, root)
 		}
 	}
-	return nil
+	d.recoveringMutex.Unlock()
+	d.recoveryRetryMutex.Unlock()
+	select {
+	case d.recoveryRetryWake <- struct{}{}:
+	default:
+	}
 }
 
 type recoverBlobsRequest struct {
 	slot      uint64
 	blockRoot common.Hash
+	metadata  *blobRecoveryMetadata
+}
+
+type delayedRecoverBlobsRequest struct {
+	request   recoverBlobsRequest
+	notBefore time.Time
+	heapIndex int
+}
+
+type blobRecoveryRetryHeap []*delayedRecoverBlobsRequest
+
+func (h blobRecoveryRetryHeap) Len() int { return len(h) }
+
+func (h blobRecoveryRetryHeap) Less(i, j int) bool {
+	return h[i].notBefore.Before(h[j].notBefore)
+}
+
+func (h blobRecoveryRetryHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
+}
+
+func (h *blobRecoveryRetryHeap) Push(value any) {
+	delayed := value.(*delayedRecoverBlobsRequest)
+	delayed.heapIndex = len(*h)
+	*h = append(*h, delayed)
+}
+
+func (h *blobRecoveryRetryHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	delayed := old[last]
+	old[last] = nil
+	delayed.heapIndex = -1
+	*h = old[:last]
+	return delayed
+}
+
+type blobRecoverySlot struct {
+	slot      uint64
+	roots     map[common.Hash]struct{}
+	heapIndex int
+}
+
+type blobRecoverySlotHeap []*blobRecoverySlot
+
+func (h blobRecoverySlotHeap) Len() int { return len(h) }
+
+func (h blobRecoverySlotHeap) Less(i, j int) bool { return h[i].slot < h[j].slot }
+
+func (h blobRecoverySlotHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
+}
+
+func (h *blobRecoverySlotHeap) Push(value any) {
+	slot := value.(*blobRecoverySlot)
+	slot.heapIndex = len(*h)
+	*h = append(*h, slot)
+}
+
+func (h *blobRecoverySlotHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	slot := old[last]
+	old[last] = nil
+	slot.heapIndex = -1
+	*h = old[:last]
+	return slot
+}
+
+type blobRecoveryResult struct {
+	existingColumns         []uint64
+	isGloas                 bool
+	kzgCommitmentsFromBlock *solid.ListSSZ[*cltypes.KZGCommitment]
+	anyColumnSidecar        *cltypes.DataColumnSidecar
+	blobMatrix              [][]cltypes.MatrixEntry
+	blobSidecars            []*cltypes.BlobSidecar
+	numberOfBlobs           uint64
+	timeRecoverMatrix       time.Duration
+	timeRecoverBlobs        time.Duration
+	encodedBytes            int
+}
+
+func newBlobRecoveryResult(
+	existingColumns []uint64,
+	isGloas bool,
+	kzgCommitmentsFromBlock *solid.ListSSZ[*cltypes.KZGCommitment],
+	anyColumnSidecar *cltypes.DataColumnSidecar,
+	blobMatrix [][]cltypes.MatrixEntry,
+	blobSidecars []*cltypes.BlobSidecar,
+	numberOfBlobs uint64,
+	timeRecoverMatrix time.Duration,
+	timeRecoverBlobs time.Duration,
+) *blobRecoveryResult {
+	encodedBytes := len(existingColumns) * 8
+	if anyColumnSidecar != nil {
+		encodedBytes += anyColumnSidecar.EncodingSizeSSZ()
+	}
+	if kzgCommitmentsFromBlock != nil {
+		encodedBytes += kzgCommitmentsFromBlock.EncodingSizeSSZ()
+	}
+	for _, entries := range blobMatrix {
+		for i := range entries {
+			encodedBytes += entries[i].EncodingSizeSSZ()
+		}
+	}
+	for _, sidecar := range blobSidecars {
+		encodedBytes += sidecar.EncodingSizeSSZ()
+	}
+	return &blobRecoveryResult{
+		existingColumns:         existingColumns,
+		isGloas:                 isGloas,
+		kzgCommitmentsFromBlock: kzgCommitmentsFromBlock,
+		anyColumnSidecar:        anyColumnSidecar,
+		blobMatrix:              blobMatrix,
+		blobSidecars:            blobSidecars,
+		numberOfBlobs:           numberOfBlobs,
+		timeRecoverMatrix:       timeRecoverMatrix,
+		timeRecoverBlobs:        timeRecoverBlobs,
+		encodedBytes:            encodedBytes,
+	}
+}
+
+func (d *peerdas) initBlobRecoveryRetries() {
+	d.recoveryRetryOnce.Do(func() {
+		if d.recoveryRetries == nil {
+			d.recoveryRetries = make(map[common.Hash]*delayedRecoverBlobsRequest)
+		}
+		if d.recoveryRetryWake == nil {
+			d.recoveryRetryWake = make(chan struct{}, numOfBlobRecoveryWorkers)
+		}
+	})
+}
+
+func (d *peerdas) initBlobRecoveryOwnershipLocked() {
+	if d.isRecovering == nil {
+		d.isRecovering = make(map[common.Hash]bool)
+	}
+	if d.recoveryRequests == nil {
+		d.recoveryRequests = make(map[common.Hash]recoverBlobsRequest)
+	}
+	if d.recoveryGenerations == nil {
+		d.recoveryGenerations = make(map[common.Hash]uint64)
+	}
+	if d.recoveryResults == nil {
+		d.recoveryResults = make(map[common.Hash]*blobRecoveryResult)
+	}
+	if d.recoverySlots == nil {
+		d.recoverySlots = make(map[uint64]*blobRecoverySlot)
+	}
+}
+
+func blobRecoveryRetryServiceInterval() time.Duration {
+	workers := max(numOfBlobRecoveryWorkers, 1)
+	return blobRecoveryValidationRetryInterval / time.Duration(workers)
+}
+
+func (d *peerdas) trackBlobRecoverySlotLocked(request recoverBlobsRequest) {
+	slot := d.recoverySlots[request.slot]
+	if slot == nil {
+		slot = &blobRecoverySlot{slot: request.slot, roots: make(map[common.Hash]struct{})}
+		d.recoverySlots[request.slot] = slot
+		heap.Push(&d.recoverySlotQueue, slot)
+	}
+	slot.roots[request.blockRoot] = struct{}{}
+}
+
+func (d *peerdas) removeBlobRecoverySlotLocked(request recoverBlobsRequest) {
+	slot := d.recoverySlots[request.slot]
+	if slot == nil {
+		return
+	}
+	delete(slot.roots, request.blockRoot)
+	if len(slot.roots) == 0 {
+		heap.Remove(&d.recoverySlotQueue, slot.heapIndex)
+		delete(d.recoverySlots, request.slot)
+	}
+}
+
+func (d *peerdas) removeBlobRecoveryOwnershipLocked(blockRoot common.Hash) {
+	request, exists := d.recoveryRequests[blockRoot]
+	delete(d.isRecovering, blockRoot)
+	delete(d.recoveryRequests, blockRoot)
+	delete(d.recoveryGenerations, blockRoot)
+	d.removeBlobRecoveryResultLocked(blockRoot)
+	if exists {
+		d.removeBlobRecoverySlotLocked(request)
+	}
+}
+
+func (d *peerdas) removeDelayedBlobRecoveryLocked(blockRoot common.Hash) {
+	delayed := d.recoveryRetries[blockRoot]
+	if delayed == nil {
+		return
+	}
+	heap.Remove(&d.recoveryRetryQueue, delayed.heapIndex)
+	delete(d.recoveryRetries, blockRoot)
+}
+
+func (d *peerdas) blobRecoveryResult(blockRoot common.Hash) *blobRecoveryResult {
+	d.recoveringMutex.Lock()
+	defer d.recoveringMutex.Unlock()
+	return d.recoveryResults[blockRoot]
+}
+
+func (d *peerdas) authoritativeBlobRecoveryRequest(request recoverBlobsRequest) recoverBlobsRequest {
+	d.recoveringMutex.Lock()
+	defer d.recoveringMutex.Unlock()
+	if owned, exists := d.recoveryRequests[request.blockRoot]; exists {
+		return owned
+	}
+	return request
+}
+
+func (d *peerdas) cacheBlobRecoveryResult(blockRoot common.Hash, result *blobRecoveryResult) bool {
+	if result == nil || result.encodedBytes > maxBlobRecoveryResultBytes {
+		return false
+	}
+	d.recoveringMutex.Lock()
+	defer d.recoveringMutex.Unlock()
+	d.initBlobRecoveryOwnershipLocked()
+	if request, exists := d.recoveryRequests[blockRoot]; exists && request.slot < d.recoveryPruneFloor {
+		return false
+	}
+	d.removeBlobRecoveryResultLocked(blockRoot)
+	for d.recoveryResultBytes+result.encodedBytes > maxBlobRecoveryResultBytes && len(d.recoveryResultOrder) > 0 {
+		evictedRoot := d.recoveryResultOrder[0]
+		d.removeBlobRecoveryResultLocked(evictedRoot)
+	}
+	d.recoveryResultOrder = append(d.recoveryResultOrder, blockRoot)
+	d.recoveryResults[blockRoot] = result
+	d.recoveryResultBytes += result.encodedBytes
+	return true
+}
+
+func (d *peerdas) removeBlobRecoveryResultLocked(blockRoot common.Hash) {
+	result := d.recoveryResults[blockRoot]
+	if result == nil {
+		return
+	}
+	d.recoveryResultBytes -= result.encodedBytes
+	delete(d.recoveryResults, blockRoot)
+	for i, root := range d.recoveryResultOrder {
+		if root == blockRoot {
+			copy(d.recoveryResultOrder[i:], d.recoveryResultOrder[i+1:])
+			d.recoveryResultOrder = d.recoveryResultOrder[:len(d.recoveryResultOrder)-1]
+			break
+		}
+	}
+}
+
+func (d *peerdas) removeBlobRecoveryResult(blockRoot common.Hash) {
+	d.recoveringMutex.Lock()
+	d.removeBlobRecoveryResultLocked(blockRoot)
+	d.recoveringMutex.Unlock()
+}
+
+func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) bool {
+	d.initBlobRecoveryRetries()
+	d.recoveryRetryMutex.Lock()
+	d.recoveringMutex.Lock()
+	d.initBlobRecoveryOwnershipLocked()
+	if owned, exists := d.recoveryRequests[request.blockRoot]; exists {
+		request = owned
+	} else {
+		d.recoveryRequests[request.blockRoot] = request
+		d.recoveryGenerations[request.blockRoot] = 1
+		d.trackBlobRecoverySlotLocked(request)
+	}
+	if request.slot < d.recoveryPruneFloor {
+		d.removeDelayedBlobRecoveryLocked(request.blockRoot)
+		d.removeBlobRecoveryOwnershipLocked(request.blockRoot)
+		d.recoveringMutex.Unlock()
+		d.recoveryRetryMutex.Unlock()
+		return false
+	}
+	d.isRecovering[request.blockRoot] = false
+	d.recoveringMutex.Unlock()
+
+	notBefore := time.Now().Add(blobRecoveryValidationRetryInterval)
+	if existing := d.recoveryRetries[request.blockRoot]; existing != nil {
+		existing.request = request
+		existing.notBefore = notBefore
+		heap.Fix(&d.recoveryRetryQueue, existing.heapIndex)
+	} else {
+		delayed := &delayedRecoverBlobsRequest{request: request, notBefore: notBefore, heapIndex: -1}
+		d.recoveryRetries[request.blockRoot] = delayed
+		heap.Push(&d.recoveryRetryQueue, delayed)
+	}
+	d.recoveryRetryMutex.Unlock()
+	select {
+	case d.recoveryRetryWake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (d *peerdas) nextBlobRecoveryRequest(ctx context.Context) (recoverBlobsRequest, bool) {
+	d.initBlobRecoveryRetries()
+	for {
+		now := time.Now()
+		var next time.Time
+		d.recoveryRetryMutex.Lock()
+		if d.recoveryRetryQueue.Len() > 0 {
+			next = d.recoveryRetryQueue[0].notBefore
+			if d.recoveryRetryAfter.After(next) {
+				next = d.recoveryRetryAfter
+			}
+		}
+		if !next.IsZero() && !next.After(now) {
+			if !d.recoveryPreferRetry {
+				select {
+				case request := <-d.recoverBlobsQueue:
+					d.recoveryPreferRetry = true
+					d.recoveryRetryMutex.Unlock()
+					return request, true
+				default:
+				}
+			}
+			delayed := heap.Pop(&d.recoveryRetryQueue).(*delayedRecoverBlobsRequest)
+			delete(d.recoveryRetries, delayed.request.blockRoot)
+			d.recoveryRetryAfter = now.Add(blobRecoveryRetryServiceInterval())
+			d.recoveryPreferRetry = false
+			d.recoveryRetryMutex.Unlock()
+			return delayed.request, true
+		}
+		d.recoveryRetryMutex.Unlock()
+
+		if next.IsZero() {
+			select {
+			case <-ctx.Done():
+				return recoverBlobsRequest{}, false
+			case request := <-d.recoverBlobsQueue:
+				return request, true
+			case <-d.recoveryRetryWake:
+			}
+			continue
+		}
+
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return recoverBlobsRequest{}, false
+		case request := <-d.recoverBlobsQueue:
+			timer.Stop()
+			return request, true
+		case <-d.recoveryRetryWake:
+			timer.Stop()
+		case <-timer.C:
+		}
+	}
+}
+
+func (d *peerdas) claimBlobRecovery(request recoverBlobsRequest) (recoverBlobsRequest, uint64, bool) {
+	d.recoveringMutex.Lock()
+	defer d.recoveringMutex.Unlock()
+	d.initBlobRecoveryOwnershipLocked()
+	if request.slot < d.recoveryPruneFloor {
+		d.removeBlobRecoveryOwnershipLocked(request.blockRoot)
+		return recoverBlobsRequest{}, 0, false
+	}
+	active, exists := d.isRecovering[request.blockRoot]
+	if active {
+		return recoverBlobsRequest{}, 0, false
+	}
+	if !exists {
+		d.isRecovering[request.blockRoot] = false
+		d.recoveryRequests[request.blockRoot] = request
+		d.recoveryGenerations[request.blockRoot] = 1
+		d.trackBlobRecoverySlotLocked(request)
+	}
+	owned, exists := d.recoveryRequests[request.blockRoot]
+	if !exists {
+		owned = request
+		d.recoveryRequests[request.blockRoot] = request
+		d.recoveryGenerations[request.blockRoot] = 1
+		d.trackBlobRecoverySlotLocked(request)
+	}
+	d.isRecovering[request.blockRoot] = true
+	return owned, d.recoveryGenerations[request.blockRoot], true
+}
+
+func (d *peerdas) releaseBlobRecovery(blockRoot common.Hash, generation uint64) {
+	d.recoveringMutex.Lock()
+	request, exists := d.recoveryRequests[blockRoot]
+	if !exists {
+		d.recoveringMutex.Unlock()
+		return
+	}
+	if request.slot < d.recoveryPruneFloor {
+		d.removeBlobRecoveryOwnershipLocked(blockRoot)
+		d.recoveringMutex.Unlock()
+		return
+	}
+	if current := d.recoveryGenerations[blockRoot]; current != generation {
+		d.isRecovering[blockRoot] = false
+		d.recoveringMutex.Unlock()
+		d.delayBlobRecovery(request)
+		return
+	}
+	d.removeBlobRecoveryOwnershipLocked(blockRoot)
+	d.recoveringMutex.Unlock()
+}
+
+func (d *peerdas) clearDelayedBlobRecoveries() {
+	d.initBlobRecoveryRetries()
+	d.recoveryRetryMutex.Lock()
+	d.recoveringMutex.Lock()
+	d.recoveryRetries = make(map[common.Hash]*delayedRecoverBlobsRequest)
+	d.recoveryRetryQueue = nil
+	d.recoveryRetryAfter = time.Time{}
+	d.recoveryPreferRetry = false
+	for root, active := range d.isRecovering {
+		if !active {
+			d.removeBlobRecoveryOwnershipLocked(root)
+		}
+	}
+	d.recoveryResults = make(map[common.Hash]*blobRecoveryResult)
+	d.recoveryResultOrder = nil
+	d.recoveryResultBytes = 0
+	d.recoveringMutex.Unlock()
+	d.recoveryRetryMutex.Unlock()
+}
+
+func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
+	d.recoveringMutex.Lock()
+	d.initBlobRecoveryOwnershipLocked()
+	if request.slot < d.recoveryPruneFloor {
+		d.recoveringMutex.Unlock()
+		return nil
+	}
+	if _, ok := d.isRecovering[request.blockRoot]; ok {
+		owned := d.recoveryRequests[request.blockRoot]
+		if owned.metadata == nil && request.metadata != nil {
+			d.recoveryRequests[request.blockRoot] = request
+			d.recoveryGenerations[request.blockRoot]++
+		}
+		d.recoveringMutex.Unlock()
+		return nil
+	}
+	d.isRecovering[request.blockRoot] = false
+	d.recoveryRequests[request.blockRoot] = request
+	d.recoveryGenerations[request.blockRoot] = 1
+	d.trackBlobRecoverySlotLocked(request)
+	select {
+	case d.recoverBlobsQueue <- request:
+		d.recoveringMutex.Unlock()
+		return nil
+	default:
+		d.recoveringMutex.Unlock()
+		d.delayBlobRecovery(request)
+		return nil
+	}
 }
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
-	recover := func(toRecover recoverBlobsRequest) {
+	defer d.clearDelayedBlobRecoveries()
+	recover := func(toRecover recoverBlobsRequest) (retryScheduled bool) {
+		if ctx.Err() != nil {
+			return
+		}
 		begin := time.Now()
 		log.Debug("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
-		ctx := context.Background()
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
-		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
-		if err != nil {
-			log.Warn("[blobsRecover] failed to get saved column index", "err", err)
-			return
-		}
-		if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
-			log.Debug("[blobsRecover] not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
-			return
-		}
-
-		// [Modified in Gloas:EIP7732] For GLOAS, kzg_commitments and SignedBlockHeader come from block
-		epoch := slot / d.beaconConfig.SlotsPerEpoch
-		isGloas := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
-		var kzgCommitmentsFromBlock *solid.ListSSZ[*cltypes.KZGCommitment]
-		var signedBlockHeaderFromBlock *cltypes.SignedBeaconBlockHeader
-		if isGloas {
-			kzgCommitmentsFromBlock, err = d.getKzgCommitmentsForGloas(slot, blockRoot)
-			if err != nil {
-				log.Warn("[blobsRecover] failed to get kzg commitments for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
-				return
-			}
-			signedBlockHeaderFromBlock, err = d.getSignedBlockHeaderForGloas(blockRoot)
-			if err != nil {
-				log.Warn("[blobsRecover] failed to get signed block header for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
-				return
-			}
-		}
-
-		// Recover the matrix from the column sidecars
-		matrixEntries := []cltypes.MatrixEntry{}
-		var anyColumnSidecar *cltypes.DataColumnSidecar
-		for _, columnIndex := range existingColumns {
-			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
-			if err != nil {
-				log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
-				d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
-				return
-			}
-			if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {
-				log.Warn("[blobsRecover] invalid column sidecar", "slot", slot, "blockRoot", blockRoot, "columnIndex", columnIndex, "columnLen", sidecar.Column.Len())
-				return
-			}
-			for i := 0; i < sidecar.Column.Len(); i++ {
-				matrixEntries = append(matrixEntries, cltypes.MatrixEntry{
-					Cell:        *sidecar.Column.Get(i),
-					KzgProof:    *sidecar.KzgProofs.Get(i),
-					RowIndex:    uint64(i),
-					ColumnIndex: columnIndex,
-				})
-			}
-			if anyColumnSidecar == nil {
-				anyColumnSidecar = sidecar
-			}
-		}
-		// recover matrix
-		beginRecoverMatrix := time.Now()
-		numberOfBlobs := uint64(anyColumnSidecar.Column.Len())
-		blobMatrix, err := peerdasutils.RecoverMatrix(matrixEntries, numberOfBlobs)
-		if err != nil {
-			log.Warn("[blobsRecover] failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
-			return
-		}
-		timeRecoverMatrix := time.Since(beginRecoverMatrix)
-		log.Trace("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
-
-		// Recover blobs from the matrix
-		beginRecoverBlobs := time.Now()
-		blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
-		blobCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](int(d.beaconConfig.MaxBlobCommittmentsPerBlock), length.Bytes48)
-		for blobIndex, blobEntries := range blobMatrix {
-			var (
-				blob           cltypes.Blob
-				kzgCommitment  common.Bytes48
-				kzgProof       common.Bytes48
-				inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.CommitmentBranchSize)
-			)
-			// blob
-			if len(blobEntries) != int(d.beaconConfig.NumberOfColumns) {
-				log.Warn("[blobsRecover] invalid blob entries", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot, "blobEntries", len(blobEntries))
-				return
-			}
-			for i := range len(blobEntries) / 2 {
-				if copied := copy(blob[i*cltypes.BytesPerCell:], blobEntries[i].Cell[:]); copied != cltypes.BytesPerCell {
-					log.Warn("[blobsRecover] failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+		result := d.blobRecoveryResult(blockRoot)
+		if result == nil {
+			result = func() (result *blobRecoveryResult) {
+				existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+				if err != nil {
+					log.Warn("[blobsRecover] failed to get saved column index", "err", err)
+					if ctx.Err() == nil {
+						retryScheduled = d.delayBlobRecovery(toRecover)
+					}
 					return
 				}
-			}
-			// kzg commitment
-			// [Modified in Gloas:EIP7732] Use kzg_commitments from block for GLOAS
-			if isGloas {
-				copy(kzgCommitment[:], kzgCommitmentsFromBlock.Get(blobIndex)[:])
-			} else {
-				copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
-			}
-			// kzg proof
-			ckzgBlob := goethkzg.Blob(blob)
-			proof, err := kzg.Ctx().ComputeBlobKZGProof(&ckzgBlob, goethkzg.KZGCommitment(kzgCommitment), 0 /* numGoRoutines */)
-			if err != nil {
-				log.Warn("[blobsRecover] failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+				if ctx.Err() != nil {
+					return
+				}
+				if len(existingColumns) < int(d.beaconConfig.NumberOfColumns+1)/2 {
+					log.Debug("[blobsRecover] not enough columns to recover", "slot", slot, "blockRoot", blockRoot, "existingColumns", len(existingColumns))
+					return
+				}
+
+				// [Modified in Gloas:EIP7732] For GLOAS, kzg_commitments and SignedBlockHeader come from block
+				epoch := slot / d.beaconConfig.SlotsPerEpoch
+				isGloas := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
+				var kzgCommitmentsFromBlock *solid.ListSSZ[*cltypes.KZGCommitment]
+				var signedBlockHeaderFromBlock *cltypes.SignedBeaconBlockHeader
+				if isGloas {
+					kzgCommitmentsFromBlock, err = d.getKzgCommitmentsForGloas(blockRoot)
+					if err != nil {
+						log.Warn("[blobsRecover] failed to get kzg commitments for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
+						return
+					}
+					signedBlockHeaderFromBlock, err = d.getSignedBlockHeaderForGloas(blockRoot)
+					if err != nil {
+						log.Warn("[blobsRecover] failed to get signed block header for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
+						return
+					}
+				}
+
+				// Recover the matrix from the column sidecars
+				matrixEntries := []cltypes.MatrixEntry{}
+				var anyColumnSidecar *cltypes.DataColumnSidecar
+				for _, columnIndex := range existingColumns {
+					if ctx.Err() != nil {
+						return
+					}
+					sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
+					if err != nil {
+						log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
+						if ctx.Err() != nil {
+							return
+						}
+						if errors.Is(err, os.ErrNotExist) {
+							if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
+								log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
+							}
+						} else {
+							retryScheduled = d.delayBlobRecovery(toRecover)
+						}
+						return
+					}
+					if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {
+						log.Warn("[blobsRecover] invalid column sidecar", "slot", slot, "blockRoot", blockRoot, "columnIndex", columnIndex, "columnLen", sidecar.Column.Len())
+						return
+					}
+					for i := 0; i < sidecar.Column.Len(); i++ {
+						matrixEntries = append(matrixEntries, cltypes.MatrixEntry{
+							Cell:        *sidecar.Column.Get(i),
+							KzgProof:    *sidecar.KzgProofs.Get(i),
+							RowIndex:    uint64(i),
+							ColumnIndex: columnIndex,
+						})
+					}
+					if anyColumnSidecar == nil {
+						anyColumnSidecar = sidecar
+					}
+				}
+				// recover matrix
+				beginRecoverMatrix := time.Now()
+				numberOfBlobs := uint64(anyColumnSidecar.Column.Len())
+				if ctx.Err() != nil {
+					return
+				}
+				blobMatrix, err := peerdasutils.RecoverMatrix(matrixEntries, numberOfBlobs)
+				if err != nil {
+					log.Warn("[blobsRecover] failed to recover matrix", "err", err, "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
+					return
+				}
+				timeRecoverMatrix := time.Since(beginRecoverMatrix)
+				if ctx.Err() != nil {
+					return
+				}
+				log.Trace("[blobsRecover] recovered matrix", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
+
+				// Recover blobs from the matrix
+				beginRecoverBlobs := time.Now()
+				blobSidecars := make([]*cltypes.BlobSidecar, 0, len(blobMatrix))
+				blobCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](int(d.beaconConfig.MaxBlobCommittmentsPerBlock), length.Bytes48)
+				for blobIndex, blobEntries := range blobMatrix {
+					var (
+						blob           cltypes.Blob
+						kzgCommitment  common.Bytes48
+						kzgProof       common.Bytes48
+						inclusionProof solid.HashVectorSSZ = solid.NewHashVector(cltypes.CommitmentBranchSize)
+					)
+					// blob
+					if len(blobEntries) != int(d.beaconConfig.NumberOfColumns) {
+						log.Warn("[blobsRecover] invalid blob entries", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot, "blobEntries", len(blobEntries))
+						return
+					}
+					for i := range len(blobEntries) / 2 {
+						if copied := copy(blob[i*cltypes.BytesPerCell:], blobEntries[i].Cell[:]); copied != cltypes.BytesPerCell {
+							log.Warn("[blobsRecover] failed to copy cell", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+							return
+						}
+					}
+					// kzg commitment
+					// [Modified in Gloas:EIP7732] Use kzg_commitments from block for GLOAS
+					if isGloas {
+						copy(kzgCommitment[:], kzgCommitmentsFromBlock.Get(blobIndex)[:])
+					} else {
+						copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
+					}
+					// kzg proof
+					ckzgBlob := goethkzg.Blob(blob)
+					proof, err := kzg.Ctx().ComputeBlobKZGProof(&ckzgBlob, goethkzg.KZGCommitment(kzgCommitment), 0 /* numGoRoutines */)
+					if err != nil {
+						log.Warn("[blobsRecover] failed to compute blob kzg proof", "blobIndex", blobIndex, "slot", slot, "blockRoot", blockRoot)
+						return
+					}
+					copy(kzgProof[:], proof[:])
+					// [Modified in Gloas:EIP7732] Use SignedBlockHeader from block for GLOAS
+					var signedBlockHeader *cltypes.SignedBeaconBlockHeader
+					if isGloas {
+						signedBlockHeader = signedBlockHeaderFromBlock
+					} else {
+						signedBlockHeader = anyColumnSidecar.SignedBlockHeader
+					}
+					blobSidecar := cltypes.NewBlobSidecar(
+						uint64(blobIndex),
+						&blob,
+						kzgCommitment,
+						kzgProof,
+						signedBlockHeader,
+						inclusionProof,
+					)
+					blobSidecars = append(blobSidecars, blobSidecar)
+					commitment := cltypes.KZGCommitment(kzgCommitment)
+					blobCommitments.Append(&commitment)
+				}
+				timeRecoverBlobs := time.Since(beginRecoverBlobs)
+				// inclusion proof
+				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof
+				if !isGloas {
+					for i := range len(blobSidecars) {
+						branchProof := blobCommitments.ElementProof(i)
+						p := blobSidecars[i].CommitmentInclusionProof
+						for index := range branchProof {
+							p.Set(index, branchProof[index])
+						}
+						for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
+							p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
+						}
+					}
+				}
+				return newBlobRecoveryResult(existingColumns, isGloas, kzgCommitmentsFromBlock, anyColumnSidecar, blobMatrix, blobSidecars, numberOfBlobs, timeRecoverMatrix, timeRecoverBlobs)
+			}()
+			if result == nil {
 				return
 			}
-			copy(kzgProof[:], proof[:])
-			// [Modified in Gloas:EIP7732] Use SignedBlockHeader from block for GLOAS
-			var signedBlockHeader *cltypes.SignedBeaconBlockHeader
-			if isGloas {
-				signedBlockHeader = signedBlockHeaderFromBlock
-			} else {
-				signedBlockHeader = anyColumnSidecar.SignedBlockHeader
-			}
-			blobSidecar := cltypes.NewBlobSidecar(
-				uint64(blobIndex),
-				&blob,
-				kzgCommitment,
-				kzgProof,
-				signedBlockHeader,
-				inclusionProof,
-			)
-			blobSidecars = append(blobSidecars, blobSidecar)
-			commitment := cltypes.KZGCommitment(kzgCommitment)
-			blobCommitments.Append(&commitment)
 		}
-		timeRecoverBlobs := time.Since(beginRecoverBlobs)
-		// inclusion proof
-		// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof
-		if !isGloas {
-			for i := range len(blobSidecars) {
-				branchProof := blobCommitments.ElementProof(i)
-				p := blobSidecars[i].CommitmentInclusionProof
-				for index := range branchProof {
-					p.Set(index, branchProof[index])
-				}
-				for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
-					p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
-				}
-			}
-		}
+		existingColumns := result.existingColumns
+		isGloas := result.isGloas
+		kzgCommitmentsFromBlock := result.kzgCommitmentsFromBlock
+		anyColumnSidecar := result.anyColumnSidecar
+		blobMatrix := result.blobMatrix
+		blobSidecars := result.blobSidecars
+		numberOfBlobs := result.numberOfBlobs
+		timeRecoverMatrix := result.timeRecoverMatrix
+		timeRecoverBlobs := result.timeRecoverBlobs
 		// Save blobs
-		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
-			log.Warn("[blobsRecover] failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
+		toRecover = d.authoritativeBlobRecoveryRequest(toRecover)
+		if toRecover.metadata != nil {
+			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
+			if validation == blobRecoveryUnavailable && ctx.Err() == nil {
+				d.cacheBlobRecoveryResult(blockRoot, result)
+				return d.delayBlobRecovery(toRecover)
+			}
+			if validation != blobRecoveryInvalid {
+				return
+			}
+		} else {
+			count, err := d.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
+			if err != nil && ctx.Err() == nil {
+				d.cacheBlobRecoveryResult(blockRoot, result)
+				return d.delayBlobRecovery(toRecover)
+			}
+			if err != nil || count > 0 {
+				return
+			}
+		}
+		if ctx.Err() != nil {
 			return
 		}
+		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
+			log.Warn("[blobsRecover] failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
+			if ctx.Err() == nil {
+				d.cacheBlobRecoveryResult(blockRoot, result)
+				return d.delayBlobRecovery(toRecover)
+			}
+			return
+		}
+		d.removeBlobRecoveryResult(blockRoot)
 		log.Trace("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
 		// remove column sidecars that are not in our custody group
@@ -527,11 +1267,15 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 			if !exist {
 				blobSize := anyColumnSidecar.Column.Len()
-				sidecar := cltypes.NewDataColumnSidecar()
+				version := d.beaconConfig.GetCurrentStateVersion(slot / d.beaconConfig.SlotsPerEpoch)
+				sidecar := cltypes.NewDataColumnSidecarWithVersion(version)
 				sidecar.Index = columnIndex
-				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
 				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
-				if !isGloas {
+				if isGloas {
+					sidecar.Slot = slot
+					sidecar.BeaconBlockRoot = blockRoot
+				} else {
+					sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
 					sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
 					sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
 				}
@@ -577,66 +1321,68 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		timeAddColumns := time.Since(beginAddColumns)
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin),
 			"timeRecoverMatrix", timeRecoverMatrix, "timeRecoverBlobs", timeRecoverBlobs, "timeRemoveColumns", timeRemoveColumns, "timeAddColumns", timeAddColumns)
+		return false
 	}
 
 	// main loop
 	for {
-		select {
-		case <-ctx.Done():
+		toRecover, ok := d.nextBlobRecoveryRequest(ctx)
+		if !ok {
 			return
-		case toRecover := <-d.recoverBlobsQueue:
-			d.recoveringMutex.Lock()
-			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
-				// recovering, skip
-				d.recoveringMutex.Unlock()
-				continue
-			}
-			d.isRecovering[toRecover.blockRoot] = true
-			d.recoveringMutex.Unlock()
+		}
+		var generation uint64
+		toRecover, generation, ok = d.claimBlobRecovery(toRecover)
+		if !ok {
+			continue
+		}
 
-			// check if the blobs are already recovered
-			if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
-				// recover the blobs
-				recover(toRecover)
+		var retryScheduled bool
+		if toRecover.metadata != nil {
+			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
+			switch validation {
+			case blobRecoveryUnavailable:
+				if ctx.Err() == nil {
+					retryScheduled = d.delayBlobRecovery(toRecover)
+				}
+			case blobRecoveryInvalid:
+				retryScheduled = recover(toRecover)
 			}
-			// remove the block from the recovering map
-			d.recoveringMutex.Lock()
-			delete(d.isRecovering, toRecover.blockRoot)
-			d.recoveringMutex.Unlock()
+		} else {
+			count, err := d.blobStorage.KzgCommitmentsCount(ctx, toRecover.blockRoot)
+			if err != nil {
+				if ctx.Err() == nil {
+					retryScheduled = d.delayBlobRecovery(toRecover)
+				}
+			} else if count == 0 && ctx.Err() == nil {
+				retryScheduled = recover(toRecover)
+			}
+		}
+		if !retryScheduled {
+			d.releaseBlobRecovery(toRecover.blockRoot, generation)
 		}
 	}
 }
 
 func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
+	return d.tryScheduleRecover(slot, blockRoot, nil)
+}
+
+func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadata *blobRecoveryMetadata) error {
 	if !d.IsArchivedMode() && !d.StateReader().IsSupernode() {
 		return nil
 	}
 
-	if !d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot) {
+	if !d.IsColumnOverHalf(slot, blockRoot) || metadata == nil && d.IsBlobAlreadyRecovered(blockRoot) {
 		// no need to recover if column data is not over 50% or the blobs are already recovered
 		return nil
 	}
 
-	// early check if the blobs are recovering
-	d.recoveringMutex.Lock()
-	if _, ok := d.isRecovering[blockRoot]; ok {
-		d.recoveringMutex.Unlock()
-		return nil
-	}
-	d.recoveringMutex.Unlock()
-
-	// schedule
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case d.recoverBlobsQueue <- recoverBlobsRequest{
+	request := recoverBlobsRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
-	}:
-	case <-timer.C:
-		return errors.New("failed to schedule recover: timeout")
+		metadata:  metadata,
 	}
-	return nil
+	return d.enqueueBlobRecovery(request)
 }
 
 var allColumns = func() map[cltypes.CustodyIndex]bool {
@@ -673,7 +1419,8 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltyp
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	// filter out blocks that don't need to be processed
-	blocksToProcess := []cltypes.ColumnSyncableSignedBlock{}
+	recoveryDetails := []*blobRecoveryMetadata{}
+	validatedBlobCounts := make(map[common.Hash]uint32)
 	for _, block := range blocks {
 		kzgCommitments := block.GetBlobKzgCommitments()
 		if block.Version() < clparams.FuluVersion ||
@@ -687,16 +1434,28 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 			continue
 		}
 
-		if d.IsColumnOverHalf(block.GetSlot(), root) || d.IsBlobAlreadyRecovered(root) {
-			if err := d.TryScheduleRecover(block.GetSlot(), root); err != nil {
-				log.Debug("failed to schedule recover", "err", err)
+		metadata, err := newBlobRecoveryMetadata(block, root)
+		if err != nil {
+			log.Warn("failed to build blob recovery metadata", "err", err, "blockRoot", root)
+			continue
+		}
+		validation, count := d.storedBlobRecoveryValidation(ctx, metadata)
+		if validation != blobRecoveryUnavailable {
+			validatedBlobCounts[root] = count
+		}
+		complete := validation == blobRecoveryComplete
+		if d.IsColumnOverHalf(block.GetSlot(), root) || complete {
+			if !complete {
+				if err := d.tryScheduleRecover(block.GetSlot(), root, metadata); err != nil {
+					log.Debug("failed to schedule recover", "err", err)
+				}
 			}
 			continue
 		}
-		blocksToProcess = append(blocksToProcess, block)
+		recoveryDetails = append(recoveryDetails, metadata)
 	}
 
-	if len(blocksToProcess) == 0 {
+	if len(recoveryDetails) == 0 {
 		return nil
 	}
 
@@ -712,10 +1471,10 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	// initialize the download request
 	batchBlcokSize := 4
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(blocksToProcess); i += batchBlcokSize {
-		blocks := blocksToProcess[i:min(i+batchBlcokSize, len(blocksToProcess))]
+	for i := 0; i < len(recoveryDetails); i += batchBlcokSize {
+		details := recoveryDetails[i:min(i+batchBlcokSize, len(recoveryDetails))]
 		wg.Go(func() {
-			req, err := initializeDownloadRequest(blocks, d.beaconConfig, d.columnStorage, allColumns)
+			req, err := initializeDownloadRequestFromRecoveryDetails(details, validatedBlobCounts, d.beaconConfig, d.columnStorage, allColumns)
 			if err != nil {
 				log.Warn("failed to initialize download request", "err", err)
 				return
@@ -727,15 +1486,20 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	return nil
 }
 
-func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
+func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) {
+	type resolvedColumn struct {
+		slot      uint64
+		blockRoot common.Hash
+	}
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
 		reqLength int
+		requested map[requestedDataColumn]struct{}
 		err       error
 	}
 	if req.remainingEntriesCount() == 0 {
-		return nil
+		return
 	}
 
 	stopChan := make(chan struct{})
@@ -756,21 +1520,19 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 				wg.Go(func() {
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
-					ids := req.requestData()
+					ids, requested := req.requestData()
 					if ids.Len() == 0 {
 						return
 					}
-					reqLength := 0
-					ids.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, length int) bool {
-						reqLength += id.Columns.Length()
-						return true
-					})
-					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					s, pid, filtered, err := d.rpc.SendColumnSidecarsByRootIdentifierReqWithSnapshot(cctx, ids)
+					requested = requestedDataColumnsForPayload(requested, filtered)
+					reqLength := len(requested)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
 						pid:       pid,
 						reqLength: reqLength,
+						requested: requested,
 						err:       err,
 					}:
 					default:
@@ -794,9 +1556,23 @@ mainloop:
 		case <-halfCheckTicker.C:
 			for _, entry := range req.remainingEntries() {
 				if needToRecoverBlobs {
-					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) || d.IsBlobAlreadyRecovered(entry.blockRoot) {
-						// no need to schedule recovery for this block because someone else will do it
+					metadata := req.recovery(entry.blockRoot)
+					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) {
 						req.removeBlock(entry.slot, entry.blockRoot)
+						if err := d.tryScheduleRecover(entry.slot, entry.blockRoot, metadata); err != nil {
+							log.Debug("failed to schedule recover", "err", err)
+						}
+					} else if metadata != nil {
+						count, err := d.blobStorage.KzgCommitmentsCount(ctx, entry.blockRoot)
+						if err == nil && req.blobCountNeedsValidation(entry.blockRoot, count) {
+							validation := d.validateStoredBlobRecoveryMetadata(ctx, metadata, count)
+							if validation != blobRecoveryUnavailable {
+								req.updateValidatedBlobCount(entry.blockRoot, count)
+							}
+							if validation == blobRecoveryComplete {
+								req.removeBlock(entry.slot, entry.blockRoot)
+							}
+						}
 					}
 				} else {
 					available, err := d.isMyColumnDataAvailable(entry.slot, entry.blockRoot)
@@ -826,22 +1602,58 @@ mainloop:
 				continue
 			}
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
+			if len(result.sidecars) > result.reqLength {
+				log.Debug("rejecting over-cardinality column response", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
+				d.rpc.BanPeer(result.pid)
+				continue
+			}
+			resolved := make([]resolvedColumn, len(result.sidecars))
+			seen := make(map[requestedDataColumn]struct{}, len(result.sidecars))
+			validResponse := true
+			for i, sidecar := range result.sidecars {
+				if sidecar == nil {
+					validResponse = false
+					break
+				}
+				slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
+				if !ok {
+					validResponse = false
+					break
+				}
+				key := requestedDataColumn{slot: slot, blockRoot: blockRoot, index: sidecar.Index}
+				if _, ok := result.requested[key]; !ok {
+					validResponse = false
+					break
+				}
+				metadata := req.recovery(blockRoot)
+				if sidecar.Version() < clparams.GloasVersion && metadata != nil && sidecar.SignedBlockHeader.Signature != metadata.signature {
+					validResponse = false
+					break
+				}
+				if _, duplicate := seen[key]; duplicate {
+					validResponse = false
+					break
+				}
+				seen[key] = struct{}{}
+				resolved[i] = resolvedColumn{slot: slot, blockRoot: blockRoot}
+			}
+			if !validResponse {
+				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
+				d.rpc.BanPeer(result.pid)
+				continue
+			}
 			var wg sync.WaitGroup
-			for _, sidecar := range result.sidecars {
+			for i, sidecar := range result.sidecars {
 				wg.Go(func() {
-					slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
-					if !ok {
-						log.Debug("rejecting malformed or schema-inconsistent column sidecar", "pid", result.pid)
-						d.rpc.BanPeer(result.pid)
-						return
-					}
+					slot, blockRoot := resolved[i].slot, resolved[i].blockRoot
 					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
-						if needToRecoverBlobs &&
-							(d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
+						if needToRecoverBlobs && d.IsColumnOverHalf(slot, blockRoot) {
 							req.removeBlock(slot, blockRoot)
-							d.TryScheduleRecover(slot, blockRoot)
+							if err := d.tryScheduleRecover(slot, blockRoot, req.recovery(blockRoot)); err != nil {
+								log.Debug("failed to schedule recover", "err", err)
+							}
 						}
 					}()
 
@@ -867,7 +1679,7 @@ mainloop:
 					// [Modified in Gloas:EIP7732] Version-aware verification
 					if isGloasSidecar {
 						// GLOAS: kzg_commitments come from block
-						kzgCommitments, err := d.getKzgCommitmentsForGloas(slot, blockRoot)
+						kzgCommitments, err := d.getKzgCommitmentsForGloas(blockRoot)
 						if err != nil {
 							log.Debug("failed to get kzg commitments for GLOAS", "err", err, "blockRoot", blockRoot)
 							return
@@ -916,17 +1728,12 @@ mainloop:
 			}
 		}
 	}
-
-	return nil
 }
 
-// resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
-// block root from the fields populated by the schema it was decoded with. ok is
-// false for a malformed sidecar, or one whose slot disagrees with that schema —
-// see BeaconChainConfig.ForkSchemaMatchesSlot.
+// resolveColumnSidecarSlotAndRoot rejects malformed sidecars and response fork versions that are not active at the claimed slot.
 func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
 	if sidecar.Version() >= clparams.GloasVersion {
-		if !d.beaconConfig.ForkSchemaMatchesSlot(sidecar.Slot, sidecar.Version()) {
+		if d.beaconConfig.GetCurrentStateVersion(sidecar.Slot/d.beaconConfig.SlotsPerEpoch) != sidecar.Version() {
 			return 0, common.Hash{}, false
 		}
 		return sidecar.Slot, sidecar.BeaconBlockRoot, true
@@ -935,7 +1742,7 @@ func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSid
 	if header == nil || header.Header == nil {
 		return 0, common.Hash{}, false
 	}
-	if !d.beaconConfig.ForkSchemaMatchesSlot(header.Header.Slot, sidecar.Version()) {
+	if d.beaconConfig.GetCurrentStateVersion(header.Header.Slot/d.beaconConfig.SlotsPerEpoch) != sidecar.Version() {
 		return 0, common.Hash{}, false
 	}
 	root, err := header.Header.HashSSZ()
@@ -949,8 +1756,7 @@ func isExpectedColumnDownloadMiss(err error) bool {
 	if err == nil {
 		return false
 	}
-	var peerErr *httpreqresp.PeerResponseError
-	if errors.As(err, &peerErr) {
+	if peerErr, ok := errors.AsType[*httpreqresp.PeerResponseError](err); ok {
 		return peerErr.Code == httpreqresp.ResponseCodeResourceUnavailable
 	}
 	return false
@@ -961,11 +1767,43 @@ type downloadTableEntry struct {
 	slot      uint64
 }
 
+type requestedDataColumn struct {
+	slot      uint64
+	blockRoot common.Hash
+	index     uint64
+}
+
+func requestedDataColumnsForPayload(requested map[requestedDataColumn]struct{}, payload *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) map[requestedDataColumn]struct{} {
+	type identity struct {
+		blockRoot common.Hash
+		index     uint64
+	}
+	selected := make(map[identity]struct{})
+	if payload != nil {
+		payload.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+			id.Columns.Range(func(_ int, column uint64, _ int) bool {
+				selected[identity{blockRoot: id.BlockRoot, index: column}] = struct{}{}
+				return true
+			})
+			return true
+		})
+	}
+	filtered := make(map[requestedDataColumn]struct{}, len(selected))
+	for column := range requested {
+		if _, ok := selected[identity{blockRoot: column.blockRoot, index: column.index}]; ok {
+			filtered[column] = struct{}{}
+		}
+	}
+	return filtered
+}
+
 // downloadRequest is used to track the download progress of the column sidecars
 type downloadRequest struct {
-	beaconConfig  *clparams.BeaconChainConfig
-	tableMutex    sync.RWMutex
-	downloadTable map[downloadTableEntry]map[uint64]bool
+	beaconConfig       *clparams.BeaconChainConfig
+	tableMutex         sync.RWMutex
+	downloadTable      map[downloadTableEntry]map[uint64]bool
+	recoveryDetails    map[common.Hash]*blobRecoveryMetadata
+	validatedBlobCount map[common.Hash]uint32
 }
 
 // [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
@@ -975,8 +1813,7 @@ func initializeDownloadRequest(
 	columnStorage blob_storage.DataColumnStorage,
 	expectedColumns map[cltypes.CustodyIndex]bool,
 ) (*downloadRequest, error) {
-	downloadTable := make(map[downloadTableEntry]map[uint64]bool)
-	blockRootToBeaconBlock := make(map[common.Hash]cltypes.ColumnSyncableSignedBlock)
+	details := make([]*blobRecoveryMetadata, 0, len(blocks))
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue
@@ -990,10 +1827,34 @@ func initializeDownloadRequest(
 		if err != nil {
 			return nil, err
 		}
-		blockRootToBeaconBlock[blockRoot] = block
+		metadata, err := newBlobRecoveryMetadata(block, blockRoot)
+		if err != nil {
+			return nil, err
+		}
+		details = append(details, metadata)
+	}
+	return initializeDownloadRequestFromRecoveryDetails(details, nil, beaconConfig, columnStorage, expectedColumns)
+}
+
+func initializeDownloadRequestFromRecoveryDetails(
+	details []*blobRecoveryMetadata,
+	validatedBlobCounts map[common.Hash]uint32,
+	beaconConfig *clparams.BeaconChainConfig,
+	columnStorage blob_storage.DataColumnStorage,
+	expectedColumns map[cltypes.CustodyIndex]bool,
+) (*downloadRequest, error) {
+	downloadTable := make(map[downloadTableEntry]map[uint64]bool)
+	recoveryDetails := make(map[common.Hash]*blobRecoveryMetadata, len(details))
+	requestValidatedCounts := make(map[common.Hash]uint32, len(details))
+	for _, metadata := range details {
+		if metadata == nil {
+			continue
+		}
+		recoveryDetails[metadata.blockRoot] = metadata
+		requestValidatedCounts[metadata.blockRoot] = validatedBlobCounts[metadata.blockRoot]
 
 		// get the existing columns from the column storage
-		existingColumns, err := columnStorage.GetSavedColumnIndex(context.Background(), block.GetSlot(), blockRoot)
+		existingColumns, err := columnStorage.GetSavedColumnIndex(context.Background(), metadata.slot, metadata.blockRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -1003,8 +1864,8 @@ func initializeDownloadRequest(
 		}
 
 		if _, ok := downloadTable[downloadTableEntry{
-			blockRoot: blockRoot,
-			slot:      block.GetSlot(),
+			blockRoot: metadata.blockRoot,
+			slot:      metadata.slot,
 		}]; !ok {
 			table := make(map[uint64]bool)
 			for column := range expectedColumns {
@@ -1014,16 +1875,34 @@ func initializeDownloadRequest(
 			}
 			if len(table) > 0 {
 				downloadTable[downloadTableEntry{
-					blockRoot: blockRoot,
-					slot:      block.GetSlot(),
+					blockRoot: metadata.blockRoot,
+					slot:      metadata.slot,
 				}] = table
 			}
 		}
 	}
 	return &downloadRequest{
-		beaconConfig:  beaconConfig,
-		downloadTable: downloadTable,
+		beaconConfig:       beaconConfig,
+		downloadTable:      downloadTable,
+		recoveryDetails:    recoveryDetails,
+		validatedBlobCount: requestValidatedCounts,
 	}, nil
+}
+
+func (d *downloadRequest) recovery(blockRoot common.Hash) *blobRecoveryMetadata {
+	return d.recoveryDetails[blockRoot]
+}
+
+func (d *downloadRequest) blobCountNeedsValidation(blockRoot common.Hash, count uint32) bool {
+	d.tableMutex.RLock()
+	defer d.tableMutex.RUnlock()
+	return d.validatedBlobCount[blockRoot] != count
+}
+
+func (d *downloadRequest) updateValidatedBlobCount(blockRoot common.Hash, count uint32) {
+	d.tableMutex.Lock()
+	defer d.tableMutex.Unlock()
+	d.validatedBlobCount[blockRoot] = count
 }
 
 func (d *downloadRequest) remainingEntries() []downloadTableEntry {
@@ -1064,8 +1943,9 @@ func (d *downloadRequest) removeBlock(slot uint64, blockRoot common.Hash) {
 	})
 }
 
-func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
+func (d *downloadRequest) requestData() (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], map[requestedDataColumn]struct{}) {
 	payload := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
+	requested := make(map[requestedDataColumn]struct{})
 
 	d.tableMutex.RLock()
 	defer d.tableMutex.RUnlock()
@@ -1076,12 +1956,13 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 		}
 		for column := range columns {
 			id.Columns.Append(column)
+			requested[requestedDataColumn{slot: entry.slot, blockRoot: entry.blockRoot, index: column}] = struct{}{}
 		}
 		if id.Columns.Length() > 0 {
 			payload.Append(id)
 		}
 	}
-	return payload
+	return payload, requested
 }
 
 func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
@@ -1098,74 +1979,297 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	if err != nil {
 		return err
 	}
+	// Gossip gets its grace from the later of the slot start and now: a Gloas root is queued
+	// mid-slot, when its envelope is processed and its columns are still arriving.
+	start := time.Now()
+	if slotStart := d.ethClock.GetSlotTime(block.Block.Slot); slotStart.After(start) {
+		start = slotStart
+	}
 	// [Modified in Gloas:EIP7732] Store SignedBeaconBlock directly via ColumnSyncableSignedBlock interface
 	// instead of calling Blinded() which fails for GLOAS blocks
-	d.blocksToCheckSync.Store(common.Hash(blockRoot), block)
+	d.blocksToCheckSync.add(common.Hash(blockRoot), block, start.Add(d.deferredColumnSyncDelay(block)))
 	return nil
 }
 
+// deferredColumnSync is a block queued for the column sync worker, with its retry state.
+type deferredColumnSync struct {
+	block       cltypes.ColumnSyncableSignedBlock
+	attempts    int
+	nextAttempt time.Time
+	inFlight    bool
+	// atMaxBackoff marks a root retried once per maximum backoff, which may never complete.
+	atMaxBackoff bool
+}
+
+// deferredColumnSyncs holds the roots whose columns gossip did not deliver. A failed round grows
+// a root's backoff by one slot, up to an epoch. The zero value is ready to use.
+type deferredColumnSyncs struct {
+	mu      sync.Mutex
+	entries map[common.Hash]*deferredColumnSync
+}
+
+// add queues root with its first attempt at firstAttempt, unless it is queued already.
+func (q *deferredColumnSyncs) add(root common.Hash, block cltypes.ColumnSyncableSignedBlock, firstAttempt time.Time) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.entries == nil {
+		q.entries = map[common.Hash]*deferredColumnSync{}
+	}
+	if _, ok := q.entries[root]; !ok {
+		q.entries[root] = &deferredColumnSync{block: block, nextAttempt: firstAttempt}
+	}
+}
+
+// due drops the roots below serveRangeStart and returns the roots that are not in a round and
+// whose next attempt is due.
+func (q *deferredColumnSyncs) due(now time.Time, serveRangeStart uint64) ([]common.Hash, []cltypes.ColumnSyncableSignedBlock) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var roots []common.Hash
+	var blocks []cltypes.ColumnSyncableSignedBlock
+	for root, e := range q.entries {
+		slot := e.block.GetSlot()
+		if slot < serveRangeStart {
+			log.Debug("[syncColumnDataWorker] block left the data-column serve range, removing from sync queue", "slot", slot, "blockRoot", root)
+			delete(q.entries, root)
+			continue
+		}
+		if !e.inFlight && !now.Before(e.nextAttempt) {
+			roots = append(roots, root)
+			blocks = append(blocks, e.block)
+		}
+	}
+	return roots, blocks
+}
+
+func (q *deferredColumnSyncs) start(roots []common.Hash) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, root := range roots {
+		if e := q.entries[root]; e != nil {
+			e.inFlight = true
+		}
+	}
+}
+
+// failed records a round that left columns missing and grows the backoff, capped at
+// maxBackoffSlots. It reports whether the backoff has reached the cap. A root dropped meanwhile
+// stays dropped.
+func (q *deferredColumnSyncs) failed(root common.Hash, now time.Time, slot time.Duration, maxBackoffSlots uint64) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	if e == nil {
+		return false
+	}
+	e.inFlight = false
+	e.attempts++
+	backoffSlots := min(uint64(e.attempts), maxBackoffSlots)
+	e.nextAttempt = now.Add(slot * time.Duration(backoffSlots))
+	e.atMaxBackoff = backoffSlots == maxBackoffSlots
+	return e.atMaxBackoff
+}
+
+// retryLater defers a root by one slot without counting an attempt, for a local storage error.
+func (q *deferredColumnSyncs) retryLater(root common.Hash, now time.Time, slot time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if e := q.entries[root]; e != nil {
+		e.inFlight = false
+		e.nextAttempt = now.Add(slot)
+	}
+}
+
+// activeLen counts the roots below the maximum backoff, which are retried at least once an epoch.
+func (q *deferredColumnSyncs) activeLen() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, e := range q.entries {
+		if !e.atMaxBackoff {
+			n++
+		}
+	}
+	return n
+}
+
+// isBackfill reports whether root was queued by the custody backfill.
+func (q *deferredColumnSyncs) isBackfill(root common.Hash) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	if e == nil {
+		return false
+	}
+	_, ok := e.block.(*backfillColumnBlock)
+	return ok
+}
+
+func (q *deferredColumnSyncs) forget(root common.Hash) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.entries, root)
+}
+
+func (d *peerdas) slotDuration() time.Duration {
+	return time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
+}
+
+// deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A
+// custody node gets the custody grace; an archive node recovers from half the columns and gives
+// in-flight gossip a full slot instead.
+func (d *peerdas) deferredColumnSyncDelay(block cltypes.ColumnSyncableSignedBlock) time.Duration {
+	if d.IsArchivedMode() {
+		return d.slotDuration()
+	}
+	return d.custodyGrace(block.Version() >= clparams.GloasVersion)
+}
+
+// custodyGrace is half the window in which a custody node needs every custody column; the by-root
+// fetch gets the other half. Before Gloas the columns decide whether the node attests to the
+// block, so the window ends at the attestation deadline. From Gloas they decide the envelope and
+// the PTC's blob_data_available vote, and the root is queued when its envelope is processed, so
+// the window runs from the payload deadline to the PTC deadline.
+func (d *peerdas) custodyGrace(gloas bool) time.Duration {
+	cfg := d.beaconConfig
+	if !gloas {
+		return time.Duration(cfg.AttestationDueMs(false)) * time.Millisecond / 2
+	}
+	payloadDueMs := cfg.SecondsPerSlot * cfg.PayloadDueBps / (clparams.BpsFactor / 1000)
+	return time.Duration(cfg.PayloadAttestationDueMs()-min(payloadDueMs, cfg.PayloadAttestationDueMs())) * time.Millisecond / 2
+}
+
+// deferredColumnSyncTick bounds how late a due root is picked up to a quarter of the shortest
+// custody grace, so the by-root fetch keeps most of its half of the window.
+func (d *peerdas) deferredColumnSyncTick() time.Duration {
+	grace := min(d.custodyGrace(false), d.custodyGrace(true))
+	return min(max(grace/4, deferredColumnSyncMinTick), deferredColumnSyncMaxTick)
+}
+
+// stillCanonical reports whether root may still be canonical at slot. The beacon indices cover
+// the head chain only, so a slot above their head is undecided and keeps the root, as does a
+// missing or unreadable index.
+func (d *peerdas) stillCanonical(ctx context.Context, slot uint64, root common.Hash) bool {
+	if d.indiciesDB == nil {
+		return true
+	}
+	canonical := true
+	if err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		headSlot, _, err := beacon_indicies.ReadCanonicalHead(tx)
+		if err != nil || slot > headSlot {
+			return err
+		}
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return err
+		}
+		canonical = canonicalRoot == root
+		return nil
+	}); err != nil {
+		log.Debug("[syncColumnDataWorker] failed to read the canonical chain, keeping the root", "slot", slot, "blockRoot", root, "err", err)
+		return true
+	}
+	return canonical
+}
+
+// columnSyncRoundFailed records a round that left a root's columns missing. A root whose backoff
+// reached an epoch is kept while it is canonical, since nothing in this queue re-queues it; a later
+// SyncColumnDataLater can, for example for a parked Gloas envelope. A root that is not canonical,
+// such as an orphaned block nobody serves, is given up. So is a root the custody backfill queued:
+// on a range peers cannot serve, keeping them would retry a growing set every epoch.
+func (d *peerdas) columnSyncRoundFailed(ctx context.Context, root common.Hash, slot uint64, now time.Time) {
+	if !d.blocksToCheckSync.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
+		return
+	}
+	switch {
+	case d.blocksToCheckSync.isBackfill(root):
+		log.Warn("[custodyBackfill] peers did not serve the custody columns, giving up the block", "slot", slot, "blockRoot", root)
+		d.blocksToCheckSync.forget(root)
+	case !d.stillCanonical(ctx, slot, root):
+		log.Debug("[syncColumnDataWorker] column data still missing for a non-canonical block, removing from sync queue", "slot", slot, "blockRoot", root)
+		d.blocksToCheckSync.forget(root)
+	}
+}
+
+// syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
+// off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
+// others.
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(d.deferredColumnSyncTick())
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// check peers count
-			if d.rpc != nil {
-				if peersCount, err := d.rpc.Peers(); err != nil {
-					log.Warn("failed to get peers count", "err", err)
-					continue
-				} else if peersCount == 0 {
-					log.Info("[syncColumnDataWorker] no peers available, skipping sync")
-					continue
-				}
-			}
-
-			// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
-			blocks := []cltypes.ColumnSyncableSignedBlock{}
-			roots := []common.Hash{}
-			d.blocksToCheckSync.Range(func(key, value any) bool {
-				root := key.(common.Hash)
-				block := value.(cltypes.ColumnSyncableSignedBlock)
-				curSlot := d.ethClock.GetCurrentSlot()
-				if curSlot-block.GetSlot() < 5 { // wait slow data from peers
-					// skip blocks that are too close to the current slot
-					return true
-				}
-				available, err := d.IsDataAvailable(block.GetSlot(), root)
-				switch {
-				case err != nil:
-					log.Warn("failed to check if data is available", "err", err)
-				case available:
-					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
-					d.blocksToCheckSync.Delete(root)
-				default:
-					blocks = append(blocks, block)
-					roots = append(roots, root)
-				}
-				return true
-			})
-			if len(blocks) == 0 {
+		}
+		now := time.Now()
+		serveRangeStart := d.beaconConfig.DataColumnSidecarServeRangeStartSlot(d.ethClock.GetCurrentSlot())
+		dueRoots, due := d.blocksToCheckSync.due(now, serveRangeStart)
+		if len(due) == 0 {
+			continue
+		}
+		// Without peers nothing can be downloaded, so the availability scan waits as well.
+		if d.rpc != nil {
+			peersCount, err := d.rpc.Peers()
+			if err != nil {
+				log.Warn("[syncColumnDataWorker] failed to get peers count", "err", err)
 				continue
 			}
-			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
-			if d.IsArchivedMode() {
-				if err := d.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
-					log.Warn("failed to download columns and recover blobs", "err", err)
-					continue
-				}
-			} else {
-				if err := d.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
-					log.Warn("failed to download only custody columns", "err", err)
-					continue
-				}
-			}
-			for i, root := range roots {
-				d.blocksToCheckSync.Delete(root)
-				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+			if peersCount == 0 {
+				log.Trace("[syncColumnDataWorker] no peers available, deferring column sync")
+				continue
 			}
 		}
+		blocks := []cltypes.ColumnSyncableSignedBlock{}
+		roots := []common.Hash{}
+		for i, root := range dueRoots {
+			block := due[i]
+			available, err := d.IsDataAvailable(block.GetSlot(), root)
+			switch {
+			case err != nil:
+				log.Warn("[syncColumnDataWorker] failed to check if data is available", "slot", block.GetSlot(), "blockRoot", root, "err", err)
+				d.blocksToCheckSync.retryLater(root, now, d.slotDuration())
+			case available:
+				log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
+				d.blocksToCheckSync.forget(root)
+			default:
+				blocks = append(blocks, block)
+				roots = append(roots, root)
+			}
+		}
+		if len(blocks) == 0 {
+			continue
+		}
+		d.blocksToCheckSync.start(roots)
+		log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
+		go func() {
+			roundCtx, cancel := context.WithTimeout(ctx, d.slotDuration())
+			defer cancel()
+			var err error
+			if d.IsArchivedMode() {
+				err = d.DownloadColumnsAndRecoverBlobs(roundCtx, blocks)
+			} else {
+				err = d.DownloadOnlyCustodyColumns(roundCtx, blocks)
+			}
+			if err != nil {
+				log.Warn("[syncColumnDataWorker] failed to download column data", "blocks_count", len(blocks), "err", err)
+			}
+			for i, root := range roots {
+				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
+				if err != nil {
+					log.Warn("[syncColumnDataWorker] failed to check if data is available", "slot", blocks[i].GetSlot(), "blockRoot", root, "err", err)
+					d.blocksToCheckSync.retryLater(root, time.Now(), d.slotDuration())
+					continue
+				}
+				if !available {
+					// The round's own context has expired by then, so the canonical check uses the worker's.
+					d.columnSyncRoundFailed(ctx, root, blocks[i].GetSlot(), time.Now())
+					continue
+				}
+				d.blocksToCheckSync.forget(root)
+				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+			}
+		}()
 	}
 }

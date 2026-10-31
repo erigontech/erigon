@@ -20,7 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -43,15 +44,20 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	// Delete canonical hashes that are being unwound
 	unwindBlock := (u.Reason.Block != nil)
-	badBlock := false
-	if unwindBlock {
-		badBlock = u.Reason.IsBadBlock()
+	if unwindBlock && u.Reason.IsBadBlock() {
+		badFrom := u.UnwindPoint + 1
+		if badNum := rawdb.ReadHeaderNumber(tx, *u.Reason.Block); badNum != nil {
+			badFrom = max(badFrom, *badNum)
+		}
+		if err := rawdb.TruncateCanonicalHash(tx, badFrom, true); err != nil {
+			return err
+		}
 	}
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, false); err != nil {
 		return err
 	}
 	if unwindBlock {
-		var maxTd big.Int
+		var maxTd uint256.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
 
@@ -70,7 +76,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 			if len(k) != 40 {
 				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 			}
-			var td big.Int
+			var td uint256.Int
 			if err := rlp.DecodeBytes(v, &td); err != nil {
 				return err
 			}

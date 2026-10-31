@@ -110,8 +110,8 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			it.seqIt = seqIt
 		}
 
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
+		// Asc:  [from, to) AND from < to
+		// Desc: [from, to) AND from > to
 		if it.orderAscend {
 			for it.seqIt.HasNext() {
 				n, err := it.seqIt.Next()
@@ -120,7 +120,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					return
 				}
 				isBeforeRange := int(n) < it.startTxNum
-				if isBeforeRange { //skip
+				if isBeforeRange { // skip
 					continue
 				}
 				isAfterRange := it.endTxNum >= 0 && int(n) >= it.endTxNum
@@ -140,7 +140,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 					return
 				}
 				isAfterRange := it.startTxNum >= 0 && int(n) > it.startTxNum
-				if isAfterRange { //skip
+				if isAfterRange { // skip
 					continue
 				}
 				isBeforeRange := it.endTxNum >= 0 && int(n) <= it.endTxNum

@@ -35,7 +35,7 @@ func (imp *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.
 	}
 	expectedStateRoot, err := s.HashSSZ()
 	if err != nil {
-		return fmt.Errorf("unable to generate state root: %v", err)
+		return fmt.Errorf("unable to generate state root: %w", err)
 	}
 	if expectedStateRoot != currentBlock.StateRoot {
 		return fmt.Errorf("expected state root differs from received state root, slot %d , we have %s, ans %s", s.Slot(), hex.EncodeToString(expectedStateRoot[:]), hex.EncodeToString(currentBlock.StateRoot[:]))
@@ -49,7 +49,7 @@ func (imp *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.Sig
 	}
 	valid, err := VerifyBlockSignature(s, block)
 	if err != nil {
-		return fmt.Errorf("error validating block signature: %v", err)
+		return fmt.Errorf("error validating block signature: %w", err)
 	}
 	if !valid {
 		return errors.New("block not valid")

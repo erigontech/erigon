@@ -113,6 +113,23 @@ func TestIntegerSquareRoot(t *testing.T) {
 	}
 }
 
+func TestSecondsToMilliseconds(t *testing.T) {
+	testCases := []struct {
+		seconds      uint64
+		milliseconds uint64
+	}{
+		{0, 0},
+		{math.MaxUint64 / 1000, (math.MaxUint64 / 1000) * 1000},
+		{math.MaxUint64/1000 + 1, math.MaxUint64},
+	}
+
+	for _, tc := range testCases {
+		if got := utils.SecondsToMilliseconds(tc.seconds); got != tc.milliseconds {
+			t.Errorf("SecondsToMilliseconds(%d) = %d, want %d", tc.seconds, got, tc.milliseconds)
+		}
+	}
+}
+
 func TestETA(t *testing.T) {
 	maxDuration := time.Duration(math.MaxInt64).Truncate(time.Second).String()
 	testCases := []struct {

@@ -18,12 +18,18 @@ package engineapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/json"
+	"fmt"
 	"math/big"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/jinzhu/copier"
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -32,26 +38,330 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+func TestEngineRejectsMissingRequiredObjects(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, false, false, true, nil, nil, 0, 0)
+	client := newEngineInProcClient(t, srv)
+
+	for _, test := range []struct {
+		method string
+		params []any
+	}{
+		{"engine_newPayloadV1", []any{nil}},
+		{"engine_newPayloadV2", []any{nil}},
+		{"engine_newPayloadV3", []any{nil, []common.Hash{}, common.Hash{}}},
+		{"engine_newPayloadV4", []any{nil, []common.Hash{}, common.Hash{}, []hexutil.Bytes{}}},
+		{"engine_newPayloadV5", []any{nil, []common.Hash{}, common.Hash{}, []hexutil.Bytes{}}},
+		{"engine_forkchoiceUpdatedV1", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV2", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV3", []any{nil, nil}},
+		{"engine_forkchoiceUpdatedV4", []any{nil, nil, nil}},
+	} {
+		t.Run(test.method, func(t *testing.T) {
+			for _, params := range []struct {
+				name string
+				args []any
+			}{
+				{"null", test.params},
+				{"empty", []any{}},
+				{"omitted", nil},
+			} {
+				t.Run(params.name, func(t *testing.T) {
+					err := client.CallContext(t.Context(), new(any), test.method, params.args...)
+					var rpcErr rpc.Error
+					require.ErrorAs(t, err, &rpcErr)
+					require.Equal(t, -32602, rpcErr.ErrorCode())
+				})
+			}
+		})
+	}
+}
+
+func TestNewPayloadV5BoundsBALAllocations(t *testing.T) {
+	reads := make([]uint64, 100_000)
+	for i := range reads {
+		reads[i] = uint64(i)
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, reads, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+
+	header := makeParentHeader(1)
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	header.GasLimit = types.BalItemCost
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	header.RequestsHash = (types.FlatRequests{}).Hash()
+	balHash := crypto.Keccak256Hash(raw)
+	header.BlockAccessListHash = &balHash
+	header.SlotNumber = new(uint64)
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	balBytes := hexutil.Bytes(raw)
+	payload.BlockAccessList = &balBytes
+	srv := NewEngineServer(log.New(), allForksChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	status, err := srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.NotNil(t, status.ValidationError)
+	require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
+	t.Parallel()
+
+	const withdrawal = `{"index":"0x0","validatorIndex":"0x1","address":"0x1111111111111111111111111111111111111111","amount":"0x1"}`
+	for _, test := range []struct {
+		name        string
+		withdrawals string
+		wantError   string
+	}{
+		{"null entry", `[null]`, "null withdrawal at index 0"},
+		{"null after valid entry", `[` + withdrawal + `,null]`, "null withdrawal at index 1"},
+		{"missing list", `null`, "missing withdrawals list"},
+		{"empty list", `[]`, ""},
+		{"valid entry", `[` + withdrawal + `]`, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var decoded engine_types.ExecutionPayload
+			require.NoError(t, json.Unmarshal([]byte(`{"withdrawals":`+test.withdrawals+`}`), &decoded))
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.TxHash = empty.RootHash
+			if decoded.Withdrawals != nil {
+				root := types.DeriveSha(types.Withdrawals(decoded.Withdrawals))
+				header.WithdrawalsHash = &root
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, decoded.Withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+
+			cfg := preCancunChainConfig()
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			status, err := srv.NewPayloadV2(t.Context(), payload)
+			if test.wantError != "" {
+				require.Nil(t, status)
+				var invalidParams *rpc.InvalidParamsError
+				require.ErrorAs(t, err, &invalidParams)
+				require.Equal(t, -32602, invalidParams.ErrorCode())
+				require.Equal(t, test.wantError, invalidParams.Message)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, engine_types.SyncingStatus, status.Status)
+		})
+	}
+}
+
+func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
+	t.Parallel()
+
+	const gasLimit = 4 * 16_800 // the per-transaction minimum after London
+	for _, test := range []struct {
+		name          string
+		txCount       int
+		txGasLimit    uint64
+		cfg           *chain.Config
+		allowAA       bool
+		noWithdrawals bool
+		nilBlobHashes bool
+		prague        bool
+		amsterdam     bool
+		wantStatus    engine_types.EngineStatus
+		wantErr       string
+		wantErrCode   int
+	}{
+		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
+		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached"},
+		{name: "5 txs with AllowAA", txCount: 5, cfg: preCancunChainConfig(), allowAA: true, wantStatus: engine_types.SyncingStatus},
+		{name: "4 txs on Prague", txCount: 4, cfg: preOsakaChainConfig(), prague: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 21000 gas each"},
+		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
+		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
+		{name: "5 txs after Cancun", txCount: 5, cfg: prePragueChainConfig(), wantErrCode: -38005},
+		{name: "5 txs with null blob hashes", txCount: 5, cfg: prePragueChainConfig(), nilBlobHashes: true, wantErrCode: -32602},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			test.cfg.AllowAA = test.allowAA
+			to := common.Address{0x1}
+			txs := make(types.Transactions, test.txCount)
+			for i := range txs {
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
+			}
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			if test.nilBlobHashes || test.prague || test.amsterdam {
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
+			if test.prague || test.amsterdam {
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+			}
+			if test.amsterdam {
+				balHash := empty.BlockAccessListHash
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+			if test.noWithdrawals {
+				payload.Withdrawals = nil
+			}
+
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, test.cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), test.cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			var status *engine_types.PayloadStatus
+			switch {
+			case test.amsterdam:
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.prague:
+				status, err = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+			case test.nilBlobHashes:
+				status, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
+			default:
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			if test.wantErrCode != 0 {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, test.wantErrCode, rpcErr.ErrorCode())
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.wantStatus, status.Status)
+			if test.wantErr != "" {
+				require.EqualError(t, status.ValidationError.Error(), test.wantErr)
+			}
+		})
+	}
+}
+
+func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
+	t.Parallel()
+
+	cfg := prePragueChainConfig()
+	header := makeParentHeader(1001)
+	header.ParentHash = common.Hash{0x1}
+	blobHashes := make([]common.Hash, cfg.GetMaxBlobsPerBlock(header.Time)+1)
+	for i := range blobHashes {
+		blobHashes[i] = common.Hash{kzg.BlobCommitmentVersionKZG, byte(i)}
+	}
+	txs := types.Transactions{&types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x1}},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(1),
+		BlobVersionedHashes: blobHashes,
+	}}
+	header.UncleHash = empty.UncleHash
+	header.TxHash = types.DeriveSha(txs)
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	downloader.ReportBadHeader(header.ParentHash, common.Hash{}, "invalid block")
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	status, err := srv.NewPayloadV3(t.Context(), payload, blobHashes, header.ParentBeaconBlockRoot)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
+}
+
+func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	var attributes engine_types.PayloadAttributes
+	require.NoError(t, json.Unmarshal([]byte(`{"timestamp":"0x3e9","withdrawals":[null]}`), &attributes))
+	cfg := preCancunChainConfig()
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	response, err := srv.ForkchoiceUpdatedV2(t.Context(), &engine_types.ForkChoiceState{HeadHash: common.Hash{0x1}}, &attributes)
+	require.Nil(t, response)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -38003, rpcErr.ErrorCode())
+}
 
 // Do 1 step to start txPool
 func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) {
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(blocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
@@ -66,7 +376,7 @@ func oneBlockStep(mockSentry *execmoduletester.ExecModuleTester, require *requir
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *jsonrpc.BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
 func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient) *jsonrpc.APIImpl {
@@ -92,14 +402,12 @@ func TestGetBlobsV1(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 
-	var chainConfig chain.Config
-	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	require.NoError(t, err)
+	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.PragueTime = nil
 	chainConfig.OsakaTime = nil
 	chainConfig.AmsterdamTime = nil
 	gspec := &types.Genesis{
-		Config: &chainConfig,
+		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
@@ -223,10 +531,8 @@ func TestGetBlobsV2(t *testing.T) {
 	}
 }
 
-func TestGetBlobsV3(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
+func newGetBlobsTxPoolFixture(t *testing.T) (context.Context, *EngineServer, *types.BlobTxWrapper) {
+	t.Helper()
 	buf := bytes.NewBuffer(nil)
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	require := require.New(t)
@@ -269,6 +575,16 @@ func TestGetBlobsV3(t *testing.T) {
 	require.NoError(err)
 	require.NotEmpty(hh)
 
+	return ctx, engineServer, wrappedTxn
+}
+
+func TestGetBlobsV3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx, engineServer, wrappedTxn := newGetBlobsTxPoolFixture(t)
+	require := require.New(t)
+
 	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
 	blobsResp, err := engineServer.GetBlobsV3(ctx, blobHashes)
 	require.NoError(err)
@@ -288,6 +604,264 @@ func TestGetBlobsV3(t *testing.T) {
 		require.Equal(blobsResp[0].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i][:]))
 		require.Equal(blobsResp[1].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i+128][:]))
 	}
+}
+
+func TestGetBlobsV4WithTxPool(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx, engineServer, wrappedTxn := newGetBlobsTxPoolFixture(t)
+	require := require.New(t)
+
+	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
+	indices := []uint64{0, 64, 127}
+	mask := hexutil.MustDecodeHex("0x01000000000000000100000000000080")
+	cellBundles, err := engineServer.GetBlobsV4(ctx, blobHashes, mask)
+	require.NoError(err)
+	require.Len(cellBundles, 3)
+	require.Nil(cellBundles[0])
+	for i, bundle := range cellBundles[1:] {
+		require.NotNil(bundle)
+		require.Len(bundle.BlobCells, len(indices))
+		require.Len(bundle.Proofs, len(indices))
+		cells := make([]*goethkzg.Cell, len(indices))
+		proofs := make([]goethkzg.KZGProof, len(indices))
+		commitments := make([]goethkzg.KZGCommitment, len(indices))
+		for j := range indices {
+			require.NotNil(bundle.BlobCells[j])
+			require.NotNil(bundle.Proofs[j])
+			require.Len(*bundle.BlobCells[j], len(goethkzg.Cell{}))
+			require.Len(*bundle.Proofs[j], len(goethkzg.KZGProof{}))
+			cells[j] = (*goethkzg.Cell)(*bundle.BlobCells[j])
+			proofs[j] = goethkzg.KZGProof(*bundle.Proofs[j])
+			commitments[j] = goethkzg.KZGCommitment(wrappedTxn.Commitments[i])
+		}
+		require.NoError(kzg.Ctx().VerifyCellKZGProofBatch(commitments, indices, cells, proofs))
+	}
+}
+
+type blobGetterFunc func([]common.Hash) []txpool.PoolBlobBundle
+
+func (f blobGetterFunc) GetBlobs(hashes []common.Hash) []txpool.PoolBlobBundle {
+	return f(hashes)
+}
+
+type blobGetterMap map[common.Hash]txpool.PoolBlobBundle
+
+func (m blobGetterMap) GetBlobs(hashes []common.Hash) []txpool.PoolBlobBundle {
+	bundles := make([]txpool.PoolBlobBundle, len(hashes))
+	for i, hash := range hashes {
+		bundles[i] = m[hash]
+	}
+	return bundles
+}
+
+func getBlobsV4Fixture(t *testing.T, value byte) (common.Hash, txpool.PoolBlobBundle, []*goethkzg.Cell) {
+	t.Helper()
+	var blob goethkzg.Blob
+	blob[31] = value
+	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&blob, 2)
+	require.NoError(t, err)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 2)
+	require.NoError(t, err)
+	return common.Hash(kzg.KZGToVersionedHash(commitment)), txpool.PoolBlobBundle{
+		Commitment: commitment,
+		Blob:       blob[:],
+		Proofs:     proofs[:],
+	}, cells[:]
+}
+
+func newGetBlobsV4Client(t *testing.T, getter txpool.BlobGetter) *rpc.Client {
+	t.Helper()
+	return newEngineInProcClient(t, &EngineServer{logger: log.New(), blobGetter: getter})
+}
+
+func TestGetBlobsV4(t *testing.T) {
+	hash, bundle, cells := getBlobsV4Fixture(t, 1)
+	client := newGetBlobsV4Client(t, blobGetterMap{hash: bundle})
+	allIndices := make([]int, goethkzg.CellsPerExtBlob)
+	for i := range allIndices {
+		allIndices[i] = i
+	}
+	for _, tc := range []struct {
+		name    string
+		mask    hexutil.Bytes
+		indices []int
+	}{
+		{"selected_cells", hexutil.MustDecodeHex("0x81010000000000800100000000000080"), []int{0, 7, 8, 63, 64, 127}},
+		{"all_cells", bytes.Repeat([]byte{0xff}, 16), allIndices},
+		{"no_cells", make(hexutil.Bytes, 16), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var result []struct {
+				BlobCells []hexutil.Bytes `json:"blob_cells"`
+				Proofs    []hexutil.Bytes `json:"proofs"`
+			}
+			require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, tc.mask))
+			require.Len(t, result, 1)
+			require.NotNil(t, result[0].BlobCells)
+			require.NotNil(t, result[0].Proofs)
+			require.Len(t, result[0].BlobCells, len(tc.indices))
+			require.Len(t, result[0].Proofs, len(tc.indices))
+			for i, index := range tc.indices {
+				require.Equal(t, hexutil.Bytes(cells[index][:]), result[0].BlobCells[i])
+				require.Equal(t, hexutil.Bytes(bundle.Proofs[index][:]), result[0].Proofs[i])
+			}
+		})
+	}
+}
+
+func TestGetBlobsV4FastJSON(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 1)
+	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
+	result, err := server.GetBlobsV4(t.Context(), []common.Hash{hash, {}}, hexutil.MustDecodeHex("0x01000000000000000100000000000080"))
+	require.NoError(t, err)
+	marshaler, ok := any(result).(interface {
+		MarshalFastJSONTo(*jsonstream.Stream) error
+	})
+	require.True(t, ok, "GetBlobsV4 must return a fast JSON result")
+	want, err := json.Marshal(result)
+	require.NoError(t, err)
+	got, err := jsonstream.Marshal(marshaler)
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(got))
+}
+
+func TestGetBlobsV4PartialResponse(t *testing.T) {
+	hashA, bundleA, cellsA := getBlobsV4Fixture(t, 1)
+	hashB, bundleB, cellsB := getBlobsV4Fixture(t, 2)
+	pool := blobGetterMap{hashA: bundleA, hashB: bundleB}
+	cells := map[common.Hash][]*goethkzg.Cell{hashA: cellsA, hashB: cellsB}
+	client := newGetBlobsV4Client(t, pool)
+	hashes := []common.Hash{hashB, {}, hashA, hashB}
+	mask := hexutil.Bytes(hexutil.MustDecodeHex("0x80010000000000000000000000000080"))
+	var result []*engine_types.BlobCellsAndProofsV1
+	require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", hashes, mask))
+	require.Len(t, result, len(hashes))
+	for i, hash := range hashes {
+		bundle, available := pool[hash]
+		if !available {
+			require.Nil(t, result[i])
+			continue
+		}
+		require.NotNil(t, result[i])
+		require.Len(t, result[i].BlobCells, 3)
+		require.Len(t, result[i].Proofs, 3)
+		for j, index := range []int{7, 8, 127} {
+			require.NotNil(t, result[i].BlobCells[j])
+			require.NotNil(t, result[i].Proofs[j])
+			require.Equal(t, hexutil.Bytes(cells[hash][index][:]), *result[i].BlobCells[j])
+			require.Equal(t, hexutil.Bytes(bundle.Proofs[index][:]), *result[i].Proofs[j])
+		}
+	}
+}
+
+func TestGetBlobsV4InvalidMask(t *testing.T) {
+	client := newGetBlobsV4Client(t, blobGetterFunc(func(hashes []common.Hash) []txpool.PoolBlobBundle {
+		return make([]txpool.PoolBlobBundle, len(hashes))
+	}))
+	for _, tc := range []struct {
+		name string
+		mask any
+	}{
+		{"long", "0x" + strings.Repeat("00", 17)},
+		{"short", "0x" + strings.Repeat("00", 15)},
+		{"empty", "0x"},
+		{"null", nil},
+		{"missing_prefix", strings.Repeat("00", 16)},
+		{"invalid_hex", "0x" + strings.Repeat("gg", 16)},
+		{"wrong_type", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var result any
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{}, tc.mask)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, -32602, rpcErr.ErrorCode())
+		})
+	}
+}
+
+func TestGetBlobsV4RequestLimit(t *testing.T) {
+	client := newGetBlobsV4Client(t, blobGetterFunc(func(hashes []common.Hash) []txpool.PoolBlobBundle {
+		return make([]txpool.PoolBlobBundle, len(hashes))
+	}))
+	for _, count := range []int{0, 128, 129} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			var result []*engine_types.BlobCellsAndProofsV1
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", make([]common.Hash, count), make(hexutil.Bytes, 16))
+			if count > 128 {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, -38004, rpcErr.ErrorCode())
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, make([]*engine_types.BlobCellsAndProofsV1, count), result)
+		})
+	}
+}
+
+func TestGetBlobsV4PoolDisabled(t *testing.T) {
+	client := newGetBlobsV4Client(t, nil)
+	var result json.RawMessage
+	err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{{1}}, make(hexutil.Bytes, 16))
+	require.EqualError(t, err, txpool.ErrPoolDisabled.Error())
+}
+
+func TestGetBlobsV4Unavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		getter txpool.BlobGetter
+	}{
+		{"unavailable", blobGetterFunc(func([]common.Hash) []txpool.PoolBlobBundle { return nil })},
+		{"invalid_response_length", blobGetterFunc(func([]common.Hash) []txpool.PoolBlobBundle {
+			return make([]txpool.PoolBlobBundle, 2)
+		})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newGetBlobsV4Client(t, tc.getter)
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{{1}}, make(hexutil.Bytes, 16))
+			require.NoError(t, err)
+			require.JSONEq(t, "null", string(result))
+		})
+	}
+}
+
+func TestGetBlobsV4JSONRPCClient(t *testing.T) {
+	client := &JsonRpcClient{rpcClient: newGetBlobsV4Client(t, blobGetterFunc(func(hashes []common.Hash) []txpool.PoolBlobBundle {
+		return make([]txpool.PoolBlobBundle, len(hashes))
+	}))}
+	result, err := client.GetBlobsV4(t.Context(), []common.Hash{{1}, {2}}, make(hexutil.Bytes, 16))
+	require.NoError(t, err)
+	require.Equal(t, []*engine_types.BlobCellsAndProofsV1{nil, nil}, result)
+}
+
+func TestGetBlobsV4InvalidBlobLength(t *testing.T) {
+	for _, size := range []int{1, len(goethkzg.Blob{}) - 1, len(goethkzg.Blob{}) + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			hash := common.Hash{1}
+			client := newGetBlobsV4Client(t, blobGetterMap{hash: {
+				Blob:   make([]byte, size),
+				Proofs: make([]goethkzg.KZGProof, goethkzg.CellsPerExtBlob),
+			}})
+			var result []*engine_types.BlobCellsAndProofsV1
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, make(hexutil.Bytes, 16))
+			require.NoError(t, err)
+			require.Equal(t, []*engine_types.BlobCellsAndProofsV1{nil}, result)
+		})
+	}
+}
+
+func TestGetBlobsV4Canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{}}
+	result, err := server.GetBlobsV4(ctx, []common.Hash{{1}}, make(hexutil.Bytes, 16))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
 }
 
 func canonicalHashAt(t *testing.T, db kv.TemporalRoDB, blockNum uint64) common.Hash {
@@ -391,4 +965,60 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.NotNil(bodies[1].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes1), *bodies[0].BlockAccessList)
 	req.Equal(hexutil.Bytes(balBytes2), *bodies[1].BlockAccessList)
+}
+
+// TestQuickStatusHeaderLookup pins how the known-block check looks up its block. A new payload
+// passes its number: a hash-only lookup of a block that is not stored yet searches every header
+// snapshot file before it misses. A forkchoice update does not know its head's number (it passes
+// 0), so it must look the head up by hash only.
+func TestQuickStatusHeaderLookup(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parentHash := parent.Hash()
+	blockHash := common.Hash{0x42}
+	payloadNumber := parent.Number.Uint64() + 1
+
+	for _, test := range []struct {
+		name       string
+		newPayload bool
+		number     uint64
+		forkchoice *engine_types.ForkChoiceState
+		wantNumber *uint64
+	}{
+		{name: "newPayload", newPayload: true, number: payloadNumber, wantNumber: &payloadNumber},
+		{name: "forkchoiceUpdated", forkchoice: &engine_types.ForkChoiceState{HeadHash: blockHash}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var lookups int
+			stub := &stubExecutionModule{
+				getHeaderFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
+					if hash != nil && *hash == blockHash {
+						lookups++
+						require.Equal(t, test.wantNumber, number)
+						return nil, nil
+					}
+					return getHeaderReturning(parentHash, parent)(context.Background(), hash, number)
+				},
+			}
+
+			cfg := preCancunChainConfig()
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
+
+			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, test.forkchoice, test.newPayload, defaultReadinessWait)
+			require.NoError(t, err)
+			require.Equal(t, 1, lookups)
+		})
+	}
+}
+
+func TestValidatedPayloadStatusAnswersSyncingWhenTooFarAway(t *testing.T) {
+	var e EngineServer
+	resp := e.validatedPayloadStatus(types.NewBlockWithHeader(&types.Header{}, nil), execmodule.ExecutionStatusTooFarAway, nil, common.Hash{})
+	require.Equal(t, engine_types.SyncingStatus, resp.Status)
+	require.Nil(t, resp.LatestValidHash)
+	require.Nil(t, resp.ValidationError)
 }

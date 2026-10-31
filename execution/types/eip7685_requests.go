@@ -22,16 +22,18 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const DepositRequestType byte = 0x00
-const WithdrawalRequestType byte = 0x01
-const ConsolidationRequestType byte = 0x02
-const BuilderDepositRequestType byte = 0x03
-const BuilderExitRequestType byte = 0x04
-const DepositRequestDataLen = 192       // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
-const WithdrawalRequestDataLen = 76     // addr + pubkey + amt
-const ConsolidationRequestDataLen = 116 // addr + sourcePubkey + targetPubkey
-const BuilderDepositRequestDataLen = 184
-const BuilderExitRequestDataLen = 68
+const (
+	DepositRequestType           byte = 0x00
+	WithdrawalRequestType        byte = 0x01
+	ConsolidationRequestType     byte = 0x02
+	BuilderDepositRequestType    byte = 0x03
+	BuilderExitRequestType       byte = 0x04
+	DepositRequestDataLen             = 192 // BLSPubKeyLen + WithdrawalCredentialsLen + 8 + BLSSigLen + 8
+	WithdrawalRequestDataLen          = 76  // addr + pubkey + amt
+	ConsolidationRequestDataLen       = 116 // addr + sourcePubkey + targetPubkey
+	BuilderDepositRequestDataLen      = 184
+	BuilderExitRequestDataLen         = 68
+)
 
 var KnownRequestTypes = []byte{DepositRequestType, WithdrawalRequestType, ConsolidationRequestType, BuilderDepositRequestType, BuilderExitRequestType}
 

@@ -25,6 +25,21 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+// HTTPError is returned by client operations when the HTTP status code of the
+// response is not a 2xx status.
+type HTTPError struct {
+	StatusCode int
+	Status     string
+	Body       []byte
+}
+
+func (err HTTPError) Error() string {
+	if len(err.Body) == 0 {
+		return err.Status
+	}
+	return fmt.Sprintf("%v: %s", err.Status, err.Body)
+}
+
 var (
 	_ Error = new(methodNotFoundError)
 	_ Error = new(subscriptionNotFoundError)
@@ -33,6 +48,7 @@ var (
 	_ Error = new(invalidMessageError)
 	_ Error = new(InvalidParamsError)
 	_ Error = new(CustomError)
+	_ Error = new(ResourceNotFoundError)
 )
 
 const (
@@ -50,6 +66,7 @@ const (
 	ErrCodeInternalError           = -32603
 	ErrCodeInvalidParams           = -32602
 	ErrCodeDefault                 = -32000
+	ErrCodeResourceNotFound        = -32001
 	ErrCodeVMError                 = -32015
 	ErrCodeServerOverloaded        = -32005 // JSON-RPC "Too many requests"
 
@@ -108,6 +125,14 @@ type UnsupportedForkError struct{ Message string }
 func (e *UnsupportedForkError) ErrorCode() int { return -38005 }
 
 func (e *UnsupportedForkError) Error() string { return e.Message }
+
+// ResourceNotFoundError reports that the requested resource, such as a block, is
+// unknown or not available to serve.
+type ResourceNotFoundError struct{ Message string }
+
+func (e *ResourceNotFoundError) ErrorCode() int { return ErrCodeResourceNotFound }
+
+func (e *ResourceNotFoundError) Error() string { return e.Message }
 
 type BlockNotFoundErr struct {
 	BlockId string

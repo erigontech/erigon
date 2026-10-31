@@ -54,7 +54,7 @@ func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, block
 
 func (b DirectBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }
@@ -130,17 +130,7 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) (
 	res := make([]types.Log, len(rpcLogs))
 
 	for i, log := range rpcLogs {
-		res[i] = types.Log{
-			Address:     log.Address,
-			Topics:      log.Topics,
-			Data:        log.Data,
-			BlockNumber: log.BlockNumber,
-			TxHash:      log.TxHash,
-			TxIndex:     log.TxIndex,
-			BlockHash:   log.BlockHash,
-			Index:       log.Index,
-			Removed:     log.Removed,
-		}
+		res[i] = *log
 	}
 
 	return res, nil
@@ -201,25 +191,10 @@ func CallArgsFromCallMsg(callMsg bind.CallMsg) ethapi.CallArgs {
 		gas = (*hexutil.Uint64)(&callMsg.Gas)
 	}
 
-	var gasPrice *hexutil.Big
-	if callMsg.GasPrice != nil {
-		gasPrice = (*hexutil.Big)(callMsg.GasPrice.ToBig())
-	}
-
-	var feeCap *hexutil.Big
-	if callMsg.FeeCap != nil {
-		feeCap = (*hexutil.Big)(callMsg.FeeCap.ToBig())
-	}
-
-	var maxFeePerBlobGas *hexutil.Big
-	if callMsg.MaxFeePerBlobGas != nil {
-		maxFeePerBlobGas = (*hexutil.Big)(callMsg.MaxFeePerBlobGas.ToBig())
-	}
-
-	var value *hexutil.Big
-	if callMsg.Value != nil {
-		value = (*hexutil.Big)(callMsg.Value.ToBig())
-	}
+	gasPrice := (*hexutil.U256)(callMsg.GasPrice)
+	feeCap := (*hexutil.U256)(callMsg.FeeCap)
+	maxFeePerBlobGas := (*hexutil.U256)(callMsg.MaxFeePerBlobGas)
+	value := (*hexutil.U256)(callMsg.Value)
 
 	var data *hexutil.Bytes
 	if callMsg.Data != nil {

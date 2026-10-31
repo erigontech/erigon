@@ -20,7 +20,6 @@
 package trie
 
 import (
-	"bytes"
 	"io"
 	"math/bits"
 
@@ -34,7 +33,6 @@ const codeSizeUncached = -1
 var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "[17]"}
 
 type Node interface {
-	print(io.Writer)
 	fstring(string) string
 
 	// if not empty, returns node's RLP or hash thereof
@@ -92,14 +90,6 @@ func NewShortNode(key []byte, value Node) *ShortNode {
 	}
 
 	return s
-}
-
-func EncodeAsValue(data []byte) ([]byte, error) {
-	tmp := new(bytes.Buffer)
-	if err := rlp.Encode(tmp, ValueNode(data)); err != nil {
-		return nil, err
-	}
-	return tmp.Bytes(), nil
 }
 
 // EncodeRLP encodes a full node into the consensus RLP format.
@@ -181,77 +171,3 @@ func (n HashNode) String() string     { return n.fstring("") }
 func (n ValueNode) String() string    { return n.fstring("") }
 func (n CodeNode) String() string     { return n.fstring("") }
 func (an AccountNode) String() string { return an.fstring("") }
-
-func CodeKeyFromAddrHash(addrHash []byte) []byte {
-	return append(addrHash, 0xC0, 0xDE)
-}
-
-func CodeHexFromHex(hex []byte) []byte {
-	return append(hex, 0x0C, 0x00, 0x0D, 0x0E)
-}
-
-func IsPointingToCode(key []byte) bool {
-	// checking for 0xC0DE
-	l := len(key)
-	if l < 2 {
-		return false
-	}
-
-	return key[l-2] == 0xC0 && key[l-1] == 0xDE
-}
-
-func AddrHashFromCodeKey(codeKey []byte) []byte {
-	// cut off 0xC0DE
-	return codeKey[:len(codeKey)-2]
-}
-
-func calcSubtreeSize(node Node) int {
-	switch n := node.(type) {
-	case nil:
-		return 0
-	case ValueNode:
-		return 0
-	case *ShortNode:
-		return calcSubtreeSize(n.Val)
-	case *DuoNode:
-		return 1 + calcSubtreeSize(n.child1) + calcSubtreeSize(n.child2)
-	case *FullNode:
-		size := 1
-		for _, child := range n.Children {
-			size += calcSubtreeSize(child)
-		}
-		return size
-	case *AccountNode:
-		return len(n.Code) + calcSubtreeSize(n.Storage)
-	case HashNode:
-		return 0
-	}
-	return 0
-}
-
-func calcSubtreeNodes(node Node) int {
-	switch n := node.(type) {
-	case nil:
-		return 0
-	case ValueNode:
-		return 0
-	case *ShortNode:
-		return calcSubtreeNodes(n.Val)
-	case *DuoNode:
-		return 1 + calcSubtreeNodes(n.child1) + calcSubtreeNodes(n.child2)
-	case *FullNode:
-		size := 1
-		for _, child := range n.Children {
-			size += calcSubtreeNodes(child)
-		}
-		return size
-	case *AccountNode:
-		if n.Code != nil {
-			return 1 + calcSubtreeNodes(n.Storage)
-		}
-		return calcSubtreeNodes(n.Storage)
-	case HashNode:
-		return 0
-	}
-	return 0
-}

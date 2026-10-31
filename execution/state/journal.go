@@ -52,7 +52,6 @@ const (
 	kindFakeStorage
 	kindCode
 	kindRefund
-	kindAddLog
 	kindTouch
 	kindAccessListAddAccount
 	kindAccessListAddSlot
@@ -70,7 +69,7 @@ const (
 // journalExtra holds the fields needed only by the infrequent entry kinds,
 // kept out of line so the common entry stays small (see TestJournalEntrySize).
 type journalExtra struct {
-	prevObj              *stateObject         // kindResetObject
+	prevObj              *stateObject         // kindResetObject: the cached object, nil if none
 	prevWrites           *createWriteSnapshot // kindResetObject
 	bi                   *BalanceIncrease     // kindBalanceIncreaseTransfer
 	prevhash             accounts.CodeHash    // kindCode
@@ -98,6 +97,7 @@ type journalEntry struct {
 type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 	entries []journalEntry           // Current changes tracked by the journal
+	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }
 
 // newJournal gets a journal from the pool.
@@ -110,7 +110,10 @@ func (j *journal) release() {
 	j.Reset()
 	journalPool.Put(j)
 }
+
 func (j *journal) Reset() {
+	j.epoch++
+	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
@@ -133,7 +136,9 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
+	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
+	j.epoch++
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would
@@ -234,16 +239,16 @@ func (j *journal) fakeStorageChange(account accounts.Address, key accounts.Stora
 }
 
 func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: &journalExtra{prevcode: prevcode, prevhash: prevhash}})
+	var extra *journalExtra // nil means the previous code was accounts.EmptyCode
+	if len(prevcode) != 0 || prevhash != accounts.EmptyCodeHash {
+		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
+	}
+	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
 }
 
 func (j *journal) refundChange(prev uint64) {
 	j.entries = append(j.entries, journalEntry{kind: kindRefund, aux: prev})
-}
-
-func (j *journal) addLogChange(txIndex int) {
-	j.entries = append(j.entries, journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
 }
 
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
@@ -259,8 +264,8 @@ func (j *journal) accessListAddSlotChange(address accounts.Address, slot account
 	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
 }
 
-func (j *journal) transientStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
+func (j *journal) transientStorageChange(account accounts.Address, slot int, prevalue uint256.Int) {
+	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, value: prevalue, aux: uint64(slot)})
 }
 
 // dirtied returns the address modified by this entry, or (NilAddress, false) for
@@ -269,7 +274,7 @@ func (j *journal) transientStorageChange(account accounts.Address, key accounts.
 // dropping either loses a recreated account from dirties, diverging the state root.
 func (je *journalEntry) dirtied() (accounts.Address, bool) {
 	switch je.kind {
-	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAddLog, kindAccessListAddAccount, kindAccessListAddSlot:
+	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAccessListAddAccount, kindAccessListAddSlot:
 		return accounts.NilAddress, false
 	case kindCreateObject, kindResetObject, kindSelfdestruct, kindBalance, kindBalanceIncrease, kindNonce, kindStorage, kindFakeStorage, kindCode, kindTouch:
 		return je.account, true
@@ -303,7 +308,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		if current, ok := s.stateObjects[je.account]; ok && current != prev {
 			current.release()
 		}
-		if s.noMaterialize {
+		if prev == nil {
 			delete(s.stateObjects, je.account)
 		} else {
 			s.setStateObject(je.account, prev)
@@ -346,7 +351,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
-			// selfdestructVersioned clears the incarnation cell on both paths. Restore
+			// selfdestructVersioned resets the incarnation cell to 0 on both paths. Restore
 			// it to its pre-destruct versioned value, or drop the write if the
 			// self-destruct created it.
 			if je.flags&flagSelfdestructHadIncarnation != 0 {
@@ -418,8 +423,10 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindCode:
-		prevcode := je.extra.prevcode
-		prevhash := je.extra.prevhash
+		prevcode, prevhash := []byte(nil), accounts.EmptyCodeHash
+		if je.extra != nil {
+			prevcode, prevhash = je.extra.prevcode, je.extra.prevhash
+		}
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
 		} else if s.versionMap == nil {
@@ -480,24 +487,11 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindTransientStorage:
-		s.setTransientState(je.account, je.key, je.value)
+		s.transientStorage.restore(je.account, int(je.aux), je.value)
 		return nil
 
 	case kindRefund:
 		s.refund = je.aux
-		return nil
-
-	case kindAddLog:
-		txIndex := int(je.aux)
-		if txIndex+1 >= len(s.logs) {
-			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
-		}
-		txnLogs := s.logs[txIndex+1]
-		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-		if len(s.logs[txIndex+1]) == 0 {
-			s.logs = s.logs[:len(s.logs)-1] // revert txn
-		}
-		s.logIndexInBlock--
 		return nil
 
 	case kindTouch:
@@ -509,7 +503,8 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// stale reads to pass validation and produce incorrect results.
 		//
 		// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
-		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
+		// lets the EIP-161 removal in FinalizedWrites delete an account whose touch was
+		// rolled back.
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
 		//

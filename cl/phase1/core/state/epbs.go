@@ -64,54 +64,58 @@ func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig 
 	return withdrawalCredentials[0] == byte(beaconConfig.BuilderWithdrawalPrefix)
 }
 
-// IsValidIndexedPayloadAttestation checks if the indexed payload attestation is valid.
-// It verifies that:
-// - Indices are non-empty and sorted
-// - The aggregate signature is valid
-func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (bool, error) {
+func IndexedPayloadAttestationSignatureSet(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (signature, signingRoot, aggregatePublicKey []byte, err error) {
 	indices := attestation.AttestingIndices
 	if indices.Length() == 0 || !solid.IsUint64Sorted(indices) {
-		return false, errors.New("isValidIndexedPayloadAttestation: attesting indices are empty or not sorted")
+		return nil, nil, nil, errors.New("indexedPayloadAttestationSignatureSet: attesting indices are empty or not sorted")
 	}
 
-	// Collect public keys from validators
 	pks := make([][]byte, 0, indices.Length())
-	indices.Range(func(_ int, idx uint64, _ int) bool {
-		val, err := s.ValidatorForValidatorIndex(int(idx))
+	for i := range indices.Length() {
+		val, err := s.ValidatorForValidatorIndex(int(indices.Get(i)))
 		if err != nil {
-			return false
+			return nil, nil, nil, fmt.Errorf("indexedPayloadAttestationSignatureSet: failed to get validator public key: %w", err)
 		}
-		pk := val.PublicKeyBytes()
-		pks = append(pks, pk)
-		return true
-	})
-	if len(pks) != indices.Length() {
-		return false, errors.New("isValidIndexedPayloadAttestation: failed to get all validator public keys")
+		pks = append(pks, val.PublicKeyBytes())
 	}
 
-	// Get domain for PTC attester
 	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)
 	domain, err := s.GetDomain(s.BeaconConfig().DomainPtcAttester, epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
-	// Compute signing root
-	signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
+	root, err := fork.ComputeSigningRoot(attestation.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
-	// Verify aggregate signature
-	valid, err := bls.VerifyAggregate(attestation.Signature[:], signingRoot[:], pks)
+	aggregate, err := bls.AggregatePublickKeys(pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
-	}
-	if !valid {
-		return false, errors.New("invalid aggregate signature")
+		return nil, nil, nil, fmt.Errorf("unable to aggregate public keys: %w", err)
 	}
 
-	return true, nil
+	return attestation.Signature[:], root[:], aggregate, nil
+}
+
+func ExecutionPayloadBidSignatureSet(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (signature, signingRoot, publicKey []byte, err error) {
+	builders := s.GetBuilders()
+	if builders == nil || signedBid.Message.BuilderIndex >= uint64(builders.Len()) {
+		return nil, nil, nil, fmt.Errorf("builder index %d out of range", signedBid.Message.BuilderIndex)
+	}
+	builder := builders.Get(int(signedBid.Message.BuilderIndex))
+
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, Epoch(s))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	root, err := fork.ComputeSigningRoot(signedBid.Message, domain)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return signedBid.Signature[:], root[:], builder.Pubkey[:], nil
 }
 
 // CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
@@ -131,48 +135,43 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 		return false
 	}
 
-	builderBalance := builder.Balance
-	pendingWithdrawalsAmount := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
-	if pendingWithdrawalsAmount > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
-		return false
+	minDepositAmount := s.BeaconConfig().MinDepositAmount
+	pendingWithdrawals := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	capacity, ok := BuilderBidCapacity(builder.Balance, minDepositAmount, pendingWithdrawals)
+	return ok && bidAmount <= capacity
+}
+
+// BuilderBidCapacity returns the largest bid the builder can cover; ok is false when it cannot cover any bid.
+func BuilderBidCapacity(balance, minDepositAmount, pendingWithdrawals uint64) (capacity uint64, ok bool) {
+	if pendingWithdrawals > math.MaxUint64-minDepositAmount {
+		return 0, false
 	}
-	minBalance := s.BeaconConfig().MinDepositAmount + pendingWithdrawalsAmount
-	if builderBalance < minBalance {
-		return false
+	minimumBalance := minDepositAmount + pendingWithdrawals
+	if balance < minimumBalance {
+		return 0, false
 	}
-	return builderBalance-minBalance >= bidAmount
+	return balance - minimumBalance, true
 }
 
 func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
 	cfg := s.BeaconConfig()
-	if epoch < cfg.MinSeedLookahead {
-		return common.Hash{}, fmt.Errorf("proposer dependent root epoch %d before min seed lookahead %d", epoch, cfg.MinSeedLookahead)
+	if epoch <= cfg.MinSeedLookahead {
+		if s.Slot() == 0 {
+			return s.BlockRoot()
+		}
+		return s.GetBlockRootAtSlot(0)
 	}
-	dependentEpoch := epoch - cfg.MinSeedLookahead
-	if dependentEpoch == 0 {
-		return common.Hash{}, fmt.Errorf("proposer dependent root slot underflow for epoch %d", epoch)
-	}
-	dependentSlot := dependentEpoch*cfg.SlotsPerEpoch - 1
+	dependentSlot := (epoch-cfg.MinSeedLookahead)*cfg.SlotsPerEpoch - 1
 	return s.GetBlockRootAtSlot(dependentSlot)
 }
 
-// GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
-// This includes:
-// - Amounts from builder_pending_withdrawals (direct withdrawal requests)
-// - Amounts from builder_pending_payments (payments that include withdrawals)
-func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
-	var total uint64
-
-	// Sum from builder_pending_withdrawals
+// ForEachPendingBuilderWithdrawal calls fn for every pending builder withdrawal and pending payment withdrawal.
+func ForEachPendingBuilderWithdrawal(s abstract.BeaconState, fn func(builderIndex, amount uint64)) {
 	pendingWithdrawals := s.GetBuilderPendingWithdrawals()
 	if pendingWithdrawals != nil {
 		pendingWithdrawals.Range(func(_ int, withdrawal *cltypes.BuilderPendingWithdrawal, _ int) bool {
-			if withdrawal != nil && withdrawal.BuilderIndex == builderIndex {
-				if withdrawal.Amount > math.MaxUint64-total {
-					total = math.MaxUint64
-					return false
-				}
-				total += withdrawal.Amount
+			if withdrawal != nil {
+				fn(withdrawal.BuilderIndex, withdrawal.Amount)
 			}
 			return true
 		})
@@ -180,22 +179,32 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 		log.Debug("builder_pending_withdrawals is nil")
 	}
 
-	// Sum from builder_pending_payments
 	pendingPayments := s.GetBuilderPendingPayments()
 	if pendingPayments != nil {
 		pendingPayments.Range(func(_ int, payment *cltypes.BuilderPendingPayment, _ int) bool {
-			if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.BuilderIndex == builderIndex {
-				if payment.Withdrawal.Amount > math.MaxUint64-total {
-					total = math.MaxUint64
-					return false
-				}
-				total += payment.Withdrawal.Amount
+			if payment != nil && payment.Withdrawal != nil {
+				fn(payment.Withdrawal.BuilderIndex, payment.Withdrawal.Amount)
 			}
 			return true
 		})
 	} else {
 		log.Debug("builder_pending_payments is nil")
 	}
+}
+
+// GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
+func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
+	var total uint64
+	ForEachPendingBuilderWithdrawal(s, func(index, amount uint64) {
+		if index != builderIndex {
+			return
+		}
+		if amount > math.MaxUint64-total {
+			total = math.MaxUint64
+			return
+		}
+		total += amount
+	})
 
 	return total
 }

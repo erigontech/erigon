@@ -1,0 +1,61 @@
+---
+title: "Caplin"
+description: "Erigon's built-in consensus layer — run a full node without an external CL client."
+sidebar_position: 6
+---
+
+# Caplin
+
+Caplin is Erigon's embedded Consensus Layer. It runs inside the Erigon process and keeps all of its data under the same `--datadir` as the execution layer, so a full node needs neither a second client process nor a second datadir to operate.
+
+Caplin does write to disk. It maintains an indexing database at `<datadir>/caplin/indexing`, its own snapshots under `<datadir>/snapshots/caplin`, and further subdirectories for blobs, PeerDAS column data and beacon state. What Caplin removes is the separate process and separate datadir of an external consensus client — not the storage itself.
+
+## Caplin Usage
+
+Caplin is enabled by default, at which point an external consensus layer is no longer needed.
+
+```bash
+./build/bin/erigon
+```
+
+Caplin also has an archive mode for historical states, blocks, and blobs. These can be enabled with the following flags:
+
+* `--caplin.states-archive`: Enables the storage and retrieval of historical state data, allowing access to past states of the blockchain for debugging, analytics, or other use cases.
+* `--caplin.blocks-archive`: Enables the storage of historical block data, making it possible to query or analyze full block history.
+* `--caplin.blobs-archive`: Enables the storage of historical blobs, ensuring access to additional off-chain data that might be required for specific applications.
+
+In addition, Caplin can backfill recent blobs for an op-node or other uses with the new flag:
+
+* `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
+
+With state archival enabled, Caplin's indexing database (`<datadir>/caplin/indexing`) is pruned automatically: state rows already frozen into snapshots are deleted on the antiquary cadence, so the database holds only the un-frozen tail. The `mdbx.dat` file does not shrink when rows are pruned — freed pages are reused, bounding future growth. Set `CAPLIN_STATE_PRUNE_DISABLE=true` to turn pruning off.
+
+### PeerDAS Data Column Retention
+
+For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
+
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `(MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS + 1) × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131104 slots, ~18 days). The extra epoch is a safety margin: the spec window starts at an epoch boundary, so retaining exactly `MIN_EPOCHS × SLOTS_PER_EPOCH` slots would drop columns the node must still serve whenever the head sits inside an epoch. Increase this value for DA oracle or rollup nodes that require a longer column history.
+
+Caplin can also be used for [block production](../staking/caplin), aka **staking**.
+
+## Beacon API Configuration
+
+When Caplin is running, it exposes a Beacon API that external tools can query. The following flags control the Beacon API server:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
+| `--beacon.api.port` | `5555` | Listening port for the Beacon API |
+| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
+| `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
+| `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
+| `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
+| `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
+| `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
+
+The API is not served until you enable it with `--beacon.api=<namespaces>`; see [Caplin for staking](../staking/caplin) for the full namespace list.
+
+:::note
+Enabling the Beacon API increases RAM usage by roughly **6 GB**. Account for it when sizing your host — see [Hardware Requirements](../get-started/hardware-requirements).
+:::

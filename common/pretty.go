@@ -76,7 +76,8 @@ func prettyCounter(num uint64) string {
 }
 
 var divs = []time.Duration{
-	time.Duration(1), time.Duration(10), time.Duration(100), time.Duration(1000)}
+	time.Duration(1), time.Duration(10), time.Duration(100), time.Duration(1000),
+}
 
 func round(d time.Duration, digits int) time.Duration {
 	switch {

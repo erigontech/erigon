@@ -96,6 +96,7 @@ func (d *LeakDetector) Del(id uint64) {
 	defer d.listLock.Unlock()
 	delete(d.list, id)
 }
+
 func (d *LeakDetector) Add() uint64 {
 	if d == nil || !d.Enabled() {
 		return 0

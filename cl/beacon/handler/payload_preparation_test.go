@@ -1,0 +1,3771 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package handler
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	mock_services "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
+	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+)
+
+func preparedWarmup(p *preparedPayload, slot uint64, payloadID []byte, now time.Time) time.Duration {
+	warmup, _, _ := p.warmupAndMismatch(slot, payloadID, now)
+	return warmup
+}
+
+func requireExecutionWithdrawals(t *testing.T, expected []*cltypes.Withdrawal, actual []*types.Withdrawal) {
+	t.Helper()
+	require.Len(t, actual, len(expected))
+	for i, withdrawal := range expected {
+		require.Equal(t, hexutil.Uint64(withdrawal.Index), actual[i].Index)
+		require.Equal(t, hexutil.Uint64(withdrawal.Validator), actual[i].Validator)
+		require.Equal(t, withdrawal.Address, actual[i].Address)
+		require.Equal(t, hexutil.Uint64(withdrawal.Amount), actual[i].Amount)
+	}
+}
+
+type payloadBuildEngine struct {
+	*execution_client.MockExecutionEngine
+	t                 *testing.T
+	startPayloadBuild func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)
+}
+
+type updateFailingDB struct {
+	kv.RwDB
+	err error
+}
+
+func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
+	return db.err
+}
+
+func awaitErrorResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation did not finish")
+		return nil
+	}
+}
+
+func newPayloadBuildEngine(t *testing.T, ctrl *gomock.Controller) *payloadBuildEngine {
+	return &payloadBuildEngine{
+		MockExecutionEngine: execution_client.NewMockExecutionEngine(ctrl),
+		t:                   t,
+	}
+}
+
+func (e *payloadBuildEngine) StartPayloadBuild(
+	ctx context.Context,
+	head common.Hash,
+	attrs *engine_types.PayloadAttributes,
+) ([]byte, error) {
+	e.t.Helper()
+	require.NotNil(e.t, e.startPayloadBuild, "unexpected payload-build attempt")
+	return e.startPayloadBuild(ctx, head, attrs)
+}
+
+func preparePayloadForTest(t *testing.T, handler *ApiHandler, targetSlot uint64) (common.Hash, error) {
+	t.Helper()
+	var scratch payloadPreparationScratch
+	result, err := handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+	return result.headRoot, err
+}
+
+type payloadPreparationLoopRun struct {
+	handler         *ApiHandler
+	syncedData      *sync_mock_services.MockSyncedData
+	headState       *state.CachingBeaconState
+	baseBlockRoot   common.Hash
+	selectedSlot    uint64
+	currentSlot     uint64
+	targetSlot      uint64
+	targetSlotStart time.Time
+	timeout         time.Duration
+	shouldPrepare   bool
+	checksProposer  bool
+	checkBuild      func(common.Hash, *engine_types.PayloadAttributes)
+}
+
+func runPayloadPreparationLoop(t *testing.T, ctrl *gomock.Controller, run payloadPreparationLoopRun) {
+	t.Helper()
+	run.syncedData.EXPECT().SelectedHead().Return(run.baseBlockRoot, run.selectedSlot, true).AnyTimes()
+	run.syncedData.EXPECT().HeadRoot().Return(run.baseBlockRoot).AnyTimes()
+	viewHead := run.syncedData.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(run.headState, run.baseBlockRoot, run.headState.Slot())
+		})
+	switch {
+	case run.shouldPrepare && run.checksProposer:
+		viewHead.MinTimes(2)
+	case run.checksProposer:
+		// Pending paths may repeat the proposer check before the test deadline.
+		viewHead.MinTimes(1)
+	case run.shouldPrepare:
+		viewHead.Times(1)
+	default:
+		viewHead.Times(0)
+	}
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(run.currentSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(run.targetSlot).Return(run.targetSlotStart).AnyTimes()
+	run.handler.ethClock = clock
+
+	timeout := 300 * time.Millisecond
+	if run.shouldPrepare {
+		timeout = 5 * time.Second
+	}
+	if run.timeout > 0 {
+		timeout = run.timeout
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+	buildStarted := false
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+		buildStarted = true
+		if run.checkBuild != nil {
+			run.checkBuild(head, attrs)
+		}
+		cancel()
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	run.handler.engine = engine
+
+	run.handler.preparePayloadLoop(ctx)
+	require.Equal(t, run.shouldPrepare, buildStarted)
+}
+
+func newPayloadPreparationLoopHarness(
+	t *testing.T,
+	ctrl *gomock.Controller,
+	config *clparams.BeaconChainConfig,
+	currentSlot uint64,
+	selectedSlot uint64,
+	targetLead time.Duration,
+) (*ApiHandler, common.Hash, *mock_services.ForkChoiceStorageMock, *sync_mock_services.MockSyncedData) {
+	t.Helper()
+	baseBlockRoot := common.Hash{0x41}
+	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
+	syncedData.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	// Keep the requested lead stable across ticks. These tests exercise loop decisions, not
+	// unrelated wall-clock drift.
+	clock.EXPECT().GetSlotTime(currentSlot + 1).DoAndReturn(func(uint64) time.Time {
+		return time.Now().Add(targetLead)
+	}).AnyTimes()
+
+	validatorParams := validator_params.NewValidatorParams()
+	validatorParams.SetFeeRecipient(0, common.Address{0x11})
+	headState := state.New(config)
+	require.NoError(t, headState.SetSlot(selectedSlot))
+	headState.SetVersion(config.GetCurrentStateVersion(selectedSlot / config.SlotsPerEpoch))
+	headState.SetProposerLookahead(solid.NewUint64VectorSSZ(int((config.MinSeedLookahead + 1) * config.SlotsPerEpoch)))
+	syncedData.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+		func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(headState, baseBlockRoot, selectedSlot)
+		},
+	).AnyTimes()
+	forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadSlotVal = selectedSlot
+	return &ApiHandler{
+		logger:          log.Root(),
+		beaconChainCfg:  config,
+		ethClock:        clock,
+		syncedData:      syncedData,
+		forkchoiceStore: forkchoiceStore,
+		validatorParams: validatorParams,
+	}, baseBlockRoot, forkchoiceStore, syncedData
+}
+
+func payloadPreparationLoopConfig(secondsPerSlot, fuluForkEpoch, gloasForkEpoch uint64) clparams.BeaconChainConfig {
+	config := clparams.MainnetBeaconConfig
+	config.SecondsPerSlot = secondsPerSlot
+	config.IntervalsPerSlot = 3
+	config.AltairForkEpoch = 0
+	config.BellatrixForkEpoch = 0
+	config.CapellaForkEpoch = 0
+	config.DenebForkEpoch = 0
+	config.ElectraForkEpoch = 0
+	config.FuluForkEpoch = fuluForkEpoch
+	config.GloasForkEpoch = gloasForkEpoch
+	config.InitializeForkSchedule()
+	return config
+}
+
+func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	for _, test := range []struct {
+		version             clparams.StateVersion
+		warmup              time.Duration
+		firstPoll           time.Duration
+		pollUntil           time.Duration
+		unpreparedAt        time.Duration
+		unpreparedPollUntil time.Duration
+	}{
+		{clparams.ElectraVersion, 2 * time.Second, 899_750 * time.Microsecond, 2_999_250 * time.Microsecond, 2_899_250 * time.Microsecond, 2_999_250 * time.Microsecond},
+		{clparams.GloasVersion, 1500 * time.Millisecond, 650 * time.Millisecond, 2250 * time.Millisecond, 900 * time.Millisecond, time.Second},
+	} {
+		t.Run(test.version.String(), func(t *testing.T) {
+			prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, test.version, test.warmup)
+			require.Equal(t, slotStart.Add(test.firstPoll), prepared.firstGetAt)
+			require.Equal(t, slotStart.Add(test.pollUntil), prepared.pollUntil)
+
+			unprepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, test.version, 0)
+			require.Equal(t, slotStart.Add(test.unpreparedAt), unprepared.firstGetAt)
+			require.Equal(t, slotStart.Add(test.unpreparedPollUntil), unprepared.pollUntil)
+
+			require.True(t, prepared.firstGetAt.Before(unprepared.firstGetAt))
+			fullyWarmed := computeBlockBuilderWindow(slotStart, slotStart, cfg, test.version, 10*time.Second)
+			require.Equal(t, prepared, fullyWarmed, "warmup beyond the cap must not collect the payload earlier")
+
+			late := computeBlockBuilderWindow(slotStart.Add(2*time.Second), slotStart, cfg, test.version, test.warmup)
+			require.Equal(t, slotStart.Add(2*time.Second), late.firstGetAt)
+			require.Equal(t, slotStart.Add(test.pollUntil), late.pollUntil)
+		})
+	}
+}
+
+func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	window := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, time.Second)
+
+	// One second of work before production advances collection by one second. It does not have to
+	// cross a minimum-age threshold before it becomes useful.
+	require.Equal(t, slotStart.Add(1_999_250*time.Microsecond).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2_999_250*time.Microsecond), window.pollUntil)
+}
+
+func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	now := time.Unix(100, 0)
+
+	require.Zero(t, preparedWarmup(&p, 10, id, now), "nothing primed yet")
+
+	p.set(10, id, common.Hash{}, now.Add(-time.Second))
+	require.Equal(t, time.Second, preparedWarmup(&p, 10, id, now))
+
+	// A different payload ID means production selected another build, so the prepared record must
+	// not change its collection time.
+	require.Zero(t, preparedWarmup(&p, 10, []byte{9, 9, 9, 9, 9, 9, 9, 9}, now))
+	require.Zero(t, preparedWarmup(&p, 11, id, now), "primed for another slot")
+	require.Zero(t, preparedWarmup(&p, 10, nil, now), "no id from the execution layer")
+}
+
+func TestPreparedPayloadKeepsTheEarliestMatchingPrime(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	firstPrime := time.Unix(100, 0)
+
+	p.set(10, id, common.Hash{}, firstPrime)
+	p.set(10, id, common.Hash{}, firstPrime.Add(time.Second))
+
+	require.Equal(t, 2*time.Second, preparedWarmup(&p, 10, id, firstPrime.Add(2*time.Second)))
+}
+
+func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+
+	require.Equal(t, 1_999_500*time.Microsecond, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
+	require.Equal(t, 1500*time.Millisecond, maximumPreparedAdvance(cfg, clparams.GloasVersion))
+}
+
+func TestPayloadPreparationScratchReusesState(t *testing.T) {
+	_, _, _, _, postState, _, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	var scratch payloadPreparationScratch
+
+	scratch.resetForTargetSlot(10)
+	first, err := scratch.copyFrom(postState, postState.BeaconConfig())
+	require.NoError(t, err)
+	require.NoError(t, first.SetSlot(first.Slot()+1))
+	scratch.resetForTargetSlot(10)
+	second, err := scratch.copyFrom(postState, postState.BeaconConfig())
+	require.NoError(t, err)
+
+	require.Same(t, first, second)
+	require.Equal(t, postState.Slot(), second.Slot())
+}
+
+func TestPayloadPreparationScratchReleasesStateBetweenTargetSlots(t *testing.T) {
+	_, _, _, _, postState, _, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	var scratch payloadPreparationScratch
+
+	scratch.resetForTargetSlot(10)
+	_, err := scratch.copyFrom(postState, postState.BeaconConfig())
+	require.NoError(t, err)
+	require.NotNil(t, scratch.state)
+
+	scratch.resetForTargetSlot(11)
+
+	require.Nil(t, scratch.state)
+}
+
+func TestShouldWaitForCurrentSlotHead(t *testing.T) {
+	currentSlotStart := time.Unix(100, 0)
+	attestationDeadline := 4 * time.Second
+	tests := []struct {
+		name                 string
+		selectedSlot         uint64
+		blockProcessing      bool
+		now                  time.Time
+		wantWaitForFreshHead bool
+	}{
+		{
+			name:                 "future head",
+			selectedSlot:         11,
+			now:                  currentSlotStart.Add(attestationDeadline),
+			wantWaitForFreshHead: true,
+		},
+		{
+			name:         "current head",
+			selectedSlot: 10,
+			now:          currentSlotStart,
+		},
+		{
+			name:                 "before attestation deadline",
+			selectedSlot:         9,
+			now:                  currentSlotStart.Add(attestationDeadline - time.Millisecond),
+			wantWaitForFreshHead: true,
+		},
+		{
+			name:                 "at attestation deadline",
+			selectedSlot:         9,
+			now:                  currentSlotStart.Add(attestationDeadline),
+			wantWaitForFreshHead: false,
+		},
+		{
+			name:                 "past deadline without active block processing",
+			selectedSlot:         9,
+			now:                  currentSlotStart.Add(attestationDeadline),
+			wantWaitForFreshHead: false,
+		},
+		{
+			name:                 "block is still being processed",
+			selectedSlot:         9,
+			blockProcessing:      true,
+			now:                  currentSlotStart.Add(attestationDeadline),
+			wantWaitForFreshHead: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.wantWaitForFreshHead, shouldWaitForCurrentSlotHead(
+				10, test.selectedSlot, test.blockProcessing, test.now, currentSlotStart, attestationDeadline,
+			))
+		})
+	}
+}
+
+func TestGloasPayloadDecisionDelay(t *testing.T) {
+	selectedSlotStart := time.Unix(100, 0)
+	deadline := 9 * time.Second
+
+	require.Equal(t, time.Second, gloasPayloadDecisionDelay(
+		selectedSlotStart.Add(8*time.Second), selectedSlotStart, deadline,
+	))
+	require.Zero(t, gloasPayloadDecisionDelay(
+		selectedSlotStart.Add(deadline), selectedSlotStart, deadline,
+	))
+}
+
+func TestStartPayloadPreparationSkipsEngineWithoutDirectBuilder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	handler := &ApiHandler{
+		engine:         engine,
+		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true},
+		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+		logger:         logger,
+	}
+
+	done := handler.StartPayloadPreparation(t.Context())
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("payload preparation did not report that the execution client is unsupported")
+	}
+
+	require.Contains(t, output.String(), "execution client does not support direct payload building")
+}
+
+func TestStartPayloadPreparationSkipsWithoutValidatorAPI(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler := &ApiHandler{
+		engine:         engine,
+		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: false},
+		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+	}
+
+	handler.StartPayloadPreparation(t.Context())
+}
+
+func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
+	handler := &ApiHandler{}
+	require.NotPanics(t, func() {
+		handler.StartPayloadPreparation(t.Context())
+	})
+}
+
+func TestStartPayloadPreparationCanBeDisabledIndependently(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(disabled), func(t *testing.T) {
+			var output bytes.Buffer
+			logger := log.New()
+			logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+			handler := &ApiHandler{
+				engine:         newPayloadBuildEngine(t, gomock.NewController(t)),
+				routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true, DisablePayloadPreparation: disabled},
+				beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+				logger:         logger,
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			<-handler.StartPayloadPreparation(ctx)
+			require.Equal(t, !disabled, strings.Contains(output.String(), "watching for proposals"))
+			if disabled {
+				require.Contains(t, output.String(), "disabled by flag")
+			}
+			require.True(t, handler.routerCfg.Validator)
+		})
+	}
+}
+
+func TestPreparePayloadLoopStopsWithZeroSlotDuration(t *testing.T) {
+	handler := &ApiHandler{beaconChainCfg: &clparams.BeaconChainConfig{}, logger: log.Root()}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NotPanics(t, func() {
+		handler.preparePayloadLoop(ctx)
+	})
+}
+
+func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	config := payloadPreparationLoopConfig(2, 0, 0)
+	handler := &ApiHandler{
+		beaconChainCfg: &config,
+		logger:         logger,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.preparePayloadLoop(ctx)
+
+	require.Contains(t, output.String(), "Gloas preparation window is too short")
+}
+
+func TestPreparePayloadLoopWarnsWhenGloasWindowCannotFitStateWork(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	// A quarter of a 4-second slot is left after the payload decision: room for the builder
+	// cutoff, but not for the state work before it.
+	config := payloadPreparationLoopConfig(4, 0, 0)
+	handler := &ApiHandler{
+		beaconChainCfg: &config,
+		logger:         logger,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.preparePayloadLoop(ctx)
+
+	require.Contains(t, output.String(), "Gloas preparation window is too short")
+}
+
+func TestPreparePayloadLoopDoesNotWarnAboutUnscheduledGloas(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	config := clparams.MainnetBeaconConfig
+	config.SecondsPerSlot = 2
+	handler := &ApiHandler{beaconChainCfg: &config, logger: logger}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.preparePayloadLoop(ctx)
+
+	require.NotContains(t, output.String(), "Gloas preparation window is too short")
+}
+
+func TestPreparePayloadLoopRunsImmediatelyWithPreparationDeadline(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	// Preparation only primes on a head fork choice has published, so the loop stands down until
+	// one is selected.
+	syncedData.(*synced_data.SyncedDataManager).OnSelectedHead(handler.syncedData.HeadRoot(), postState.Slot())
+
+	slotStart := time.Now().Add(6 * time.Second)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(callCtx context.Context, _ common.Hash, _ *engine_types.PayloadAttributes) ([]byte, error) {
+		deadline, ok := callCtx.Deadline()
+		require.True(t, ok)
+		require.Equal(t, slotStart.Add(-minimumPreparationLead), deadline)
+		cancel()
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
+	tests := []struct {
+		name               string
+		elapsed            time.Duration
+		producedBlock      bool
+		highestSeenCurrent bool
+		blockProcessing    bool
+		selectedCurrent    bool
+		blockWork          bool
+		shouldPrepare      bool
+	}{
+		{name: "before attestation deadline"},
+		{name: "after empty-slot deadline", elapsed: 5 * time.Second, shouldPrepare: true},
+		{name: "produced block awaiting publication", elapsed: 5 * time.Second, producedBlock: true},
+		{name: "rejected current block in highest-seen does not suppress fallback", elapsed: 5 * time.Second, highestSeenCurrent: true, shouldPrepare: true},
+		{name: "current block is still being processed", elapsed: 5 * time.Second, blockProcessing: true},
+		{name: "current head with block work", selectedCurrent: true, blockWork: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			config := *handler.beaconChainCfg
+			config.SecondsPerSlot = 12
+			config.IntervalsPerSlot = 3
+			handler.beaconChainCfg = &config
+
+			currentSlot := postState.Slot() + 1
+			targetSlot := currentSlot + 1
+			if test.producedBlock {
+				completedAt := time.Now()
+				handler.payloadPreparationGate.noteProducedBlock(currentSlot, currentSlot, completedAt, completedAt.Add(time.Minute))
+			}
+			if test.highestSeenCurrent {
+				forkchoiceStore.HighestSeenVal = currentSlot
+			}
+			forkchoiceStore.BlockProcessingVal = test.blockProcessing
+			if test.blockWork {
+				finishBlockWork := handler.payloadPreparationGate.beginBlockWork()
+				defer finishBlockWork()
+			}
+			advancedState, err := postState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+			proposerIndex, err := advancedState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+			baseBlockRoot := common.Hash{0x41}
+			selectedSlot := postState.Slot()
+			if test.selectedCurrent {
+				selectedSlot = currentSlot
+			}
+			currentSlotStart := time.Now().Add(-test.elapsed)
+			runPayloadPreparationLoop(t, ctrl, payloadPreparationLoopRun{
+				handler:         handler,
+				syncedData:      syncedData.(*sync_mock_services.MockSyncedData),
+				headState:       postState,
+				baseBlockRoot:   baseBlockRoot,
+				selectedSlot:    selectedSlot,
+				currentSlot:     currentSlot,
+				targetSlot:      targetSlot,
+				targetSlotStart: currentSlotStart.Add(12 * time.Second),
+				shouldPrepare:   test.shouldPrepare,
+			})
+		})
+	}
+}
+
+func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		elapsed       time.Duration
+		staleHead     bool
+		fullHead      bool
+		unverified    bool
+		reorgToEmpty  bool
+		timeout       time.Duration
+		shouldPrepare bool
+	}{
+		{name: "older head after empty-slot deadline", elapsed: 4 * time.Second, staleHead: true, shouldPrepare: true},
+		{name: "wakeup at PTC deadline", elapsed: 8900 * time.Millisecond, timeout: 2 * time.Second, shouldPrepare: true},
+		{name: "EMPTY head after PTC deadline", elapsed: 9100 * time.Millisecond, shouldPrepare: true},
+		{name: "FULL head", elapsed: 9100 * time.Millisecond, fullHead: true, shouldPrepare: true},
+		{name: "unverified FULL head", elapsed: 9100 * time.Millisecond, fullHead: true, unverified: true},
+		{name: "FULL head with EMPTY decision", elapsed: 9100 * time.Millisecond, reorgToEmpty: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
+				currentSlot := postState.Slot()
+				targetSlot := currentSlot + 1
+				baseBlockRoot := common.Hash{0x41}
+				forkchoiceStore.HeadVal = baseBlockRoot
+				parentHash := common.Hash{0xa1}
+				postState.SetLatestBlockHash(parentHash)
+				postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+					ParentBlockHash: parentHash,
+					BlockHash:       common.Hash{0xb2},
+					GasLimit:        30_000_000,
+					Slot:            currentSlot,
+				})
+				forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+				if test.fullHead {
+					forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+					forkchoiceStore.VerifiedPayloads = map[common.Hash]bool{baseBlockRoot: !test.unverified}
+					forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+						Message: &cltypes.ExecutionPayloadEnvelope{
+							BeaconBlockRoot:   baseBlockRoot,
+							Payload:           &cltypes.Eth1Block{BlockHash: common.Hash{0xb2}},
+							ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+						},
+					}
+				}
+				if test.reorgToEmpty {
+					forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+					buildOnFull := false
+					forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
+				}
+				proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+				require.NoError(t, err)
+				validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+				selectedSlot := currentSlot
+				if test.staleHead {
+					selectedSlot--
+				}
+				currentSlotStart := time.Now().Add(-test.elapsed)
+				runPayloadPreparationLoop(t, ctrl, payloadPreparationLoopRun{
+					handler:         handler,
+					syncedData:      syncedData.(*sync_mock_services.MockSyncedData),
+					headState:       postState,
+					baseBlockRoot:   baseBlockRoot,
+					selectedSlot:    selectedSlot,
+					currentSlot:     currentSlot,
+					targetSlot:      targetSlot,
+					targetSlotStart: currentSlotStart.Add(12 * time.Second),
+					timeout:         test.timeout,
+					shouldPrepare:   test.shouldPrepare,
+					checksProposer:  true,
+					checkBuild: func(head common.Hash, _ *engine_types.PayloadAttributes) {
+						if test.fullHead {
+							require.Equal(t, common.Hash{0xb2}, head)
+						} else {
+							require.Equal(t, parentHash, head)
+						}
+					},
+				})
+			})
+		})
+	}
+}
+
+func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		elapsed         time.Duration
+		currentInGloas  bool
+		selectedCurrent bool
+		shouldPrepare   bool
+	}{
+		{name: "current Fulu head", elapsed: 8 * time.Second, selectedCurrent: true, shouldPrepare: true},
+		{name: "stale Fulu head before Fulu deadline", elapsed: 4 * time.Second},
+		{name: "stale Fulu head between Gloas and Fulu deadlines", elapsed: 7 * time.Second},
+		{name: "Fulu head in first Gloas slot", elapsed: 8 * time.Second, currentInGloas: true, shouldPrepare: true},
+		{name: "Fulu head after Gloas deadline but before Fulu deadline", elapsed: 7 * time.Second, currentInGloas: true, shouldPrepare: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			config := payloadPreparationLoopConfig(24, 1, 2)
+			lastFuluSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+			currentSlot := lastFuluSlot
+			if test.currentInGloas {
+				currentSlot++
+			}
+			targetSlot := currentSlot + 1
+			selectedSlot := lastFuluSlot - 1
+			if test.currentInGloas {
+				selectedSlot = lastFuluSlot
+			}
+			if test.selectedCurrent {
+				selectedSlot = currentSlot
+			}
+			handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+				t, ctrl, &config, currentSlot, selectedSlot, 24*time.Second-test.elapsed,
+			)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if test.shouldPrepare {
+				syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, selectedSlot, true)
+			} else {
+				syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+					cancel()
+					return baseBlockRoot, selectedSlot, true
+				})
+			}
+			attempted := false
+			handler.preparePayloadLoopWith(ctx, func(
+				_ context.Context,
+				key preparationKey,
+				_ *payloadPreparationScratch,
+			) (preparationKey, error) {
+				require.Equal(t, targetSlot, key.targetSlot)
+				attempted = true
+				cancel()
+				return key, nil
+			})
+			require.Equal(t, test.shouldPrepare, attempted)
+		})
+	}
+}
+
+func TestPreparePayloadLoopChecksProposerBeforeGloasDecisionWait(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
+	currentSlot := postState.Slot()
+	targetSlot := currentSlot + 1
+	baseBlockRoot := common.Hash{0x41}
+	validatorParams.SetFeeRecipient(^uint64(0), common.Address{0x11})
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadSlotVal = currentSlot
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+		func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			err := view(postState, baseBlockRoot, currentSlot)
+			cancel()
+			return err
+		},
+	)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(11 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	attempts := 0
+	handler.preparePayloadLoopWith(ctx, func(
+		context.Context,
+		preparationKey,
+		*payloadPreparationScratch,
+	) (preparationKey, error) {
+		attempts++
+		return preparationKey{}, nil
+	})
+
+	require.Zero(t, attempts)
+}
+
+func TestPrecheckPreparationInputsRejectsHeadOutsideLookahead(t *testing.T) {
+	_, handler, syncedData, _, _ := setupGloasPreparationTest(t)
+	headState := state.New(handler.beaconChainCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	headRoot := common.Hash{0x41}
+	targetEpoch := headState.Slot()/handler.beaconChainCfg.SlotsPerEpoch +
+		handler.beaconChainCfg.MinSeedLookahead + 1
+	targetSlot := targetEpoch * handler.beaconChainCfg.SlotsPerEpoch
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(headState, headRoot, headState.Slot())
+		})
+
+	_, err := handler.precheckPreparationInputs(preparationKey{headRoot: headRoot, targetSlot: targetSlot})
+
+	require.ErrorIs(t, err, errHeadTooFarBack)
+}
+
+func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
+	const pendingWarning = "PayloadPreparation: Gloas payload path is still pending"
+	const failureWarning = "PayloadPreparation: Gloas payload path resolution failed"
+	for _, test := range []struct {
+		name             string
+		headChanged      bool
+		lookupErr        error
+		unverifiedFull   bool
+		wantFirstWarning string
+	}{
+		{name: "pending", wantFirstWarning: pendingWarning},
+		{name: "unverified FULL", unverifiedFull: true},
+		{name: "head changed", headChanged: true},
+		{name: "lookup failed", lookupErr: errors.New("head lookup failed"), wantFirstWarning: failureWarning},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				config := payloadPreparationLoopConfig(12, 1, 1)
+				currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
+				handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
+					t, ctrl, &config, currentSlot, currentSlot, 2500*time.Millisecond,
+				)
+				syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+				var output bytes.Buffer
+				handler.logger = log.New()
+				handler.logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+				defer cancel()
+				if test.unverifiedFull {
+					buildOnFull := true
+					forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
+					forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+				}
+				reads := 0
+				var firstOutput string
+				forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					reads++
+					status := cltypes.PayloadStatusPending
+					if test.unverifiedFull {
+						status = cltypes.PayloadStatusFull
+					}
+					head := forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: status}
+					switch reads {
+					case 1:
+						if test.headChanged {
+							head.Root = common.Hash{0x42}
+						}
+						return head, currentSlot, test.lookupErr
+					case 2:
+						firstOutput = output.String()
+					case 3:
+						cancel()
+					}
+					return head, currentSlot, nil
+				}
+				handler.preparePayloadLoopWith(ctx, func(
+					context.Context,
+					preparationKey,
+					*payloadPreparationScratch,
+				) (preparationKey, error) {
+					t.Fatal("unresolved Gloas path reached payload preparation")
+					return preparationKey{}, nil
+				})
+
+				require.Equal(t, 3, reads)
+				if test.wantFirstWarning == "" {
+					require.NotContains(t, firstOutput, "lvl=warn")
+				} else {
+					require.Contains(t, firstOutput, test.wantFirstWarning)
+					require.Contains(t, firstOutput, "lvl=warn")
+				}
+				if test.lookupErr != nil {
+					require.Contains(t, firstOutput, test.lookupErr.Error())
+				}
+				if test.wantFirstWarning != pendingWarning {
+					require.NotContains(t, firstOutput, pendingWarning)
+				}
+				if test.unverifiedFull {
+					require.NotContains(t, output.String(), pendingWarning)
+				} else {
+					// A lookup failure must not consume the warning budget for a pending payload.
+					require.Equal(t, 1, strings.Count(output.String(), pendingWarning))
+				}
+			})
+		})
+	}
+}
+
+func setupFirstGloasPayloadStates(
+	t *testing.T,
+	handler *ApiHandler,
+	postState *state.CachingBeaconState,
+	preForkHead common.Hash,
+	parentGasLimit uint64,
+) (*state.CachingBeaconState, *state.CachingBeaconState, uint64, uint64, []*cltypes.Withdrawal) {
+	t.Helper()
+	config := *handler.beaconChainCfg
+	currentEpoch := postState.Slot() / config.SlotsPerEpoch
+	config.FuluForkEpoch = currentEpoch
+	config.GloasForkEpoch = currentEpoch + 1
+	config.InitializeForkSchedule()
+	handler.beaconChainCfg = &config
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	require.NoError(t, headState.UpgradeToFulu())
+	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	targetSlot := currentSlot + 1
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, currentSlot))
+	latestHeader := headState.LatestBlockHeader()
+	latestHeader.Slot = currentSlot
+	headState.SetLatestBlockHeader(&latestHeader)
+	executionHeader := headState.LatestExecutionPayloadHeader()
+	executionHeader.BlockHash = preForkHead
+	executionHeader.GasLimit = parentGasLimit
+	headState.SetLatestExecutionPayloadHeader(executionHeader)
+
+	targetState, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(targetState, targetSlot))
+	expectedWithdrawals, err := state.GetExpectedWithdrawals(targetState, targetSlot/config.SlotsPerEpoch)
+	require.NoError(t, err)
+	require.NotEmpty(t, expectedWithdrawals.Withdrawals)
+	return headState, targetState, currentSlot, targetSlot, expectedWithdrawals.Withdrawals
+}
+
+func TestExecutionPayloadSourceAtGloasForkBoundary(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	config.AltairForkEpoch = 0
+	config.BellatrixForkEpoch = 0
+	config.CapellaForkEpoch = 0
+	config.DenebForkEpoch = 0
+	config.ElectraForkEpoch = 0
+	config.FuluForkEpoch = 1
+	config.GloasForkEpoch = 3
+	config.InitializeForkSchedule()
+	firstGloasSlot := config.GloasForkEpoch * config.SlotsPerEpoch
+	targetSlot := firstGloasSlot + 1
+	preForkHead := common.Hash{0xa1}
+	emptyParent := common.Hash{0x91}
+	for _, test := range []struct {
+		name       string
+		parentSlot uint64
+		wantHead   common.Hash
+		wantPath   gloasPayloadPath
+	}{
+		{name: "last pre-Gloas parent", parentSlot: firstGloasSlot - 1, wantHead: preForkHead, wantPath: gloasPayloadPathPreFork},
+		{name: "older pre-Gloas parent", parentSlot: firstGloasSlot - 6, wantHead: preForkHead, wantPath: gloasPayloadPathPreFork},
+		{name: "first Gloas EMPTY parent", parentSlot: firstGloasSlot, wantHead: emptyParent, wantPath: gloasPayloadPathEmpty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			baseState := state.New(&config)
+			// Slot processing can cross the fork while the latest block remains pre-fork.
+			require.NoError(t, baseState.SetSlot(targetSlot))
+			latestHeader := baseState.LatestBlockHeader()
+			latestHeader.Slot = test.parentSlot
+			baseState.SetLatestBlockHeader(&latestHeader)
+			baseState.SetLatestBlockHash(test.wantHead)
+			baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+				ParentBlockHash: emptyParent,
+				ParentBlockRoot: common.Hash{0x92},
+				BlockHash:       preForkHead,
+				Slot:            test.parentSlot,
+			})
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			handler := &ApiHandler{beaconChainCfg: &config, forkchoiceStore: forkchoiceStore}
+
+			source, err := handler.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+			require.NoError(t, err)
+
+			require.Equal(t, test.wantHead, source.head)
+			require.Equal(t, test.wantPath, source.gloasPath)
+		})
+	}
+}
+
+func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
+	config := payloadPreparationLoopConfig(12, 0, 0)
+	genesisHash := common.Hash{0xa1}
+	genesisRoot := common.Hash{0x41}
+	for _, targetSlot := range []uint64{1, 5} {
+		t.Run(fmt.Sprintf("slot %d", targetSlot), func(t *testing.T) {
+			baseState := state.New(&config)
+			baseState.SetVersion(clparams.GloasVersion)
+			require.NoError(t, baseState.SetSlot(targetSlot))
+			baseState.SetLatestBlockHash(genesisHash)
+			// A Gloas genesis bid names the EL genesis as its parent, but has no payload of its own.
+			baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{ParentBlockHash: genesisHash})
+			forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
+			forkchoiceStore.HeadVal = genesisRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			handler := &ApiHandler{beaconChainCfg: &config, forkchoiceStore: forkchoiceStore}
+
+			source, err := handler.resolveExecutionPayloadSource(baseState, genesisRoot, targetSlot, clparams.GloasVersion)
+			require.NoError(t, err)
+
+			require.Equal(t, genesisHash, source.head)
+			require.Equal(t, gloasPayloadPathEmpty, source.gloasPath)
+			withdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, source)
+			require.NoError(t, err)
+			require.Nil(t, withdrawalsState, "an EMPTY genesis parent must keep the cached withdrawals")
+		})
+	}
+}
+
+func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	baseState := state.New(config)
+	baseState.SetVersion(clparams.FuluVersion)
+	targetSlot := uint64(353024) * config.SlotsPerEpoch
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	header := baseState.LatestExecutionPayloadHeader()
+	header.GasLimit = 60_000_000
+	baseState.SetLatestExecutionPayloadHeader(header)
+	handler := &ApiHandler{beaconChainCfg: config}
+
+	t.Run("before Gloas", func(t *testing.T) {
+		require.Nil(t, handler.targetGasLimitForProposal(baseState, targetSlot-1, 0, clparams.FuluVersion))
+	})
+	t.Run("scheduled default", func(t *testing.T) {
+		gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+		require.NotNil(t, gasLimit)
+		require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+	})
+	for _, preferenceGasLimit := range []uint64{100_000_000, 300_000_000} {
+		t.Run(fmt.Sprintf("preference %d", preferenceGasLimit), func(t *testing.T) {
+			dependentRoot, err := state.GetProposerDependentRoot(baseState, targetSlot/config.SlotsPerEpoch)
+			require.NoError(t, err)
+			handler := &ApiHandler{beaconChainCfg: config, epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.ProposerPreferences.Add(
+				pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+				&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: preferenceGasLimit,
+				}},
+			)
+			gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+			require.NotNil(t, gasLimit)
+			require.Equal(t, hexutil.Uint64(preferenceGasLimit), *gasLimit)
+		})
+	}
+}
+
+func TestTargetGasLimitForLaterSepoliaGloasSlot(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	targetSlot := (config.GloasForkEpoch + 1) * config.SlotsPerEpoch
+	baseState := state.New(config)
+	baseState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{GasLimit: 60_000_000})
+	handler := &ApiHandler{beaconChainCfg: config}
+
+	gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+
+	require.NotNil(t, gasLimit)
+	require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+}
+
+func TestPreparePayloadForFirstGloasSlotUsesProposalAttributes(t *testing.T) {
+	for _, removePreference := range []bool{false, true} {
+		t.Run(fmt.Sprintf("preference removed %t", removePreference), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(
+				t, clparams.ElectraVersion, log.Root(), false,
+			)
+			preForkHead := common.Hash{0xa1}
+			const parentGasLimit = uint64(30_000_000)
+			headState, targetState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
+				t, handler, postState, preForkHead, parentGasLimit,
+			)
+			config := handler.beaconChainCfg
+
+			proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+			dependentRoot, err := state.GetProposerDependentRoot(targetState, targetSlot/config.SlotsPerEpoch)
+			require.NoError(t, err)
+
+			handler.epbsPool = pool.NewEpbsPool()
+			preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+			handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
+				Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
+					TargetGasLimit: 36_000_000, FeeRecipient: common.Address{0x22},
+				},
+			})
+			wantFeeRecipient := common.Address{0x22}
+			wantGasLimit := hexutil.Uint64(36_000_000)
+			if removePreference {
+				handler.epbsPool.ProposerPreferences.Remove(preferenceKey)
+				_, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+				require.False(t, found)
+				wantFeeRecipient = common.Address{0x11}
+				wantGasLimit = hexutil.Uint64(parentGasLimit)
+			}
+
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+				func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(headState, baseBlockRoot, currentSlot)
+				},
+			)
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Minute)).AnyTimes()
+			handler.ethClock = clock
+
+			engine := newPayloadBuildEngine(t, ctrl)
+			engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+				require.Equal(t, preForkHead, head)
+				requireExecutionWithdrawals(t, expectedWithdrawals, attrs.Withdrawals)
+				require.NotNil(t, attrs.SlotNumber)
+				require.Equal(t, hexutil.Uint64(targetSlot), *attrs.SlotNumber)
+				require.NotNil(t, attrs.TargetGasLimit)
+				require.Equal(t, wantGasLimit, *attrs.TargetGasLimit)
+				require.Equal(t, wantFeeRecipient, attrs.SuggestedFeeRecipient)
+				return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+			}
+			handler.engine = engine
+
+			var scratch payloadPreparationScratch
+			result, err := handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+
+			require.NoError(t, err)
+			require.Equal(t, baseBlockRoot, result.headRoot)
+		})
+	}
+}
+
+func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	baseBlockRoot := common.Hash{0x41}
+	_, baseState, currentSlot, targetSlot, _ := setupFirstGloasPayloadStates(t, handler, postState, common.Hash{0xa1}, 30_000_000)
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+	engineCalled := false
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			engineCalled = true
+			return nil, errors.New("unexpected execution work on a stale parent")
+		}).AnyTimes()
+	handler.engine = engine
+
+	_, _, err := handler.produceBeaconBody(t.Context(), currentSlot, baseBlockRoot, baseState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.False(t, engineCalled, "the fork transition must not bypass the beacon-parent check")
+}
+
+func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, validatorParams := setupTestingHandler(
+		t, clparams.ElectraVersion, log.Root(), false,
+	)
+	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+	preForkHead := common.Hash{0xa1}
+	_, baseState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
+		t, handler, postState, preForkHead, 30_000_000,
+	)
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	stopErr := errors.New("stop after fork-choice update")
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(
+		gomock.Any(), gomock.Any(), gomock.Any(), preForkHead, gomock.Any(), clparams.GloasVersion,
+	).DoAndReturn(func(
+		_ context.Context,
+		_, _, _ common.Hash,
+		attrs *engine_types.PayloadAttributes,
+		_ clparams.StateVersion,
+	) ([]byte, error) {
+		requireExecutionWithdrawals(t, expectedWithdrawals, attrs.Withdrawals)
+		return nil, stopErr
+	})
+	handler.engine = engine
+
+	_, _, err = handler.produceBeaconBody(
+		t.Context(), currentSlot, baseBlockRoot, baseState, targetSlot,
+		common.Bytes96{}, common.Hash{},
+	)
+
+	require.ErrorIs(t, err, stopErr)
+}
+
+func TestPreparePayloadLoopMemoizesEffectiveAttributes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 1, 2)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+		)
+		handler.epbsPool = pool.NewEpbsPool()
+		var dependentRoot common.Hash
+		require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+			header := head.LatestExecutionPayloadHeader()
+			header.GasLimit = 30_000_000
+			head.SetLatestExecutionPayloadHeader(header)
+			var err error
+			dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
+			return err
+		}))
+		preference := func(root common.Hash, validator, gas uint64) *cltypes.SignedProposerPreferences {
+			return &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot: targetSlot, DependentRoot: root, ValidatorIndex: validator, TargetGasLimit: gas,
+				FeeRecipient: common.Address{0x11},
+			}}
+		}
+		differentRecipient := preference(dependentRoot, 0, 40_000_000)
+		differentRecipient.Message.FeeRecipient = common.Address{0x22}
+		steps := []struct {
+			name         string
+			preference   *cltypes.SignedProposerPreferences
+			prune        bool
+			wantAttempts int
+		}{
+			{name: "parent fallback", wantAttempts: 1},
+			{name: "other dependent root", preference: preference(common.Hash{0x51}, 0, 36_000_000), wantAttempts: 1},
+			{name: "other validator", preference: preference(dependentRoot, 1, 36_000_000), wantAttempts: 1},
+			{name: "same effective limit", preference: preference(dependentRoot, 0, 30_000_000), wantAttempts: 1},
+			{name: "remove same limit", prune: true, wantAttempts: 1},
+			{name: "explicit zero", preference: preference(dependentRoot, 0, 0), wantAttempts: 2},
+			{name: "restore fallback", prune: true, wantAttempts: 3},
+			{name: "re-add different limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
+			{name: "replace same limit", preference: preference(dependentRoot, 0, 36_000_000), wantAttempts: 4},
+			{name: "prune and re-add before next tick", prune: true, preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 5},
+			{name: "different fee recipient", preference: differentRecipient, wantAttempts: 6},
+			{name: "same fee recipient", preference: differentRecipient, wantAttempts: 6},
+			{name: "restore registered recipient", preference: preference(dependentRoot, 0, 40_000_000), wantAttempts: 7},
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		tick, attempts := 0, 0
+		syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+			if tick > 0 {
+				require.Equal(t, steps[tick-1].wantAttempts, attempts, steps[tick-1].name)
+			}
+			if tick == len(steps) {
+				cancel()
+				return baseBlockRoot, currentSlot, false
+			}
+			step := steps[tick]
+			if step.prune {
+				handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
+			}
+			if step.preference != nil {
+				handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+					Slot:          step.preference.Message.ProposalSlot,
+					DependentRoot: step.preference.Message.DependentRoot,
+				}, step.preference)
+			}
+			tick++
+			return baseBlockRoot, currentSlot, true
+		}).AnyTimes()
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			attempts++
+			return key, nil
+		})
+
+		require.Equal(t, len(steps), tick)
+		require.Equal(t, steps[len(steps)-1].wantAttempts, attempts)
+	})
+}
+
+func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.SecondsPerSlot = 12
+			currentEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+			if version.AfterOrEqual(clparams.FuluVersion) {
+				require.NoError(t, postState.UpgradeToFulu())
+				handler.beaconChainCfg.FuluForkEpoch = currentEpoch
+			}
+			if version.AfterOrEqual(clparams.GloasVersion) {
+				require.NoError(t, postState.UpgradeToGloas())
+				handler.beaconChainCfg.GloasForkEpoch = currentEpoch
+			}
+			handler.beaconChainCfg.InitializeForkSchedule()
+			currentSlot := postState.Slot() + 1
+			targetSlot := currentSlot + 1
+			advancedState := state.New(handler.beaconChainCfg)
+			require.NoError(t, postState.CopyInto(advancedState))
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+			proposerIndex, err := advancedState.GetBeaconProposerIndex()
+			require.NoError(t, err)
+			feeRecipient := common.Address{0x11}
+			validatorParams.SetFeeRecipient(proposerIndex, feeRecipient)
+			if version.AfterOrEqual(clparams.GloasVersion) {
+				feeRecipient = common.Address{0x22}
+				dependentRoot, err := state.GetProposerDependentRoot(postState, targetSlot/handler.beaconChainCfg.SlotsPerEpoch)
+				require.NoError(t, err)
+				handler.epbsPool = pool.NewEpbsPool()
+				handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+					Slot: targetSlot, DependentRoot: dependentRoot,
+				}, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
+					FeeRecipient: feeRecipient, TargetGasLimit: 36_000_000,
+				}})
+			}
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).Times(2)
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+				func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(postState, baseBlockRoot, postState.Slot())
+				},
+			).AnyTimes()
+
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentSlot().Return(currentSlot).Times(2)
+				clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(8 * time.Second)).AnyTimes()
+				handler.ethClock = clock
+				buildAttempts := 0
+				payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+				engine := newPayloadBuildEngine(t, ctrl)
+				engine.startPayloadBuild = func(_ context.Context, _ common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+					buildAttempts++
+					require.Equal(t, feeRecipient, attrs.SuggestedFeeRecipient)
+					if version.AfterOrEqual(clparams.GloasVersion) {
+						require.NotNil(t, attrs.TargetGasLimit)
+						require.Equal(t, hexutil.Uint64(36_000_000), *attrs.TargetGasLimit)
+					}
+					return payloadID, nil
+				}
+				handler.engine = engine
+				ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+				defer cancel()
+
+				handler.preparePayloadLoop(ctx)
+
+				require.Equal(t, 1, buildAttempts, "unchanged inputs must stay settled across eligible ticks")
+				require.Equal(t, payloadID, handler.preparedPayload.payloads[targetSlot].id)
+			})
+		})
+	}
+}
+
+func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 1, 2)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+		)
+		syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+		handler.epbsPool = pool.NewEpbsPool()
+		dependentRoot := common.Hash{0x51}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		attempts := 0
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			require.Equal(t, targetSlot, key.targetSlot)
+			attempts++
+			if attempts == 1 {
+				preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+				handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{
+					Message: &cltypes.ProposerPreferences{
+						ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: 36_000_000,
+					},
+				})
+				preference, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+				require.True(t, found)
+				usedGasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
+				// Pruning during a build must not replace the limit that the attempt used with
+				// the fallback limit. The next tick must detect that difference and re-prepare.
+				handler.epbsPool.ProposerPreferences.PruneSlotsBefore(targetSlot + 1)
+				_, found = handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+				require.False(t, found)
+				key.setTargetGasLimit(&usedGasLimit)
+				return key, nil
+			}
+			cancel()
+			return key, nil
+		})
+
+		require.Equal(t, 2, attempts)
+	})
+}
+
+func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 2, 2)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, _, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot, 750*time.Millisecond,
+		)
+		handler.epbsPool = pool.NewEpbsPool()
+		const proposerIndex = uint64(42)
+		const gasLimit = hexutil.Uint64(36_000_000)
+		var dependentRoot common.Hash
+		require.NoError(t, handler.syncedData.ViewHeadStateWithIdentity(func(head *state.CachingBeaconState, _ common.Hash, _ uint64) error {
+			var err error
+			dependentRoot, err = state.GetProposerDependentRoot(head, targetSlot/config.SlotsPerEpoch)
+			return err
+		}))
+		preferenceKey := pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot}
+		handler.epbsPool.ProposerPreferences.Add(preferenceKey, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+			ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex, TargetGasLimit: uint64(gasLimit),
+		}})
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		ticks := 0
+		syncedData.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+			ticks++
+			if ticks == 3 {
+				cancel()
+				return baseBlockRoot, currentSlot, false
+			}
+			return baseBlockRoot, currentSlot, true
+		}).AnyTimes()
+		attempts := 0
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			attempts++
+			// Before Fulu, advancing the copied state can be needed to discover this proposer.
+			// Later ticks must reuse that index when reading the effective preference.
+			key.proposerIndex = proposerIndex
+			key.feeRecipient = common.Address{}
+			limit := gasLimit
+			key.setTargetGasLimit(&limit)
+			return key, nil
+		})
+
+		require.Equal(t, 3, ticks)
+		require.Equal(t, 1, attempts)
+	})
+}
+
+func TestPreparationKeyDistinguishesUnsetGasLimit(t *testing.T) {
+	var unset, zero preparationKey
+	limit := hexutil.Uint64(0)
+	zero.setTargetGasLimit(&limit)
+
+	require.NotEqual(t, unset, zero, "an explicit zero and an omitted attribute are different build inputs")
+	zero.setTargetGasLimit(nil)
+	require.Equal(t, unset, zero)
+}
+
+func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		config := payloadPreparationLoopConfig(1, 1, 1)
+		currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
+		targetSlot := currentSlot + 1
+		handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
+			t, ctrl, &config, currentSlot, currentSlot-1, 700*time.Millisecond,
+		)
+		syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot-1, true).AnyTimes()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		statusReads := 0
+		forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+			statusReads++
+			return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, currentSlot - 1, nil
+		}
+		attempts := 0
+		handler.preparePayloadLoopWith(ctx, func(
+			_ context.Context,
+			key preparationKey,
+			_ *payloadPreparationScratch,
+		) (preparationKey, error) {
+			require.Equal(t, targetSlot, key.targetSlot)
+			attempts++
+			if attempts == 1 {
+				// The decision changes during state work. If the loop memoizes its earlier EMPTY
+				// sample, it will incorrectly skip the next attempt when the path returns to EMPTY.
+				key.gloasPath = gloasPayloadPathFull
+				return key, errGloasPathNeedsForkChoice
+			}
+			cancel()
+			return key, nil
+		})
+
+		require.Equal(t, 2, attempts, "a resolved FULL skip must not memoize the loop's earlier EMPTY path")
+		require.Equal(t, 2, statusReads, "the loop must compare the settled path on its next tick")
+	})
+}
+
+func TestPreparePayloadLoopRetriesBusySkipAfterPTCDeadline(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		blockWorkEnds time.Duration
+		shouldPrepare bool
+	}{
+		{name: "block work ends before the cutoff", blockWorkEnds: 9100 * time.Millisecond, shouldPrepare: true},
+		{name: "block work ends after the cutoff", blockWorkEnds: 10100 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				config := payloadPreparationLoopConfig(12, 1, 1)
+				currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch + 1
+				targetSlot := currentSlot + 1
+				handler, baseBlockRoot, forkchoiceStore, syncedData := newPayloadPreparationLoopHarness(
+					t, ctrl, &config, currentSlot, currentSlot, 0,
+				)
+				// Start at the current slot's beginning, so quarter-slot ticks land at 3, 6, 9 and 12 s.
+				currentSlotStart := time.Now()
+				slotDuration := 12 * time.Second
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 {
+					return currentSlot + uint64(time.Since(currentSlotStart)/slotDuration)
+				}).AnyTimes()
+				clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+					return currentSlotStart.Add(time.Duration(slot-currentSlot) * slotDuration)
+				}).AnyTimes()
+				handler.ethClock = clock
+				syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+				forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+					return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, currentSlot, nil
+				}
+
+				// Block work holds the gate across the 9 s PTC deadline.
+				go func() {
+					time.Sleep(8999 * time.Millisecond)
+					finish := handler.payloadPreparationGate.beginBlockWork()
+					time.Sleep(test.blockWorkEnds - 8999*time.Millisecond)
+					finish()
+				}()
+
+				ctx, cancel := context.WithTimeout(t.Context(), slotDuration)
+				defer cancel()
+				var attempts []time.Duration
+				handler.preparePayloadLoopWith(ctx, func(
+					_ context.Context,
+					key preparationKey,
+					_ *payloadPreparationScratch,
+				) (preparationKey, error) {
+					require.Equal(t, targetSlot, key.targetSlot)
+					attempts = append(attempts, time.Since(currentSlotStart))
+					return key, nil
+				})
+
+				if !test.shouldPrepare {
+					require.Empty(t, attempts, "no state work may start after the cutoff")
+					return
+				}
+				require.Len(t, attempts, 1, "a busy skip at the PTC deadline must be retried once before the cutoff")
+				require.Greater(t, attempts[0], test.blockWorkEnds)
+				require.Less(t, attempts[0], slotDuration-stateWorkLead(slotDuration))
+			})
+		})
+	}
+}
+
+func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
+	handler := &ApiHandler{}
+	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation(0, 0)
+	require.True(t, ok)
+
+	result := make(chan error, 1)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v3/validator/blocks/1?randao_reveal=invalid", nil)
+	go func() {
+		_, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		finishPreparation()
+		require.ErrorContains(t, err, "invalid randao_reveal")
+	case <-time.After(2 * time.Second):
+		finishPreparation()
+		err := awaitErrorResult(t, result)
+		t.Fatalf("request validation waited for payload preparation: %v", err)
+	}
+}
+
+func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	persistenceErr := errors.New("stop after persistence")
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+			require.False(t, handler.payloadPreparationGate.idle(), "storage must take over the block-work gate")
+			return persistenceErr
+		})
+	handler.blobStoage = storage
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+	block.Block.Slot = 1
+	var scheduled func(context.Context) error
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(block)
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+			scheduled = store
+			return waitingPublishedBlockJob{waiting: make(chan struct{})}
+		},
+	)
+	handler.blockService = blockService
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	require.NoError(t, handler.broadcastBlockWithIntegrationWait(ctx, block, BlockPublishingValidationGossip, false))
+	require.NotNil(t, scheduled)
+	require.True(t, handler.payloadPreparationGate.idle(), "a queued job must not hold the block-work lock")
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()), "gossip success is not local integration")
+
+	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation(1, 0)
+	if preparationStarted {
+		finishPreparation()
+	}
+	require.False(t, preparationStarted, "the marker must cover the gap before the queued job starts")
+	require.ErrorIs(t, scheduled(t.Context()), persistenceErr)
+	require.True(t, handler.payloadPreparationGate.idle(), "a failed storage attempt must release the lock")
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()), "storage may still retry")
+}
+
+func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.DenebVersion)
+	block.Block.Slot = 1
+	commitment := cltypes.KZGCommitment{0x01}
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+
+	require.ErrorContains(t, err, "missing blob bundle")
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+}
+
+func TestBlockPublicationClearsMarkerAfterSuccessfulIntegration(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		integrationErr error
+	}{
+		{name: "integrated"},
+		{name: "storage needs retry", integrationErr: errors.New("storage unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+			block.Block.Slot = 1
+			blockService := network_services_mock.NewMockBlockService(ctrl)
+			blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+			blockService.EXPECT().CommitGossipReservation(block)
+			blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).
+				Return(completedPublishedBlockJob{err: test.integrationErr})
+			handler.blockService = blockService
+			now := time.Now()
+			handler.payloadPreparationGate.noteProducedBlock(1, 1, now, now.Add(time.Minute))
+
+			err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+
+			require.ErrorIs(t, err, test.integrationErr)
+			require.Equal(t, test.integrationErr != nil, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+			require.True(t, handler.payloadPreparationGate.idle())
+		})
+	}
+}
+
+func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.blobStoage = storage
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	blockPublishErr := errors.New("block publish failed")
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(blockPublishErr)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(0), gomock.Any()).Times(0)
+	handler.gossipManager = gossipManager
+
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.DenebVersion)
+	block.Block.Slot = 1
+	commitment := cltypes.KZGCommitment{0x01}
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	handler.blobBundles.Add(common.Bytes48(commitment), BlobBundle{
+		Blob:       &cltypes.Blob{},
+		KzgProofs:  []common.Bytes48{{0x02}},
+		Commitment: common.Bytes48(commitment),
+	})
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorIs(t, err, blockPublishErr)
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
+}
+
+func TestMissingLegacySelfBuildEnvelopeDoesNotFailBlockPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	fcu.OnTickFn = func(uint64) {}
+	handler.indiciesDB = updateFailingDB{RwDB: handler.indiciesDB, err: errors.New("stop after persistence")}
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	require.NotNil(t, bid)
+	require.NotNil(t, bid.Message)
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.Hash{0x42}
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+
+	require.NoError(t, handler.broadcastBlockWithIntegrationWait(t.Context(), block, BlockPublishingValidationGossip, false))
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()), "failed storage must not clear the marker")
+	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
+}
+
+func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Before genesis the current slot clamps to zero, so the next slot can be hours out.
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1)
+	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time {
+		cancel()
+		return time.Now().Add(time.Hour)
+	})
+	handler.ethClock = clock
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+	counter := payloadPreparationOutcomes.WithLabelValues("too_early")
+	before := counter.GetValue()
+
+	done := handler.StartPayloadPreparation(ctx)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("payload preparation did not stop after cancellation")
+	}
+	require.Equal(t, before+1, counter.GetValue())
+}
+
+func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Times(0)
+	handler.ethClock = clock
+
+	// Priming would contend with the block being produced for the execution layer's single slot.
+	finishBlockWork := handler.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopSkipsSlotsThatHaveStarted(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	// Production owns the target once its slot starts. Preparation must not begin new state or
+	// execution work for it.
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-time.Millisecond)).AnyTimes()
+	handler.ethClock = clock
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopSkipsSlotsWithInsufficientLead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).Times(0)
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(minimumPreparationLead / 2)).AnyTimes()
+	handler.ethClock = clock
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+// A copy and slot processing cannot be cancelled once started, so an attempt that is still
+// allowed to start the builder must not start them without room to finish.
+func TestPreparePayloadLoopSkipsStateWorkWithoutItsLead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).Times(0)
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Second)).AnyTimes()
+	handler.ethClock = clock
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+// A deterministic rejection cannot change while the slot, selected head, and validator
+// registrations stay fixed. Retrying it on every tick would repeat the expensive state work.
+func TestPreparePayloadLoopMemoizesStableFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	// A registration for another validator starts the loop but leaves this proposal unregistered.
+	validatorParams.SetFeeRecipient(proposerIndex+1, common.Address{0x11})
+
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 1
+	config.IntervalsPerSlot = 3
+	handler.beaconChainCfg = &config
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).Times(1)
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time {
+		return time.Now().Add(800 * time.Millisecond)
+	}).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithTimeout(t.Context(), 650*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopRetriesExecutionFailures(t *testing.T) {
+	for _, failure := range []error{errNoPayloadID, context.Canceled, errBlockWorkInFlight, errors.New("storage unavailable"), errors.New("execution unavailable")} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				config := payloadPreparationLoopConfig(1, 1, 2)
+				currentSlot := config.SlotsPerEpoch
+				handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
+				synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				attempts := 0
+				handler.preparePayloadLoopWith(ctx, func(_ context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
+					attempts++
+					if attempts == 1 {
+						return key, failure
+					}
+					cancel()
+					return key, nil
+				})
+				require.Equal(t, 2, attempts)
+			})
+		})
+	}
+}
+
+func TestPreparePayloadLoopMemoizesDerivationFailureUntilHeadChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		invalidate func(*testing.T, *state.CachingBeaconState)
+		failure    string
+	}{
+		{
+			name: "withdrawals",
+			invalidate: func(_ *testing.T, head *state.CachingBeaconState) {
+				head.SetNextWithdrawalValidatorIndex(uint64(head.ValidatorLength()))
+			},
+			failure: "next_withdrawal_validator_index",
+		},
+		{
+			name: "slot_transition",
+			invalidate: func(t *testing.T, head *state.CachingBeaconState) {
+				slotsPerEpoch := head.BeaconConfig().SlotsPerEpoch
+				require.NoError(t, transition.DefaultMachine.ProcessSlots(head, (head.Slot()/slotsPerEpoch+1)*slotsPerEpoch-1))
+				require.NoError(t, head.SetValidatorSlashed(0, false))
+				require.NoError(t, head.SetWithdrawableEpochForValidatorAtIndex(0, 0))
+				head.GetPendingConsolidations().Clear()
+				head.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: 0, TargetIndex: uint64(head.ValidatorLength())})
+			},
+			failure: "invalid validator index",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, head, handler, _, synced, _, validators := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.SecondsPerSlot = 1
+			tc.invalidate(t, head)
+			targetSlot := head.Slot() + 1
+			proposer, err := head.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validators.SetFeeRecipient(proposer, common.Address{1})
+			root := common.Hash{1}
+			ticks, views := 0, 0
+			syncedMock := synced.(*sync_mock_services.MockSyncedData)
+			syncedMock.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+				ticks++
+				if ticks >= 3 {
+					root = common.Hash{2}
+				}
+				return root, head.Slot(), true
+			}).AnyTimes()
+			syncedMock.EXPECT().HeadRoot().DoAndReturn(func() common.Hash { return root }).AnyTimes()
+			syncedMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+				views++
+				return view(head, root, head.Slot())
+			}).AnyTimes()
+			synctest.Test(t, func(t *testing.T) {
+				clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+				clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+				clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time { return time.Now().Add(750 * time.Millisecond) }).AnyTimes()
+				handler.ethClock = clock
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				handler.preparePayloadLoopWith(ctx, func(ctx context.Context, key preparationKey, scratch *payloadPreparationScratch) (preparationKey, error) {
+					outcome, err := handler.preparePayloadForWithScratch(ctx, key, scratch)
+					require.ErrorContains(t, err, tc.failure)
+					return outcome, err
+				})
+			})
+			require.GreaterOrEqual(t, ticks, 4)
+			require.Equal(t, 2, views)
+		})
+	}
+}
+
+func TestPayloadPreparationCountsOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		err    error
+	}{
+		{"success", nil},
+		{"unregistered", errNotOurProposal},
+		{"stale_head", errPreparationHeadChanged},
+		{"busy", errBlockWorkInFlight},
+		{"late", errPreparationTooLate},
+		{"needs_forkchoice", errGloasPathNeedsForkChoice},
+		{"error", errors.New("arbitrary error text must not become a label")},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			outcome := payloadPreparationOutcomes.WithLabelValues(tc.reason)
+			before := outcome.GetValue()
+			observePreparationOutcome(tc.err)
+			require.Equal(t, before+1, outcome.GetValue())
+		})
+	}
+}
+
+func TestPreparePayloadLoopRecordsOutcome(t *testing.T) {
+	config := payloadPreparationLoopConfig(1, 1, 2)
+	currentSlot := config.SlotsPerEpoch
+	handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
+	synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	outcome := payloadPreparationOutcomes.WithLabelValues("error")
+	before := outcome.GetValue()
+	handler.preparePayloadLoopWith(ctx, func(_ context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
+		cancel()
+		return key, errors.New("preparation failed")
+	})
+	require.Equal(t, before+1, outcome.GetValue())
+}
+
+func TestPayloadPreparationCountsHeadWaits(t *testing.T) {
+	config := payloadPreparationLoopConfig(1, 1, 2)
+	currentSlot := config.SlotsPerEpoch
+	for _, tc := range []struct {
+		headSlot        uint64
+		reason          string
+		unchangedReason string
+	}{
+		{currentSlot - 1, "busy", "stale_head"},
+		{currentSlot + 1, "stale_head", "busy"},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			handler, root, store, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, tc.headSlot, 750*time.Millisecond)
+			store.BlockProcessingVal = true
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			synced.EXPECT().SelectedHead().DoAndReturn(func() (common.Hash, uint64, bool) {
+				cancel()
+				return root, tc.headSlot, true
+			})
+			outcome := payloadPreparationOutcomes.WithLabelValues(tc.reason)
+			unchanged := payloadPreparationOutcomes.WithLabelValues(tc.unchangedReason)
+			before, unchangedBefore := outcome.GetValue(), unchanged.GetValue()
+
+			handler.preparePayloadLoopWith(ctx, func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error) {
+				t.Fatal("head wait reached payload preparation")
+				return preparationKey{}, nil
+			})
+
+			require.Equal(t, before+1, outcome.GetValue())
+			require.Equal(t, unchangedBefore, unchanged.GetValue())
+		})
+	}
+}
+
+func TestPayloadPreparationPTCWaitCountsPendingOnce(t *testing.T) {
+	postState, handler, syncedData, store, validatorParams := setupGloasPreparationTest(t)
+	currentSlot := postState.Slot()
+	targetSlot := currentSlot + 1
+	root := common.Hash{0x41}
+	store.HeadVal = root
+	store.HeadSlotVal = currentSlot
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	synced := syncedData.(*sync_mock_services.MockSyncedData)
+	synced.EXPECT().SelectedHead().Return(root, currentSlot, true).AnyTimes()
+	synced.EXPECT().HeadRoot().Return(root).AnyTimes()
+	synced.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+		return view(postState, root, currentSlot)
+	}).AnyTimes()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	store.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		cancel()
+		return forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, currentSlot, nil
+	}
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	slotStart := time.Now().Add(3100 * time.Millisecond)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart).AnyTimes()
+	handler.ethClock = clock
+	pending := payloadPreparationOutcomes.WithLabelValues("pending")
+	before := pending.GetValue()
+
+	handler.preparePayloadLoopWith(ctx, func(context.Context, preparationKey, *payloadPreparationScratch) (preparationKey, error) {
+		t.Fatal("pending Gloas path reached payload preparation")
+		return preparationKey{}, nil
+	})
+
+	require.Equal(t, before+1, pending.GetValue())
+}
+
+func TestPayloadPreparationExpiredAdmissionCountsLate(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	handler := &ApiHandler{forkchoiceStore: store}
+	engine := newPayloadBuildEngine(t, gomock.NewController(t))
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	late := payloadPreparationOutcomes.WithLabelValues("late")
+	before := late.GetValue()
+
+	_, err := handler.startPayloadBuildAttempt(ctx, engine, 10, 10, common.Hash{}, nil)
+	observePreparationOutcome(err)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, before+1, late.GetValue())
+}
+
+func TestPayloadPreparationCountsCollectionReuse(t *testing.T) {
+	for _, tc := range []struct {
+		reason      string
+		preparedID  []byte
+		collectedID []byte
+	}{
+		{reason: "absent", collectedID: []byte{1}},
+		{reason: "reused", preparedID: []byte{1}, collectedID: []byte{1}},
+		{reason: "mismatch", preparedID: []byte{1}, collectedID: []byte{2}},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			var prepared preparedPayload
+			if tc.preparedID != nil {
+				prepared.set(1, tc.preparedID, common.Hash{}, time.Now())
+			}
+			counter := payloadPreparationCollections.WithLabelValues(tc.reason)
+			before := counter.GetValue()
+
+			prepared.warmupAndMismatch(1, tc.collectedID, time.Now())
+
+			require.Equal(t, before+1, counter.GetValue())
+		})
+	}
+}
+
+func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	config := *handler.beaconChainCfg
+	targetEpoch := postState.Slot()/config.SlotsPerEpoch + 1
+	targetSlot := targetEpoch * config.SlotsPerEpoch
+	config.DenebForkEpoch = targetEpoch
+	config.InitializeForkSchedule()
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	currentEpoch := headState.Slot() / config.SlotsPerEpoch
+	require.NoError(t, headState.SetRandaoMixAt(int(currentEpoch%config.EpochsPerHistoricalVector), common.Hash{0x51}))
+	require.NoError(t, headState.SetRandaoMixAt(int(targetEpoch%config.EpochsPerHistoricalVector), common.Hash{0x52}))
+	baseBlockRoot := common.Hash{0x41}
+	syncedData := synced_data.NewSyncedDataManager(&config, true)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, baseBlockRoot))
+	syncedData.OnSelectedHead(baseBlockRoot, headState.Slot())
+	handler.beaconChainCfg = &config
+	handler.syncedData = syncedData
+
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+
+	feeRecipient := common.Address{0x11}
+	validatorParams.SetFeeRecipient(proposerIndex, feeRecipient)
+
+	advancedState, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+	require.Equal(t, clparams.CapellaVersion, headState.Version())
+	require.Equal(t, clparams.DenebVersion, advancedState.Version())
+	require.NotEqual(t, headState.GetRandaoMixes(targetEpoch), advancedState.GetRandaoMixes(targetEpoch))
+
+	require.Equal(t, clparams.DenebVersion,
+		handler.beaconChainCfg.GetCurrentStateVersion(targetSlot/handler.beaconChainCfg.SlotsPerEpoch))
+	expectedWithdrawals, err := state.GetExpectedWithdrawals(advancedState, targetSlot/handler.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, err)
+
+	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+		require.Equal(t, advancedState.LatestExecutionPayloadHeader().BlockHash, head)
+		require.Equal(t, hexutil.Uint64(state.ComputeTimestampAtSlot(advancedState, targetSlot)), attrs.Timestamp)
+		require.Equal(t, common.Hash(advancedState.GetRandaoMixes(targetSlot/handler.beaconChainCfg.SlotsPerEpoch)), attrs.PrevRandao)
+		require.Equal(t, feeRecipient, attrs.SuggestedFeeRecipient)
+		require.Equal(t, &baseBlockRoot, attrs.ParentBeaconBlockRoot)
+		require.Nil(t, attrs.SlotNumber)
+		require.Nil(t, attrs.TargetGasLimit)
+		require.NotNil(t, attrs.Withdrawals)
+		require.Len(t, attrs.Withdrawals, len(expectedWithdrawals.Withdrawals))
+		for i, withdrawal := range expectedWithdrawals.Withdrawals {
+			require.Equal(t, hexutil.Uint64(withdrawal.Index), attrs.Withdrawals[i].Index)
+			require.Equal(t, hexutil.Uint64(withdrawal.Amount), attrs.Withdrawals[i].Amount)
+			require.Equal(t, hexutil.Uint64(withdrawal.Validator), attrs.Withdrawals[i].Validator)
+			require.Equal(t, withdrawal.Address, attrs.Withdrawals[i].Address)
+		}
+		return payloadID, nil
+	}
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	var scratch payloadPreparationScratch
+	result, err := handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+	require.NoError(t, err)
+	require.Equal(t, baseBlockRoot, result.headRoot)
+	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
+}
+
+func TestPayloadPreparationSeesImportAfterAdvisorySample(t *testing.T) {
+	config := payloadPreparationLoopConfig(4, 1, 2)
+	currentSlot := config.SlotsPerEpoch
+	handler, root, store, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot-1, 2*time.Second)
+	synced.EXPECT().SelectedHead().Return(root, currentSlot-1, true).AnyTimes()
+	engine := newPayloadBuildEngine(t, gomock.NewController(t))
+	started := false
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		started = true
+		return []byte{1}, nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	busy := payloadPreparationOutcomes.WithLabelValues("busy")
+	before := busy.GetValue()
+	var attemptErr error
+
+	handler.preparePayloadLoopWith(ctx, func(callCtx context.Context, key preparationKey, _ *payloadPreparationScratch) (preparationKey, error) {
+		finishImport := store.BeginPayloadImport(currentSlot)
+		defer finishImport()
+		_, attemptErr = handler.startPayloadBuildAttempt(callCtx, engine, currentSlot, currentSlot-1, common.Hash{}, nil)
+		cancel()
+		return key, attemptErr
+	})
+
+	require.ErrorIs(t, attemptErr, forkchoice.ErrPayloadImportInProgress)
+	require.False(t, started)
+	require.Equal(t, before+1, busy.GetValue())
+}
+
+func TestPayloadPreparationDiscardsImportInterruptedStartup(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	engine := newPayloadBuildEngine(t, gomock.NewController(t))
+	engine.startPayloadBuild = func(ctx context.Context, _ common.Hash, _ *engine_types.PayloadAttributes) ([]byte, error) {
+		finishImport := store.BeginPayloadImport(10)
+		defer finishImport()
+		return []byte{1}, nil
+	}
+	handler := &ApiHandler{forkchoiceStore: store}
+	id, err := handler.startPayloadBuildAttempt(t.Context(), engine, 10, 10, common.Hash{}, nil)
+	require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
+	require.Empty(t, id)
+}
+
+func TestPayloadPreparationDiscardsImportAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := mock_services.NewForkChoiceStorageMock(t)
+		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(time.Second), errPreparationTooLate)
+		defer cancel()
+		engine := newPayloadBuildEngine(t, gomock.NewController(t))
+		engine.startPayloadBuild = func(buildCtx context.Context, _ common.Hash, _ *engine_types.PayloadAttributes) ([]byte, error) {
+			time.Sleep(time.Second)
+			synctest.Wait()
+			require.ErrorIs(t, buildCtx.Err(), context.DeadlineExceeded)
+			require.ErrorIs(t, context.Cause(buildCtx), errPreparationTooLate)
+			finishImport := store.BeginPayloadImport(10)
+			finishImport()
+			return []byte{1}, nil
+		}
+		handler := &ApiHandler{forkchoiceStore: store}
+
+		id, err := handler.startPayloadBuildAttempt(ctx, engine, 10, 10, common.Hash{}, nil)
+		require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
+		require.Empty(t, id)
+	})
+}
+
+func TestPayloadPreparationKeepsBuilderStartedBeforeDeadline(t *testing.T) {
+	store := mock_services.NewForkChoiceStorageMock(t)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	payloadID := []byte{1}
+	engine := newPayloadBuildEngine(t, gomock.NewController(t))
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		cancel(errPreparationTooLate)
+		return payloadID, nil
+	}
+	handler := &ApiHandler{forkchoiceStore: store}
+
+	id, err := handler.startPayloadBuildAttempt(ctx, engine, 10, 10, common.Hash{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, payloadID, id)
+}
+
+func TestPreparePayloadForGloasPaths(t *testing.T) {
+	for _, test := range []struct {
+		name                 string
+		payloadStatus        cltypes.PayloadStatus
+		buildOnFull          bool
+		hasEnvelope          bool
+		unverified           bool
+		invalidateAfterBuild bool
+		wantBuild            bool
+		wantErr              error
+	}{
+		{
+			name: "FULL parent", payloadStatus: cltypes.PayloadStatusFull,
+			buildOnFull: true, hasEnvelope: true, wantBuild: true,
+		},
+		{
+			name: "unverified FULL parent", payloadStatus: cltypes.PayloadStatusFull,
+			buildOnFull: true, hasEnvelope: true, unverified: true, wantErr: errGloasPayloadPending,
+		},
+		{
+			name: "invalidated during builder startup", payloadStatus: cltypes.PayloadStatusFull,
+			buildOnFull: true, hasEnvelope: true, invalidateAfterBuild: true, wantBuild: true, wantErr: errGloasPayloadPending,
+		},
+		{
+			name: "pending head", payloadStatus: cltypes.PayloadStatusPending,
+			wantErr: errGloasPayloadPending,
+		},
+		{
+			name: "FULL without envelope", payloadStatus: cltypes.PayloadStatusFull,
+			buildOnFull: true, wantErr: errGloasPayloadPending,
+		},
+		{
+			name: "FULL-to-EMPTY", payloadStatus: cltypes.PayloadStatusFull,
+			wantErr: errGloasPathNeedsForkChoice,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
+			targetSlot := postState.Slot() + 1
+			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.VerifiedPayloads = map[common.Hash]bool{baseBlockRoot: !test.unverified}
+			postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+				ParentBlockHash: common.Hash{0xa1},
+				BlockHash:       common.Hash{0xb2},
+				Slot:            postState.Slot(),
+			})
+			forkchoiceStore.HeadPayloadStatusVal = test.payloadStatus
+			forkchoiceStore.ShouldBuildOnFullVal = &test.buildOnFull
+			if test.hasEnvelope {
+				forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+					Message: &cltypes.ExecutionPayloadEnvelope{
+						BeaconBlockRoot:   baseBlockRoot,
+						Payload:           &cltypes.Eth1Block{BlockHash: common.Hash{0xb2}},
+						ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+					},
+				}
+			}
+
+			proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+				DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(postState, baseBlockRoot, postState.Slot())
+				})
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+
+			buildStarted := false
+			engine := newPayloadBuildEngine(t, ctrl)
+			engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+				buildStarted = true
+				if test.invalidateAfterBuild {
+					forkchoiceStore.VerifiedPayloads[baseBlockRoot] = false
+				}
+				return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+			}
+			handler.engine = engine
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+			handler.ethClock = clock
+
+			_, err = preparePayloadForTest(t, handler, targetSlot)
+			if test.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, test.wantErr)
+				require.Empty(t, handler.preparedPayload.payloads)
+			}
+			require.Equal(t, test.wantBuild, buildStarted)
+		})
+	}
+}
+
+func TestFullPayloadSourceReusesDecodedRequests(t *testing.T) {
+	beaconState, handler, _, store, _ := setupGloasPreparationTest(t)
+	reads := 0
+	requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	store.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads++
+		return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}, nil
+	}
+	for range 2 {
+		source := handler.executionPayloadSourceForGloasPath(beaconState, common.Hash{1}, gloasPayloadPathFull)
+		require.Nil(t, source.fallbackCause)
+		require.Same(t, requests, source.parentExecutionRequests)
+	}
+	require.Equal(t, 1, reads)
+}
+
+func TestFullPayloadSourceCoalescesConcurrentRequestReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, handler, _, store, _ := setupGloasPreparationTest(t)
+		root := common.Hash{1}
+		requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+		releaseRead := make(chan struct{})
+		var reads atomic.Int32
+		store.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+			reads.Add(1)
+			<-releaseRead
+			return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}, nil
+		}
+		type result struct {
+			requests *cltypes.ExecutionRequests
+			err      error
+		}
+		results := make(chan result, 2)
+		for range 2 {
+			go func() {
+				got, err := handler.fullParentExecutionRequests(root)
+				results <- result{requests: got, err: err}
+			}()
+		}
+		synctest.Wait()
+		readsWhileBlocked := reads.Load()
+		close(releaseRead)
+		require.Equal(t, int32(1), readsWhileBlocked)
+		for range 2 {
+			result := <-results
+			require.NoError(t, result.err)
+			require.Same(t, requests, result.requests)
+		}
+		require.Equal(t, int32(1), reads.Load())
+	})
+}
+
+func TestFullPayloadSourceEvictsRequestsAndRetriesReadFailures(t *testing.T) {
+	beaconState, handler, _, store, _ := setupGloasPreparationTest(t)
+	reads := make(map[common.Hash]int)
+	requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	store.ReadEnvelopeFromDiskFunc = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		reads[root]++
+		if root == (common.Hash{1}) && reads[root] == 1 {
+			return nil, errors.New("temporary read failure")
+		}
+		return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}, nil
+	}
+	first := common.Hash{1}
+	require.Error(t, handler.executionPayloadSourceForGloasPath(beaconState, first, gloasPayloadPathFull).fallbackCause)
+	require.Nil(t, handler.executionPayloadSourceForGloasPath(beaconState, first, gloasPayloadPathFull).fallbackCause)
+	for i := 2; i <= maxCachedParentExecutionRequests+1; i++ {
+		source := handler.executionPayloadSourceForGloasPath(beaconState, common.Hash{byte(i)}, gloasPayloadPathFull)
+		require.Nil(t, source.fallbackCause)
+	}
+	require.Equal(t, maxCachedParentExecutionRequests, handler.parentExecutionRequests.Len())
+	require.Nil(t, handler.executionPayloadSourceForGloasPath(beaconState, first, gloasPayloadPathFull).fallbackCause)
+	require.Equal(t, 3, reads[first])
+}
+
+func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
+	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentHash,
+		BlockHash:       common.Hash{0xb2},
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	buildOnFull := false
+	forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	require.Equal(t, parentHash, source.head)
+	require.Equal(t, gloasPayloadPathReorgToEmpty, source.gloasPath)
+	require.Nil(t, source.parentExecutionRequests)
+}
+
+func TestExecutionPayloadSourceFallsBackToEmptyForUnavailableGloasPayload(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		payloadStatus cltypes.PayloadStatus
+		envelope      *cltypes.SignedExecutionPayloadEnvelope
+		wantCause     string
+	}{
+		{name: "pending head", payloadStatus: cltypes.PayloadStatusPending},
+		{name: "FULL without envelope", payloadStatus: cltypes.PayloadStatusFull},
+		{
+			name: "FULL without execution requests", payloadStatus: cltypes.PayloadStatusFull,
+			envelope:  &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{}},
+			wantCause: "FULL parent payload has no execution requests",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+			targetSlot := postState.Slot() + 1
+			baseBlockRoot := common.Hash{0x41}
+			parentHash := common.Hash{0xa1}
+			postState.SetLatestBlockHash(parentHash)
+			postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+				ParentBlockHash: parentHash,
+				BlockHash:       common.Hash{0xb2},
+				Slot:            postState.Slot(),
+			})
+			forkchoiceStore.HeadVal = baseBlockRoot
+			forkchoiceStore.HeadPayloadStatusVal = test.payloadStatus
+			buildOnFull := true
+			forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
+			if test.envelope != nil {
+				forkchoiceStore.Envelopes[baseBlockRoot] = test.envelope
+			}
+
+			source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+			require.NoError(t, err)
+			require.Equal(t, parentHash, source.head)
+			require.Equal(t, gloasPayloadPathPending, source.gloasPath)
+			require.Nil(t, source.parentExecutionRequests)
+			if test.wantCause != "" {
+				require.ErrorContains(t, source.fallbackCause, test.wantCause)
+			} else {
+				require.NoError(t, source.fallbackCause)
+			}
+		})
+	}
+}
+
+func TestExecutionPayloadSourceRejectsChangedBeaconHead(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	baseBlockRoot := common.Hash{0x41}
+	parentHash := common.Hash{0xa1}
+	postState.SetLatestBlockHash(parentHash)
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentHash,
+		BlockHash:       common.Hash{0xb2},
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
+	require.ErrorContains(t, err, baseBlockRoot.String())
+	require.ErrorContains(t, err, forkchoiceStore.HeadVal.String())
+	require.Zero(t, source, "a changed beacon head must not yield an EMPTY fallback")
+}
+
+func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	baseBlockRoot := common.Hash{0x41}
+	fullHash := common.Hash{0xb2}
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.Hash{0xa1},
+		BlockHash:       fullHash,
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadVal = common.Hash{}
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}, postState.Slot(), nil
+	}
+	forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+		},
+	}
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	require.Equal(t, fullHash, source.head)
+	require.Equal(t, gloasPayloadPathFull, source.gloasPath)
+}
+
+func TestExecutionPayloadSourceRejectsHeadLookupFailure(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	baseBlockRoot := common.Hash{0x41}
+	headErr := errors.New("fork choice unavailable")
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {
+		return forkchoice.ForkChoiceNode{}, 0, headErr
+	}
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion)
+
+	require.ErrorIs(t, err, headErr)
+	require.Zero(t, source, "a failed head lookup must not yield an EMPTY fallback")
+}
+
+func setupGloasPreparationTest(t *testing.T) (
+	*state.CachingBeaconState,
+	*ApiHandler,
+	synced_data.SyncedData,
+	*mock_services.ForkChoiceStorageMock,
+	*validator_params.ValidatorParams,
+) {
+	t.Helper()
+	_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(
+		t, clparams.ElectraVersion, log.Root(), false,
+	)
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	config := *handler.beaconChainCfg
+	currentEpoch := postState.Slot() / config.SlotsPerEpoch
+	config.FuluForkEpoch = currentEpoch
+	config.GloasForkEpoch = currentEpoch
+	config.InitializeForkSchedule()
+	handler.beaconChainCfg = &config
+	return postState, handler, syncedData, forkchoiceStore, validatorParams
+}
+
+func TestPreparationGateRefusesActiveBlockWork(t *testing.T) {
+	var gate payloadPreparationGate
+	finishBlockWork := gate.beginBlockWork()
+	defer finishBlockWork()
+
+	_, ok := gate.tryBeginPreparation(0, 0)
+
+	require.False(t, ok, "preparation must stand off active block work")
+}
+
+func TestPreparationGateRefusesPendingProducedBlock(t *testing.T) {
+	var gate payloadPreparationGate
+	now := time.Now()
+	gate.noteProducedBlock(10, 10, now, now.Add(time.Hour))
+
+	finishPreparation, ok := gate.tryBeginPreparation(10, 9)
+	if ok {
+		finishPreparation()
+	}
+	require.False(t, ok, "admission must check the signing marker, not just the block-work lock")
+	require.Nil(t, finishPreparation)
+	require.True(t, gate.idle(), "refusing a pending marker must release the exclusive gate")
+
+	finishPreparation, ok = gate.tryBeginPreparation(10, 10)
+	require.True(t, ok, "selecting the produced slot's head makes preparation safe again")
+	finishPreparation()
+}
+
+func TestPreparationGateBlockWorkReleaseIsIdempotent(t *testing.T) {
+	var gate payloadPreparationGate
+	finishBlockWork := gate.beginBlockWork()
+
+	finishBlockWork()
+	require.NotPanics(t, finishBlockWork)
+	finishPreparation, ok := gate.tryBeginPreparation(0, 0)
+	require.True(t, ok)
+	finishPreparation()
+}
+
+func TestPayloadBuildPanicReleasesPreparationGate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	baseBlockRoot := common.Hash{0x41}
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().SelectedHead().Return(baseBlockRoot, uint64(10), true)
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		panic("payload builder panic")
+	}
+	handler.engine = engine
+
+	require.Panics(t, func() {
+		_, _ = handler.startPayloadBuildForPreparation(t.Context(), 11, baseBlockRoot, common.Hash{0x42}, gloasPayloadPathPreFork, new(engine_types.PayloadAttributes))
+	})
+
+	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation(0, 0)
+	require.True(t, ok, "a failed builder attempt must not strand the preparation gate")
+	finishPreparation()
+}
+
+func TestProducedBlockSigningExpiryStartsAtTheLaterBoundary(t *testing.T) {
+	targetSlotStart := time.Unix(100, 0)
+	signingWindow := time.Second
+	for _, test := range []struct {
+		name        string
+		completedAt time.Time
+	}{
+		{name: "early production", completedAt: targetSlotStart.Add(-10 * time.Second)},
+		{name: "late production", completedAt: targetSlotStart.Add(2 * time.Second)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			expectedStart := targetSlotStart
+			if test.completedAt.After(expectedStart) {
+				expectedStart = test.completedAt
+			}
+
+			expiresAt := producedBlockSigningExpiry(test.completedAt, targetSlotStart, signingWindow)
+
+			require.Equal(t, expectedStart.Add(signingWindow), expiresAt)
+		})
+	}
+}
+
+func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T) {
+	var gate payloadPreparationGate
+	expiresAt := time.Unix(200, 0)
+	now := expiresAt.Add(-time.Second)
+	gate.noteProducedBlock(9, 10, now, expiresAt)
+
+	require.True(t, gate.producedBlockPending(9, 9, now), "an early production is pending")
+	require.True(t, gate.producedBlockPending(10, 9, now), "the signing round trip is pending")
+	require.False(t, gate.producedBlockPending(10, 10, now), "a head for the produced slot is selected")
+	require.False(t, gate.producedBlockPending(11, 10, now), "the produced slot has passed")
+}
+
+func TestPreparationGateTracksProductionThatFinishesAfterItsSlot(t *testing.T) {
+	var gate payloadPreparationGate
+	expiresAt := time.Unix(200, 0)
+	now := expiresAt.Add(-time.Second)
+	gate.noteProducedBlock(11, 10, now, expiresAt)
+
+	require.True(t, gate.producedBlockPending(11, 9, now), "the late signing round trip is pending")
+	require.False(t, gate.producedBlockPending(11, 10, now), "a head for the produced slot is selected")
+	require.False(t, gate.producedBlockPending(12, 9, now), "the signing marker expires after one slot")
+}
+
+func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) {
+	var gate payloadPreparationGate
+	expiresAt := time.Unix(200, 0)
+	gate.noteProducedBlock(10, 20, expiresAt.Add(-time.Second), expiresAt)
+
+	require.False(t, gate.producedBlockPending(19, 10, expiresAt.Add(-time.Second)), "a far-future request must not schedule a later preparation blackout")
+}
+
+func TestPreparationGateExpiresAndClearsProducedBlock(t *testing.T) {
+	var gate payloadPreparationGate
+	expiresAt := time.Unix(200, 0)
+	completedAt := expiresAt.Add(-time.Second)
+	gate.noteProducedBlock(10, 10, completedAt, expiresAt)
+
+	require.True(t, gate.producedBlockPending(10, 9, expiresAt.Add(-time.Nanosecond)))
+	require.False(t, gate.producedBlockPending(10, 9, expiresAt), "an abandoned signing round trip must expire")
+
+	gate.noteProducedBlock(10, 10, completedAt, expiresAt.Add(time.Second))
+	gate.clearProducedBlock(10)
+	require.False(t, gate.producedBlockPending(10, 9, expiresAt), "completed integration releases the marker")
+}
+
+func TestPreparationGateTracksOverlappingProducedBlocks(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		firstSlot  uint64
+		firstEnd   time.Time
+		secondSlot uint64
+		secondEnd  time.Time
+	}{
+		{
+			name:       "higher slot finishes first",
+			firstSlot:  11,
+			firstEnd:   time.Unix(200, 0),
+			secondSlot: 10,
+			secondEnd:  time.Unix(210, 0),
+		},
+		{
+			name:       "higher slot finishes second",
+			firstSlot:  10,
+			firstEnd:   time.Unix(210, 0),
+			secondSlot: 11,
+			secondEnd:  time.Unix(200, 0),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gate payloadPreparationGate
+			gate.noteProducedBlock(10, test.firstSlot, time.Unix(190, 0), test.firstEnd)
+			gate.noteProducedBlock(11, test.secondSlot, time.Unix(195, 0), test.secondEnd)
+
+			require.True(t, gate.producedBlockPending(11, 10, time.Unix(199, 0)), "the higher slot must remain pending")
+			require.True(t, gate.producedBlockPending(11, 9, time.Unix(205, 0)), "the later expiry must remain pending")
+		})
+	}
+}
+
+func TestPreparationGateClearsOnlyThePublishedProducedBlock(t *testing.T) {
+	now := time.Unix(199, 0)
+	newGate := func() *payloadPreparationGate {
+		gate := new(payloadPreparationGate)
+		gate.noteProducedBlock(10, 10, time.Unix(190, 0), time.Unix(210, 0))
+		gate.noteProducedBlock(11, 11, time.Unix(195, 0), time.Unix(205, 0))
+		return gate
+	}
+
+	gate := newGate()
+	gate.clearProducedBlock(11)
+	require.True(t, gate.producedBlockPending(10, 9, now), "slot 10 may still be signing")
+
+	gate = newGate()
+	gate.clearProducedBlock(10)
+	require.True(t, gate.producedBlockPending(11, 10, now), "slot 11 may still be signing")
+}
+
+func TestPreparationGateReplacesAnExpiredHigherSlotMarker(t *testing.T) {
+	var gate payloadPreparationGate
+	gate.noteProducedBlock(10, 11, time.Unix(190, 0), time.Unix(200, 0))
+	gate.noteProducedBlock(11, 10, time.Unix(205, 0), time.Unix(210, 0))
+
+	require.True(t, gate.producedBlockPending(11, 9, time.Unix(205, 0)))
+	require.False(t, gate.producedBlockPending(11, 10, time.Unix(205, 0)), "the expired higher slot must not be retained")
+}
+
+func TestProductionUsesTargetSlotRandao(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	targetEpoch := targetSlot / handler.beaconChainCfg.SlotsPerEpoch
+	wallClockEpoch := targetEpoch + 1
+	targetMix := common.Hash{0x11}
+	wallClockMix := common.Hash{0x22}
+	require.NoError(t, postState.SetRandaoMixAt(int(targetEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), targetMix))
+	require.NoError(t, postState.SetRandaoMixAt(int(wallClockEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), wallClockMix))
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			require.Equal(t, targetMix, common.Hash(attrs.PrevRandao))
+			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+		})
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil, nil, nil, errors.New("collection stops here")).AnyTimes()
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second)).AnyTimes()
+	clock.EXPECT().GetCurrentEpoch().Times(0)
+	handler.ethClock = clock
+
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), common.Hash{0x41}, postState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+
+	require.Error(t, err)
+}
+
+func TestProductionUsesPreparedWarmupForPayloadCollection(t *testing.T) {
+	t.Run("Electra", func(t *testing.T) {
+		_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+		requireProductionUsesPreparedWarmup(t, postState, handler)
+	})
+	t.Run("Gloas EMPTY", func(t *testing.T) {
+		postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+		forkchoiceStore.HeadVal = common.Hash{0x41}
+		forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+		postState.SetLatestBlockHash(common.Hash{0xa1})
+		requireProductionUsesPreparedWarmup(t, postState, handler)
+	})
+}
+
+func requireProductionUsesPreparedWarmup(t *testing.T, postState *state.CachingBeaconState, handler *ApiHandler) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	targetSlot := postState.Slot() + 1
+	version := postState.Version()
+	baseBlockRoot := common.Hash{0x41}
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	handler.validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 30
+	handler.beaconChainCfg = &config
+	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	handler.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now().Add(-10*time.Second))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	collectionStarted := false
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), version).
+		Return(payloadID, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), payloadID, version).
+		DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			collectionStarted = true
+			cancel()
+			return nil, nil, nil, nil, context.Canceled
+		})
+	handler.engine = engine
+
+	// With the warmup cap, this slot collects immediately. Ignoring warmup would delay
+	// the first poll beyond the request context.
+	slotStart := time.Now().Add(-3 * time.Second)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
+	handler.ethClock = clock
+
+	_, _, err = handler.produceBeaconBody(ctx, postState.Slot(), baseBlockRoot, postState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, collectionStarted, "prepared warmup was not applied to the production collection window")
+}
+
+func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, logger, false)
+	targetSlot := postState.Slot() + 1
+	preparedID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	productionID := []byte{8, 7, 6, 5, 4, 3, 2, 1}
+	preparedHead := common.Hash{0x51}
+	productionHead := common.Hash{0x41}
+	handler.preparedPayload.set(targetSlot, preparedID, preparedHead, time.Now().Add(-time.Second))
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(productionID, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), productionID, clparams.ElectraVersion).
+		Return(nil, nil, nil, nil, errors.New("collection stops here"))
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
+	handler.ethClock = clock
+
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), productionHead, postState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+
+	require.Error(t, err)
+	require.Contains(t, output.String(), "prepared payload ID did not match production")
+	require.Contains(t, output.String(), "preparedHead")
+	require.Contains(t, output.String(), preparedHead.Hex())
+	require.Contains(t, output.String(), "productionHead")
+	require.Contains(t, output.String(), productionHead.Hex())
+	require.Contains(t, output.String(), "lvl=info")
+}
+
+// Builder startup is non-blocking, so temporary execution contention is retried outside the gate.
+func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).AnyTimes()
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	buildAttempts := 0
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		buildAttempts++
+		if buildAttempts == 1 {
+			return nil, chainreader.ErrExecutionBusy
+		}
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	head, err := preparePayloadForTest(t, handler, targetSlot)
+	require.NoError(t, err)
+	require.Equal(t, baseBlockRoot, head)
+	require.Equal(t, 2, buildAttempts)
+}
+
+func TestPreparePayloadLoopRecoversAfterExecutionRetryCutoff(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "busy", err: chainreader.ErrExecutionBusy},
+		{name: "head mismatch", err: execution_client.ErrPayloadBuildHeadMismatch},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.SecondsPerSlot = 2
+			targetSlot := postState.Slot() + 1
+			advancedState := state.New(handler.beaconChainCfg)
+			require.NoError(t, postState.CopyInto(advancedState))
+			for _, slot := range []uint64{targetSlot, targetSlot + 1} {
+				require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, slot))
+				proposerIndex, err := advancedState.GetBeaconProposerIndex()
+				require.NoError(t, err)
+				validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+			}
+			baseBlockRoot := common.Hash{0x41}
+			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+			syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
+				func(view synced_data.ViewHeadStateWithIdentityFn) error {
+					return view(postState, baseBlockRoot, postState.Slot())
+				},
+			).AnyTimes()
+
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				slotDuration := time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second
+				// Put the cutoff between retry timers so cancellation, not a completed sleep,
+				// must wake the persistent-failure attempt.
+				slotStart := time.Now().Add(1850 * time.Millisecond)
+				cutoff := slotStart.Add(-minimumPreparationLead)
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 {
+					if time.Now().Before(slotStart) {
+						return targetSlot - 1
+					}
+					return targetSlot
+				}).AnyTimes()
+				clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+					return slotStart.Add(time.Duration(slot-targetSlot) * slotDuration)
+				}).AnyTimes()
+				handler.ethClock = clock
+
+				payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+				var buildAttempts atomic.Int64
+				executionRecovered := make(chan struct{})
+				engine := newPayloadBuildEngine(t, ctrl)
+				engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+					buildAttempts.Add(1)
+					select {
+					case <-executionRecovered:
+						return payloadID, nil
+					default:
+						return nil, test.err
+					}
+				}
+				handler.engine = engine
+
+				type preparationResult struct {
+					slot       uint64
+					err        error
+					finishedAt time.Time
+				}
+				results := make(chan preparationResult, 2)
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					handler.preparePayloadLoopWith(ctx, func(callCtx context.Context, key preparationKey, scratch *payloadPreparationScratch) (preparationKey, error) {
+						outcome, err := handler.preparePayloadForWithScratch(callCtx, key, scratch)
+						select {
+						case results <- preparationResult{slot: outcome.targetSlot, err: err, finishedAt: time.Now()}:
+						case <-ctx.Done():
+						}
+						return outcome, err
+					})
+				}()
+				defer func() {
+					cancel()
+					<-done
+				}()
+
+				synctest.Wait()
+				time.Sleep(time.Until(cutoff))
+				synctest.Wait()
+				select {
+				case result := <-results:
+					require.Equal(t, targetSlot, result.slot)
+					require.ErrorIs(t, result.err, errPreparationTooLate)
+					require.Equal(t, cutoff, result.finishedAt)
+				default:
+					t.Fatal("preparation did not stop at its cutoff")
+				}
+				require.Greater(t, buildAttempts.Load(), int64(1), "execution must remain unavailable across multiple retries")
+				require.Empty(t, handler.preparedPayload.payloads, "an exhausted attempt must not record a payload")
+				require.True(t, handler.payloadPreparationGate.idle(), "deadline exhaustion must release the preparation gate")
+				finishBlockWork := handler.payloadPreparationGate.beginBlockWork()
+				finishBlockWork()
+
+				attemptsAtCutoff := buildAttempts.Load()
+				time.Sleep(time.Until(slotStart))
+				synctest.Wait()
+				require.Equal(t, attemptsAtCutoff, buildAttempts.Load(), "retries must not continue into the proposal slot")
+				close(executionRecovered)
+				select {
+				case result := <-results:
+					require.Equal(t, targetSlot+1, result.slot)
+					require.NoError(t, result.err)
+				case <-time.After(slotDuration):
+					t.Fatal("preparation did not recover for the next target slot")
+				}
+				synctest.Wait()
+				require.Equal(t, attemptsAtCutoff+1, buildAttempts.Load())
+				require.Len(t, handler.preparedPayload.payloads, 1)
+				record := handler.preparedPayload.payloads[targetSlot+1]
+				require.Equal(t, payloadID, record.id)
+				require.Equal(t, baseBlockRoot, record.head)
+			})
+		})
+	}
+}
+
+func TestPreparePayloadBuildBacksOffWhileExecutionHeadDiffers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	handler := &ApiHandler{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
+	baseBlockRoot := common.Hash{0x41}
+	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
+	syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, uint64(10), true).AnyTimes()
+	handler.syncedData = syncedData
+
+	buildAttempts := 0
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		buildAttempts++
+		if buildAttempts == 1 {
+			return nil, execution_client.ErrPayloadBuildHeadMismatch
+		}
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	minimumObservedBackoff := 400 * time.Millisecond
+	startedAt := time.Now()
+
+	payloadID, err := handler.startPayloadBuildForPreparation(
+		ctx, 11, baseBlockRoot, common.Hash{0x42}, gloasPayloadPathPreFork, new(engine_types.PayloadAttributes),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, payloadID, 8)
+	require.Equal(t, 2, buildAttempts)
+	require.GreaterOrEqual(t, time.Since(startedAt), minimumObservedBackoff)
+}
+
+func TestPreparePayloadForStopsRetryWhenTheHeadChanges(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).AnyTimes()
+	movedBlockRoot := common.Hash{0x42}
+	gomock.InOrder(
+		syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true),
+		syncedDataMock.EXPECT().SelectedHead().Return(movedBlockRoot, postState.Slot()+1, true),
+	)
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		return nil, chainreader.ErrExecutionBusy
+	}
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	_, err = preparePayloadForTest(t, handler, targetSlot)
+	require.ErrorIs(t, err, errPreparationHeadChanged)
+}
+
+// Production waits only for a builder-start attempt that has already entered the execution layer.
+// The attempt is one non-blocking call; state copying and contention retries happen outside it.
+func TestProductionWaitsForActivePreparationAttempt(t *testing.T) {
+	var gate payloadPreparationGate
+	finishPreparation, ok := gate.tryBeginPreparation(0, 0)
+	require.True(t, ok)
+
+	productionStarted := make(chan func(), 1)
+	go func() {
+		productionStarted <- gate.beginBlockWork()
+	}()
+
+	select {
+	case finishBlockWork := <-productionStarted:
+		finishBlockWork()
+		t.Fatal("production started during a payload-build attempt")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	finishPreparation()
+	select {
+	case finishBlockWork := <-productionStarted:
+		finishBlockWork()
+	case <-time.After(5 * time.Second):
+		t.Fatal("production did not start after payload preparation finished")
+	}
+}
+
+func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	stateCopied := make(chan struct{})
+	resumePreparation := make(chan struct{})
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			err := view(postState, baseBlockRoot, postState.Slot())
+			close(stateCopied)
+			select {
+			case <-resumePreparation:
+			case <-t.Context().Done():
+			}
+			return err
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true)
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := preparePayloadForTest(t, handler, targetSlot)
+		result <- err
+	}()
+	select {
+	case <-stateCopied:
+	case <-time.After(5 * time.Second):
+		t.Fatal("state copying did not finish")
+	}
+	finishBlockWork := handler.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+	close(resumePreparation)
+
+	require.ErrorIs(t, awaitErrorResult(t, result), errBlockWorkInFlight)
+}
+
+func TestPreparePayloadForStopsWhenProducedBlockCompletesDuringStateCopy(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 2
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	producedSlot := targetSlot - 1
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			if err := view(postState, baseBlockRoot, postState.Slot()); err != nil {
+				return err
+			}
+			completedAt := time.Now()
+			handler.payloadPreparationGate.noteProducedBlock(
+				producedSlot,
+				producedSlot,
+				completedAt,
+				completedAt.Add(time.Minute),
+			)
+			return nil
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+
+	buildAttempts := 0
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		buildAttempts++
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	_, err = preparePayloadForTest(t, handler, targetSlot)
+
+	require.ErrorIs(t, err, errBlockWorkInFlight)
+	require.Zero(t, buildAttempts)
+}
+
+func TestPreparePayloadForRejectsInsufficientLeadAfterStateWork(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).AnyTimes()
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(minimumPreparationLead / 2))
+	handler.ethClock = clock
+
+	var scratch payloadPreparationScratch
+	_, err = handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+	require.ErrorIs(t, err, errPreparationTooLate)
+}
+
+// The lead can shrink while the attempt waits for the head-state view, so it is checked again
+// before the copy starts.
+func TestPreparePayloadForRejectsStateWorkWithoutItsLead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).AnyTimes()
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	var scratch payloadPreparationScratch
+	_, err = handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+	require.ErrorIs(t, err, errPreparationTooLate)
+	require.Nil(t, scratch.state, "the head state must not be copied")
+}
+
+func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(common.Hash{0x42}, postState.Slot()+1, true)
+	engine := newPayloadBuildEngine(t, ctrl)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	_, err = preparePayloadForTest(t, handler, targetSlot)
+	require.ErrorIs(t, err, errPreparationHeadChanged)
+	require.Zero(t, preparedWarmup(&handler.preparedPayload, targetSlot, []byte{1}, time.Now()))
+}
+
+func TestPreparePayloadForSkipsStateCopyWhenBlockWorkStarts(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	var finishBlockWork func()
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			finishBlockWork = handler.payloadPreparationGate.beginBlockWork()
+			return view(postState, baseBlockRoot, postState.Slot())
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+	var scratch payloadPreparationScratch
+
+	_, err = handler.preparePayloadForWithScratch(t.Context(), preparationKey{targetSlot: targetSlot}, &scratch)
+	if finishBlockWork != nil {
+		finishBlockWork()
+	}
+
+	require.ErrorIs(t, err, errBlockWorkInFlight)
+	require.Nil(t, scratch.state, "block work announced before copying should avoid the state allocation")
+}
+
+func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	config := *handler.beaconChainCfg
+	targetEpoch := postState.Slot()/config.SlotsPerEpoch + 1
+	targetSlot := targetEpoch * config.SlotsPerEpoch
+	config.FuluForkEpoch = targetEpoch + 10
+	config.GloasForkEpoch = targetEpoch + 11
+	config.InitializeForkSchedule()
+	handler.beaconChainCfg = &config
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	require.NoError(t, headState.SetSlot(targetSlot-1))
+	for i := 0; i < headState.ValidatorLength(); i += 2 {
+		require.NoError(t, headState.SetEffectiveBalanceForValidatorAtIndex(i, 0))
+		require.NoError(t, headState.SetValidatorBalance(i, config.MaxEffectiveBalanceElectra))
+	}
+
+	mixPosition := (targetEpoch + config.EpochsPerHistoricalVector - config.MinSeedLookahead - 1) % config.EpochsPerHistoricalVector
+	var oldProposer, newProposer uint64
+	found := false
+	for nonce := byte(0); ; nonce++ {
+		require.NoError(t, headState.SetRandaoMixAt(int(mixPosition), common.Hash{nonce}))
+		var err error
+		oldProposer, err = headState.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+
+		advanced, err := headState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, targetSlot))
+		newProposer, err = advanced.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+		if oldProposer != newProposer {
+			found = true
+			break
+		}
+		if nonce == 255 {
+			break
+		}
+	}
+	require.True(t, found, "fixture must expose a proposer change across epoch processing")
+	validatorParams.SetFeeRecipient(newProposer, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(headState, baseBlockRoot, headState.Slot())
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, headState.Slot(), true).AnyTimes()
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(_ context.Context, _ common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+		require.Equal(t, common.Address{0x11}, attrs.SuggestedFeeRecipient)
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	_, err := preparePayloadForTest(t, handler, targetSlot)
+	require.NoError(t, err)
+}
+
+func TestFuluPreparationRejectsUnregisteredProposerBeforeCopyingState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	currentEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	handler.beaconChainCfg.FuluForkEpoch = currentEpoch
+	handler.beaconChainCfg.GloasForkEpoch = currentEpoch + 2
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	targetSlot := (currentEpoch + 1) * handler.beaconChainCfg.SlotsPerEpoch
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).AnyTimes()
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	var preparationErr error
+	allocations := testing.AllocsPerRun(1, func() {
+		_, preparationErr = preparePayloadForTest(t, handler, targetSlot)
+	})
+
+	require.ErrorIs(t, preparationErr, errNotOurProposal)
+	require.Less(t, allocations, 1000.0, "an unregistered Fulu proposer should not require a full state copy")
+}
+
+// Memoization must use the head paired with the state that produced the verdict, not an earlier
+// selected-head snapshot.
+func TestPreparePayloadForReturnsViewedHeadWhenProposalIsNotOurs(t *testing.T) {
+	postState, handler, syncedData, _, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	viewRoot := common.Hash{0x41}
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, viewRoot, postState.Slot())
+		})
+	sampled := preparationKey{
+		targetSlot:          targetSlot,
+		headRoot:            common.Hash{0x40},
+		validatorGeneration: 1,
+		gloasPath:           gloasPayloadPathEmpty,
+		targetGasLimit:      30_000_000,
+		targetGasLimitSet:   true,
+	}
+	var scratch payloadPreparationScratch
+
+	outcome, err := handler.preparePayloadForWithScratch(t.Context(), sampled, &scratch)
+
+	require.ErrorIs(t, err, errNotOurProposal)
+	sampled.headRoot = viewRoot
+	sampled.proposerIndex, err = postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	require.Equal(t, sampled, outcome, "an early skip must retain unresolved inputs while updating the viewed head")
+}
+
+func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	// Root and state must come from one view. Separate reads could pair a new root with an old state
+	// and produce payload inputs that production can never reproduce.
+	viewRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, viewRoot, postState.Slot())
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(viewRoot, postState.Slot(), true).AnyTimes()
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(_ context.Context, _ common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+		require.NotNil(t, attrs.ParentBeaconBlockRoot)
+		require.Equal(t, viewRoot, *attrs.ParentBeaconBlockRoot)
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	primedHead, err := preparePayloadForTest(t, handler, targetSlot)
+	require.NoError(t, err)
+	require.Equal(t, viewRoot, primedHead)
+}
+
+func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
+	var p preparedPayload
+	first := []byte{1, 1, 1, 1, 1, 1, 1, 1}
+	second := []byte{2, 2, 2, 2, 2, 2, 2, 2}
+	now := time.Unix(100, 0)
+
+	// Consecutive proposals: priming slot 11 must not evict slot 10, whose block may still be
+	// in production.
+	p.set(10, first, common.Hash{}, now)
+	p.set(11, second, common.Hash{}, now)
+	require.Positive(t, preparedWarmup(&p, 10, first, now.Add(time.Second)))
+	require.Positive(t, preparedWarmup(&p, 11, second, now.Add(time.Second)))
+
+	// Records old enough that they can no longer be produced are dropped, so the map is bounded.
+	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3}, common.Hash{}, now)
+	require.Zero(t, preparedWarmup(&p, 10, first, now.Add(time.Second)))
+}
+
+func TestPreparedPayloadCopiesTheID(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	now := time.Unix(100, 0)
+
+	p.set(10, id, common.Hash{}, now)
+	id[0] = 0xff
+
+	// The caller's buffer must not be able to invalidate, or forge, a later match.
+	require.Positive(t, preparedWarmup(&p, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now.Add(time.Second)))
+	require.Zero(t, preparedWarmup(&p, 10, id, now.Add(time.Second)))
+}
+
+func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
+	for _, change := range []string{"head", "payload status", "verification", "PTC decision"} {
+		t.Run(change, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			root, payload := common.Hash{1}, common.Hash{2}
+			store := mock_services.NewForkChoiceStorageMock(t)
+			store.HeadVal, store.HeadPayloadStatusVal = root, cltypes.PayloadStatusFull
+			store.VerifiedPayloads = map[common.Hash]bool{root: true}
+			store.SetEnvelope(root, &cltypes.SignedExecutionPayloadEnvelope{})
+			synced := sync_mock_services.NewMockSyncedData(ctrl)
+			synced.EXPECT().SelectedHead().Return(root, uint64(10), true).AnyTimes()
+			engine := newPayloadBuildEngine(t, ctrl)
+			calls := 0
+			engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+				calls++
+				if calls > 1 {
+					return nil, errors.New("unexpected builder retry after parent changed")
+				}
+				switch change {
+				case "head":
+					store.HeadVal = common.Hash{9}
+				case "payload status":
+					store.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+				case "verification":
+					store.VerifiedPayloads[root] = false
+				case "PTC decision":
+					buildFull := false
+					store.ShouldBuildOnFullVal = &buildFull
+				}
+				return nil, chainreader.ErrExecutionBusy
+			}
+			handler := &ApiHandler{engine: engine, syncedData: synced, forkchoiceStore: store}
+			id, err := handler.startPayloadBuildForPreparation(t.Context(), 11, root, payload, gloasPayloadPathFull, new(engine_types.PayloadAttributes))
+			require.Error(t, err)
+			require.Empty(t, id)
+			require.Equal(t, 1, calls, "a changed parent must stop retries before another builder call")
+			require.True(t, handler.payloadPreparationGate.idle())
+		})
+	}
+}
+
+func TestBlockBuilderWindowGloasLateStartKeepsMinimumBuildTime(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	for _, test := range []struct {
+		name      string
+		startedAt time.Duration
+		firstPoll time.Duration
+		pollUntil time.Duration
+	}{
+		{"after the unprepared collection point", 1300 * time.Millisecond, 1700 * time.Millisecond, 1800 * time.Millisecond},
+		{"capped at the prepared collection point", 2 * time.Second, 2150 * time.Millisecond, 2250 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			window := computeBlockBuilderWindow(slotStart.Add(test.startedAt), slotStart, cfg, clparams.GloasVersion, 0)
+			require.Equal(t, slotStart.Add(test.firstPoll), window.firstGetAt)
+			require.Equal(t, slotStart.Add(test.pollUntil), window.pollUntil)
+		})
+	}
+}
+
+func TestBlockBuilderWindowShortGloasWarmupPollsNoLaterThanUnprepared(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	window := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.GloasVersion, 500*time.Millisecond)
+
+	require.Equal(t, slotStart.Add(900*time.Millisecond), window.firstGetAt)
+	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+}

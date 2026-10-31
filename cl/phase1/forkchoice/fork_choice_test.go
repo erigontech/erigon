@@ -19,11 +19,15 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
-	"math"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -35,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -45,8 +50,152 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		load func() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState)
+	}{
+		{name: "bellatrix", load: tests.GetBellatrixRandom},
+		{name: "capella", load: tests.GetCapellaRandom},
+		{name: "electra", load: tests.GetElectraRandom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks, anchorState, _ := tc.load()
+			block := blocks[0]
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			executionHash := block.Block.Body.ExecutionPayload.BlockHash
+			encoded, err := block.EncodeSSZ(nil)
+			require.NoError(t, err)
+			invalid := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), block.Version())
+			require.NoError(t, invalid.DecodeSSZ(encoded, int(block.Version())))
+			invalid.Block.Body.ExecutionPayload.GasUsed++
+			if block.Version() >= clparams.DenebVersion {
+				invalid.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+				invalid.Block.Body.ExecutionPayload.BlobGasUsed = 0
+				invalid.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+			}
+			invalidRoot, err := invalid.Block.HashSSZ()
+			require.NoError(t, err)
+			require.NotEqual(t, blockRoot, invalidRoot)
+			engine, err := execution_client.NewExecutionClientDirect(chainreader.ChainReaderWriterEth1{}, nil)
+			require.NoError(t, err)
+			mockEngine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(engine.NewPayload)
+			store := newBellatrixForkChoiceStore(t, anchorState, mockEngine)
+			store.OnTick((anchorState.GenesisTime() + block.Block.Slot*anchorState.BeaconConfig().SecondsPerSlot) * 1000)
+			require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
+			store.MarkPayloadVerified(blockRoot, executionHash)
+			status, ok := store.GetRecentExecutionPayloadStatus(executionHash)
+			require.True(t, ok)
+			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
+
+			err = store.OnBlock(t.Context(), invalid, true, true, false)
+			require.ErrorContains(t, err, "OnBlock: invalid execution payload hash")
+			require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+
+			status, ok = store.GetRecentExecutionPayloadStatus(executionHash)
+			require.True(t, ok)
+			require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
+
+			var requestsHash common.Hash
+			if block.Version() >= clparams.ElectraVersion {
+				requestsHash = cltypes.ComputeExecutionRequestHash(invalid.Block.Body.GetExecutionRequestsList())
+			}
+			invalid.Block.Body.ExecutionPayload.BlockHash, err = invalid.Block.Body.ExecutionPayload.ComputeBlockHash(&invalid.Block.ParentRoot, requestsHash, nil)
+			require.NoError(t, err)
+			mockEngine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusInvalidated, nil)
+			require.ErrorContains(t, store.OnBlock(t.Context(), invalid, true, true, false), "execution payload is invalid")
+			err = store.OnBlock(t.Context(), invalid, true, true, false)
+			require.ErrorContains(t, err, "block is invalid")
+			require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+		})
+	}
+}
+
+func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	injected := errors.New("injected validation error")
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusValidated, injected)
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	err = store.OnBlock(context.Background(), block, true, true, false)
+
+	require.ErrorIs(t, err, injected)
+	require.False(t, store.IsPayloadVerified(blockRoot))
+}
+
+func TestOnBlockRejectsKnownInvalidPayloadWithoutRepeatingEngineCall(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusInvalidated, errors.New("injected invalid payload"))
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+}
+
+func TestOnBlockKnownInvalidRetryClearsOptimisticCandidate(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	executionHash := block.Block.Body.ExecutionPayload.BlockHash
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusNotValidated, nil)
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	require.NoError(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.True(t, store.IsRootOptimistic(blockRoot))
+	store.MarkPayloadInvalid(blockRoot, executionHash)
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.False(t, store.IsRootOptimistic(blockRoot))
+}
+
+func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		engine,
+		pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		forkGraphDisk,
+		beaconevents.NewEventEmitter(),
+		synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true),
+		blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(2000 * 1000)
+	return store
+}
 
 //go:embed test_data/anchor_state.ssz_snappy
 var anchorStateEncoded []byte
@@ -88,18 +237,20 @@ func TestForkChoiceBasic(t *testing.T) {
 	emitters := beaconevents.NewEventEmitter()
 
 	// Create required components
-	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	localValidators := validator_params.NewValidatorParams()
 
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
 	store, err := forkchoice.NewForkChoiceStore(
 		ethClock,
 		anchorState,
 		nil, // execution engine
 		pool,
-		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
+		forkGraphDisk,
 		emitters,
 		sd,
 		blobStorage,
@@ -111,7 +262,15 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
-	store.OnTick(12)
+	store.OnTick(12 * 1000)
+	blockRoot, err := block0x3a.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, store.ValidateBlockForPublishing(block0x3a, false))
+	_, insertedByPreflight := store.GetHeader(blockRoot)
+	require.False(t, insertedByPreflight)
+	block0x3a.Block.StateRoot[0] ^= 1
+	require.ErrorIs(t, store.ValidateBlockForPublishing(block0x3a, false), forkchoice.ErrBlockInvalid)
+	block0x3a.Block.StateRoot[0] ^= 1
 	require.NoError(t, store.OnBlock(ctx, block0x3a, false, true, false))
 	// Check if we get correct status (1)
 	require.Equal(t, uint64(12), store.Time())
@@ -122,8 +281,12 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, headRoot, common.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
 	require.Equal(t, uint64(1), headSlot)
+	selectedRoot, selectedSlot, ok := sd.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, headRoot, selectedRoot)
+	require.Equal(t, headSlot, selectedSlot)
 	// process another tick and another block
-	store.OnTick(36)
+	store.OnTick(36 * 1000)
 	require.NoError(t, store.OnBlock(ctx, block0xc2, false, true, false))
 	// Check if we get correct status (2)
 	require.Equal(t, uint64(36), store.Time())
@@ -134,6 +297,10 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), headSlot)
 	require.Equal(t, headRoot, common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	selectedRoot, selectedSlot, ok = sd.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, headRoot, selectedRoot)
+	require.Equal(t, headSlot, selectedSlot)
 	// last block
 	require.NoError(t, store.OnBlock(ctx, block0xd4, false, true, false))
 	require.Equal(t, uint64(36), store.Time())
@@ -146,11 +313,142 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headRoot, common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// lastly do attestation
 	require.NoError(t, store.OnAttestation(testAttestation, false, false))
-	bs, err := store.GetStateAtBlockRoot(headRoot, true)
+	bs, err := store.GetStateAtBlockRoot(headRoot)
 	require.NoError(t, err)
-	sd.OnHeadState(bs)
+	require.NoError(t, sd.OnHeadState(bs))
+}
 
+func TestCurrentStateReadersDoNotShareStateWithBlockImport(t *testing.T) {
+	ctx := context.Background()
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(blockA, block3aEncoded, int(clparams.AltairVersion)))
+	require.NoError(t, utils.DecodeSSZSnappy(blockB, blockc2Encoded, int(clparams.AltairVersion)))
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
+	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	graph, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig),
+		anchorState,
+		nil,
+		pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		graph,
+		beaconevents.NewEventEmitter(),
+		sd,
+		blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(12 * 1000)
+	require.NoError(t, store.OnBlock(ctx, blockA, false, true, false))
+	rootA, err := blockA.Block.HashSSZ()
+	require.NoError(t, err)
+
+	first, err := store.GetStateAtBlockRoot(rootA)
+	require.NoError(t, err)
+	second, err := store.GetStateAtBlockRoot(rootA)
+	require.NoError(t, err)
+	require.NotSame(t, first, second)
+
+	stop := make(chan struct{})
+	started := make(chan struct{}, 8)
+	errs := make(chan error, 8)
+	var readers sync.WaitGroup
+	for range 8 {
+		readers.Go(func() {
+			started <- struct{}{}
+			for {
+				select {
+				case <-stop:
+					errs <- nil
+					return
+				default:
+				}
+				readState, readErr := store.GetStateAtBlockRoot(rootA)
+				if readErr == nil {
+					readErr = assertStateRootRoundTrip(readState, blockA.Block.StateRoot)
+				}
+				if readErr != nil {
+					errs <- readErr
+					return
+				}
+			}
+		})
+	}
+	for range 8 {
+		<-started
+	}
+
+	writerDone := make(chan error, 1)
+	go func() {
+		store.OnTick(36 * 1000)
+		writerDone <- store.OnBlock(ctx, blockB, false, true, false)
+	}()
+	select {
+	case err := <-writerDone:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("block import timed out")
+	}
+	close(stop)
+	readers.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	rootB, err := blockB.Block.HashSSZ()
+	require.NoError(t, err)
+	postB, err := store.GetStateAtBlockRoot(rootB)
+	require.NoError(t, err)
+	require.NoError(t, assertStateRootRoundTrip(postB, blockB.Block.StateRoot))
+}
+
+func assertStateRootRoundTrip(source *state.CachingBeaconState, want common.Hash) error {
+	if source == nil {
+		return errors.New("state is nil")
+	}
+	cachedRoot, err := source.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if cachedRoot != want {
+		return fmt.Errorf("cached state root %x, want %x", cachedRoot, want)
+	}
+	encoded, err := source.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	decoded := state.New(source.BeaconConfig())
+	if err := decoded.DecodeSSZ(encoded, int(source.Version())); err != nil {
+		return err
+	}
+	freshRoot, err := decoded.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if freshRoot != want {
+		return fmt.Errorf("fresh state root %x, want %x", freshRoot, want)
+	}
+	copyState, err := source.Copy()
+	if err != nil {
+		return err
+	}
+	copyRoot, err := copyState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if copyRoot != want {
+		return fmt.Errorf("copied state root %x, want %x", copyRoot, want)
+	}
+	return nil
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
@@ -176,20 +474,22 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 
 	// Create required components
-	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	localValidators := validator_params.NewValidatorParams()
 
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	})
+	require.NoError(t, err)
 	store, err := forkchoice.NewForkChoiceStore(
 		ethClock,
 		anchorState,
 		nil, // execution engine
 		pool,
-		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
-			Beacon: true,
-		}),
+		forkGraphDisk,
 		emitters,
 		sd,
 		blobStorage,
@@ -198,7 +498,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 		false, // probabilisticHeadGetter
 		nil,   // db: no KV persistence in tests
 	)
-	store.OnTick(2000)
+	store.OnTick(2000 * 1000)
 	require.NoError(t, err)
 	for _, block := range blocks {
 		require.NoError(t, store.OnBlock(ctx, block, false, true, false))

@@ -63,7 +63,7 @@ The all-in-one client is the preferred option for most users:
 
 This CLI command allows you to run an Ethereum **full node** where every process is integrated and no special configuration is needed.
 
-The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship embedded CL.
+The default Consensus Layer utilized is [Caplin](caplin), the Erigon flagship embedded Consensus Layer (CL).
 
 ## Example of configuration
 
@@ -85,7 +85,7 @@ To run Erigon with RPC Daemon, TxPool, and other components in a single process 
 
 ### Flags of Interest
 
-*   Default data directory is `/home/usr/.local/share/erigon`. If you want to store Erigon files in a non-default location, use the flag:
+*   The default data directory is `~/.local/share/erigon` on Linux (`$XDG_DATA_HOME/erigon` when that variable is set), `~/Library/Erigon` on macOS and `%LOCALAPPDATA%\Erigon` on Windows. If you want to store Erigon files in a non-default location, use the flag:
 
     ```bash
     --datadir=/desired/path/to/datadir
@@ -128,7 +128,7 @@ curl -s -X POST -H "Content-Type: application/json" \
   http://localhost:8545
 ```
 
-* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{stage_name, block_number}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. (`startingBlock` is also returned but is hardcoded to `"0x0"` and carries no meaningful info.)
+* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{stage_name, block_number}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. `startingBlock` reports the block the current sync session started from, so `(currentBlock - startingBlock) / (highestBlock - startingBlock)` is the progress of this run.
 * Once fully synced, the result is simply `false`.
 
 :::tip

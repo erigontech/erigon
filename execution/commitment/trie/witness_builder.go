@@ -187,8 +187,8 @@ func (b *WitnessBuilder) processAccountStorage(n *AccountNode, hex []byte, limit
 }
 
 func (b *WitnessBuilder) makeBlockWitness(
-	nd Node, hex []byte, limiter *MerklePathLimiter, force bool) error {
-
+	nd Node, hex []byte, limiter *MerklePathLimiter, force bool,
+) error {
 	processAccountNode := func(key []byte, storageKey []byte, n *AccountNode) error {
 		var retainDec RetainDecider
 		if limiter != nil {

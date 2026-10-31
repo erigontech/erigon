@@ -9,13 +9,13 @@ sidebar_position: 7
 
 The `trace` module is for getting a deeper insight into transaction processing. It includes two sets of calls the transaction trace filtering API and the ad-hoc tracing API.
 
-In order to use the Transaction-Trace Filtering API, Erigon must be fully synced with the argument `trace` in `http.api` flag.
+In order to use the Transaction-Trace Filtering API, Erigon must be fully synced with the argument `trace` in the `--http.api` flag.
 
 ```bash
 ./build/bin/erigon --http.api: eth,erigon,trace
 ```
 
-As for the Ad-hoc Tracing API, as long the blocks have not yet been pruned, the RPC calls will work.
+As for the Ad-hoc Tracing API, as long as the blocks have not yet been pruned, the RPC calls will work.
 
 ## The Ad-hoc Tracing API
 
@@ -65,6 +65,86 @@ then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
 
+## Beacon-chain withdrawals
+
+Beacon-chain withdrawals credit balances outside of any transaction, so by default no
+trace mentions them. `trace_block` and `trace_replayBlockTransactions` can be asked to
+include them by passing a trace-settings object as the last positional parameter. It is
+positional, so the parameters before it have to be supplied even when they are not
+otherwise needed:
+
+```js
+// trace_block(blockNumber, gasBailOut, traceSettings)
+["0x1194bf0", false, { "IncludeWithdrawals": true }]
+
+// trace_replayBlockTransactions(blockNumber, traceTypes, gasBailOut, traceSettings)
+["0x1194bf0", ["stateDiff"], false, { "IncludeWithdrawals": true }]
+```
+
+The default is off — omit the object, or leave the field out, and withdrawals are not
+reported. How they appear depends on the method:
+
+* **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a
+  `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set
+  to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain
+  denominates withdrawals in Gwei). These entries carry `transactionHash` and
+  `transactionPosition` as `null`, since no transaction caused them.
+
+* **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction
+  result shape, so withdrawals surface only through `stateDiff`. You must request
+  `"stateDiff"` in the trace types; when you do, one extra entry is appended to the
+  result array, carrying the withdrawal state changes. Its shape depends on whether the
+  recipient already existed: an existing account gets a `"*"` balance change with `code`
+  and `nonce` marked `"="`, while an account created by the withdrawal itself gets `"+"`
+  entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either
+  way. Multiple withdrawals to the same address are merged into a single balance change.
+
+## The gasBailOut option
+
+`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
+`trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
+`trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
+`trace_call`, `trace_callMany` and `trace_rawTransaction` never enable it.
+`trace_call` and `trace_callMany` run each call object with the fees and block
+environment `eth_call` gives it: a call with no gas price runs free and sees `BASEFEE` 0,
+and a priced call is checked and pays for its gas. A signed transaction passed to
+`trace_rawTransaction` pays for its gas as it would in a block. The gas
+is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
+reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
+`stateDiff`.
+
+:::warning
+`gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
+changes replayed state in ways that make the output unsuitable for reconstructing
+balances:
+
+* **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
+  calls whenever the flag is set, for *every* replayed transaction — funded senders
+  included, not only underfunded ones.
+* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout` — that
+  is the internal Go parameter, spelled with a lowercase `o`, not the JSON-RPC
+  `gasBailOut` this section documents.
+* **The producer is still paid.** The block producer's tip is credited as usual.
+* **An unaffordable value transfer is credited anyway.** When the sender cannot cover a
+  non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
+  while still crediting the recipient. Value appears from nowhere, so a trace can show
+  what looks like balance creation.
+* **Where the chain configures a burn contract, that contract is credited too.** A
+  **non-free** London transaction credits the configured `burntContract` with
+  `gasUsed * baseFee`; on Aura from Prague the blob fee is added on top. Gnosis and
+  Chiado are the chains that configure one. The sender was never debited, so this is a second source of apparent balance
+  creation in `stateDiff`. Aura marks zero-fee certified service transactions as free
+  and the credit is guarded by `!msg.IsFree()`, so those are excluded. Chains with no
+  configured contract never receive this extra credit — every other effect above still
+  applies to them.
+:::
+
+Whether one transaction's altered state is visible to the next depends on the execution
+path. Replaying a historical block for traces alone runs each transaction in parallel
+against its own canonical pre-state, so nothing propagates. The sequential path — taken
+when `stateDiff` or `vmTrace` is requested, and for single-transaction blocks — carries the altered state forward to every later transaction
+in the block.
+
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing
@@ -94,7 +174,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `trace_callMany` | `Array<Object>` — one per input call |
 | `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash` |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
-| `trace_get` | `TraceEntry` (single call frame at the requested position) |
+| `trace_get` | `TraceEntry` (single call frame at the requested `traceAddress` path) |
 
 ### Top-level (ad-hoc tracing) fields
 
@@ -102,8 +182,8 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- | --- |
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
-| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. See **TraceEntry fields** below. |
-| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
+| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
+| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `op` name, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
 ### TraceEntry fields
@@ -113,15 +193,15 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | Field | Type | Description |
 | --- | --- | --- |
 | `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
-| `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
-| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
+| `result` | Object \| null | The outcome of the action. `null` if the call frame failed other than by reverting. See **Result variants**. |
+| `error` | String | (Optional) Present when the call frame failed, with a Parity-style label: `"Reverted"`, `"Out of gas"`, `"Bad instruction"`, `"Bad jump destination"`, `"Stack underflow"`, `"Out of stack"`, `"Mutable Call In Static Context"`, `"Built-in failed"` (a precompile failure), `"Out of bounds"`, `"Invalid code"` (created code starting with `0xEF`), `"Contract address collision"`, `"Nonce overflow"`, `"Insufficient balance for transfer"` or `"Max call depth exceeded"`. A code deposit failure, including code above the EIP-170 size limit, is `"Out of gas"`. Any other failure keeps its Go error text. For `"Reverted"`, `result` holds `gasUsed` and `output`, the revert data, for a `create` frame too; for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
-| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
-| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. Absent for `"reward"` entries. |
+| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. `null` for `"reward"` entries. |
+| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. `null` for `"reward"` entries. |
 
 ### Action variants
 
@@ -183,6 +263,8 @@ The `result` object's shape depends on `type`:
 | `code` | DATA | Deployed runtime bytecode of the new contract. |
 | `address` | DATA, 20 BYTES | Address of the newly deployed contract. |
 
+A reverted `create` frame deploys no contract, so its `result` has the `call` shape, `gasUsed` and `output`, with the revert data as `output`. `trace_filter` does not match a failed `create` by the address it would have occupied.
+
 **`type: "suicide"` and `type: "reward"`**
 
 `result` is `null` — these actions have no return value.
@@ -197,13 +279,13 @@ Executes the given call and returns a number of possible traces for it.
 
 #### Parameters
 
-1. `Object` - \[Transaction object] where `from` field is optional and `nonce` field is omitted.
+1. `Object` - \[Transaction object] where the `from` field is optional and the `nonce` field is omitted.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported and returns `-32602`: the call is executed against committed state, so there is no pending block to execute on top of.
 
 #### Returns
 
-`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
+`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; `stateDiff` and `vmTrace` are `null` when not requested, while `trace` is an empty array. See [Response Fields Reference](#response-fields-reference) for full field semantics.
 
 #### Example
 
@@ -242,28 +324,28 @@ Response
 
 ### trace\_callMany
 
-Performs multiple call traces on top of the same block. i.e. transaction `n` will be executed on top of a pending block with all `n-1` transactions applied (traced) first. Allows to trace dependent transactions.
+Performs multiple call traces on top of the same block. i.e. transaction `n` will be executed on top of the selected block's state with all `n-1` transactions applied (traced) first. Allows to trace dependent transactions.
 
 #### Parameters
 
 1. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'` (default block parameter).
+2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'` or `'earliest'` (default block parameter). `'pending'` is not supported and returns `-32602`: the calls are executed against committed state, so there is no pending block to execute on top of.
 
 ```js
 params: [
   [
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
     ],
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
@@ -282,7 +364,7 @@ params: [
 Request
 
 ```bash
-curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_callMany","params":[[[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]],[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 
@@ -299,10 +381,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -321,10 +403,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -405,7 +487,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported and returns `-32602`: tracing replays committed state, so there is no pending block to replay.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
 ```js
@@ -515,11 +597,11 @@ Response
 
 ### trace\_block
 
-Returns traces created at given block.
+Returns traces created at the given block.
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported and returns `-32602`: tracing replays committed state, so there is no pending block to replay.
 
 ```js
 params: [
@@ -577,19 +659,23 @@ Response
 
 ### trace\_filter
 
-Returns traces matching given filter
+Returns traces matching the given filter.
 
 #### Parameters
 
 1. `Object` - The filter object
-   * `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
-   * `toBlock`: `Quantity` or `Tag` - (optional) To this block.
+   * `fromBlock`: `Quantity` or `Tag` - (optional) From this block. Defaults to the latest executed block; send `"earliest"` to scan from genesis.
+   * `toBlock`: `Quantity` or `Tag` - (optional) To this block. Defaults to the latest executed block. A `toBlock` below `fromBlock`, including the default start, returns `-32602`.
+   * `blockHash`: `Data`, 32 Bytes - (optional) Selects exactly the block with this hash, as in `eth_getLogs`, instead of a range. The result, including `[]`, is for that block, and address matching, `mode`, `after` and `count` apply as for a single-block range. Setting it together with `fromBlock` or `toBlock` returns `-32602`. A hash that does not name a canonical, executed block, including one reorganized out of the chain, returns `-32001`, even with `count` 0; a block below the prune boundary returns an error naming the boundary instead.
    * `fromAddress`: `Array` - (optional) Sent from these addresses.
-   * `toAddress`: `Address` - (optional) Sent to these addresses.
+   * `toAddress`: `Array` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+   * `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. A `null` mode is the same as an omitted one. Other mode values, including `""`, return `-32602`.
 
+   The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
+
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
 ```js
 params: [{
@@ -651,12 +737,12 @@ Response
 
 ### trace\_get
 
-Returns trace at given position.
+Returns the call frame at the given `traceAddress` path.
 
 #### Parameters
 
 1. `Hash` - Transaction hash.
-2. `Array` - Index positions of the traces.
+2. `Array` - `traceAddress` path of the call frame: `[]` for the root call, `["0x1", "0x0"]` for the first child of the second child of the root.
 
 ```js
 params: [
@@ -667,7 +753,7 @@ params: [
 
 #### Returns
 
-A single `TraceEntry` corresponding to the call frame at the requested position, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
+A single `TraceEntry` corresponding to the call frame at the requested `traceAddress` path, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -714,7 +800,7 @@ Response
 
 ### trace\_transaction
 
-Returns all traces of given transaction
+Returns all traces of the given transaction.
 
 #### Parameters
 

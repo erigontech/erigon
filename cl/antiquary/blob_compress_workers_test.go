@@ -1,0 +1,111 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package antiquary
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/db/snaptype"
+)
+
+// Retirement at the tip covers a single chunk and must stay single-threaded so it does not
+// compete with execution. A backlog is the case EL retirement handles with its initial-cycle
+// worker bump, and the one that otherwise compresses for days.
+func TestIsBlobBacklog(t *testing.T) {
+	const limit = uint64(snaptype.CaplinMergeLimit)
+
+	for _, tc := range []struct {
+		name string
+		span uint64
+		want bool
+	}{
+		{"one chunk, the steady tip case", limit, false},
+		{"one slot short of two chunks, so only one is compressed", 2*limit - 1, false},
+		{"exactly two chunks", 2 * limit, true},
+		{"the 72-chunk backlog measured on sepolia", 72 * limit, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isBlobBacklog(1_000_000, 1_000_000+tc.span))
+		})
+	}
+}
+
+// The span is an unsigned subtraction, so a range that does not advance has to be rejected before
+// it wraps into an enormous one.
+func TestIsBlobBacklogHandlesNonAdvancingRange(t *testing.T) {
+	require.False(t, isBlobBacklog(1_000_000, 1_000_000))
+	require.False(t, isBlobBacklog(1_000_000, 999_999))
+}
+
+const (
+	tipFrom, tipTo         = uint64(1_000_000), uint64(1_010_000)
+	backlogFrom, backlogTo = uint64(1_000_000), uint64(1_720_000)
+)
+
+func TestBlobCompressWorkersLeavesTheLimiterAloneAtTheTip(t *testing.T) {
+	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
+	a := &Antiquary{snBuildSema: sema}
+
+	workers, release := a.blobCompressWorkers(tipFrom, tipTo)
+	defer release()
+
+	require.Equal(t, 1, workers)
+	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight),
+		"the tip does not build at full budget, so it must not hold the shared limiter")
+}
+
+// Holding the limiter is what stops a blob catch-up overlapping an EL snapshot build, since both
+// draw on the same estimate of the host.
+func TestBlobCompressWorkersHoldsTheLimiterWhileCatchingUp(t *testing.T) {
+	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
+	a := &Antiquary{snBuildSema: sema}
+
+	workers, release := a.blobCompressWorkers(backlogFrom, backlogTo)
+
+	require.Equal(t, estimate.CompressSnapshot.Workers(), workers)
+	require.False(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight),
+		"a parallel dump must hold the shared build limiter for its duration")
+
+	release()
+	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight), "the limiter must be given back")
+}
+
+// Retiring slowly beats not retiring: an unavailable limiter drops the dump to one worker rather
+// than skipping it, because the blob gate stays shut until the whole range lands.
+func TestBlobCompressWorkersFallsBackWhenTheLimiterIsTaken(t *testing.T) {
+	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
+	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight))
+	a := &Antiquary{snBuildSema: sema}
+
+	workers, release := a.blobCompressWorkers(backlogFrom, backlogTo)
+	defer release()
+
+	require.Equal(t, 1, workers)
+}
+
+func TestBlobCompressWorkersWithoutALimiter(t *testing.T) {
+	a := &Antiquary{}
+
+	workers, release := a.blobCompressWorkers(backlogFrom, backlogTo)
+	defer release()
+
+	require.Equal(t, estimate.CompressSnapshot.Workers(), workers)
+}

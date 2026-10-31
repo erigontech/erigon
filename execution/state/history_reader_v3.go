@@ -25,40 +25,19 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var PrunedError = errors.New("old data not available due to pruning")
+var ErrPruned = errors.New("old data not available due to pruning")
 
-// HistoryReaderV3 Implements StateReader and StateWriter.
-//
-// The read chain, from most-recent to persisted, is:
-//
-//	blockCache (in-flight parallel-block writes, per-field) →
-//	sd.GetAsOf (in-batch memory state) →
-//	ttx.GetAsOf (DB history + snapshot files).
-//
-// blockCache is populated by applyVersionedWrites in the parallel executor
-// for every committed tx in the current block. Those writes do NOT land in
-// sd.mem until Flush at block boundary, so a finalize-time IBS constructed
-// in historic mode (withdrawals, EIP-7002/7251 system calls on a
-// tip-adjacent historic block) would otherwise read the pre-block balance
-// and stomp a prior tx's in-block update. Consulting blockCache first fixes
-// that gap.
-//
-// sd is the SharedDomains for the batch. When non-nil, the reader checks
-// sd.GetAsOf before ttx.GetAsOf so prior-batch writes that haven't been
-// flushed to the history index yet are still visible.
-//
-// RPC and other consumers that want to read strictly persisted history
-// pass sd=nil and blockCache=nil via the legacy NewHistoryReaderV3
-// constructor.
+// HistoryReaderV3 implements StateReader and StateWriter. Reads chain from
+// most-recent to persisted: sd's as-of read (in-batch memory, the shared state cache, ttx) → ttx.GetAsOf (DB
+// history + snapshots). When sd is nil the reader serves strictly persisted history.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
-	sd          *execctx.SharedDomains
-	blockCache  *BlockStateCache
+	sd          execctx.DomainReader
+	asOf        kv.AsOfGetter // ttx, or sd's as-of read bound to ttx; built on the first read
 	tracePrefix string
 	txNum       uint64
 	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
@@ -74,91 +53,30 @@ func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
 // parallel executor. Reads chain sd.GetAsOf (in-memory batch state) then
 // fall back to ttx.GetAsOf so a tx can see prior-tx writes from the same
 // batch that have not yet been flushed to the history index.
-func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDomains, txNum uint64) *HistoryReaderV3 {
+func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainReader, txNum uint64) *HistoryReaderV3 {
 	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
 }
 
-// NewHistoryReaderV3WithBlockCache is the finalize-time variant used by
-// the parallel executor for historic blocks. In addition to the
-// sd.GetAsOf → ttx.GetAsOf chain, it consults the per-block BlockStateCache
-// first so the block-finalize IBS (withdrawals, EIP-7002/7251 system calls)
-// sees every prior-tx write recorded in the current block, not just the
-// pre-block committed state.
-func NewHistoryReaderV3WithBlockCache(ttx kv.TemporalTx, sd *execctx.SharedDomains, blockCache *BlockStateCache, txNum uint64) *HistoryReaderV3 {
-	return &HistoryReaderV3{ttx: ttx, sd: sd, blockCache: blockCache, txNum: txNum}
-}
-
-// SetBlockStateCache updates the in-flight block cache tier. Used when the
-// reader is reused across blocks in the parallel executor.
-func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
-	hr.blockCache = cache
-}
-
-// getAsOf chains blockCache (in-flight parallel block writes, per-field)
-// before sd.GetAsOf (in-batch memory) and ttx.GetAsOf (DB history +
-// snapshot files). Callers requesting only persisted history construct the
-// reader with sd=nil and blockCache=nil. If sd.mem has inMemHistoryReads
-// disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
-// we silently fall through to ttx so the same reader type is usable in
-// both modes.
-//
-// blockCache is consulted for the AccountsDomain and StorageDomain only;
-// CodeDomain is not currently cached per block, so for code reads we fall
-// straight through to sd/ttx. For storage we use the full 52-byte
-// composite key (addr||slot) like the rest of the state domain.
+// getAsOf reads through sd's as-of read (in-batch memory, the shared state cache, then ttx). When sd is nil, or
+// sd.mem has inMemHistoryReads disabled, it falls through to ttx so the same reader type
+// serves both the in-batch and persisted-history modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.blockCache != nil {
-		switch domain {
-		case kv.AccountsDomain:
-			if len(key) == 20 {
-				var raw common.Address
-				copy(raw[:], key)
-				addr := accounts.InternAddress(raw)
-				if cached, hit := hr.blockCache.GetCurrentAccount(addr); hit {
-					// hit==true is authoritative for the in-flight block, including the
-					// deletion case (cached==nil). Return immediately rather than falling
-					// through to sd/ttx, which would surface the pre-deletion value from
-					// history. Downstream callers (ReadAccountData) treat enc=nil as
-					// "no account" regardless of ok, so emitting ok=true here just
-					// reflects the cache's authoritative status.
-					if cached == nil {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
-		case kv.StorageDomain:
-			if len(key) == 20+32 {
-				var rawAddr common.Address
-				var rawSlot common.Hash
-				copy(rawAddr[:], key[:20])
-				copy(rawSlot[:], key[20:])
-				addr := accounts.InternAddress(rawAddr)
-				slot := accounts.InternKey(rawSlot)
-				if cached, hit := hr.blockCache.GetCurrentStorage(addr, slot); hit {
-					// Same as the account case above: hit==true is authoritative even
-					// when the slot was cleared (len(cached)==0), so do not fall through.
-					if len(cached) == 0 {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
+	if hr.asOf == nil {
+		hr.asOf = hr.ttx
+		if hr.sd != nil {
+			hr.asOf = hr.sd.AsOfGetter(hr.ttx)
 		}
 	}
-	if hr.sd != nil {
-		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
-		if err == nil && ok {
-			return enc, true, nil
-		}
+	if enc, ok, err = hr.asOf.GetAsOf(domain, key, hr.txNum); hr.sd != nil && errors.Is(err, kv.ErrInMemHistoryDisabled) {
+		return hr.ttx.GetAsOf(domain, key, hr.txNum)
 	}
-	return hr.ttx.GetAsOf(domain, key, hr.txNum)
+	return enc, ok, err
 }
 
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx, hr.asOf = tx, nil }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -166,33 +84,71 @@ func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.tracePrefix = tracePrefix
 }
 
-func (r *HistoryReaderV3) Trace() bool {
-	return r.trace
+func (hr *HistoryReaderV3) Trace() bool {
+	return hr.trace
 }
 
-func (r *HistoryReaderV3) TracePrefix() string {
-	return r.tracePrefix
+func (hr *HistoryReaderV3) TracePrefix() string {
+	return hr.tracePrefix
 }
 
-// Gets the txNum where Account, Storage and Code history begins.
-// If the node is an archive node all history will be available therefore
-// the result will be 0.
-//
-// For non-archive node old history files get deleted, so this number will vary
-// but the goal is to know where the historical data begins.
-func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
+var stateHistoryDomains = []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+
+// StateHistoryStartTxNum returns a conservative lower bound for account, storage
+// and code history. A domain may start later because it had no earlier changes,
+// so the maximum would reject valid reads. The minimum can still admit a request
+// whose history is missing in another domain.
+func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 	dbg := ttx.Debug()
-	return min(
-		dbg.HistoryStartFrom(kv.AccountsDomain),
-		dbg.HistoryStartFrom(kv.StorageDomain),
-		dbg.HistoryStartFrom(kv.CodeDomain),
-	)
+	if dbg == nil {
+		return 0, errors.New("state history requires a temporal debug view")
+	}
+	var start uint64
+	for i, domain := range stateHistoryDomains {
+		domainStart, err := dbg.HistoryStartFrom(domain)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 || domainStart < start {
+			start = domainStart
+		}
+	}
+	return start, nil
+}
+
+// RequireStateHistory returns an ErrPruned error unless account, storage and
+// code history cover the txNums [fromTxNum, toTxNum). History held only in the
+// DB must show a record in that range: an empty history table reports no start,
+// and a history read then answers from the latest state.
+func RequireStateHistory(dbg kv.TemporalDebugTx, fromTxNum, toTxNum uint64) error {
+	for _, domain := range stateHistoryDomains {
+		if start := dbg.HistoryCoverageStart(domain); fromTxNum < start {
+			return fmt.Errorf("%w: %s history starts at txNum %d, requested %d", ErrPruned, domain, start, fromTxNum)
+		}
+	}
+	if fromTxNum < dbg.TxNumsInFiles(stateHistoryDomains...) {
+		return nil
+	}
+	for _, domain := range stateHistoryDomains {
+		recorded, err := dbg.HistoryRecordedInDB(domain, fromTxNum, toTxNum)
+		if err != nil {
+			return err
+		}
+		if recorded {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: no state history recorded in txNums [%d, %d)", ErrPruned, fromTxNum, toTxNum)
 }
 
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	hr.addr = address.Value()
+	return hr.ReadAccountByPlainAddr(address.Value())
+}
+
+func (hr *HistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	hr.addr = address
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
@@ -208,6 +164,12 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %s, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, a.Balance.String(), a.CodeHash)
 	}
 	return &a, nil
+}
+
+func (hr *HistoryReaderV3) HasAccount(address common.Address) (bool, error) {
+	hr.addr = address
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
+	return ok && len(enc) > 0, err
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -232,40 +194,9 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 	return res, ok, err
 }
 
-func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	hr.addr = address.Value()
-	to, ok := kv.NextSubtree(hr.addr[:])
-	if !ok {
-		to = nil
-	}
-
-	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, hr.addr[:], to, hr.txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return false, err
-	}
-
-	defer it.Close()
-	// Note: if a storage for an address gets deleted, the historical RangeAsOf will return its slots as empty values.
-	// If the address doesn't have any storage slots, then we return "no storage" immediately
-	// If the address has storage slots, but they are all empty, then we return "no storage"
-	// If we see a non-empty slot for then address, then we return "has storage" immediately
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return false, err
-		}
-
-		if len(v) != 0 {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	// code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	hr.addr = address.Value()
 	code, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	if hr.trace {

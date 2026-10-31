@@ -17,12 +17,19 @@
 package engine_block_downloader
 
 import (
+	"context"
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func newTestBadHeadersDownloader(t *testing.T) *EngineBlockDownloader {
@@ -97,5 +104,67 @@ func TestNewPayloadGapExceedsLimit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, newPayloadGapExceedsLimit(tt.currentHead, tt.missingNum, tt.limit))
 		})
+	}
+}
+
+// domainAheadExecStub answers like an execution module whose state files run
+// ahead of its TxNums index.
+type domainAheadExecStub struct {
+	execmodule.ExecutionModule
+	fcuStatus      execmodule.ExecutionStatus
+	fcuLatestValid common.Hash
+	fcuCalls       int
+}
+
+func (*domainAheadExecStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+	return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusTooFarAway}, nil
+}
+
+func (s *domainAheadExecStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+	s.fcuCalls++
+	return execmodule.ForkChoiceResult{Status: s.fcuStatus, ValidationError: "domain ahead of blocks", LatestValidHash: s.fcuLatestValid}, nil
+}
+
+// A domain-ahead fork choice has already stored the batch's canonical markers
+// and TxNums, so the download must go on instead of dropping the run.
+func TestExecDownloadedBatch_DomainAheadOfBlocksKeepsDownloading(t *testing.T) {
+	e := newTestBadHeadersDownloader(t)
+	e.logger = testlog.Logger(t, log.LvlCrit)
+	exec := &domainAheadExecStub{fcuStatus: execmodule.ExecutionStatusTooFarAway}
+	e.chainRW = chainreader.NewChainReaderEth1(nil, exec, 0)
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
+	require.NoError(t, e.execDownloadedBatch(t.Context(), block, block.Hash()))
+	require.Equal(t, 1, exec.fcuCalls)
+}
+
+func TestExecDownloadedBatch_RejectedForkChoiceFails(t *testing.T) {
+	for _, status := range []execmodule.ExecutionStatus{execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusBadBlock} {
+		t.Run(status.String(), func(t *testing.T) {
+			e := newTestBadHeadersDownloader(t)
+			e.logger = testlog.Logger(t, log.LvlCrit)
+			exec := &domainAheadExecStub{fcuStatus: status}
+			e.chainRW = chainreader.NewChainReaderEth1(nil, exec, 0)
+			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
+			require.Error(t, e.execDownloadedBatch(t.Context(), block, block.Hash()))
+			require.Equal(t, 1, exec.fcuCalls)
+		})
+	}
+}
+
+// The fork choice names the pre-batch head as latest valid, which the batch
+// blocks below the bad one are not known to fail, so the ancestor stays unknown.
+func TestExecDownloadedBatch_BadBlockForkChoiceMarksBatchBad(t *testing.T) {
+	e := newTestBadHeadersDownloader(t)
+	e.logger = testlog.Logger(t, log.LvlCrit)
+	exec := &domainAheadExecStub{fcuStatus: execmodule.ExecutionStatusBadBlock, fcuLatestValid: common.Hash{0x01}}
+	e.chainRW = chainreader.NewChainReaderEth1(nil, exec, 0)
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
+	requested := common.Hash{0x02}
+	require.Error(t, e.execDownloadedBatch(t.Context(), block, requested))
+	for _, h := range []common.Hash{block.Hash(), requested} {
+		bad, lastValid, validationErr := e.IsBadHeader(h)
+		require.True(t, bad, h)
+		require.Equal(t, common.Hash{}, lastValid)
+		require.Equal(t, "domain ahead of blocks", validationErr)
 	}
 }

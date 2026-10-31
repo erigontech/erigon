@@ -21,12 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -46,31 +46,33 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if args.GasPrice != nil && args.AuthorizationList != nil {
 		return nil, errors.New("both gasPrice and authorizationList specified")
 	}
-	if args.MaxFeePerBlobGas != nil && args.MaxFeePerBlobGas.ToInt().Sign() == 0 {
+	if args.MaxFeePerBlobGas != nil && (*uint256.Int)(args.MaxFeePerBlobGas).IsZero() {
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
 
-	dbTx, err := api.db.BeginTemporalRo(ctx)
+	// The pinned view keeps the current header and the gas-oracle fee defaults
+	// on one head (including the in-flight overlay block); the nonce and
+	// gas-estimate sub-calls still open their own txs.
+	overlayTx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer dbTx.Rollback()
-
-	// Use the overlay so ReadCurrentHeader and the gas oracle see the latest
-	// in-flight block (which may not yet be committed to MDBX).
-	overlayTx := api.filters.WithTemporalOverlay(dbTx)
+	defer overlayTx.Rollback()
 
 	cc, err := api.chainConfig(ctx, overlayTx)
 	if err != nil {
 		return nil, err
 	}
-	head := rawdb.ReadCurrentHeader(overlayTx)
+	head, err := api.currentHeader(ctx, overlayTx)
+	if err != nil {
+		return nil, err
+	}
 	if head == nil {
 		return nil, errors.New("missing current header")
 	}
 
 	if args.Value == nil {
-		args.Value = new(hexutil.Big)
+		args.Value = new(hexutil.U256)
 	}
 
 	if args.Nonce == nil {
@@ -86,8 +88,12 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
 
-	if args.Data != nil && args.Input != nil && !bytes.Equal(*args.Data, *args.Input) {
-		return nil, errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
+	if args.Blobs != nil && args.AuthorizationList != nil {
+		return nil, errors.New("both blobs and authorizationList specified")
+	}
+	sidecar, err := buildBlobSidecar(&args, cc.IsOsaka(head.Time))
+	if err != nil {
+		return nil, err
 	}
 
 	if args.BlobVersionedHashes != nil {
@@ -96,6 +102,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		} else if n > params.MaxBlobsPerTxn {
 			return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", n, params.MaxBlobsPerTxn)
 		}
+	}
+
+	if args.BlobVersionedHashes == nil {
+		// The calls reject a blob fee cap without blob hashes; a filled non-blob transaction has none.
+		args.MaxFeePerBlobGas = nil
 	}
 
 	if args.AuthorizationList != nil && len(args.AuthorizationList) == 0 {
@@ -128,16 +139,19 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			if err != nil {
 				return nil, err
 			}
-			b := blobFee.ToBig()
-			args.MaxFeePerBlobGas = (*hexutil.Big)(b.Lsh(b, 1))
+			blobFeeCap, overflow := new(uint256.Int).AddOverflow(&blobFee, &blobFee)
+			if overflow {
+				return nil, fmt.Errorf("maxFeePerBlobGas overflow: 2*blobGasPrice (%v) exceeds 256 bits", &blobFee)
+			}
+			args.MaxFeePerBlobGas = (*hexutil.U256)(blobFeeCap)
 		}
 	}
 
-	chainIDBig := cc.ChainID.ToBig()
+	if err := ethapi.ChainIDMismatch(args.ChainID, cc.ChainID); err != nil {
+		return nil, err
+	}
 	if args.ChainID == nil {
-		args.ChainID = (*hexutil.Big)(chainIDBig)
-	} else if have := args.ChainID.ToInt(); have.Cmp(chainIDBig) != 0 {
-		return nil, fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, cc.ChainID)
+		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(cc.ChainID))
 	}
 
 	if args.Gas == nil {
@@ -154,18 +168,116 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	var buf bytes.Buffer
-	if err := txn.MarshalBinary(&buf); err != nil {
+	if sidecar != nil {
+		sidecar = txn.(*types.BlobTx).WithSidecar(sidecar)
+		err = sidecar.MarshalBinaryWrapped(&buf)
+	} else {
+		err = txn.MarshalBinary(&buf)
+	}
+	if err != nil {
 		return nil, err
 	}
-
 	return &ethapi.SignTransactionResult{
-		Raw: buf.Bytes(),
-		Tx:  ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil),
+		Raw:     buf.Bytes(),
+		Tx:      ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil),
+		Sidecar: sidecar,
 	}, nil
 }
 
+// buildBlobSidecar computes the missing commitments, proofs and versioned hashes
+// from args.Blobs, or verifies the provided ones. It returns nil when no blobs are given.
+func buildBlobSidecar(args *ethapi.CallArgs, cellProofs bool) (*types.BlobTxWrapper, error) {
+	if args.Blobs == nil {
+		return nil, nil
+	}
+	if args.Commitments == nil && args.Proofs != nil {
+		return nil, errors.New("blob proofs provided while commitments were not")
+	} else if args.Commitments != nil && args.Proofs == nil {
+		return nil, errors.New("blob commitments provided while proofs were not")
+	}
+
+	n := len(args.Blobs)
+	if n > params.MaxBlobsPerTxn {
+		return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", n, params.MaxBlobsPerTxn)
+	}
+	if args.BlobVersionedHashes != nil && len(args.BlobVersionedHashes) != n {
+		return nil, fmt.Errorf("number of blobs and hashes mismatch (have=%d, want=%d)", len(args.BlobVersionedHashes), n)
+	}
+	if args.Commitments != nil && len(args.Commitments) != n {
+		return nil, fmt.Errorf("number of blobs and commitments mismatch (have=%d, want=%d)", len(args.Commitments), n)
+	}
+	sidecar := &types.BlobTxWrapper{Blobs: make(types.Blobs, n)}
+	proofLen := n
+	if cellProofs {
+		sidecar.WrapperVersion = 1
+		proofLen = n * int(params.CellsPerExtBlob)
+	}
+	commitments, proofs := args.Commitments, args.Proofs
+	if proofs != nil && len(proofs) != proofLen {
+		if len(proofs) != n {
+			return nil, fmt.Errorf("number of blobs and proofs mismatch (have=%d, want=%d)", len(proofs), proofLen)
+		}
+		// Blob proofs from pre-Osaka tooling are replaced by freshly computed cell proofs.
+		commitments, proofs = nil, nil
+	}
+
+	for i, blob := range args.Blobs {
+		if len(blob) != params.BlobSize {
+			return nil, fmt.Errorf("blobs[%d]: invalid length %d, want %d", i, len(blob), params.BlobSize)
+		}
+		copy(sidecar.Blobs[i][:], blob)
+	}
+
+	var err error
+	switch {
+	case commitments == nil && cellProofs:
+		if sidecar.Commitments, err = sidecar.Blobs.ComputeCommitments(); err != nil {
+			return nil, err
+		}
+		if sidecar.Proofs, err = sidecar.Blobs.ComputeCellProofs(); err != nil {
+			return nil, err
+		}
+	case commitments == nil:
+		if sidecar.Commitments, _, sidecar.Proofs, err = sidecar.Blobs.ComputeCommitmentsAndProofs(); err != nil {
+			return nil, err
+		}
+	default:
+		if sidecar.Commitments, err = parse48[types.KZGCommitment]("commitments", commitments); err != nil {
+			return nil, err
+		}
+		if sidecar.Proofs, err = parse48[types.KZGProof]("proofs", proofs); err != nil {
+			return nil, err
+		}
+		if err := sidecar.VerifyProofs(); err != nil {
+			return nil, fmt.Errorf("failed to verify blob proof: %w", err)
+		}
+	}
+
+	hashes := make([]common.Hash, n)
+	for i, c := range sidecar.Commitments {
+		hashes[i] = c.ComputeVersionedHash()
+		if len(args.BlobVersionedHashes) == n && args.BlobVersionedHashes[i] != hashes[i] {
+			return nil, fmt.Errorf("blob hash verification failed (have=%s, want=%s)", args.BlobVersionedHashes[i], hashes[i])
+		}
+	}
+	args.BlobVersionedHashes = hashes
+	return sidecar, nil
+}
+
+func parse48[T ~[types.LEN_48]byte](field string, in []hexutil.Bytes) ([]T, error) {
+	out := make([]T, len(in))
+	for i, b := range in {
+		if len(b) != types.LEN_48 {
+			return nil, fmt.Errorf("%s[%d]: invalid length %d, want %d", field, i, len(b), types.LEN_48)
+		}
+		copy(out[i][:], b)
+	}
+	return out, nil
+}
+
 func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {
-	return gasprice.NewOracle(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
+	backend := NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI)
+	return gasprice.NewOracle(backend, ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.gasOracleLogger)
 }
 
 func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, head *types.Header, dbTx kv.TemporalTx) error {
@@ -178,23 +290,23 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 			if err != nil {
 				return err
 			}
-			args.GasPrice = (*hexutil.Big)(price.ToBig())
+			args.GasPrice = (*hexutil.U256)(new(uint256.Int).Set(price))
 		}
 		return nil
 	}
 
 	if args.GasPrice == nil && args.MaxFeePerGas != nil && args.MaxPriorityFeePerGas != nil {
-		if args.MaxFeePerGas.ToInt().Sign() == 0 {
+		if (*uint256.Int)(args.MaxFeePerGas).IsZero() {
 			return errors.New("maxFeePerGas must be non-zero")
 		}
-		if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
+		if (*uint256.Int)(args.MaxFeePerGas).Lt((*uint256.Int)(args.MaxPriorityFeePerGas)) {
 			return fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", args.MaxFeePerGas, args.MaxPriorityFeePerGas)
 		}
 		return nil
 	}
 
 	if args.GasPrice != nil {
-		if args.GasPrice.ToInt().Sign() == 0 {
+		if (*uint256.Int)(args.GasPrice).IsZero() {
 			return errors.New("gasPrice must be non-zero after london fork")
 		}
 		return nil
@@ -206,16 +318,20 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		if err != nil {
 			return err
 		}
-		args.MaxPriorityFeePerGas = (*hexutil.Big)(tip.ToBig())
+		args.MaxPriorityFeePerGas = (*hexutil.U256)(new(uint256.Int).Set(tip))
 	}
 	if args.MaxFeePerGas == nil {
-		val := new(big.Int).Add(
-			args.MaxPriorityFeePerGas.ToInt(),
-			new(big.Int).Lsh(head.BaseFee.ToBig(), 1),
-		)
-		args.MaxFeePerGas = (*hexutil.Big)(val)
+		doubledBaseFee, overflow := new(uint256.Int).AddOverflow(head.BaseFee, head.BaseFee)
+		if overflow {
+			return fmt.Errorf("maxFeePerGas overflow: 2*baseFee (%v) exceeds 256 bits", head.BaseFee)
+		}
+		val, overflow := new(uint256.Int).AddOverflow((*uint256.Int)(args.MaxPriorityFeePerGas), doubledBaseFee)
+		if overflow {
+			return fmt.Errorf("maxFeePerGas overflow: maxPriorityFeePerGas (%v) + 2*baseFee exceeds 256 bits", args.MaxPriorityFeePerGas)
+		}
+		args.MaxFeePerGas = (*hexutil.U256)(val)
 	}
-	if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
+	if (*uint256.Int)(args.MaxFeePerGas).Lt((*uint256.Int)(args.MaxPriorityFeePerGas)) {
 		if autoFilledPriorityFee {
 			return fmt.Errorf("suggested maxPriorityFeePerGas (%v) exceeds provided maxFeePerGas (%v)", args.MaxPriorityFeePerGas, args.MaxFeePerGas)
 		}

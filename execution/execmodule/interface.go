@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -74,6 +75,9 @@ type ForkChoiceResult struct {
 	Status          ExecutionStatus
 	LatestValidHash common.Hash
 	ValidationError string
+	MissingHash     common.Hash
+	// UpdateInProgress distinguishes admitted asynchronous work from a Busy rejection.
+	UpdateInProgress bool
 }
 
 // ForkChoiceState is the native return type for GetForkChoice.
@@ -93,10 +97,14 @@ type AssembleBlockResult struct {
 
 // AssembledBlockResult is the native return type for GetAssembledBlock.
 type AssembledBlockResult struct {
-	// Busy is true when the builder has not finished yet.
+	// Busy is true when the module was already occupied, not when the builder is still working:
+	// otherwise the call waits for the builder to finish.
 	Busy bool
+	// Unknown is true when no builder is held for the payload id, so nothing will ever arrive for
+	// it. A caller polling that id cannot otherwise tell it from a build still running.
+	Unknown bool
 	// Block holds the assembled block with receipts and requests.
-	// Nil when Busy is true or when no builder was found for the payload ID.
+	// Nil when Busy or Unknown is true, or when the builder produced nothing.
 	Block      *types.BlockWithReceipts
 	BlockValue *uint256.Int
 }
@@ -124,7 +132,9 @@ type ExecutionModule interface {
 	// InsertBlocks stores one or more blocks in the execution layer.
 	// Returns ExecutionStatusSuccess on success or a non-success status on
 	// rejection (e.g. ExecutionStatusTooFarAway).
-	InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error)
+	InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error)
+
+	AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery)
 
 	// --- Chain validation -------------------------------------------------
 
@@ -136,8 +146,8 @@ type ExecutionModule interface {
 
 	// UpdateForkChoice updates the canonical head, safe, and finalized block
 	// hashes.  The caller may set a deadline on ctx to bound how long to wait
-	// synchronously: a DeadlineExceeded returns ForkChoiceResult{Status:Busy}
-	// so the caller can poll with GetForkChoice.
+	// synchronously: an admitted update that exceeds the deadline returns Busy
+	// with UpdateInProgress set so the caller can poll with GetForkChoice.
 	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error)
 
 	// GetForkChoice returns the current fork choice state (head, safe,
@@ -146,12 +156,12 @@ type ExecutionModule interface {
 
 	// --- Block building ---------------------------------------------------
 
-	// AssembleBlock initiates building a new block with the supplied
-	// parameters.  Returns the payload ID assigned to the build job.
+	// AssembleBlock initiates building a block. Busy reports that the execution module is occupied;
+	// otherwise PayloadID identifies the new build.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
-	// GetAssembledBlock retrieves the block that was assembled under the
-	// given payloadID.  The result is Busy when the builder has not finished.
+	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
+	// module is occupied; Unknown reports that no builder is held for payloadID.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
 	// --- Header / body queries --------------------------------------------
@@ -196,6 +206,10 @@ type ExecutionModule interface {
 	// chain.
 	IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error)
 
+	// IsValidated reports whether a payload with blockHash already passed
+	// validation.
+	IsValidated(blockHash common.Hash) bool
+
 	// GetHeaderHashNumber returns the block number for blockHash, or nil
 	// when the hash is unknown.
 	GetHeaderHashNumber(ctx context.Context, blockHash common.Hash) (*uint64, error)
@@ -215,4 +229,7 @@ type ExecutionModule interface {
 	// and whether there is a gap between the snapshot tip and the live
 	// database.
 	FrozenBlocks(ctx context.Context) (frozenBlocks uint64, hasGap bool, err error)
+
+	// InclusionList builds an inclusion list for EIP-7805 from its view of the mempool.
+	InclusionList(ctx context.Context) (types.Transactions, error)
 }

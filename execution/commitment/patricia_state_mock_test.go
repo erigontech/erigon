@@ -35,15 +35,29 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// In memory commitment and state to use with the tests
 type MockState struct {
 	t          testing.TB
 	concurrent atomic.Bool
 
-	mu     sync.RWMutex          // to protect sm and cm for concurrent trie
-	sm     map[string][]byte     // backbone of the state
-	cm     map[string]BranchData // backbone of the commitments
+	mu     sync.RWMutex
+	sm     map[string][]byte
+	cm     map[string]BranchData
 	numBuf [binary.MaxVarintLen64]byte
+
+	putBranches int
+
+	recordPuts atomic.Bool
+	putLog     []recordedBranchPut
+
+	// reuseBranchBuf makes Branch return a single reused buffer, mirroring the
+	// production TrieContext.Branch, so a caller that keeps a branch across a later
+	// Branch read sees it overwritten.
+	reuseBranchBuf atomic.Bool
+	branchBuf      []byte
+}
+
+type recordedBranchPut struct {
+	prefix, data, prev []byte
 }
 
 func NewMockState(t testing.TB) *MockState {
@@ -64,12 +78,17 @@ func (ms *MockState) TempDir() string {
 }
 
 func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
-	ms.cm[string(prefix)] = data
+	// Clone is required by PutBranch's no-retain contract, not incidental: callers pass
+	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
+	ms.cm[string(prefix)] = bytes.Clone(data)
+	ms.putBranches++
+	if ms.recordPuts.Load() {
+		ms.putLog = append(ms.putLog, recordedBranchPut{bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prevData)})
+	}
 	return nil
 }
 
@@ -79,6 +98,10 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		defer ms.mu.RUnlock()
 	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
+		if ms.reuseBranchBuf.Load() {
+			ms.branchBuf = append(ms.branchBuf[:0], exBytes...)
+			return ms.branchBuf, 0, nil
+		}
 		return exBytes, 0, nil
 	}
 	return nil, 0, nil
@@ -116,6 +139,9 @@ func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 		ms.t.Fatalf("GetAccount reading deleted account for key [%x]", plainKey)
 		return nil, nil
 	}
+	// Mirror TrieContext.Account: a domain read yields the whole account record, so it
+	// flags every field. Decode already left CodeHash at empty for a code-less account.
+	ex.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 	return &ex, nil
 }
 
@@ -160,7 +186,6 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 
 func (ms *MockState) TxNum() uint64 { return 0 }
 
-// applyPlainUpdates is called sequentially outside of the trie, so it needs no locking.
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
 		update := updates[i]
@@ -186,21 +211,6 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 	return nil
 }
 
-// applyBranchNodeUpdates is called sequentially outside of the trie, so it needs no locking.
-func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
-	for key, update := range updates {
-		if pre, ok := ms.cm[key]; ok {
-			merged, err := pre.MergeHexBranches(update, nil)
-			if err != nil {
-				panic(err)
-			}
-			ms.cm[key] = merged
-		} else {
-			ms.cm[key] = update
-		}
-	}
-}
-
 func decodeHex(in string) []byte {
 	payload, err := hex.DecodeString(in)
 	if err != nil {
@@ -209,8 +219,6 @@ func decodeHex(in string) []byte {
 	return payload
 }
 
-// UpdateBuilder collects updates to the state
-// and provides them in properly sorted form
 type UpdateBuilder struct {
 	balances   map[string]*uint256.Int
 	nonces     map[string]uint64
@@ -346,7 +354,6 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 	return ub
 }
 
-// Build returns plain keys and the corresponding updates, ordered by increasing hashed key.
 func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
@@ -354,7 +361,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	keccak := keccak.NewFastKeccak()
 	for key := range ub.keyset {
 		keccak.Reset()
-		keccak.Write([]byte(key))
+		_, _ = keccak.Write([]byte(key))
 		h := keccak.Sum(nil)
 		hashedKey := make([]byte, len(h)*2)
 		for i, c := range h {
@@ -367,7 +374,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashedKey := make([]byte, 128)
 	for sk1, k := range ub.keyset2 {
 		keccak.Reset()
-		keccak.Write([]byte(sk1))
+		_, _ = keccak.Write([]byte(sk1))
 		h := keccak.Sum(nil)
 		for i, c := range h {
 			hashedKey[i*2] = (c >> 4) & 0xf
@@ -375,7 +382,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 		}
 		for sk2 := range k {
 			keccak.Reset()
-			keccak.Write([]byte(sk2))
+			_, _ = keccak.Write([]byte(sk2))
 			h2 := keccak.Sum(nil)
 			for i, c := range h2 {
 				hashedKey[64+i*2] = (c >> 4) & 0xf
@@ -452,7 +459,6 @@ func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, u
 	return upd
 }
 
-// WrapKeyUpdatesInto adds keys to an existing Updates without clearing its prior contents.
 func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Update) {
 	tb.Helper()
 	for i, key := range keys {

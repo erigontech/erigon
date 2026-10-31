@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -125,10 +126,9 @@ func (f *FetcherBase) FetchBodies(
 	totalBodiesSize := 0
 
 	for len(headers) > 0 {
-		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
-		// In most cases the response will contain incomplete bodies list (ie < MaxBodiesServe) so we just
-		// continue asking it for more starting from the first hash in the sequence after the last received one.
-		// This is akin to how a paging API is consumed.
+		// Request up to MaxBodiesServe to make use of the peer's response size limit.
+		// Non-empty partial responses must match a prefix of the requested headers;
+		// continue with the remaining headers.
 		var headersChunk []*types.Header
 		if len(headers) > eth.MaxBodiesServe {
 			headersChunk = headers[:eth.MaxBodiesServe]
@@ -180,7 +180,7 @@ func (f *FetcherBase) FetchBlocksBackwardsByHash(
 	bodies := bodiesResponse.Data
 	blocks := make([]*types.Block, len(headers))
 	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i], nil)
 	}
 
 	response := FetcherResponse[[]*types.Block]{
@@ -376,8 +376,8 @@ func (f *FetcherBase) fetchBodies(
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[*eth.BlockBodiesPacket66])
-	observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+	messages := make(chan *DecodedInboundMessage[BlockBodiesEnvelope])
+	observer := func(message *DecodedInboundMessage[BlockBodiesEnvelope]) {
 		select {
 		case <-ctx.Done():
 			return
@@ -408,25 +408,15 @@ func (f *FetcherBase) fetchBodies(
 		return nil, err
 	}
 
-	if err := f.validateBodies(message.BlockBodiesPacket, headers); err != nil {
+	bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, headers)
+	if err != nil {
 		return nil, err
 	}
 
 	return &FetcherResponse[[]*types.Body]{
-		Data:      message.BlockBodiesPacket,
+		Data:      bodies,
 		TotalSize: messageSize,
 	}, nil
-}
-
-func (f *FetcherBase) validateBodies(bodies []*types.Body, headers []*types.Header) error {
-	if len(bodies) > len(headers) {
-		return &ErrTooManyBodies{
-			requested: len(headers),
-			received:  len(bodies),
-		}
-	}
-
-	return nil
 }
 
 func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)) (TData, error) {
@@ -449,6 +439,47 @@ func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)
 	}
 
 	return data, nil
+}
+
+func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([]*types.Body, error) {
+	if len(encodedBodies) == 0 {
+		return nil, nil
+	}
+
+	stream := rlp.NewBytesStream(encodedBodies)
+	defer rlp.PutStream(stream)
+
+	maxBodies := len(headers)
+	bodies := make([]*types.Body, 0, maxBodies)
+	for stream.Remaining() > 0 {
+		if len(bodies) == maxBodies {
+			return nil, &ErrTooManyBodies{
+				requested: maxBodies,
+				received:  maxBodies + 1,
+			}
+		}
+
+		body := new(types.Body)
+		if err := stream.Decode(body); err != nil {
+			if rlp.IsInvalidRLPError(err) {
+				err = fmt.Errorf("%w: %w", ErrInvalidBodyRLP, err)
+			}
+			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
+		}
+
+		header := headers[len(bodies)]
+		// Check commitments before retaining bodies so incorrect data cannot accumulate across pages.
+		if err := body.MatchesHeader(header); err != nil {
+			return nil, fmt.Errorf(
+				"%w: blockNum=%d, blockHash=%s: %w",
+				ErrBodyDoesNotMatchHeader, header.Number.Uint64(), header.Hash(), err,
+			)
+		}
+
+		bodies = append(bodies, body)
+	}
+
+	return bodies, nil
 }
 
 func awaitResponse[TPacket any](
@@ -481,8 +512,8 @@ func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMe
 	}
 }
 
-func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
-	return func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
+func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[BlockBodiesEnvelope]) bool {
+	return func(message *DecodedInboundMessage[BlockBodiesEnvelope]) bool {
 		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }

@@ -52,6 +52,27 @@ func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
 	return m.m.LoadOrStore(h, value)
 }
 
+// ReplaceIfPresent atomically overwrites an existing key, reporting whether it
+// was there. It never inserts, so external counts need no accounting.
+func (m *Map[V]) ReplaceIfPresent(key []byte, value V) bool {
+	h := Hash(key)
+	_, ok := m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if !loaded {
+			return old, xsync.CancelOp
+		}
+		return value, xsync.UpdateOp
+	})
+	return ok
+}
+
+// LoadAndStore stores value and returns the previous one, loaded reporting
+// prior presence. Probing with a separate Get first races a concurrent delete,
+// so external counters must key off loaded.
+func (m *Map[V]) LoadAndStore(key []byte, value V) (previous V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadAndStore(h, value)
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
@@ -92,46 +113,6 @@ func (m *Map[V]) Range(fn func(hash uint64, v V) bool) {
 // alongside Range when the byte-key is unknown.
 func (m *Map[V]) DeleteByHash(hash uint64) {
 	m.m.Delete(hash)
-}
-
-// NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
-// Use this when you don't need concurrent access for better performance.
-type NonConcurrentMap[V any] struct {
-	m map[uint64]V
-}
-
-// NewNonConcurrentMap creates a new NonConcurrentMap.
-func NewNonConcurrentMap[V any]() *NonConcurrentMap[V] {
-	return &NonConcurrentMap[V]{m: make(map[uint64]V)}
-}
-
-// Get retrieves a value by key.
-func (m *NonConcurrentMap[V]) Get(key []byte) (V, bool) {
-	h := Hash(key)
-	v, ok := m.m[h]
-	return v, ok
-}
-
-// Set stores a value with the given key.
-func (m *NonConcurrentMap[V]) Set(key []byte, value V) {
-	h := Hash(key)
-	m.m[h] = value
-}
-
-// Delete removes a key from the map.
-func (m *NonConcurrentMap[V]) Delete(key []byte) {
-	h := Hash(key)
-	delete(m.m, h)
-}
-
-// Len returns the number of entries in the map.
-func (m *NonConcurrentMap[V]) Len() int {
-	return len(m.m)
-}
-
-// Clear removes all entries from the map.
-func (m *NonConcurrentMap[V]) Clear() {
-	clear(m.m)
 }
 
 // LRU is a thread-safe LRU cache that uses maphash to hash []byte keys.
@@ -243,16 +224,6 @@ func (l *ShardedLRU[V]) Set(key []byte, value V) {
 func (l *ShardedLRU[V]) Delete(key []byte) {
 	h := Hash(key)
 	l.shardOf(h).DeleteByHash(h)
-}
-
-// GetByHash and SetByHash operate on a pre-computed hash, for callers that
-// already hold the maphash of the key (the same hash used for shard routing).
-func (l *ShardedLRU[V]) GetByHash(hash uint64) (V, bool) {
-	return l.shardOf(hash).GetByHash(hash)
-}
-
-func (l *ShardedLRU[V]) SetByHash(hash uint64, value V) {
-	l.shardOf(hash).SetByHash(hash, value)
 }
 
 // DeleteByHash removes the entry under a pre-computed hash; pair with Range,

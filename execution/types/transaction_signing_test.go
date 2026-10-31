@@ -38,7 +38,7 @@ func TestEIP1559Signing(t *testing.T) {
 
 	chainId := uint256.NewInt(18)
 	signer := LatestSignerForChainID(chainId)
-	txn, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), new(uint256.Int), nil), *signer, key)
+	txn, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), nil), *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,6 @@ func TestMakeSignerFromRulesEquivalence(t *testing.T) {
 			IsBerlin:         c.IsBerlin(tc.num),
 			IsLondon:         c.IsLondon(tc.num),
 			IsCancun:         c.IsCancun(tc.time),
-			IsBhilai:         c.IsBhilai(tc.num),
 			IsPrague:         c.IsPrague(tc.time),
 		}
 
@@ -288,25 +287,6 @@ func TestSignatureValuesError(t *testing.T) {
 			t.Logf("Got expected error: %v", err)
 		}
 	}()
-}
-
-func TestMakeSignerFromRulesBhilaiFold(t *testing.T) {
-	t.Parallel()
-	rules := &chain.Rules{
-		ChainID:          uint256.NewInt(137),
-		IsHomestead:      true,
-		IsSpuriousDragon: true,
-		IsBerlin:         true,
-		IsLondon:         true,
-		IsShanghai:       true,
-		IsCancun:         true,
-		IsBhilai:         true,
-		IsPrague:         true, // BlockContext.Rules folds Bhilai into IsPrague
-	}
-	signer := MakeSignerFromRules(uint256.NewInt(137), rules)
-	assert.False(t, signer.blob, "Bhilai does not enable blob transactions")
-	assert.True(t, signer.setCode)
-	assert.True(t, signer.dynamicFee)
 }
 
 func TestMakeSignerFromRulesNilChainID(t *testing.T) {

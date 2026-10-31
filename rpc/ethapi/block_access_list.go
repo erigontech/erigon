@@ -62,9 +62,10 @@ type RPCAccountAccess struct {
 // MarshalBlockAccessList converts a types.BlockAccessList into the JSON-RPC response format.
 func MarshalBlockAccessList(bal types.BlockAccessList) []*RPCAccountAccess {
 	result := make([]*RPCAccountAccess, len(bal))
-	for i, ac := range bal {
+	for i := range bal {
+		ac := &bal[i]
 		entry := &RPCAccountAccess{
-			Address:        ac.Address.Value(),
+			Address:        ac.Address,
 			StorageChanges: make([]*RPCSlotChanges, len(ac.StorageChanges)),
 			StorageReads:   make([]common.Hash, len(ac.StorageReads)),
 			BalanceChanges: make([]*RPCBalanceChange, len(ac.BalanceChanges)),
@@ -84,9 +85,7 @@ func MarshalBlockAccessList(bal types.BlockAccessList) []*RPCAccountAccess {
 			}
 			entry.StorageChanges[j] = slot
 		}
-		for j, sr := range ac.StorageReads {
-			entry.StorageReads[j] = sr.Value()
-		}
+		copy(entry.StorageReads, ac.StorageReads)
 		for j, bc := range ac.BalanceChanges {
 			v := bc.Value.ToBig()
 			entry.BalanceChanges[j] = &RPCBalanceChange{

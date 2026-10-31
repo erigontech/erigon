@@ -36,7 +36,7 @@ func RestartUnderGDB() {
 	runCommand := "run " + formatArgsForLLDB(filteredArgs)
 
 	// maybe in future it would be a script in a separate file
-	//TODO: discover some more features from lldb and add it here
+	// TODO: discover some more features from lldb and add it here
 	lldbScript := fmt.Sprintf(`
 settings set auto-confirm true
 target create "%s"
@@ -59,7 +59,7 @@ disassemble -a $pc
 
 quit
 `, exePath, runCommand)
-	//TODO: add something to memory around fault address
+	// TODO: add something to memory around fault address
 	// some ideas bellow:
 	//	script fault_addr = int(lldb.frame.FindRegister('pc').GetValue(), 16) -128
 	//	memory read --format x --size 8 --count 16 --outfile /tmp/mem.txt fault_addr
@@ -95,12 +95,11 @@ quit
 	}
 }
 
-// formatArgsForLLDB
 func formatArgsForLLDB(args []string) string {
 	var formattedArgs []string
 	for _, arg := range args {
 		if strings.Contains(arg, " ") {
-			formattedArgs = append(formattedArgs, fmt.Sprintf(`"%s"`, arg)) // Экранируем пробелы
+			formattedArgs = append(formattedArgs, fmt.Sprintf("%q", arg))
 		} else {
 			formattedArgs = append(formattedArgs, arg)
 		}

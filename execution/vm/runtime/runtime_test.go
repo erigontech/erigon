@@ -20,30 +20,30 @@
 package runtime
 
 import (
-	"encoding/binary"
-	"errors"
+	"bytes"
 	"fmt"
 	"math/big"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -110,12 +110,38 @@ func TestExecute(t *testing.T) {
 	}
 }
 
+func TestLogNotStoredWithoutReceipts(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x77, // stays below the LOG1 operands
+		byte(vm.PUSH1), 0xff,
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.LOG1),
+		byte(vm.PUSH1), 0,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.RETURN),
+	}
+	for _, tc := range []struct {
+		noReceipts bool
+		logs       int
+	}{{false, 1}, {true, 0}} {
+		statedb := state.New(state.NewNoopReader())
+		ret, _, err := Execute(code, nil, &Config{State: statedb, EVMConfig: vm.Config{NoReceipts: tc.noReceipts}}, t.TempDir())
+		require.NoError(t, err)
+		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "noReceipts=%v", tc.noReceipts)
+		require.Len(t, statedb.GetRawLogs(0), tc.logs, "noReceipts=%v", tc.noReceipts)
+	}
+}
+
 func TestCall(t *testing.T) {
 	t.Parallel()
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 
-	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	state := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer state.Close()
 	address := accounts.InternAddress(common.HexToAddress("0xaa"))
 	require.NoError(t, state.SetCode(address, []byte{
@@ -138,6 +164,182 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func TestCallDoesNotCreateOrigin(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	origin := accounts.InternAddress(common.HexToAddress("0xbb"))
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(address, nil, &Config{State: statedb, Origin: origin})
+	require.NoError(t, err)
+	exists, err := statedb.Exist(origin)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// returnCalldata32 returns the first 32 bytes of its calldata.
+var returnCalldata32 = []byte{
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN),
+}
+
+func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+
+	first, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	second, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
+}
+
+// A transaction that returned a large output does not leave its buffer to the next one.
+func TestCallDropsAnOversizedOutputBuffer(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	returnCalldataSize := []byte{byte(vm.PUSH1), 0, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	require.NoError(t, statedb.SetCode(address, returnCalldataSize, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	size := func(n int) []byte { return common.LeftPadBytes(big.NewInt(int64(n)).Bytes(), 32) }
+
+	large, _, err := Call(address, size(2*1024*1024), cfg)
+	require.NoError(t, err)
+	small, _, err := Call(address, size(32), cfg)
+	require.NoError(t, err)
+	require.NotSame(t, unsafe.SliceData(large), unsafe.SliceData(small))
+}
+
+// A system call runs without Prepare and keeps its output, as the EIP-7002 requests do.
+func TestCallWithoutPrepareGetsItsOwnOutput(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	first, second := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+
+	out, _, err := Call(address, first, cfg)
+	require.NoError(t, err)
+	_, _, _, err = NewEnv(cfg).Call(cfg.Origin, address, second, mdgas.MdGas{Execution: cfg.GasLimit}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, first, out)
+}
+
+func TestCreatedCodeOutlivesNextTransaction(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	setDefaults(cfg)
+	vmenv := NewEnv(cfg)
+	rules := vmenv.ChainRules()
+	gas := mdgas.MdGas{Execution: cfg.GasLimit}
+	code := bytes.Repeat([]byte{1}, 32)
+	initCode := append(append([]byte{byte(vm.PUSH32)}, code...),
+		byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	_, _, _, err := vmenv.Call(cfg.Origin, address, nil, gas, uint256.Int{}, false)
+	require.NoError(t, err)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	_, created, _, _, err := vmenv.Create(cfg.Origin, initCode, gas, uint256.Int{}, nil, false)
+	require.NoError(t, err)
+	_, _, err = Call(address, bytes.Repeat([]byte{2}, 32), cfg)
+	require.NoError(t, err)
+
+	got, err := statedb.GetCode(created)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}
+
+func TestInnerCreatedCodeOutlivesNextCall(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	callee := common.HexToAddress("0xaa")
+	factory := accounts.InternAddress(common.HexToAddress("0xbb"))
+	code := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(accounts.InternAddress(callee), returnCalldata32, tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(factory, program.New().
+		Create2(program.New().ReturnData(code).Bytes(), 0).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Call(nil, callee, 0, 0, 32, 0, 32).Op(vm.POP).
+		Push(0).Op(vm.MSTORE).Return(0, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(factory, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	got, err := statedb.GetCode(accounts.InternAddress(common.BytesToAddress(ret)))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}
+
+// A tracer that never sees call outputs must not turn off the identity output buffer.
+func TestIdentityReusesOutputBufferUnderEnterTracer(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	const calls = 100
+	p := program.New().Mstore([]byte{1}, 1024)
+	for range calls {
+		p.StaticCall(nil, 0x4, 0, 1024, 0, 0).Op(vm.POP)
+	}
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	cfg.EVMConfig.Tracer = &tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}
+
+	allocs := testing.AllocsPerRun(3, func() {
+		_, _, err := Call(address, nil, cfg)
+		require.NoError(t, err)
+	})
+	require.Less(t, allocs, float64(calls))
+}
+
+// An identity call with too little gas fails on the buffer-reusing path too.
+func TestIdentityOutOfGasFails(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	// 1024 bytes cost 15 + 3*32 = 111 gas; 50 is not enough.
+	p := program.New().Mstore([]byte{1}, 1024).
+		StaticCall(uint256.NewInt(50), 0x4, 0, 1024, 0, 0).
+		Push0().Op(vm.MSTORE).Return(0, 32)
+	require.NoError(t, statedb.SetCode(address, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, make([]byte, 32), ret, "STATICCALL to identity with too little gas must return 0")
+}
+
+// The identity output must not change when the caller later overwrites the input memory.
+func TestIdentityReturnDataOutlivesInputMemory(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	input := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(address, program.New().
+		Mstore(input, 0).
+		StaticCall(nil, 0x4, 0, 32, 0, 0).Op(vm.POP).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Push(32).Push(0).Push(32).Op(vm.RETURNDATACOPY).
+		Return(32, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(address, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	require.Equal(t, input, ret)
+}
+
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
@@ -150,7 +352,6 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 			Value:    *uint256.NewInt(1),
 			State:    statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, mdgas.MdGas{Execution: gasLimit}, gasRemaining)
@@ -179,7 +380,6 @@ func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 			Value:       *uint256.NewInt(1),
 			State:       statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
@@ -211,7 +411,6 @@ func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 			GasLimit:  gasLimit,
 			State:     statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
 	require.Equal(
@@ -227,9 +426,9 @@ func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
@@ -252,9 +451,9 @@ func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
@@ -276,9 +475,9 @@ func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
@@ -295,199 +494,6 @@ func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 	require.True(t, statedb.AddressInAccessList(delegatedTo))
 }
 
-// benchState builds state on the parallel-execution path, the one staged sync
-// runs: the stateObject cache is off and reads resolve from the version map.
-func benchState(b *testing.B, reader state.StateReader) *state.IntraBlockState {
-	b.Helper()
-	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
-	return statedb
-}
-
-// mustOOG requires a program that loops until its gas budget is gone to have
-// done so. A call reaching an address with no code returns no error and burns
-// nothing, so the gas assertion - not the error - catches a broken fixture.
-func mustOOG(b *testing.B, left mdgas.MdGas, err error) {
-	b.Helper()
-	if !errors.Is(err, vm.ErrOutOfGas) || left.Total() != 0 {
-		b.Fatalf("expected gas exhaustion, got gasLeft=%d err=%v", left.Total(), err)
-	}
-}
-
-// mustComplete requires a bounded call to have finished and done work.
-func mustComplete(b *testing.B, gasLimit uint64, left mdgas.MdGas, err error) {
-	b.Helper()
-	if err != nil {
-		b.Fatal(err)
-	}
-	if left.Total() >= gasLimit {
-		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), gasLimit)
-	}
-}
-
-func BenchmarkCall(b *testing.B) {
-	var definition = `[{"constant":true,"inputs":[],"name":"seller","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"abort","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"value","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[],"name":"refund","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"buyer","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmReceived","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"state","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmPurchase","outputs":[],"type":"function"},{"inputs":[],"type":"constructor"},{"anonymous":false,"inputs":[],"name":"Aborted","type":"event"},{"anonymous":false,"inputs":[],"name":"PurchaseConfirmed","type":"event"},{"anonymous":false,"inputs":[],"name":"ItemReceived","type":"event"},{"anonymous":false,"inputs":[],"name":"Refunded","type":"event"}]`
-
-	var code = common.Hex2Bytes("6060604052361561006c5760e060020a600035046308551a53811461007457806335a063b4146100865780633fa4f245146100a6578063590e1ae3146100af5780637150d8ae146100cf57806373fac6f0146100e1578063c19d93fb146100fe578063d696069714610112575b610131610002565b610133600154600160a060020a031681565b610131600154600160a060020a0390811633919091161461015057610002565b61014660005481565b610131600154600160a060020a039081163391909116146102d557610002565b610133600254600160a060020a031681565b610131600254600160a060020a0333811691161461023757610002565b61014660025460ff60a060020a9091041681565b61013160025460009060ff60a060020a9091041681146101cc57610002565b005b600160a060020a03166060908152602090f35b6060908152602090f35b60025460009060a060020a900460ff16811461016b57610002565b600154600160a060020a03908116908290301631606082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f72c874aeff0b183a56e2b79c71b46e1aed4dee5e09862134b8821ba2fddbf8bf9250a150565b80546002023414806101dd57610002565b6002805460a060020a60ff021973ffffffffffffffffffffffffffffffffffffffff1990911633171660a060020a1790557fd5d55c8a68912e9a110618df8d5e2e83b8d83211c57a8ddd1203df92885dc881826060a15050565b60025460019060a060020a900460ff16811461025257610002565b60025460008054600160a060020a0390921691606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517fe89152acd703c9d8c7d28829d443260b411454d45394e7995815140c8cbcbcf79250a150565b60025460019060a060020a900460ff1681146102f057610002565b6002805460008054600160a060020a0390921692909102606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f8616bbbbad963e4e65b1366f1d75dfb63f9e9704bbbf91fb01bec70849906cf79250a15056")
-
-	abi, err := abi.JSON(strings.NewReader(definition))
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	cpurchase, err := abi.Pack("confirmPurchase")
-	if err != nil {
-		b.Fatal(err)
-	}
-	creceived, err := abi.Pack("confirmReceived")
-	if err != nil {
-		b.Fatal(err)
-	}
-	refund, err := abi.Pack("refund")
-	if err != nil {
-		b.Fatal(err)
-	}
-	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377)), Difficulty: uint256.NewInt(0)}
-	db := testutil.TemporalDB(b)
-	tx, sd := testutil.TemporalTxSD(b, db)
-	//cfg.w = state.NewWriter(execctx, nil)
-	cfg.State = benchState(b, state.NewReaderV3(sd.AsGetter(tx)))
-	defer cfg.State.Close()
-	// cfg carries a non-zero Value, so the origin has to be able to pay it or
-	// every call fails the balance check before reaching the interpreter.
-	cfg.Origin = accounts.ZeroAddress
-	require.NoError(b, cfg.State.SetBalance(cfg.Origin, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
-	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
-
-	tmpdir := b.TempDir()
-
-	// Execute runs the deployed runtime code, so the constructor never initialises
-	// seller/value and every entry point hits the contract's pre-REVERT throw.
-	// Pinned so the benchmark cannot degrade further without failing; making it
-	// execute the purchase flow needs a new fixture.
-	inputs := [][]byte{cpurchase, creceived, refund}
-	for b.Loop() {
-		snap := cfg.State.PushSnapshot()
-		for range 400 {
-			for _, input := range inputs {
-				if _, _, err := Execute(code, input, cfg, tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
-					b.Fatalf("expected the contract throw, got %v", err)
-				}
-			}
-		}
-		cfg.State.RevertToSnapshot(snap, nil)
-		cfg.State.PopSnapshot(snap)
-	}
-}
-
-func benchmarkEVM_Create(b *testing.B, code string) {
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
-
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(b, err)
-
-	var (
-		statedb  = benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
-		sender   = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
-		receiver = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
-	)
-	defer statedb.Close()
-
-	require.NoError(b, statedb.CreateAccount(sender, true))
-	require.NoError(b, statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified))
-	runtimeConfig := Config{
-		Origin:      sender,
-		State:       statedb,
-		GasLimit:    10000000,
-		Difficulty:  uint256.NewInt(0x200000),
-		Time:        0,
-		Coinbase:    accounts.ZeroAddress,
-		BlockNumber: 1,
-		ChainConfig: &chain.Config{
-			ChainID:               uint256.NewInt(1),
-			HomesteadBlock:        common.NewUint64(0),
-			ByzantiumBlock:        common.NewUint64(0),
-			ConstantinopleBlock:   common.NewUint64(0),
-			PetersburgBlock:       common.NewUint64(0),
-			TangerineWhistleBlock: common.NewUint64(0),
-			SpuriousDragonBlock:   common.NewUint64(0),
-		},
-		EVMConfig: vm.Config{
-			//JumpDestCache: vm.NewJumpDestCache(128),
-		},
-	}
-	// Warm up the intpools and stuff
-	for b.Loop() {
-		snap := statedb.PushSnapshot()
-		_, left, err := Call(receiver, []byte{}, &runtimeConfig)
-		mustOOG(b, left, err)
-		statedb.RevertToSnapshot(snap, nil)
-		statedb.PopSnapshot(snap)
-	}
-	b.StopTimer()
-}
-
-func BenchmarkEVM_CREATE_500(bench *testing.B) {
-	// initcode size 500K, repeatedly calls CREATE and then modifies the mem contents
-	benchmarkEVM_Create(bench, "5b6207a120600080f0600152600056")
-}
-func BenchmarkEVM_CREATE2_500(bench *testing.B) {
-	// initcode size 500K, repeatedly calls CREATE2 and then modifies the mem contents
-	benchmarkEVM_Create(bench, "5b586207a120600080f5600152600056")
-}
-func BenchmarkEVM_CREATE_1200(bench *testing.B) {
-	// initcode size 1200K, repeatedly calls CREATE and then modifies the mem contents
-	benchmarkEVM_Create(bench, "5b62124f80600080f0600152600056")
-}
-func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
-	// initcode size 1200K, repeatedly calls CREATE2 and then modifies the mem contents
-	benchmarkEVM_Create(bench, "5b5862124f80600080f5600152600056")
-}
-
-func BenchmarkEVM_RETURN(b *testing.B) {
-	// returns a contract that returns a zero-byte slice of len size
-	returnContract := func(size uint64) []byte {
-		contract := []byte{
-			byte(vm.PUSH8), 0, 0, 0, 0, 0, 0, 0, 0, // PUSH8 0xXXXXXXXXXXXXXXXX
-			byte(vm.PUSH0),  // PUSH0
-			byte(vm.RETURN), // RETURN
-		}
-		binary.BigEndian.PutUint64(contract[1:], size)
-		return contract
-	}
-
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
-
-	statedb := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Close()
-	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-
-	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
-		b.Run(strconv.FormatUint(n, 10), func(b *testing.B) {
-			b.ReportAllocs()
-
-			contractCode := returnContract(n)
-			require.NoError(b, statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified))
-
-			cfg := Config{State: statedb}
-			setDefaults(&cfg)
-
-			for b.Loop() {
-				snap := statedb.PushSnapshot()
-				ret, left, err := Call(contractAddr, []byte{}, &cfg)
-				mustComplete(b, cfg.GasLimit, left, err)
-				if uint64(len(ret)) != n {
-					b.Fatalf("expected return size %d, got %d", n, len(ret))
-				}
-				statedb.RevertToSnapshot(snap, nil)
-				statedb.PopSnapshot(snap)
-			}
-		})
-	}
-}
-
 func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 	return &types.Header{
 		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
@@ -499,42 +505,6 @@ func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 		GasLimit:   100000,
 	}
 }
-
-// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
-type FakeChainHeaderReader struct{}
-
-func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
-}
-func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
-func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
-
-// GetHeader returns a fake header with the parentHash equal to the number - 1
-func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return &types.Header{
-		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     *uint256.NewInt(number),
-		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
-		Time:       number,
-		Nonce:      types.BlockNonce{0x1},
-		Extra:      []byte{},
-		GasLimit:   100000,
-	}
-}
-func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return nil
-}
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	return nil
-}
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64    { return 0 }
-func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64 { return 0 }
 
 type dummyChain struct {
 	counter int
@@ -637,160 +607,12 @@ func TestBlockhash(t *testing.T) {
 	}
 }
 
-// benchmarkNonModifyingCode benchmarks code, but if the code modifies the
-// state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
-	b.Helper()
-	cfg := new(Config)
-	setDefaults(cfg)
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
-
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(b, err)
-
-	cfg.State = benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
-	defer cfg.State.Close()
-	cfg.GasLimit = gas.Execution
-	//
-	// TODO revise
-	//
-	cfg.Origin = accounts.ZeroAddress
-	//if len(tracerCode) > 0 {
-	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
-	//	if err != nil {
-	//		b.Fatal(err)
-	//	}
-	//	cfg.EVMConfig = vm.Config{
-	//		Tracer: tracer.Hooks,
-	//	}
-	//}
-
-	var (
-		destination = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-		vmenv       = NewEnv(cfg)
-		sender      = cfg.Origin
-	)
-	require.NoError(b, cfg.State.CreateAccount(destination, true))
-	eoa := accounts.InternAddress(common.HexToAddress("E0"))
-	{
-		require.NoError(b, cfg.State.CreateAccount(eoa, true))
-		require.NoError(b, cfg.State.SetNonce(eoa, 100, tracing.NonceChangeUnspecified))
-	}
-	reverting := accounts.InternAddress(common.HexToAddress("EE"))
-	{
-		require.NoError(b, cfg.State.CreateAccount(reverting, true))
-		require.NoError(b, cfg.State.SetCode(reverting, []byte{
-			byte(vm.PUSH1), 0x00,
-			byte(vm.PUSH1), 0x00,
-			byte(vm.REVERT),
-		}, tracing.CodeChangeUnspecified))
-	}
-
-	//cfg.State.CreateAccount(cfg.Origin)
-	// set the receiver's (the executing contract) code for execution.
-	require.NoError(b, cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified))
-	_, warmLeft, _, warmErr := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
-	mustOOG(b, warmLeft, warmErr)
-
-	b.Run(name, func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			snap := cfg.State.PushSnapshot()
-			_, left, _, err := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
-			mustOOG(b, left, err)
-			cfg.State.RevertToSnapshot(snap, nil)
-			cfg.State.PopSnapshot(snap)
-		}
-	})
-}
-
-// BenchmarkSimpleLoop test a pretty simple loop which loops until OOG
-// 55 ms
-//
-// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > old.txt
-// go test -bench=BenchmarkSimple -run=Benchmark -count 10 ./core/vm/runtime > new.txt
-// benchstat old.txt new.txt
-func BenchmarkSimpleLoop(b *testing.B) {
-	p, lbl := program.New().Jumpdest()
-	// Call identity, and pop return value
-	staticCallIdentity := p.
-		StaticCall(nil, 0x4, 0, 0, 0, 0).
-		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
-
-	p, lbl = program.New().Jumpdest()
-	callIdentity := p.
-		Call(nil, 0x4, 0, 0, 0, 0, 0).
-		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
-
-	p, lbl = program.New().Jumpdest()
-	callInexistant := p.
-		Call(nil, 0xff, 0, 0, 0, 0, 0).
-		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
-
-	p, lbl = program.New().Jumpdest()
-	// call addr of EOA
-	// pop return value and jump to label
-	callEOA := p.Call(nil, 0xE0, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
-
-	p, lbl = program.New().Jumpdest()
-	// Push as if we were making call, then pop it off again, and loop
-	loopingCode := p.Push(0).
-		Op(vm.DUP1, vm.DUP1, vm.DUP1).
-		Push(0x4).
-		Op(vm.GAS, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP).
-		Jump(lbl).Bytes()
-
-	p, lbl = program.New().Jumpdest()
-	loopingCode2 := p.
-		Push(0x01020304).Push(uint64(0x0102030405)).
-		Op(vm.POP, vm.POP).
-		Op(vm.PUSH6).Append(make([]byte, 6)).Op(vm.JUMP). // Jumpdest zero expressed in 6 bytes
-		Jump(lbl).Bytes()
-
-	loopingCode3 := []byte{
-		byte(vm.JUMPDEST), //  [ count ]
-		// push args for the call
-		byte(vm.PUSH4), 1, 2, 3, 4,
-		byte(vm.PUSH5), 1, 2, 3, 4, 5,
-
-		byte(vm.POP), byte(vm.POP),
-		byte(vm.PUSH6), 0, 0, 0, 0, 0, 0, // jumpdestination
-		byte(vm.JUMP),
-	}
-
-	p, lbl = program.New().Jumpdest()
-	callRevertingContractWithInput := p.
-		Call(nil, 0xee, 0, 0, 0x20, 0x0, 0x0).
-		Op(vm.POP).Jump(lbl).Bytes() // pop return value and jump to label
-
-	//tracer := logger.NewJSONLogger(nil, os.Stdout)
-	//Execute(loopingCode, nil, &Config{
-	//	EVMConfig: vm.Config{
-	//		Debug:  true,
-	//		Tracer: tracer,
-	//	}})
-	// 100M gas
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callIdentity, "call-identity-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode, "loop-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode2, "loop2-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode3, "loop3-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callEOA, "call-EOA-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
-
-	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
-	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
-}
-
 // TestEip2929Cases contains various testcases that are used for
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
-
 	tmpdir := t.TempDir()
 	id := 1
-	prettyPrint := func(comment string, code []byte) {
+	prettyPrint := func(code []byte) {
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
@@ -838,32 +660,28 @@ func TestEip2929Cases(t *testing.T) {
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `EXT`(codehash,codesize,balance) of precompiles, which should be `100`, "+
-			"and later checks the same operations twice against some non-precompiles. "+
-			"Those are cheaper second time they are accessed. Lastly, it checks the `BALANCE` of `origin` and `this`.", code)
+		prettyPrint(code)
 	}
 
 	{ // EXTCODECOPY
 		code := []byte{
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( this,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.ADDRESS), byte(vm.EXTCODECOPY),
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `extcodecopy( 0xff,0,0,0,0)` twice, (should be expensive first time), "+
-			"and then does `extcodecopy( this,0,0,0,0)`.", code)
+		prettyPrint(code)
 	}
 
 	{ // SLOAD + SSTORE
 		code := []byte{
-
 			// Add slot `0x1` to access list
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), byte(vm.POP), // SLOAD( 0x1) (add to access list)
 			// Write to `0x1` which is already in access list
@@ -877,8 +695,7 @@ func TestEip2929Cases(t *testing.T) {
 			// Read slot in access list (0x1)
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), // SLOAD( 0x1)
 		}
-		prettyPrint("This checks `sload( 0x1)` followed by `sstore(loc: 0x01, val:0x11)`, then 'naked' sstore:"+
-			"`sstore(loc: 0x02, val:0x11)` twice, and `sload(0x2)`, `sload(0x1)`. ", code)
+		prettyPrint(code)
 	}
 	{ // Call variants
 		code := []byte{
@@ -894,45 +711,8 @@ func TestEip2929Cases(t *testing.T) {
 			byte(vm.PUSH1), 0x0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
 			byte(vm.PUSH1), 0xff, byte(vm.PUSH1), 0x0, byte(vm.STATICCALL), byte(vm.POP),
 		}
-		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
-			"account (cheap)", code)
+		prettyPrint(code)
 	}
-}
-
-func BenchmarkEVM_SWAP1(b *testing.B) {
-	// returns a contract that does n swaps (SWAP1)
-	swapContract := func(n uint64) []byte {
-		contract := []byte{
-			byte(vm.PUSH0), // PUSH0
-			byte(vm.PUSH0), // PUSH0
-		}
-		for range n {
-			contract = append(contract, byte(vm.SWAP1))
-		}
-		return contract
-	}
-
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
-	state := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
-	defer state.Close()
-	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-
-	b.Run("10k", func(b *testing.B) {
-		contractCode := swapContract(10_000)
-		require.NoError(b, state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified))
-
-		cfg := Config{State: state}
-		setDefaults(&cfg)
-
-		for b.Loop() {
-			snap := state.PushSnapshot()
-			_, left, err := Call(contractAddr, []byte{}, &cfg)
-			mustComplete(b, cfg.GasLimit, left, err)
-			state.RevertToSnapshot(snap, nil)
-			state.PopSnapshot(snap)
-		}
-	})
 }
 
 // TestCreate2CollisionWithEIP7702Delegation verifies that CREATE2 to an address
@@ -943,9 +723,9 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
@@ -1002,9 +782,9 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
@@ -1123,22 +903,16 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 	require.True(t, found, "expected at least one GasChangeCallOpCode event from SSTORE")
 }
 
-// TestSystemCallZeroValueSkipsTransferChecks verifies that a system call
-// (caller = SystemAddress, value = 0) executes successfully without triggering
-// CanTransfer or Transfer balance-change hooks on the caller. It also asserts:
-//   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
-//     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
-//   - SYSTEM_ADDRESS remains an empty account after the call.
-//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's tx IO.
-//   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
-//     the zero-value transfer path.
-func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
-	t.Parallel()
+// runZeroValueSystemCall executes a zero-value system call (caller =
+// SystemAddress) to a trivial contract and returns the state, the call-level
+// BAL and the balance-change tracer events seen on SystemAddress.
+func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, types.BlockAccessList, int) {
+	t.Helper()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Close()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	t.Cleanup(statedb.Close)
 
 	systemAddr := params.SystemAddress
 	target := accounts.InternAddress(common.HexToAddress("0xbeef"))
@@ -1154,19 +928,11 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		byte(vm.RETURN),
 	}, tracing.CodeChangeUnspecified))
 
-	// Track balance-change events on SYSTEM_ADDRESS.
-	type balChange struct {
-		addr   accounts.Address
-		oldBal uint256.Int
-		newBal uint256.Int
-		reason tracing.BalanceChangeReason
-	}
-	var balChanges []balChange
-
+	balChanges := 0
 	hooks := &tracing.Hooks{
 		OnBalanceChange: func(addr accounts.Address, prev, newBal uint256.Int, reason tracing.BalanceChangeReason) {
 			if addr == systemAddr {
-				balChanges = append(balChanges, balChange{addr, prev, newBal, reason})
+				balChanges++
 			}
 		},
 	}
@@ -1178,16 +944,20 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		GasLimit:  10_000_000,
 	}
 	setDefaults(cfg)
+	if aura {
+		cfg.ChainConfig.Aura = &chain.AuRaConfig{}
+	}
 
 	vmenv := NewEnv(cfg)
 	rules := vmenv.ChainRules()
+	require.Equal(t, aura, rules.IsAura)
 	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil)
 
 	ret, _, _, err := vmenv.Call(
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		uint256.Int{}, // value = 0
 		false,
 	)
@@ -1197,29 +967,48 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	require.Equal(t, 32, len(ret))
 	require.Equal(t, byte(0x42), ret[31])
 
-	// Positive check: SYSTEM_ADDRESS must exist (Gnosis/AuRa invariant).
-	exists, err := statedb.Exist(systemAddr)
-	require.NoError(t, err)
-	require.True(t, exists, "SYSTEM_ADDRESS should exist after a zero-value syscall")
-
-	// SYSTEM_ADDRESS must remain empty after the touch.
-	empty, err := statedb.Empty(systemAddr)
-	require.NoError(t, err)
-	require.True(t, empty, "SYSTEM_ADDRESS should remain empty after a zero-value syscall")
-
-	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
-	// performs the sender-side touch and no actual account access.
 	var io state.VersionedIO
 	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
-	bal := io.AsBlockAccessList()
+	return statedb, io.AsBlockAccessList(), balChanges
+}
+
+// TestSystemCallZeroValueSkipsTransferChecks verifies that a system call
+// (caller = SystemAddress, value = 0) does not access its caller: SYSTEM_ADDRESS
+// is neither created nor recorded in the BAL (EIP-7928), and no balance-change
+// hooks fire for it.
+func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
+	t.Parallel()
+
+	statedb, bal, balChanges := runZeroValueSystemCall(t, false)
+
+	exists, err := statedb.Exist(params.SystemAddress)
+	require.NoError(t, err)
+	require.False(t, exists, "a system call must not create SYSTEM_ADDRESS")
+
 	for _, accountChanges := range bal {
-		require.NotEqual(t, systemAddr, accountChanges.Address,
+		require.NotEqual(t, params.SystemAddress.Value(), accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
 	}
+	require.Zero(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall")
+}
 
-	// No balance-change events should have fired for SYSTEM_ADDRESS
-	// from the zero-value call path.
-	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
+// TestSystemCallZeroValueTouchesCallerOnAura verifies the Gnosis/AuRa invariant
+// (PR 5645, Issue 18276): a zero-value system call still touches SYSTEM_ADDRESS
+// so the empty system account exists after the call, without a transfer.
+func TestSystemCallZeroValueTouchesCallerOnAura(t *testing.T) {
+	t.Parallel()
+
+	statedb, _, balChanges := runZeroValueSystemCall(t, true)
+
+	exists, err := statedb.Exist(params.SystemAddress)
+	require.NoError(t, err)
+	require.True(t, exists, "SYSTEM_ADDRESS should exist after a zero-value syscall on AuRa")
+
+	empty, err := statedb.Empty(params.SystemAddress)
+	require.NoError(t, err)
+	require.True(t, empty, "SYSTEM_ADDRESS should remain empty after a zero-value syscall on AuRa")
+
+	require.Zero(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall")
 }
 
 // LOG's BlockNumber comes from the EVM context. Entry points that do not go
@@ -1239,4 +1028,203 @@ func TestLogBlockNumberFromEVMContext(t *testing.T) {
 	logs := ibs.GetRawLogs(0)
 	require.Len(t, logs, 1)
 	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
+}
+
+// TestOpcodeMaskFiltersDelivery pins that the interpreter honours a tracer's opcode
+// mask: without this, dropping the check in interpreter.go breaks nothing a test sees.
+func TestOpcodeMaskFiltersDelivery(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.PUSH1), 0x00,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.POP),
+		byte(vm.STOP),
+	}
+
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			run := func(mask *tracing.OpcodeMask) []byte {
+				var seen []byte
+				hooks := &tracing.Hooks{OnOpcodeMask: mask}
+				if version == "v2" {
+					hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						seen = append(seen, op)
+					}
+				} else {
+					hooks.OnOpcode = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						seen = append(seen, op)
+					}
+				}
+				cfg := &Config{EVMConfig: vm.Config{Tracer: hooks}}
+				if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+				return seen
+			}
+
+			unmasked := run(nil)
+			require.Equal(t, []byte{
+				byte(vm.PUSH1), byte(vm.SLOAD),
+				byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.MSTORE),
+				byte(vm.PUSH1), byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP),
+			}, unmasked, "a nil mask must deliver every executed opcode, in execution order")
+
+			masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
+			require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
+				"a mask must deliver exactly the opcodes it names, in execution order")
+		})
+	}
+}
+
+// TestOpcodeMaskStillReportsFaults pins that filtering which opcodes a tracer sees
+// does not cost it the fault: an excluded opcode that fails still reaches OnFault.
+func TestOpcodeMaskStillReportsFaults(t *testing.T) {
+	t.Parallel()
+	code := []byte{byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 0x02, byte(vm.ADD), byte(vm.STOP)}
+
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			var opcodes []byte
+			var faults []byte
+			hooks := &tracing.Hooks{OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD))}
+			if version == "v2" {
+				hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					opcodes = append(opcodes, op)
+				}
+				hooks.OnFaultV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ int, _ error) {
+					faults = append(faults, op)
+				}
+			} else {
+				hooks.OnOpcode = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					opcodes = append(opcodes, op)
+				}
+				hooks.OnFault = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+					faults = append(faults, op)
+				}
+			}
+			cfg := &Config{
+				GasLimit:  5, // too little to finish, so an excluded opcode faults
+				EVMConfig: vm.Config{Tracer: hooks},
+			}
+			if _, _, err := Execute(code, nil, cfg, t.TempDir()); err == nil {
+				t.Fatal("expected the run to fail on gas")
+			}
+			require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
+			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
+		})
+	}
+}
+
+// loadTo is SLOAD slot, MSTORE at.
+func loadTo(p *program.Program, slot, at int) *program.Program {
+	return p.Push(slot).Op(vm.SLOAD).Push(at).Op(vm.MSTORE)
+}
+
+// Repeat storage reads are served from caches on both the serial and the versioned path.
+// Both must match the versioned path with the caches off, in results and gas.
+func TestStorageCachesMatchVersionedPath(t *testing.T) {
+	writeThenRevert := program.New().Sstore(1, 7).Push(0).Push(0).Op(vm.REVERT).Bytes()
+	warmThenRevert := program.New().Push(2).Op(vm.SLOAD, vm.POP).Push(0).Push(0).Op(vm.REVERT).Bytes()
+	c1, c2 := common.HexToAddress("0x2001"), common.HexToAddress("0x2002")
+	p := program.New()
+	loadTo(p, 1, 0)
+	loadTo(p, 1, 32)
+	p.Sstore(1, 5)
+	loadTo(p, 1, 64)
+	p.Sstore(1, 5)
+	p.DelegateCall(nil, c1, 0, 0, 0, 0).Op(vm.POP)
+	loadTo(p, 1, 96)
+	p.DelegateCall(nil, c2, 0, 0, 0, 0).Op(vm.POP)
+	loadTo(p, 2, 128)
+	p.Sstore(1, 0)
+	loadTo(p, 1, 160)
+	p.Return(0, 192)
+
+	run := func(statedb *state.IntraBlockState) (uint64, []byte) {
+		t.Helper()
+		defer statedb.Close()
+		top := accounts.InternAddress(common.HexToAddress("0x2000"))
+		require.NoError(t, statedb.SetCode(top, p.Bytes(), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(c1), writeThenRevert, tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(c2), warmThenRevert, tracing.CodeChangeUnspecified))
+		const gasLimit = 2_000_000
+		ret, left, err := Call(top, nil, &Config{State: statedb, GasLimit: gasLimit})
+		require.NoError(t, err)
+		return gasLimit - left.Total(), ret
+	}
+	versioned := func() *state.IntraBlockState {
+		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+		return ibs
+	}
+	was := dbg.TraceTransactionIO
+	t.Cleanup(func() { dbg.TraceTransactionIO = was })
+	dbg.TraceTransactionIO = true // turns the caches off
+	wantGas, want := run(versioned())
+	dbg.TraceTransactionIO = false
+	require.Equal(t, uint64(5), new(uint256.Int).SetBytes(want[96:128]).Uint64(), "a reverted DELEGATECALL wrote the slot")
+	for name, statedb := range map[string]*state.IntraBlockState{"versioned": versioned(), "serial": state.New(state.NewNoopReader())} {
+		gas, got := run(statedb)
+		require.Equal(t, want, got, name)
+		require.Equal(t, wantGas, gas, name)
+	}
+}
+
+// Frames reuse pooled contexts. A frame with another storage address must not read the
+// previous frame's slots, even when nothing changed the state in between.
+func TestStorageCacheIsPerFrame(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	x, y := common.HexToAddress("0x2001"), common.HexToAddress("0x2002")
+	readSlot := program.New()
+	loadTo(readSlot, 1, 0).Return(0, 32)
+	for addr, v := range map[common.Address]uint64{x: 11, y: 22} {
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(addr), readSlot.Bytes(), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetState(accounts.InternAddress(addr), accounts.InternKey(common.BigToHash(big.NewInt(1))), *uint256.NewInt(v)))
+	}
+	// The first two calls warm both accounts and slots, so the last two change nothing.
+	p := program.New().StaticCall(nil, x, 0, 0, 0, 0).Op(vm.POP).StaticCall(nil, y, 0, 0, 0, 0).Op(vm.POP)
+	p.StaticCall(nil, x, 0, 0, 0, 32).Op(vm.POP).StaticCall(nil, y, 0, 0, 32, 32).Op(vm.POP).Return(0, 64)
+	top := accounts.InternAddress(common.HexToAddress("0x2000"))
+	require.NoError(t, statedb.SetCode(top, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(top, nil, &Config{State: statedb, GasLimit: 1_000_000})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{11, 22}, []uint64{new(uint256.Int).SetBytes(ret[:32]).Uint64(), new(uint256.Int).SetBytes(ret[32:]).Uint64()})
+}
+
+// Without EIP-161 an empty account survives in the post-state, so a zero-value
+// call has to leave its origin existing even though nothing transfers. A chain
+// past Spurious Dragon that disables EIP-161 keeps that behaviour.
+func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"pre-spurious-dragon", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0)}},
+		{"eip161-disabled", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), DisabledEIPs: []int{161}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, domains := temporaltest.NewTestTxSD(t, db)
+
+			ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+			defer ibs.Close()
+			address := accounts.InternAddress(common.HexToAddress("0xaa"))
+			require.NoError(t, ibs.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+			origin := accounts.InternAddress(common.HexToAddress("0xf00d"))
+			_, _, err := Call(address, nil, &Config{State: ibs, Origin: origin, ChainConfig: tc.cfg})
+			require.NoError(t, err)
+
+			exists, err := ibs.Exist(origin)
+			require.NoError(t, err)
+			require.True(t, exists, "the origin must exist in the post-state")
+		})
+	}
 }

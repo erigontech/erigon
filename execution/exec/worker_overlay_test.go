@@ -17,17 +17,22 @@
 package exec
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -51,16 +56,15 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
@@ -72,7 +76,7 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(t.Context(), roTx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(roTx, dirs.Tmp))
+	require.NoError(t, doms.InitBlockOverlay(roTx))
 
 	header := &types.Header{
 		Number:     *uint256.NewInt(2_713_395),
@@ -88,20 +92,15 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	// nil blockReader → consensuschain.Reader uses rawdb.ReadHeader directly,
 	// keeping the test focused on the tx + overlay path without any
 	// snapshot-file plumbing.
-	rw := NewWorker(t.Context(), true, nil, db, nil, nil,
-		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, nil, dirs, logger)
+	rw := NewWorkerContext(t.Context(), true, nil, db, nil,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
-	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
-	// directly here would double-Rollback against rw.chainRoTx.
+	// The worker only borrows the tx (bindTx never rolls it back), so the caller
+	// owns workerRoTx and rolls it back here — mirroring the dispatch goroutine.
 	workerRoTx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if rw.chainRoTx != nil {
-			rw.chainRoTx.Rollback()
-			rw.chainRoTx = nil
-		}
-	})
+	t.Cleanup(workerRoTx.Rollback)
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
 	got := rw.chain.GetHeaderByHash(hash)
@@ -118,16 +117,15 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
@@ -159,23 +157,63 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	// nil blockReader → consensuschain.Reader uses rawdb.ReadHeader directly,
 	// keeping the test focused on the tx + overlay path without any
 	// snapshot-file plumbing.
-	rw := NewWorker(t.Context(), true, nil, db, nil, nil,
-		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, nil, dirs, logger)
+	rw := NewWorkerContext(t.Context(), true, nil, db, nil,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
-	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
-	// directly here would double-Rollback against rw.chainRoTx.
+	// The worker only borrows the tx (bindTx never rolls it back), so the caller
+	// owns workerRoTx and rolls it back here — mirroring the dispatch goroutine.
 	workerRoTx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if rw.chainRoTx != nil {
-			rw.chainRoTx.Rollback()
-			rw.chainRoTx = nil
-		}
-	})
+	t.Cleanup(workerRoTx.Rollback)
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
 	got := rw.chain.GetHeaderByHash(hash)
 	require.NotNil(t, got, "committed-MDBX header must still resolve when no overlay is active")
 	require.Equal(t, number, got.Number.Uint64())
+}
+
+// A worker run without a bound roTx is an executor fault: the result must carry
+// the operational marker so it cannot become a block verdict downstream.
+func TestRunTxTaskWithoutRoTxIsOperational(t *testing.T) {
+	w := NewWorkerContext(context.Background(), true, NewWorkerMetrics(), nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	w.stateReader = state.NewNoopReader()
+
+	res := w.RunTxTaskNoLock(&TxTask{})
+
+	require.Error(t, res.Err)
+	require.True(t, res.Operational)
+}
+
+type headerTxRecorder struct {
+	dbservices.FullBlockReader
+	tx kv.Getter
+}
+
+func (r *headerTxRecorder) Header(_ context.Context, tx kv.Getter, _ common.Hash, blockNum uint64) (*types.Header, error) {
+	r.tx = tx
+	return &types.Header{Number: *uint256.NewInt(blockNum)}, nil
+}
+
+type namedTx struct {
+	kv.TemporalTx
+	name string
+}
+
+// A mid-EVM dependency pause rebinds the worker to another roTx; BLOCKHASH must
+// read through the rebound tx, not the released one another worker may now hold.
+func TestWorker_GetHashReadsTheRebound(t *testing.T) {
+	t.Parallel()
+
+	br := &headerTxRecorder{}
+	rw := NewWorkerContext(t.Context(), true, nil, nil, br,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, datadir.New(t.TempDir()), log.New())
+	released, rebound := &namedTx{name: "released"}, &namedTx{name: "rebound"}
+	require.NoError(t, rw.ResetTx(released))
+	rw.installWorkerGetHash(&TxTask{Header: &types.Header{Number: *uint256.NewInt(10)}})
+	require.NoError(t, rw.BindTxHeld(rebound))
+
+	_, err := rw.evm.Context.GetHash(5)
+	require.NoError(t, err)
+	require.Same(t, rebound, br.tx)
 }

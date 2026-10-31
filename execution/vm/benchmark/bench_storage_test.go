@@ -5,7 +5,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 )
@@ -66,6 +71,43 @@ func BenchmarkSLOADWarm(b *testing.B) {
 				callOOG(b, vmenv, addrContract)
 			}
 		})
+	}
+}
+
+// BenchmarkSLOADCommitted reads storage from the DB as a noMaterialize eth_call
+// does: every iteration is a fresh tx that reads each slot once from the state
+// reader and then repeatedly from the in-tx caches.
+func BenchmarkSLOADCommitted(b *testing.B) {
+	const n, rounds = 50, 8
+	p := program.New()
+	slots := make(map[uint256.Int]uint256.Int, n)
+	for i := range n {
+		slots[*uint256.NewInt(uint64(i))] = *uint256.NewInt(0xDEAD)
+	}
+	for range rounds {
+		for i := range n {
+			p.Push(i).Op(vm.SLOAD, vm.POP)
+		}
+	}
+	code := p.Op(vm.STOP).Bytes()
+
+	b.ReportAllocs()
+	vmenv := newCommittedBenchEnv(b, 10_000_000, func(statedb *state.IntraBlockState) {
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+	})
+	statedb := vmenv.IntraBlockState()
+	v, err := statedb.GetState(addrContract, accounts.InternKey(uint256.NewInt(1).Bytes32()))
+	require.NoError(b, err)
+	require.EqualValues(b, 0xDEAD, v.Uint64(), "storage must come from the DB")
+	versionMap := state.NewVersionMap(nil)
+	for b.Loop() {
+		statedb.Reset()
+		statedb.SetVersionMap(versionMap)
+		statedb.SetNoConflictDetection()
+		if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -189,6 +231,47 @@ func BenchmarkStorageDiversity(b *testing.B) {
 			callComplete(b, vmenv, addrContract, nil)
 			for b.Loop() {
 				callComplete(b, vmenv, addrContract, nil)
+			}
+		})
+	}
+}
+
+// BenchmarkAddressDiversity measures repeated BALANCE over n distinct warm
+// accounts, the way an airdrop or batch contract walks a holder list. The sweep
+// assumes IntraBlockState interns addresses through a 256-entry direct-mapped table and
+// covers the miss side the call benchmarks never reach — they touch a handful of
+// addresses and hit every time.
+//
+// The addresses are keccak output, so they land in buckets at random rather than
+// one per bucket: 16 of them get 16 buckets and always hit, 256 cover 163 of the
+// 256 and miss 64% of the time, 1024 miss 98%. The sweep is therefore one hitting
+// tier and two thrashing ones, not a fits/fills/overflows progression.
+func BenchmarkAddressDiversity(b *testing.B) {
+	require.Equal(b, 256, state.AddressCacheSize,
+		"the tiers below are one hitting and two thrashing only against this bucket count")
+
+	for _, n := range []int{16, 256, 1024} {
+		p, lbl := program.New().Jumpdest()
+		addrs := make([]common.Address, n)
+		for i := range addrs {
+			addrs[i] = common.BytesToAddress(crypto.Keccak256([]byte{byte(i), byte(i >> 8)}))
+			p.Push(addrs[i]).Op(vm.BALANCE, vm.POP)
+		}
+		code := p.Jump(lbl).Bytes()
+
+		b.Run(fmt.Sprintf("%daccounts", n), func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
+			deployContract(b, statedb, addrContract, code)
+			for i, a := range addrs {
+				addr := accounts.InternAddress(a)
+				require.NoError(b, statedb.CreateAccount(addr, false))
+				require.NoError(b, statedb.SetBalance(addr, *uint256.NewInt(uint64(i) + 1), 0))
+			}
+			callOOG(b, vmenv, addrContract)
+			for b.Loop() {
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}

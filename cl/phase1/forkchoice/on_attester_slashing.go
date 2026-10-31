@@ -20,11 +20,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 )
@@ -45,9 +47,9 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	defer f.mu.Unlock()
 
 	if f.syncedDataManager.Syncing() {
-		s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root, false)
+		s, err := f.getStateLocked(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root)
 		if err != nil {
-			return err
+			log.Debug("[OnAttesterSlashing] failed to load the justified state", "err", err)
 		}
 		return f.onProcessAttesterSlashing(attesterSlashing, s, test)
 	}
@@ -58,10 +60,6 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 }
 
 func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, s *state.CachingBeaconState, test bool) error {
-	if s == nil {
-		return errors.New("no state accessible")
-	}
-
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
@@ -79,6 +77,13 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
 		return errors.New("attestation data is not slashable")
 	}
+	if s == nil {
+		if !solid.IsUint64SortedSet(attestation1.AttestingIndices) ||
+			!solid.IsUint64SortedSet(attestation2.AttestingIndices) {
+			return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		}
+		return fmt.Errorf("%w: no state accessible", synced_data.ErrNotSynced)
+	}
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
 		return err
@@ -89,23 +94,23 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
-		return fmt.Errorf("unable to get the domain: %v", err)
+		return fmt.Errorf("unable to get the domain: %w", err)
 	}
 	domain2, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation2.Data.Target.Epoch)
 	if err != nil {
-		return fmt.Errorf("unable to get the domain: %v", err)
+		return fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	if !test {
 		// Verify validity of slashings (1)
 		signingRoot, err := fork.ComputeSigningRoot(attestation1.Data, domain1)
 		if err != nil {
-			return fmt.Errorf("unable to get signing root: %v", err)
+			return fmt.Errorf("unable to get signing root: %w", err)
 		}
 
 		valid, err := bls.VerifyAggregate(attestation1.Signature[:], signingRoot[:], attestation1PublicKeys)
 		if err != nil {
-			return fmt.Errorf("error while validating signature: %v", err)
+			return fmt.Errorf("error while validating signature: %w", err)
 		}
 		if !valid {
 			return errors.New("invalid aggregate signature")
@@ -113,12 +118,12 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		// Verify validity of slashings (2)
 		signingRoot, err = fork.ComputeSigningRoot(attestation2.Data, domain2)
 		if err != nil {
-			return fmt.Errorf("unable to get signing root: %v", err)
+			return fmt.Errorf("unable to get signing root: %w", err)
 		}
 
 		valid, err = bls.VerifyAggregate(attestation2.Signature[:], signingRoot[:], attestation2PublicKeys)
 		if err != nil {
-			return fmt.Errorf("error while validating signature: %v", err)
+			return fmt.Errorf("error while validating signature: %w", err)
 		}
 		if !valid {
 			return errors.New("invalid aggregate signature")
@@ -131,17 +136,18 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {
-				return fmt.Errorf("unable to retrieve state: %v", err)
+				return fmt.Errorf("unable to retrieve state: %w", err)
 			}
 			if v.IsSlashable(state.Epoch(s)) {
 				anySlashed = true
 			}
 		}
 	}
-	if anySlashed {
-		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
-		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
+	if !anySlashed {
+		return errors.New("no slashable validators in intersection")
 	}
+	f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+	f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	return nil
 }
 

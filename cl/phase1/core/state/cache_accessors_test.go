@@ -40,10 +40,49 @@ func TestComputeNextSyncCommittee_ZeroActiveValidators(t *testing.T) {
 		v.SetExitEpoch(0) // already exited → not active at any epoch
 		v.SetPublicKey(pk)
 		v.SetEffectiveBalance(2000000000)
-		s.AddValidator(v, 2000000000)
+		require.NoError(t, s.AddValidator(v, 2000000000))
 	}
-	s.SetSlot(8160)
+	require.NoError(t, s.SetSlot(8160))
 
 	_, err := s.ComputeNextSyncCommittee()
 	require.Error(t, err)
+}
+
+func TestProposerIndexFromLookahead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	stateEpoch := uint64(3)
+	s := state.New(&cfg)
+	require.NoError(t, s.SetSlot(stateEpoch*cfg.SlotsPerEpoch+5))
+
+	lookahead := solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch))
+	for i := range lookahead.Length() {
+		lookahead.Set(i, uint64(1000+i))
+	}
+	s.SetProposerLookahead(lookahead)
+
+	s.SetVersion(clparams.ElectraVersion)
+	_, ok := s.ProposerIndexFromLookahead(stateEpoch * cfg.SlotsPerEpoch)
+	require.False(t, ok)
+
+	s.SetVersion(clparams.FuluVersion)
+	tests := []struct {
+		name string
+		slot uint64
+		want uint64
+		ok   bool
+	}{
+		{name: "first slot of state epoch", slot: stateEpoch * cfg.SlotsPerEpoch, want: 1000, ok: true},
+		{name: "slot in state epoch", slot: stateEpoch*cfg.SlotsPerEpoch + 7, want: 1007, ok: true},
+		{name: "first slot of last lookahead epoch", slot: (stateEpoch + cfg.MinSeedLookahead) * cfg.SlotsPerEpoch, want: 1000 + cfg.MinSeedLookahead*cfg.SlotsPerEpoch, ok: true},
+		{name: "last slot of last lookahead epoch", slot: (stateEpoch+cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch - 1, want: 1000 + (cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch - 1, ok: true},
+		{name: "after lookahead", slot: (stateEpoch + cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch},
+		{name: "before state epoch", slot: stateEpoch*cfg.SlotsPerEpoch - 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := s.ProposerIndexFromLookahead(tt.slot)
+			require.Equal(t, tt.ok, ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }

@@ -3,6 +3,7 @@ package receipts
 import (
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 
@@ -15,11 +16,9 @@ import (
 // TryGetCachedReceipt never touches them.
 func newTestGenerator(t *testing.T) *Generator {
 	t.Helper()
-	rc, err := lru.New[uint64, *types.Receipt](256)
-	require.NoError(t, err)
 	rsc, err := lru.New[common.Hash, types.Receipts](256)
 	require.NoError(t, err)
-	return &Generator{receiptCache: rc, receiptsCache: rsc}
+	return &Generator{receiptCache: newReceiptCache(datasize.MB), receiptsCache: rsc}
 }
 
 func TestTryGetCachedReceipt(t *testing.T) {

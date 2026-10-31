@@ -32,7 +32,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	defer sd.Close()
 
 	sc := cache.NewDefaultStateCache()
-	sd.SetStateCacheForTest(sc) // force-enable regardless of USE_STATE_CACHE
+	sd.BindStateCache(sc) // force-enable regardless of USE_STATE_CACHE
 
 	var addr common.Address
 	addr[0] = 0xab
@@ -45,7 +45,10 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	}
 	var staleArr [32]byte
 	copy(staleArr[:], stale[:])
-	sc.View(frontierAt(0)).SeedAddrCodeHash(addr[:], staleArr, 0)
+	sc.View(frontierAtStateVersion(t, rwTx, frontierAt(0))).SeedAddrCodeHash(addr[:], staleArr, 0)
+	seeded, ok := sc.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok)
+	require.Equal(t, staleArr, seeded)
 
 	t.Run("empty in-batch account wins (codeHash-no-code repro)", func(t *testing.T) {
 		acc := accounts.Account{Nonce: 7, CodeHash: accounts.EmptyCodeHash}
@@ -97,7 +100,7 @@ func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
 	seedSD, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
 	require.NoError(t, err)
 	defer seedSD.Close()
-	seedSD.SetStateCacheForTest(sc)
+	seedSD.BindStateCache(sc)
 	seedSD.SetTxNum(10)
 	require.NoError(t, seedSD.DomainPut(kv.AccountsDomain, seedTx, addr[:], accounts.SerialiseV3(&acc), 10, nil))
 	require.NoError(t, seedSD.Commit(ctx, seedTx))
@@ -114,7 +117,7 @@ func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)
@@ -159,7 +162,7 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)

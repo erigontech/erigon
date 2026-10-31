@@ -17,15 +17,16 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math/rand"
 	"runtime"
 	"slices"
-	"sync/atomic"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -54,9 +55,24 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 }
 
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers,
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }, false)
+}
+
+func runCollectingParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers, collectingTrieCtxFactory, false)
+}
+
+func runCollectAndProcessBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers,
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }, true)
+}
+
+func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers int,
+	newFactory func(*MockState) (TrieContextFactory, func()), timeCollect bool,
+) {
 	ctx := context.Background()
 	b.ReportAllocs()
-	// pph is reused across iterations so the worker pool amortizes.
 	var pph *ParallelPatriciaHashed
 	defer func() {
 		if pph != nil {
@@ -68,23 +84,33 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		ms := NewMockState(b)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
+		factory, drain := newFactory(ms)
 		if pph == nil {
-			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			pph = NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
-			// Rewire MockState without Reset()/Release(), which would drop the worker pool.
-			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.SetTrieContextFactory(factory)
 			pph.ResetContext(ms)
 		}
 		pph.RootTrie().Reset()
-		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		var upds *Updates
+		if timeCollect {
+			upds = NewUpdates(ModeParallel, "", KeyToHexNibbleHash)
+		} else {
+			upds = WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+			upds.parallel.Build()
+		}
 		b.StartTimer()
 
+		if timeCollect {
+			WrapKeyUpdatesInto(b, upds, pk, updates)
+		}
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
 
 		b.StopTimer()
 		require.NoError(b, err)
 		upds.Close()
+		drain()
 		b.StartTimer()
 	}
 }
@@ -119,6 +145,7 @@ func Benchmark_Commitment_1MWhales(b *testing.B) {
 	for _, w := range workers {
 		b.Run(fmt.Sprintf("ModeParallel-w%d", w), func(b *testing.B) { runParallelBench(b, pk, updates, w) })
 	}
+	b.Run(fmt.Sprintf("collecting-w%d", ncpu), func(b *testing.B) { runCollectingParallelBench(b, pk, updates, ncpu) })
 }
 
 func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
@@ -146,10 +173,12 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 				runParallelBench(b, pk, updates, w)
 			})
 		}
+		b.Run(fmt.Sprintf("collecting-w%d", runtime.NumCPU()), func(b *testing.B) {
+			runCollectingParallelBench(b, pk, updates, runtime.NumCPU())
+		})
 	})
 }
 
-// Accounts are pinned to distinct top nibbles so their sub-tries don't share branches.
 func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int) ([][]byte, []Update) {
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))
@@ -158,6 +187,40 @@ func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int)
 		addNibbleAccount(ub, rnd, i%16, i, slotsPerAccount)
 	}
 	return ub.Build()
+}
+
+func buildStragglerCorpus(seed int64, accounts, stragglerSlots int) ([][]byte, []Update) {
+	rnd := rand.New(rand.NewSource(seed))
+	ub := NewUpdateBuilder()
+	for range accounts {
+		addRandomAccount(ub, rnd, 0)
+	}
+	addRandomAccount(ub, rnd, stragglerSlots)
+	return ub.Build()
+}
+
+func Benchmark_Commitment_HotContractStraggler(b *testing.B) {
+	for _, c := range []struct {
+		name           string
+		accounts       int
+		stragglerSlots int
+	}{
+		{"4k-accounts-200-slots", 4_000, 200},
+		{"20k-accounts-250-slots", 20_000, 250},
+		{"20k-accounts-500-slots", 20_000, 500},
+		{"20k-accounts-1000-slots", 20_000, 1_000},
+	} {
+		pk, updates := buildStragglerCorpus(int64(c.accounts)*7+int64(c.stragglerSlots), c.accounts, c.stragglerSlots)
+		b.Run(c.name+"/ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
+		workers := []int{4, runtime.NumCPU()}
+		slices.Sort(workers)
+		workers = slices.Compact(workers)
+		for _, w := range workers {
+			b.Run(fmt.Sprintf("%s/ModeParallel-w%d", c.name, w), func(b *testing.B) {
+				runParallelBench(b, pk, updates, w)
+			})
+		}
+	}
 }
 
 func Benchmark_Commitment_Clustered(b *testing.B) {
@@ -184,7 +247,6 @@ type storageGroup struct {
 	updates []Update
 }
 
-// Splits one whale account's slots into disjoint, independently processable sub-tries.
 func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 	rnd := rand.New(rand.NewSource(919273))
 	addr := make([]byte, length.Addr)
@@ -213,7 +275,6 @@ type groupRun struct {
 	upds *Updates
 }
 
-// Must run on the test goroutine (uses require); each group gets its own MockState so concurrent process() shares no state.
 func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	ms := NewMockState(tb)
 	require.NoError(tb, ms.applyPlainUpdates(g.pk, g.updates))
@@ -222,7 +283,7 @@ func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	return groupRun{hph: hph, upds: upds}
 }
 
-// process is safe to call from any goroutine (no require/FailNow).
+// Returns err, not require: FailNow is unsafe off the test goroutine.
 func (r groupRun) process() error {
 	_, err := r.hph.Process(context.Background(), r.upds, "", nil, WarmupConfig{})
 	return err
@@ -293,92 +354,6 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 	}
 }
 
-// Keeps burnCPU's result observable so the compiler cannot elide the synthetic work.
-var benchCPUSink atomic.Uint64
-
-// Synthetic per-touch CPU cost standing in for block execution.
-func burnCPU(iters int) {
-	var x uint64 = 1469598103934665603
-	for i := range iters {
-		x = (x ^ uint64(i)) * 1099511628211
-	}
-	benchCPUSink.Add(x)
-}
-
-func streamingBenchCorpora() []struct {
-	name string
-	pk   [][]byte
-	upds []Update
-} {
-	wk, wu := buildWhaleCorpus(bigAccountWhale(40_000))
-	mk, mu := buildMixedCorpus(99, 20_000)
-	return []struct {
-		name string
-		pk   [][]byte
-		upds []Update
-	}{
-		{"whale", wk, wu},
-		{"mixed", mk, mu},
-	}
-}
-
-// scheduler=true overlaps folds with the per-touch CPU burn; false defers all folds to Process.
-func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters int, scheduler bool) {
-	ctx := context.Background()
-	b.ReportAllocs()
-	var (
-		totalProcess time.Duration
-		totalRefold  uint64
-		iters        int
-	)
-	for b.Loop() {
-		b.StopTimer()
-		ms := NewMockState(b)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(b, ms.applyPlainUpdates(pk, upds))
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(runtime.NumCPU())
-		if scheduler {
-			require.NoError(b, sc.StartScheduler(ctx))
-		}
-		b.StartTimer()
-
-		for _, k := range pk {
-			burnCPU(cpuIters)
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
-		procStart := time.Now()
-		_, err := sc.Process(ctx)
-		procDur := time.Since(procStart)
-
-		b.StopTimer()
-		require.NoError(b, err)
-		totalProcess += procDur
-		totalRefold += sc.RefoldCount()
-		iters++
-		sc.Release()
-		b.StartTimer()
-	}
-	if iters > 0 {
-		b.ReportMetric(float64(totalProcess.Nanoseconds())/float64(iters), "process-ns/op")
-		b.ReportMetric(float64(totalRefold)/float64(iters), "refolds/op")
-	}
-}
-
-// Mechanism sanity-check with synthetic CPU cost; numbers are not a performance claim.
-func Benchmark_StreamingOverlap(b *testing.B) {
-	for _, c := range streamingBenchCorpora() {
-		for _, cpu := range []int{0, 500, 5000} {
-			b.Run(fmt.Sprintf("%s/cpu=%d/overlap", c.name, cpu), func(b *testing.B) {
-				runStreamingOverlapBench(b, c.pk, c.upds, cpu, true)
-			})
-			b.Run(fmt.Sprintf("%s/cpu=%d/batch", c.name, cpu), func(b *testing.B) {
-				runStreamingOverlapBench(b, c.pk, c.upds, cpu, false)
-			})
-		}
-	}
-}
-
 func Benchmark_DeepStorageWhale(b *testing.B) {
 	for _, slots := range []int{750_000} {
 		addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(slots)
@@ -417,5 +392,270 @@ func Benchmark_DeepStorageWhale(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+func runParallelBenchGrain(b *testing.B, pk [][]byte, updates []Update, workers int, grain uint32) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	var pph *ParallelPatriciaHashed
+	defer func() {
+		if pph != nil {
+			pph.Release()
+		}
+	}()
+	for b.Loop() {
+		b.StopTimer()
+		ms := NewMockState(b)
+		ms.SetConcurrentCommitment(true)
+		require.NoError(b, ms.applyPlainUpdates(pk, updates))
+		if pph == nil {
+			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			pph.SetNumWorkers(workers)
+		} else {
+			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.ResetContext(ms)
+		}
+		pph.SetForkGrain(grain)
+		pph.RootTrie().Reset()
+		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		upds.parallel.Build()
+		b.StartTimer()
+
+		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
+
+		b.StopTimer()
+		require.NoError(b, err)
+		upds.Close()
+		b.StartTimer()
+	}
+	if pph != nil {
+		b.ReportMetric(float64(pph.Forks()), "forks/op")
+	}
+}
+
+func runIncrementalParallelBenchGrain(b *testing.B, batch1, batch2 engineBatch, workers int, grain uint32) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	var pph *ParallelPatriciaHashed
+	defer func() {
+		if pph != nil {
+			pph.Release()
+		}
+	}()
+	for b.Loop() {
+		b.StopTimer()
+		ms := NewMockState(b)
+		ms.SetConcurrentCommitment(true)
+		if pph == nil {
+			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+			pph.SetNumWorkers(workers)
+		} else {
+			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.ResetContext(ms)
+		}
+		pph.SetForkGrain(grain)
+		pph.RootTrie().Reset()
+
+		require.NoError(b, ms.applyPlainUpdates(batch1.keys, batch1.upds))
+		u1 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch1.keys, batch1.upds)
+		_, err := pph.Process(ctx, u1, "", nil, WarmupConfig{})
+		require.NoError(b, err)
+		u1.Close()
+
+		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
+		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2.parallel.Build()
+		b.StartTimer()
+
+		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
+
+		b.StopTimer()
+		require.NoError(b, err)
+		u2.Close()
+		b.StartTimer()
+	}
+	if pph != nil {
+		b.ReportMetric(float64(pph.Forks()), "forks/op")
+	}
+}
+
+func Benchmark_Commitment_GrainSweep(b *testing.B) {
+	w := runtime.NumCPU()
+	grains := []struct {
+		name  string
+		grain uint32
+	}{{"G2", 2}, {"Gauto", 0}, {"Ginf", ForkGrainNever}}
+
+	b.Run("straggler-20k-500", func(b *testing.B) {
+		pk, upds := buildStragglerCorpus(20_000*7+500, 20_000, 500)
+		for _, g := range grains {
+			b.Run(g.name, func(b *testing.B) { runParallelBenchGrain(b, pk, upds, w, g.grain) })
+		}
+	})
+	b.Run("500K-StorageHeavy", func(b *testing.B) {
+		pk, upds := build500KStorageHeavyCorpus(b)
+		for _, g := range grains {
+			b.Run(g.name, func(b *testing.B) { runParallelBenchGrain(b, pk, upds, w, g.grain) })
+		}
+	})
+	b.Run("1MWhales", func(b *testing.B) {
+		pk, upds := buildWhaleCorpus(whale1M())
+		for _, g := range grains {
+			b.Run(g.name, func(b *testing.B) { runParallelBenchGrain(b, pk, upds, w, g.grain) })
+		}
+	})
+	b.Run("Clustered-8acct-500K", func(b *testing.B) {
+		pk, upds := buildClusteredStorageCorpus(b, 8, 62_500)
+		for _, g := range grains {
+			b.Run(g.name, func(b *testing.B) { runParallelBenchGrain(b, pk, upds, w, g.grain) })
+		}
+	})
+	b.Run("incremental-whale120k", func(b *testing.B) {
+		inc1, inc2 := buildRetouchedWhale(717, 120_000)
+		for _, g := range grains {
+			b.Run(g.name, func(b *testing.B) { runIncrementalParallelBenchGrain(b, inc1, inc2, w, g.grain) })
+		}
+	})
+}
+
+func buildRetouchedWhale(seed int64, slots int) (batch1, batch2 engineBatch) {
+	rnd := rand.New(rand.NewSource(seed))
+	whale := addrHex(findAddressForNibble(0xd, int(seed)))
+
+	locs := make([]string, slots)
+	ub1 := NewUpdateBuilder()
+	ub1.Balance(whale, 12345)
+	for i := range slots {
+		loc := make([]byte, length.Hash)
+		rnd.Read(loc)
+		val := make([]byte, 32)
+		rnd.Read(val)
+		locs[i] = hex.EncodeToString(loc)
+		ub1.Storage(whale, locs[i], hex.EncodeToString(val))
+	}
+	for _, nib := range []int{2, 6, 0xa} {
+		ub1.Balance(addrHex(findAddressForNibble(nib, int(seed)+nib)), uint64(8000+nib))
+	}
+	k1, u1 := ub1.Build()
+
+	ub2 := NewUpdateBuilder()
+	ub2.Balance(whale, 55555)
+	for _, loc := range locs {
+		val := make([]byte, 32)
+		rnd.Read(val)
+		ub2.Storage(whale, loc, hex.EncodeToString(val))
+	}
+	k2, u2 := ub2.Build()
+	return engineBatch{k1, u1}, engineBatch{k2, u2}
+}
+
+func runIncrementalParallelBench(b *testing.B, batch1, batch2 engineBatch, workers int, newFactory func(*MockState) (TrieContextFactory, func())) {
+	ctx := context.Background()
+	b.ReportAllocs()
+	var pph *ParallelPatriciaHashed
+	defer func() {
+		if pph != nil {
+			pph.Release()
+		}
+	}()
+	for b.Loop() {
+		b.StopTimer()
+		ms := NewMockState(b)
+		ms.SetConcurrentCommitment(true)
+		factory, drain := newFactory(ms)
+		if pph == nil {
+			pph = NewParallelPatriciaHashed(factory, length.Addr, DefaultTrieConfig())
+			pph.SetNumWorkers(workers)
+		} else {
+			pph.SetTrieContextFactory(factory)
+			pph.ResetContext(ms)
+		}
+		pph.RootTrie().Reset()
+
+		require.NoError(b, ms.applyPlainUpdates(batch1.keys, batch1.upds))
+		u1 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch1.keys, batch1.upds)
+		_, err := pph.Process(ctx, u1, "", nil, WarmupConfig{})
+		require.NoError(b, err)
+		u1.Close()
+		drain()
+
+		require.NoError(b, ms.applyPlainUpdates(batch2.keys, batch2.upds))
+		u2 := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, batch2.keys, batch2.upds)
+		u2.parallel.Build()
+		b.StartTimer()
+
+		_, err = pph.Process(ctx, u2, "", nil, WarmupConfig{})
+
+		b.StopTimer()
+		require.NoError(b, err)
+		u2.Close()
+		drain()
+		b.StartTimer()
+	}
+}
+
+func Benchmark_Commitment_IncrementalWhale(b *testing.B) {
+	batch1, batch2 := buildRetouchedWhale(717, 120_000)
+	mock := func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }
+	workers := []int{4, runtime.NumCPU()}
+	slices.Sort(workers)
+	workers = slices.Compact(workers)
+	for _, w := range workers {
+		b.Run(fmt.Sprintf("incremental-whale120k/ModeParallel-w%d", w), func(b *testing.B) {
+			runIncrementalParallelBench(b, batch1, batch2, w, mock)
+		})
+	}
+	b.Run(fmt.Sprintf("incremental-whale120k/collecting-w%d", runtime.NumCPU()), func(b *testing.B) {
+		runIncrementalParallelBench(b, batch1, batch2, runtime.NumCPU(), collectingTrieCtxFactory)
+	})
+}
+
+type collectingTrieCtx struct {
+	*MockState
+	local map[string]BranchData
+}
+
+func (c *collectingTrieCtx) PutBranch(prefix, data, _ []byte) error {
+	c.local[string(prefix)] = bytes.Clone(data)
+	return nil
+}
+
+func collectingTrieCtxFactory(ms *MockState) (TrieContextFactory, func()) {
+	var mu sync.Mutex
+	var made []*collectingTrieCtx
+	f := func(context.Context) (PatriciaContext, func()) {
+		c := &collectingTrieCtx{MockState: ms, local: make(map[string]BranchData)}
+		mu.Lock()
+		made = append(made, c)
+		mu.Unlock()
+		return c, func() {}
+	}
+	drain := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range made {
+			maps.Copy(ms.cm, c.local)
+		}
+		made = nil
+	}
+	return f, drain
+}
+
+func Benchmark_ModeParallel_TouchAndProcess(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	for _, c := range []struct {
+		name  string
+		build func(testing.TB) ([][]byte, []Update)
+	}{
+		{"100K-AccountsOnly", build100KAccountsCorpus},
+		{"500K-StorageHeavy", build500KStorageHeavyCorpus},
+	} {
+		pk, updates := c.build(b)
+		for _, w := range []int{4, ncpu} {
+			b.Run(fmt.Sprintf("%s/w%d", c.name, w), func(b *testing.B) {
+				runCollectAndProcessBench(b, pk, updates, w)
+			})
+		}
 	}
 }

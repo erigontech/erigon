@@ -23,7 +23,8 @@ It is **enabled by default** on `127.0.0.1:8553` (TCP).
 ```
 
 This mode serves streamable HTTP at `/mcp` and SSE at `/sse` on the same port,
-and provides full access to all tools including in-process Prometheus metrics.
+and includes in-process Prometheus metrics. RPC tools are limited to the
+namespaces enabled by `--http.api` (e.g. `--http.api=eth,erigon,ots,trace`).
 
 ### 2. Standalone (`cmd/mcp`)
 

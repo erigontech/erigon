@@ -38,7 +38,6 @@ func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
 	sc.SetAccountWrite(a1[:], &accounts.Account{Incarnation: 2})
 	x, ok := sc.GetAccount(a1[:])
 	fmt.Printf("%+v,%t\n", x.Incarnation, ok)
-
 }
 
 func TestCacheBtreeOrderAccountStorage(t *testing.T) {
@@ -78,22 +77,6 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	sc.SetCodeWrite(a1[:], 1, []byte{1})
 	sc.SetCodeWrite(a2[:], 1, []byte{2})
 	lastK = lastK[:0]
-	//if err := WalkWrites(sc.PrepareWrites(), nil, nil, nil, nil, func(address []byte, incarnation uint64, code []byte) error {
-	//	i++
-	//	if i == 1 {
-	//		assert.Equal(t, a1[:], address)
-	//		assert.Equal(t, 1, incarnation)
-	//		assert.Equal(t, []byte{1}, code)
-	//	}
-	//	if i == 2 {
-	//		assert.Equal(t, a2[:], address)
-	//		assert.Equal(t, 1, incarnation)
-	//		assert.Equal(t, []byte{2}, code)
-	//	}
-	//	return nil
-	//}, nil); err != nil {
-	//	t.Fatal(err)
-	//}
 }
 
 func TestAccountReads(t *testing.T) {
@@ -503,7 +486,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
+		code := []byte{byte(i), 2, 3}
 		sc.SetCodeRead(addr[:], 2, code)
 	}
 	if sc.readQueuesLen() != 4 {
@@ -545,7 +528,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
+		code := []byte{byte(i), 2, 3}
 		sc.SetCodeWrite(addr[:], 1, code)
 	}
 	if sc.WriteCount() != 4 {

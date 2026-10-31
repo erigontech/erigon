@@ -28,8 +28,9 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
@@ -101,6 +102,52 @@ func TestGetBlobsRemovedAfterMined(t *testing.T) {
 	}
 }
 
+func TestIdHashKnownRecognizesMinedBlobAfterNonceGap(t *testing.T) {
+	pool, ctx := newGetBlobsTestPool(t, 1)
+	pool.cfg.MaxNonceGap = 64
+	sender := common.Address{1}
+	blobTxn := makeBlobTxn()
+	blobTxn.Nonce = 65
+	blobTxn.Txn.(*types.BlobTx).Nonce = 65
+	blobTxn.Txn.(*types.BlobTx).GasLimit = 50_000
+	var slots TxnSlots
+	slots.Append(&blobTxn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+	require.Empty(t, pool.byHash)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		known, err := pool.IdHashKnown(tx, blobTxn.IDHash[:])
+		require.NoError(t, err)
+		require.False(t, known)
+		return nil
+	}))
+
+	account := accounts3.Account{Nonce: 66, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts3.EmptyCodeHash}
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:       1,
+		PendingBlockBaseFee:  200_000,
+		PendingBlobFeePerGas: 100_000,
+		BlockGasLimit:        math.MaxUint64,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+			Changes: []*remoteproto.AccountChange{{
+				Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: accounts3.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, slots))
+	reason, ok := pool.discardReasonsLRU.Get(string(blobTxn.IDHash[:]))
+	require.True(t, ok)
+	require.Equal(t, txpoolcfg.NonceTooDistant, reason)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		known, err := pool.IdHashKnown(tx, blobTxn.IDHash[:])
+		require.NoError(t, err)
+		require.True(t, known)
+		return nil
+	}))
+}
+
 func TestGetBlobsUnknownHash(t *testing.T) {
 	require := require.New(t)
 	pool, ctx := newGetBlobsTestPool(t, 1)
@@ -120,7 +167,7 @@ func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Conte
 	tb.Helper()
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
-	db := memdb.NewTestPoolDB(tb)
+	db := mdbxtest.NewTestPoolDB(tb)
 	cfg := txpoolcfg.DefaultConfig
 	cfg.TotalBlobPoolLimit = 1000
 	ctx, cancel := context.WithCancel(context.Background())

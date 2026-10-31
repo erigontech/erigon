@@ -6,7 +6,6 @@ self-hosted-runner:
     - Gnosis
     - linux
     - long-running
-    - Polygon
     - qa
     - Release
     - rpc-historical
@@ -16,6 +15,8 @@ self-hosted-runner:
     - rpc-integration-nethermind
     - rpc-latest-erigon
     - rpc-latest-geth
+    - rpc-latest-nethermind
+    - rpc-latest-reth
     - rpc-performance
     - RpcSpecific
     - tip-tracking

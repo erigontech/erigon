@@ -26,6 +26,9 @@ jobs:
       CHAIN: mainnet
 
     steps:
+    - name: Clean workspace
+      run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
     - name: Check out repository
       uses: actions/checkout@v7
       with:

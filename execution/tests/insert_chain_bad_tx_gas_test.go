@@ -53,7 +53,7 @@ func TestInsertChain_TxGasExceedsBlockGasLimit_RejectsOnBothPaths(t *testing.T) 
 	badHeader.GasLimit = 20000
 
 	badBlock := types.NewBlock(badHeader, validChain.Blocks[0].Transactions(),
-		validChain.Blocks[0].Uncles(), validChain.Receipts[0], nil)
+		validChain.Blocks[0].Uncles(), validChain.Receipts[0], nil, validChain.Blocks[0].BlockAccessListSidecar())
 	badChain := &blockgen.ChainPack{
 		Blocks:   []*types.Block{badBlock},
 		Headers:  []*types.Header{badHeader},

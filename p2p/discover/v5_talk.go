@@ -84,7 +84,7 @@ func (t *talkSystem) handleRequest(id enode.ID, addr netip.AddrPort, req *v5wire
 
 	if !ok {
 		resp := &v5wire.TalkResponse{ReqID: req.ReqID}
-		t.transport.sendResponse(n.ID(), addr, resp)
+		_ = t.transport.sendResponse(n.ID(), addr, resp)
 		return
 	}
 

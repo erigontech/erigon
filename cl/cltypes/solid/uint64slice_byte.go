@@ -19,22 +19,15 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 )
-
-func convertDepthToChunkSize(d int) int {
-	return (1 << d) // just power of 2
-}
-
-func getTreeCacheSize(listLen int, cacheDepth int) int {
-	treeChunks := convertDepthToChunkSize(cacheDepth)
-	return (listLen + treeChunks - 1) / treeChunks
-}
 
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.
 // The underlying storage for the slice is a byte array. This approach allows for efficient
@@ -50,6 +43,7 @@ type byteBasedUint64Slice struct {
 	c int
 
 	*merkle_tree.MerkleTree
+	progressiveTrees []*merkle_tree.MerkleTree
 }
 
 // NewUint64Slice creates a new instance of byteBasedUint64Slice with a specified capacity limit.
@@ -65,6 +59,7 @@ func (arr *byteBasedUint64Slice) Clear() {
 	arr.l = 0
 	clear(arr.u)
 	arr.MerkleTree = nil
+	arr.progressiveTrees = nil
 }
 
 // CopyTo copies the slice to a target slice.
@@ -84,6 +79,29 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 		})
 	} else {
 		target.MerkleTree = nil
+	}
+	if arr.progressiveTrees != nil {
+		if len(arr.progressiveTrees) < len(target.progressiveTrees) {
+			clear(target.progressiveTrees[len(arr.progressiveTrees):])
+		}
+		if cap(target.progressiveTrees) < len(arr.progressiveTrees) {
+			target.progressiveTrees = make([]*merkle_tree.MerkleTree, len(arr.progressiveTrees))
+		} else {
+			target.progressiveTrees = target.progressiveTrees[:len(arr.progressiveTrees)]
+		}
+		start := 0
+		capacity := 1
+		for i, tree := range arr.progressiveTrees {
+			if target.progressiveTrees[i] == nil {
+				target.progressiveTrees[i] = &merkle_tree.MerkleTree{}
+			}
+			tree.CopyInto(target.progressiveTrees[i])
+			target.progressiveTrees[i].SetComputeLeafFn(target.progressiveLeafFn(start))
+			start += capacity
+			capacity *= 4
+		}
+	} else {
+		target.progressiveTrees = nil
 	}
 
 	target.u = target.u[:len(arr.u)]
@@ -130,28 +148,37 @@ func (arr *byteBasedUint64Slice) Pop() uint64 {
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], 0)
 	arr.l--
 	arr.MerkleTree = nil
+	arr.progressiveTrees = nil
 	return val
 }
 
 // Append adds a new element to the end of the slice.
 func (arr *byteBasedUint64Slice) Append(v uint64) {
+	newChunk := arr.l%4 == 0
 	if len(arr.u) <= arr.l*8 {
 		arr.u = append(arr.u, merkle_tree.ZeroHashes[0][:]...)
 		if arr.MerkleTree != nil {
 			arr.MerkleTree.AppendLeaf()
 		}
 	}
+	if newChunk {
+		arr.appendProgressiveLeaf(arr.l / 4)
+	}
 	offset := arr.l * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
 	if arr.MerkleTree != nil {
 		arr.MerkleTree.MarkLeafAsDirty(arr.l / 4)
+	}
+	if arr.progressiveTrees != nil {
+		segment, localIndex, _ := progressiveSegmentForIndex(arr.l / 4)
+		arr.progressiveTrees[segment].MarkLeafAsDirty(localIndex)
 	}
 	arr.l++
 }
 
 // Get returns the element at the given index.
 func (arr *byteBasedUint64Slice) Get(index int) uint64 {
-	if index >= arr.l {
+	if index < 0 || index >= arr.l {
 		panic("index out of range")
 	}
 	offset := index * 8
@@ -160,8 +187,15 @@ func (arr *byteBasedUint64Slice) Get(index int) uint64 {
 
 // Set replaces the element at the given index with a new value.
 func (arr *byteBasedUint64Slice) Set(index int, v uint64) {
+	if index < 0 || index >= arr.l {
+		panic("index out of range")
+	}
 	if arr.MerkleTree != nil {
 		arr.MerkleTree.MarkLeafAsDirty(index / 4)
+	}
+	if arr.progressiveTrees != nil {
+		segment, localIndex, _ := progressiveSegmentForIndex(index / 4)
+		arr.progressiveTrees[segment].MarkLeafAsDirty(localIndex)
 	}
 	offset := index * 8
 	binary.LittleEndian.PutUint64(arr.u[offset:offset+8], v)
@@ -193,6 +227,64 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
+func (arr *byteBasedUint64Slice) HashListSSZProgressive() ([32]byte, error) {
+	if arr.progressiveTrees == nil {
+		arr.initializeProgressiveTrees()
+	}
+	var root common.Hash
+	for _, tree := range slices.Backward(arr.progressiveTrees) {
+		left := tree.ComputeRoot()
+		root = crypto.Sha256(left[:], root[:])
+	}
+	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
+	return crypto.Sha256(root[:], lengthRoot[:]), nil
+}
+
+func (arr *byteBasedUint64Slice) SetProgressiveHashing(enabled bool) {
+	if enabled {
+		arr.MerkleTree = nil
+		return
+	}
+	arr.progressiveTrees = nil
+}
+
+func (arr *byteBasedUint64Slice) initializeProgressiveTrees() {
+	arr.progressiveTrees = make([]*merkle_tree.MerkleTree, 0)
+	chunkCount := (arr.l + 3) / 4
+	start := 0
+	capacity := 1
+	for start < chunkCount {
+		count := min(capacity, chunkCount-start)
+		tree := &merkle_tree.MerkleTree{}
+		limit := uint64(capacity)
+		tree.Initialize(count, merkle_tree.OptimalMaxTreeCacheDepth, arr.progressiveLeafFn(start), &limit)
+		arr.progressiveTrees = append(arr.progressiveTrees, tree)
+		start += capacity
+		capacity *= 4
+	}
+}
+
+func (arr *byteBasedUint64Slice) progressiveLeafFn(start int) func(int, []byte) {
+	return func(idx int, out []byte) {
+		copy(out, arr.u[(start+idx)*length.Hash:])
+	}
+}
+
+func (arr *byteBasedUint64Slice) appendProgressiveLeaf(index int) {
+	if arr.progressiveTrees == nil {
+		return
+	}
+	segment, localIndex, capacity := progressiveSegmentForIndex(index)
+	if segment < len(arr.progressiveTrees) {
+		arr.progressiveTrees[segment].AppendLeaf()
+		return
+	}
+	tree := &merkle_tree.MerkleTree{}
+	limit := uint64(capacity)
+	tree.Initialize(1, merkle_tree.OptimalMaxTreeCacheDepth, arr.progressiveLeafFn(index-localIndex), &limit)
+	arr.progressiveTrees = append(arr.progressiveTrees, tree)
+}
+
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
 	if arr.MerkleTree == nil {
@@ -220,6 +312,7 @@ func (arr *byteBasedUint64Slice) DecodeSSZ(buf []byte, _ int) error {
 	arr.u = make([]byte, bufferLength)
 	copy(arr.u, buf)
 	arr.MerkleTree = nil
+	arr.progressiveTrees = nil
 	return nil
 }
 

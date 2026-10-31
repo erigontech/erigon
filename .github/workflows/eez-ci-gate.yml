@@ -1,0 +1,162 @@
+name: EEZ CI Gate
+
+# CI for the EEZ development branches: <prefix>/eez and its milestone branches
+# <prefix>/eez-*. ci-gate.yml runs only on pull_request and merge_group, so a
+# push to these branches gets no CI without this workflow; a pull request into
+# <prefix>/eez already runs ci-gate.yml, which has no branch filter.
+#
+# A push runs the copy of this file on the pushed branch. workflow_dispatch is
+# listed from the default branch, which is why main carries a copy too; its
+# push filter never matches main.
+
+on:
+  push:
+    branches:
+      - '*/eez'
+      - '*/eez-*'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "short: lint and short tests; full: the ci-gate.yml test set"
+        type: choice
+        options:
+          - short
+          - full
+        default: short
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Grants are per job. The called workflows require actions: write from their
+# caller, though only their merge_group cancel step uses it.
+permissions: {}
+
+jobs:
+  # Milestone branches get the short tier; <prefix>/eez, which receives the
+  # milestone merges, gets the full tier.
+  tier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.tier.outputs.full }}
+    steps:
+      - id: tier
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          INPUT_TIER: ${{ inputs.tier }}
+        run: |
+          full=false
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            [ "$INPUT_TIER" = "full" ] && full=true
+          elif [[ "$REF" == refs/heads/*/eez ]]; then
+            full=true
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
+  lint:
+    needs: [tier]
+    uses: ./.github/workflows/lint.yml
+    permissions:
+      contents: read
+      actions: write
+
+  short-tests:
+    needs: [tier]
+    if: needs.tier.outputs.full != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-erigon
+        with:
+          cache-namespace: eez-ci-gate
+
+      - name: Short test suite
+        run: make test-short
+
+      # Milestone branches (<prefix>/eez-mN) must carry eez/, so losing it
+      # fails here; other refs may predate it.
+      - name: EEZ packages with -race
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF" == refs/heads/*/eez-m* ]] || [ -d eez ]; then
+            go test -race -count=1 ./eez/...
+          else
+            echo "::notice::No eez packages on $REF; race step skipped"
+          fi
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+  tests:
+    needs: [tier]
+    if: needs.tier.outputs.full == 'true'
+    uses: ./.github/workflows/test-all-erigon.yml
+    permissions:
+      contents: read
+      actions: write
+
+  race-tests:
+    needs: [tier]
+    if: needs.tier.outputs.full == 'true'
+    uses: ./.github/workflows/test-all-erigon-race.yml
+    permissions:
+      contents: read
+      actions: write
+
+  eest-spec-tests:
+    needs: [tier]
+    if: needs.tier.outputs.full == 'true'
+    uses: ./.github/workflows/test-eest-spec.yml
+    permissions:
+      contents: read
+      actions: write
+
+  # Not ci-gate: main requires that check, and two jobs of that name on one
+  # commit make it ambiguous. ci-gate-check.sh excludes this job by GITHUB_JOB.
+  eez-ci-gate:
+    if: always()
+    needs:
+      - tier
+      - lint
+      - short-tests
+      - tests
+      - race-tests
+      - eest-spec-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # ci-gate-check.sh reads the run's jobs and their annotations.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      # cancelled() is only valid in `if:`, so capture it for the check below.
+      - name: Detect run cancellation
+        id: cancelflag
+        if: cancelled()
+        run: echo "cancelled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: always()
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check all required jobs
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS: ${{ toJSON(needs) }}
+          RUN_CANCELLED: ${{ steps.cancelflag.outputs.cancelled }}
+        run: bash .github/workflows/scripts/ci-gate-check.sh

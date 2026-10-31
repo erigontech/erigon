@@ -16,7 +16,12 @@
 
 package mdgas
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
+)
 
 func TestRefillReversesExecutionGasConsumption(t *testing.T) {
 	initial := MdGas{Execution: 100, State: 30}
@@ -72,5 +77,26 @@ func TestRefillStateGasUsesSpillFirst(t *testing.T) {
 	}
 	if used != (MdGasUsage{State: 20}) {
 		t.Fatalf("used gas after second refill: got %+v", used)
+	}
+}
+
+func TestSplitTxnGasLimit(t *testing.T) {
+	const intrinsic = 21_000
+	gas := params.MaxTxnGasLimit + 1_000_000
+	amsterdam := &chain.Rules{IsAmsterdam: true}
+	for _, tc := range []struct {
+		name      string
+		rules     *chain.Rules
+		skipSplit bool
+		want      MdGas
+	}{
+		{"pre-Amsterdam", &chain.Rules{}, false, MdGas{Execution: gas - intrinsic}},
+		{"pre-Amsterdam with skipSplit", &chain.Rules{}, true, MdGas{Execution: gas - intrinsic}},
+		{"Amsterdam", amsterdam, false, MdGas{Execution: params.MaxTxnGasLimit - intrinsic, State: gas - params.MaxTxnGasLimit}},
+		{"Amsterdam with skipSplit", amsterdam, true, MdGas{Execution: gas - intrinsic}},
+	} {
+		if got := SplitTxnGasLimit(gas, intrinsic, tc.rules, tc.skipSplit); got != tc.want {
+			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
 	}
 }

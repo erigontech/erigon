@@ -41,7 +41,7 @@ func FuzzDecompressMatch(f *testing.F) {
 			if pos[i] == 0 {
 				continue
 			}
-			next := min(j+int(pos[i]*10), len(x)-1)
+			next := min(j+int(pos[i])*10, len(x)-1)
 			bbb := x[j:next]
 			a = append(a, bbb)
 			j = next
@@ -109,5 +109,4 @@ func FuzzDecompressMatch(f *testing.F) {
 			word_idx++
 		}
 	})
-
 }

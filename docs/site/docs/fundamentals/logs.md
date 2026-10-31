@@ -27,9 +27,13 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 
 * `--log.json`: Enable JSON formatting for console logs
 * `--verbosity`: Set console log level (default: `info`)
-* `--log.dir.path`: Specify directory for log files. By default Erigon writing logs to `datadir/logs` directory.
+* `--log.dir.path`: Specify directory for log files. By default, Erigon writes logs to the `datadir/logs` directory.
 * `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
+
+**Downloader (torrent) logs**
+
+The torrent client inside the Downloader keeps its own JSON-formatted file at `<datadir>/logs/torrent.log`. The path is built from the datadir and does **not** follow `--log.dir.path`, so it stays there even when Erigon's own logs are redirected elsewhere. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
 
 **Log Levels**
 
@@ -66,7 +70,7 @@ The primary synchronization stages include:
 * **Bodies**: Download and validate block bodies
 * **Senders**: Recover transaction senders from signatures
 * **Execution**: Execute transactions and update state
-* **TxLookup**: Generates transaction lookup indices. This indexing is essential for quickly finding transaction by its hash, significantly improving the performance of transaction-related RPC calls.
+* **TxLookup**: Generates transaction lookup indices. This indexing is essential for quickly finding a transaction by its hash, significantly improving the performance of transaction-related RPC calls.
 * **Finish**: The finalization stage of the sync process. This is the point where the node sends out notifications to subscribers about the new blockchain head, ensuring other components and external applications are instantly aware of the latest block.
 
 ### Stage Progress Tracking

@@ -29,12 +29,13 @@ func ProcessSyncCommitteeUpdate(s abstract.BeaconState) error {
 		return nil
 	}
 	// Set new current sync committee.
-	s.SetCurrentSyncCommittee(s.NextSyncCommittee())
+	if err := s.SetCurrentSyncCommittee(s.NextSyncCommittee()); err != nil {
+		return err
+	}
 	// Compute next new sync committee
 	committee, err := s.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	s.SetNextSyncCommittee(committee)
-	return nil
+	return s.SetNextSyncCommittee(committee)
 }

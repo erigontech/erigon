@@ -232,6 +232,42 @@ func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
 			"fail an otherwise-valid block with ErrWrongTrieRoot")
 }
 
+// One block without a BAL ends compute-ahead for the whole batch: the chain stays
+// anchored at the last block that advanced the commitment domain, so every later
+// block reads a stale baseline and stays on the incremental path.
+func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	cc := &commitmentCalculator{
+		signalCtx:     ctx,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  1 << 62,
+		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
+		hasComputedAhead:       true,
+		lastComputedAheadBlock: 5,
+		hasSeenBlockResult:     true,
+	}
+
+	for n := uint64(7); n <= 12; n++ {
+		cc.lastBlockResultSeen = n - 1 // gate open: only the contiguity guard may reject
+		cc.pending[n] = &pendingBlock{
+			req:  &blockRequest{blockNum: n, bal: make(types.BlockAccessList, 1)},
+			mode: calcModeBALDriven,
+		}
+		cc.maybeComputeAhead(ctx, n)
+		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
+	}
+	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+}
+
 // TestComputeAheadCap_StopsComputeAhead pins the orphan guard: once the shared
 // executor context carries a stopCause, the calculator must not compute any
 // block ahead past the coalesce block M — otherwise commitment would advance

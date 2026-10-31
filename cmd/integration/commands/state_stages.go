@@ -45,8 +45,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/shards"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 var stateStages = &cobra.Command{
@@ -74,7 +72,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		builderConfig := buildercfg.BuilderConfig{}
 		utils.SetupMinerCobra(cmd, &builderConfig)
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -103,7 +101,7 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -131,9 +129,9 @@ func init() {
 	withIntegrityChecks(stateStages)
 	withMining(stateStages)
 	withChain(stateStages)
-	withHeimdall(stateStages)
 	withWorkers(stateStages)
 	withChaosMonkey(stateStages)
+	withExperimentalCommitment(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -141,18 +139,14 @@ func init() {
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
-	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
+	withExperimentalCommitment(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 
 func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	_, clean, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
 	defer clean()
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
@@ -195,7 +189,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	senderAtBlock := progress(tx, stages.Senders)
 	execAtBlock := progress(tx, stages.Execution)
 
-	var stopAt = senderAtBlock
+	stopAt := senderAtBlock
 	onlyOneUnwind := block == 0 && unwindEvery == 0 && unwind > 0
 	backward := unwindEvery < unwind
 	switch {
@@ -252,7 +246,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock = progress(tx, stages.Execution)
@@ -290,7 +284,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
-			defer tx.Rollback()
+			defer tx.Rollback() //nolint:gocritic
 			// Fresh SD: a committed SD is never reused.
 			if sd, err = execctx.NewSharedDomains(ctx, tx, logger1); err != nil {
 				return err
@@ -326,7 +320,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		// allow backward loop
 		if unwind > 0 && unwindEvery > 0 {
@@ -393,7 +387,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if err != nil {
 			return err
 		}
-		defer sd.Close()
+		defer sd.Close() //nolint:gocritic
 		sd.SetInMemHistoryReads(false)
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
@@ -407,6 +401,6 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 	}
 }

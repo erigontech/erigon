@@ -8,9 +8,9 @@ sidebar_position: 5
 
 The `net` namespace provides network-related methods that are part of the standard Ethereum JSON-RPC API. These methods offer information about the node's network connectivity, peer count, and network version. In Erigon, the net namespace is implemented through the `NetAPI` interface and `NetAPIImpl` struct.
 
-The `net` namespace is enabled by default in Erigon's RPC Daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
+The `net` namespace is not in the default `--http.api` list, so add `net` to enable it. It provides essential network information that applications use to understand the node's connectivity status and network configuration.
 
-For API usage refer to the below official resources:
+For API usage refer to the official resource below:
 
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 
@@ -22,19 +22,19 @@ For API usage refer to the below official resources:
 
 ### Backend Dependency
 
-* Methods `net_version` and `net_peerCount` require the `ethBackend` to be available.
+* The methods `net_version` and `net_peerCount` require the `ethBackend` to be available.
 * When running in `--datadir` mode or when the backend cannot be accessed, these methods will return a "not available" error.
 * The `net_listening` method gracefully handles backend unavailability by returning `false` .
 
 ### Network Information Usage
 
-* `net_version` is commonly used by applications to verify they're connected to the correct .Ethereum network.
+* `net_version` is commonly used by applications to verify they're connected to the correct Ethereum network.
 * `net_peerCount` helps monitor node connectivity and network health.
 * `net_listening` provides a basic connectivity check for the node's network interface.
 
 ### Availability and Configuration
 
-* The net namespace is enabled by default in Erigon's RPC Daemon.
+* The net namespace is not enabled by default (the `erigon` binary's `--http.api` default is `eth,erigon,engine` and the standalone `rpcdaemon`'s is `eth,erigon`); add `net` to `--http.api` to enable it.
 * These methods are available on both HTTP and WebSocket connections.
 * For remote RPC Daemon setups, the `net` namespace must be explicitly enabled for health check functionality.
 

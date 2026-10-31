@@ -13,11 +13,6 @@ const publicKeyLength = 48
 // PublicKey wraps the CGO object of the BLST library and give us easy access to its methods.
 type PublicKey *blst.P1Affine
 
-// NewPublicKey makes new empty Public Key.
-func NewPublicKey() PublicKey {
-	return new(blst.P1Affine)
-}
-
 func CompressPublicKey(p PublicKey) []byte {
 	return (*blst.P1Affine)(p).Compress()
 }

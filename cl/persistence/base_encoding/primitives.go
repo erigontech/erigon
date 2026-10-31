@@ -18,8 +18,6 @@ package base_encoding
 
 import (
 	"encoding/binary"
-
-	"github.com/erigontech/erigon/common"
 )
 
 func Encode64ToBytes4(x uint64) (out []byte) {
@@ -32,14 +30,6 @@ func Encode64ToBytes4(x uint64) (out []byte) {
 func Decode64FromBytes4(buf []byte) (x uint64) {
 	// little endian
 	return uint64(binary.BigEndian.Uint32(buf))
-}
-
-// IndexAndPeriodKey encodes index and period (can be epoch/slot/epoch period) into 8 bytes
-func IndexAndPeriodKey(index, timeframe uint64) (out []byte) {
-	out = make([]byte, 8)
-	binary.BigEndian.PutUint32(out[:4], uint32(index))
-	binary.BigEndian.PutUint32(out[4:], uint32(timeframe))
-	return
 }
 
 // Encode a number with least amount of bytes
@@ -61,11 +51,4 @@ func DecodeCompactUint64(buf []byte) (x uint64) {
 		}
 	}
 	return
-}
-
-func EncodePeriodAndRoot(period uint32, root common.Hash) []byte {
-	out := make([]byte, 36)
-	binary.BigEndian.PutUint32(out[:4], period)
-	copy(out[4:], root[:])
-	return out
 }

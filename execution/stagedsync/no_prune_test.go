@@ -19,15 +19,18 @@ package stagedsync
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // TestNoPruneSkipsAllPruneStages verifies that when --exec.no-prune is set
@@ -54,7 +57,6 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		{kv.BlockAccessList, "b1", "ba1"},
 		{kv.BlockAccessList, "b2", "ba2"},
 		{kv.TxLookup, "t1", "tl1"},
-		{kv.BorWitnesses, "w1", "wit1"},
 	}
 	for _, s := range seeds {
 		require.NoError(t, tx.Put(s.table, []byte(s.key), []byte(s.value)))
@@ -70,7 +72,7 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		}
 		return n
 	}
-	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup, kv.BorWitnesses}
+	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup}
 	pre := map[string]int{}
 	for _, table := range tracked {
 		pre[table] = countRows(t, table)
@@ -79,13 +81,13 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 
 	// ForwardProgress is well past MaxReorgDepth so the inner rawdb.PruneTable /
 	// PruneSmallBatches calls would normally fire. Each prune function
-	// early-returns on dbg.NoPrune() before reading any cfg field, so zero-value
-	// cfgs are safe.
+	// returns on dbg.NoPrune() before its deletes; SnapshotsPrune still
+	// schedules the block-file build first, so it gets stubs instead of a
+	// zero-value cfg.
 	const forward uint64 = 10_000
 	require.NoError(t, PruneExecutionStage(ctx, &PruneState{ID: stages.Execution, ForwardProgress: forward}, tx, ExecuteBlockCfg{}, 0, logger))
 	require.NoError(t, PruneTxLookup(&PruneState{ID: stages.TxLookup, ForwardProgress: forward}, tx, TxLookupCfg{}, ctx, logger))
-	require.NoError(t, PruneWitnessProcessingStage(&PruneState{ID: stages.WitnessProcessing, ForwardProgress: forward}, tx, WitnessProcessingCfg{}, ctx, logger))
-	require.NoError(t, SnapshotsPrune(&PruneState{ID: stages.Snapshots, ForwardProgress: forward}, SnapshotsCfg{}, ctx, tx, logger))
+	require.NoError(t, SnapshotsPrune(&PruneState{ID: stages.Snapshots, ForwardProgress: forward}, SnapshotsCfg{blockReader: stubFreezingBlockReader{}, blockRetire: &recordingBlockRetire{}}, ctx, tx))
 
 	for _, table := range tracked {
 		require.Equal(t, pre[table], countRows(t, table), "table %s lost rows under --exec.no-prune", table)
@@ -111,11 +113,53 @@ func TestNoPruneFlagBookkeeping(t *testing.T) {
 	const forward uint64 = 12_345
 	require.NoError(t, PruneExecutionStage(ctx, &PruneState{ID: stages.Execution, ForwardProgress: forward}, tx, ExecuteBlockCfg{}, 0, logger))
 	require.NoError(t, PruneTxLookup(&PruneState{ID: stages.TxLookup, ForwardProgress: forward}, tx, TxLookupCfg{}, ctx, logger))
-	require.NoError(t, PruneWitnessProcessingStage(&PruneState{ID: stages.WitnessProcessing, ForwardProgress: forward}, tx, WitnessProcessingCfg{}, ctx, logger))
 
-	for _, id := range []stages.SyncStage{stages.Execution, stages.TxLookup, stages.WitnessProcessing} {
+	for _, id := range []stages.SyncStage{stages.Execution, stages.TxLookup} {
 		got, err := stages.GetStagePruneProgress(tx, id)
 		require.NoError(t, err)
 		require.Equal(t, forward, got, "stage %s did not record PruneProgress under --exec.no-prune", id)
 	}
+}
+
+type stubFreezingBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (stubFreezingBlockReader) FreezingCfg() ethconfig.BlocksFreezing {
+	return ethconfig.BlocksFreezing{ProduceE2: true}
+}
+
+type recordingBlockRetire struct {
+	dbservices.BlockRetire
+	builds         int
+	onFinishRetire func() error
+	ancientPrunes  int
+}
+
+func (r *recordingBlockRetire) SetWorkers(int) {}
+
+func (r *recordingBlockRetire) BuildFilesInBackground(_ context.Context, _ uint64, _ kv.FinalityContext, _ log.Lvl, _ dbservices.SeederClient, onFinishRetire func() error, _ func()) bool {
+	r.builds++
+	r.onFinishRetire = onFinishRetire
+	return true
+}
+
+func (r *recordingBlockRetire) PruneAncientBlocks(kv.RwTx, int, time.Duration) (int, error) {
+	r.ancientPrunes++
+	return 0, nil
+}
+
+// Block files are built from DB blocks the way state files are built from DB
+// steps, so --exec.no-prune keeps building both and only stops the pruning.
+func TestNoPruneStillBuildsBlockFiles(t *testing.T) {
+	orig := dbg.NoPrune()
+	t.Cleanup(func() { dbg.SetNoPrune(orig) })
+	dbg.SetNoPrune(true)
+
+	retire := &recordingBlockRetire{}
+	cfg := SnapshotsCfg{blockReader: stubFreezingBlockReader{}, blockRetire: retire}
+	require.NoError(t, SnapshotsPrune(&PruneState{ID: stages.Snapshots, ForwardProgress: 10_000}, cfg, t.Context(), nil))
+	require.Equal(t, 1, retire.builds)
+	require.NoError(t, retire.onFinishRetire())
+	require.Zero(t, retire.ancientPrunes)
 }

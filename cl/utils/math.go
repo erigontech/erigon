@@ -59,6 +59,13 @@ func IntegerSquareRoot(n uint64) uint64 {
 	return uint64(math.Sqrt(float64(n)))
 }
 
+func SecondsToMilliseconds(seconds uint64) uint64 {
+	if seconds > math.MaxUint64/1000 {
+		return math.MaxUint64
+	}
+	return seconds * 1000
+}
+
 // ETA estimates the time to process `remaining` items at `ratePerSec` items per
 // second, truncated to whole seconds. Returns "n/a" for a non-positive rate and
 // clamps to the max representable duration when the rate is extremely slow.

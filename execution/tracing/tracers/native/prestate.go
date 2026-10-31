@@ -23,7 +23,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/big"
+	"maps"
+	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -32,14 +33,15 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
-
-//go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go
 
 func init() {
 	register("prestateTracer", newPrestateTracer)
@@ -48,10 +50,10 @@ func init() {
 type state = map[accounts.Address]*account
 
 type account struct {
-	Balance *big.Int `json:"balance,omitempty"`
+	Balance *hexutil.U256 `json:"balance,omitempty"`
 	// Code is a pointer so omitempty can omit unchanged code (nil) while
 	// still emitting "0x" when code is cleared (e.g. EIP-7702 deauth).
-	Code     *[]byte                     `json:"code,omitempty"`
+	Code     *hexutil.Bytes              `json:"code,omitempty"`
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
@@ -61,13 +63,51 @@ type account struct {
 	empty bool
 }
 
-func (a *account) exists() bool {
-	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && a.Balance.Sign() != 0)
+// writeStorage writes the slots in key order, as encoding/json orders map keys.
+func writeStorage(s *jsonstream.Stream, storage map[common.Hash]common.Hash) {
+	s.WriteObjectStart()
+	for _, k := range slices.SortedFunc(maps.Keys(storage), common.Hash.Cmp) {
+		v := storage[k]
+		jsonstream.HexKey(s, k[:])
+		s.WriteHex(v[:])
+	}
+	s.WriteObjectEnd()
 }
 
-type accountMarshaling struct {
-	Balance *hexutil.Big
-	Code    *hexutil.Bytes
+// writeAccount writes what encoding/json writes for account; the nonce is a JSON number.
+func writeAccount(s *jsonstream.Stream, a *account) {
+	s.WriteObjectStart()
+	if a.Balance != nil {
+		ethjson.Quantity256(s, "balance", (*uint256.Int)(a.Balance))
+	}
+	if a.Code != nil {
+		ethjson.Data(s, "code", *a.Code)
+	}
+	if a.CodeHash != nil {
+		ethjson.Data(s, "codeHash", a.CodeHash[:])
+	}
+	if a.Nonce != 0 {
+		s.Field("nonce").Uint(a.Nonce)
+	}
+	if len(a.Storage) > 0 {
+		s.Field("storage")
+		writeStorage(s, a.Storage)
+	}
+	s.WriteObjectEnd()
+}
+
+func writeState(s *jsonstream.Stream, st state) {
+	s.WriteObjectStart()
+	for _, addr := range slices.SortedFunc(maps.Keys(st), accounts.Address.Cmp) {
+		key := addr.Value()
+		jsonstream.HexKey(s, key[:])
+		writeAccount(s, st[addr])
+	}
+	s.WriteObjectEnd()
+}
+
+func (a *account) exists() bool {
+	return a.Nonce > 0 || a.CodeHash != nil || len(a.Storage) > 0 || (a.Balance != nil && !(*uint256.Int)(a.Balance).IsZero())
 }
 
 type prestateTracer struct {
@@ -76,7 +116,6 @@ type prestateTracer struct {
 	post      state
 	create    bool
 	to        accounts.Address
-	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
 	interrupt atomic.Bool           // Atomic flag to signal execution interruption
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
@@ -116,17 +155,18 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
-			OnTxEnd:             t.OnTxEnd,
-			OnOpcode:            t.OnOpcode,
-			OnExit:              t.OnExit,
+			OnTxEndV2:           t.OnTxEndV2,
+			OnOpcodeV2:          t.OnOpcodeV2,
+			OnExitV2:            t.OnExitV2,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:         t.GetResult,
+		MarshalFastJSONTo: t.MarshalFastJSONTo,
+		Stop:              t.Stop,
 	}, nil
 }
 
 // ExitHook is invoked when the processing of a message ends.
-func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if reverted {
 		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
 		for addr := range t.created {
@@ -139,8 +179,8 @@ func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 	}
 }
 
-// OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
-func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+// OnOpcodeV2 implements the EVMLogger interface to trace a single step of VM execution.
+func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	// A faulted opcode (e.g. out-of-gas at the opcode itself) never performs its
 	// account/storage access in consensus terms, so it must not contribute to the
 	// prestate. Mirrors go-ethereum (PR #26848).
@@ -250,7 +290,7 @@ func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.lookupAccount(env.Coinbase)
 }
 
-func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *prestateTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if err != nil {
 		return
 	}
@@ -287,10 +327,9 @@ func (t *prestateTracer) processDiffState() {
 		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
 		newCodeHash := codeHash.Value()
 
-		newBalanceBig := newBalance.ToBig()
-		if newBalanceBig.Cmp(state.Balance) != 0 {
+		if newBalance != uint256.Int(*state.Balance) {
 			modified = true
-			postAccount.Balance = newBalanceBig
+			postAccount.Balance = (*hexutil.U256)(&newBalance)
 		}
 		if newNonce != state.Nonce {
 			modified = true
@@ -312,7 +351,7 @@ func (t *prestateTracer) processDiffState() {
 			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
-				postAccount.Code = &newCode
+				postAccount.Code = (*hexutil.Bytes)(&newCode)
 			}
 		}
 
@@ -367,6 +406,23 @@ func (t *prestateTracer) GetResult() (json.RawMessage, error) {
 	return json.RawMessage(res), nil
 }
 
+func (t *prestateTracer) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if p := t.reason.Load(); p != nil {
+		return *p
+	}
+	if !t.config.DiffMode {
+		writeState(s, t.pre)
+		return nil
+	}
+	s.WriteObjectStart()
+	s.Field("post")
+	writeState(s, t.post)
+	s.Field("pre")
+	writeState(s, t.pre)
+	s.WriteObjectEnd()
+	return nil
+}
+
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *prestateTracer) Stop(err error) {
 	t.reason.Store(&err)
@@ -385,14 +441,15 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	code, _ := t.env.IntraBlockState.GetCode(addr)
 
 	acc := &account{
-		Balance: balance.ToBig(),
+		Balance: (*hexutil.U256)(&balance),
 		Nonce:   nonce,
 	}
 
 	if len(code) > 0 {
-		acc.Code = &code
-		codeHash := crypto.Keccak256Hash(code)
-		acc.CodeHash = &codeHash
+		acc.Code = (*hexutil.Bytes)(&code)
+		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
+		hash := codeHash.Value()
+		acc.CodeHash = &hash
 	}
 	acc.empty = !acc.exists()
 	// The code must be fetched first for the emptiness check.
@@ -418,6 +475,6 @@ func (t *prestateTracer) lookupStorage(addr accounts.Address, key common.Hash) {
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}
-	var val, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+	val, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 	t.pre[addr].Storage[key] = val.Bytes32()
 }

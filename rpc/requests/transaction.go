@@ -21,7 +21,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -41,33 +42,10 @@ func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNum
 
 	gas := hexutil.Uint64(args.Gas)
 
-	var gasPrice *hexutil.Big
-
-	if args.GasPrice != nil {
-		big := hexutil.Big(*args.GasPrice.ToBig())
-		gasPrice = &big
-	}
-
-	var tipCap *hexutil.Big
-
-	if args.TipCap != nil {
-		big := hexutil.Big(*args.TipCap.ToBig())
-		tipCap = &big
-	}
-
-	var feeCap *hexutil.Big
-
-	if args.FeeCap != nil {
-		big := hexutil.Big(*args.FeeCap.ToBig())
-		feeCap = &big
-	}
-
-	var value *hexutil.Big
-
-	if args.Value != nil {
-		big := hexutil.Big(*args.Value.ToBig())
-		value = &big
-	}
+	gasPrice := (*hexutil.U256)(args.GasPrice)
+	tipCap := (*hexutil.U256)(args.TipCap)
+	feeCap := (*hexutil.U256)(args.FeeCap)
+	value := (*hexutil.U256)(args.Value)
 
 	var data *hexutil.Bytes
 
@@ -87,7 +65,6 @@ func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNum
 		Data:                 data,
 		AccessList:           &args.AccessList,
 	})
-
 	if err != nil {
 		return 0, err
 	}
@@ -106,19 +83,19 @@ func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNum
 	return uint64(b.Number), nil
 }
 
-func (req *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) (RPCMethod, string) {
+func (reqGen *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,"%s"],"id":%d}`
-	return Methods.ETHEstimateGas, fmt.Sprintf(template, Methods.ETHEstimateGas, callArgs, blockRef, req.reqID)
+	return Methods.ETHEstimateGas, fmt.Sprintf(template, Methods.ETHEstimateGas, callArgs, blockRef, reqGen.reqID)
 }
 
-func (reqGen *requestGenerator) GasPrice() (*big.Int, error) {
-	var result hexutil.Big
+func (reqGen *requestGenerator) GasPrice() (*uint256.Int, error) {
+	var result hexutil.U256
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGasPrice); err != nil {
 		return nil, err
 	}
 
-	return result.ToInt(), nil
+	return (*uint256.Int)(&result), nil
 }
 
 func (reqGen *requestGenerator) Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error) {
@@ -136,7 +113,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (com
 
 	var buf bytes.Buffer
 	if err := signedTx.MarshalBinary(&buf); err != nil {
-		return common.Hash{}, fmt.Errorf("failed to marshal binary: %v", err)
+		return common.Hash{}, fmt.Errorf("failed to marshal binary: %w", err)
 	}
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHSendRawTransaction, hexutil.Bytes(buf.Bytes())); err != nil {
@@ -164,7 +141,7 @@ func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transactio
 
 	var buf bytes.Buffer
 	if err := signedTx.MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("failed to marshal binary: %v", err)
+		return nil, fmt.Errorf("failed to marshal binary: %w", err)
 	}
 
 	if err := reqGen.rpcCallOnce(context.Background(), &result, Methods.ETHSendRawTransactionSync, hexutil.Bytes(buf.Bytes()), timeoutMs); err != nil {
@@ -174,30 +151,30 @@ func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transactio
 	return result, nil
 }
 
-func (req *requestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
+func (reqGen *requestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
 	var result ethapi.RPCTransaction
 
-	if err := req.rpcCall(context.Background(), &result, Methods.ETHGetTransactionByHash, hash); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetTransactionByHash, hash); err != nil {
 		return nil, err
 	}
 
 	return &result, nil
 }
 
-func (req *requestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
+func (reqGen *requestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
 	var result types.Receipt
 
-	if err := req.rpcCall(ctx, &result, Methods.ETHGetTransactionReceipt, hash); err != nil {
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetTransactionReceipt, hash); err != nil {
 		return nil, err
 	}
 
 	return &result, nil
 }
 
-func (req *requestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
+func (reqGen *requestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
 	var result types.Receipts
 
-	if err := req.rpcCall(ctx, &result, Methods.ETHGetBlockReceipts, blockRef); err != nil {
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetBlockReceipts, blockRef); err != nil {
 		return nil, err
 	}
 

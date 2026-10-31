@@ -18,9 +18,7 @@ package ethapi
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -51,11 +49,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Override account balance.
 		if account.Balance != nil {
-			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-			if overflow {
-				return errors.New("account.Balance higher than 2^256-1")
-			}
-			if err := ibs.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
+			if err := ibs.SetBalance(addr, uint256.Int(**account.Balance), tracing.BalanceChangeUnspecified); err != nil {
 				return err
 			}
 		}
@@ -75,6 +69,18 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
+			// The versioned SetState does not create the absent account the materializing one creates.
+			if ibs.IsVersioned() && len(*account.StateDiff) > 0 {
+				exists, err := ibs.Exist(addr)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if err := ibs.CreateAccount(addr, false); err != nil {
+						return err
+					}
+				}
+			}
 			for key, value := range *account.StateDiff {
 				intValue := *new(uint256.Int).SetBytes32(value[:])
 				if err := ibs.SetState(addr, accounts.InternKey(key), intValue); err != nil {
@@ -87,11 +93,8 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 	return nil
 }
 
-func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
-	if precompiles == nil {
-		precompiles = make(vm.PrecompiledContracts)
-	}
-	// Sort addresses for deterministic iteration order across both loops (map iteration is random in Go).
+// sortedAddrs gives a deterministic iteration order (map iteration is random in Go).
+func (so *StateOverrides) sortedAddrs() []accounts.Address {
 	addrs := make([]accounts.Address, 0, len(*so))
 	for addr := range *so {
 		addrs = append(addrs, addr)
@@ -100,12 +103,48 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		av, bv := a.Value(), b.Value()
 		return bytes.Compare(av[:], bv[:])
 	})
+	return addrs
+}
 
+func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	return so.OverrideTo(ibs, precompiles, rules, nil)
+}
+
+// OverrideTo is Override that also hands the overridden accounts to stateWriter.
+func (so *StateOverrides) OverrideTo(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if precompiles == nil {
+		precompiles = make(vm.PrecompiledContracts)
+	}
+	addrs := so.sortedAddrs()
 	err := so.override(ibs, addrs)
 	if err != nil {
 		return err
 	}
+	if err := so.overridePrecompiles(precompiles, addrs); err != nil {
+		return err
+	}
 
+	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
+	overrideRules := *rules
+	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
+	return EndCallTx(ibs, &overrideRules, stateWriter)
+}
+
+// ActivePrecompiles returns the precompile set of rules with the code overrides and precompile
+// moves applied, for a call that runs under other rules than the ones Override saw. It returns
+// nil, the chain's own set, when there are no overrides.
+func (so *StateOverrides) ActivePrecompiles(rules *chain.Rules) (vm.PrecompiledContracts, error) {
+	if so == nil {
+		return nil, nil
+	}
+	precompiles := vm.ActivePrecompiledContracts(rules)
+	if err := so.overridePrecompiles(precompiles, so.sortedAddrs()); err != nil {
+		return nil, err
+	}
+	return precompiles, nil
+}
+
+func (so *StateOverrides) overridePrecompiles(precompiles vm.PrecompiledContracts, addrs []accounts.Address) error {
 	// Tracks destinations of precompiles that were moved.
 	dirtyAddresses := make(map[accounts.Address]struct{})
 	for _, addr := range addrs {
@@ -133,19 +172,57 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 			delete(precompiles, addr)
 		}
 	}
+	return nil
+}
 
-	// Disable EIP-161 empty-account removal when finalizing state overrides.
-	// FinalizeTx with a NoopWriter commits dirty storage into originStorage
-	// (needed for correct SSTORE gas), but EIP-161 would also mark any account
-	// that becomes empty (nonce=0, code=0x, balance=0) as deleted in the IBS —
-	// even though the deletion is never written to the DB.  That spurious
-	// deleted=true flag causes IntraBlockState.HasStorage to short-circuit to
-	// false before reaching the state reader, breaking EIP-7610 collision
-	// detection in multi-block eth_simulateV1 when a prior simulated block
-	// deployed a contract at the overridden address.
-	// State overrides are simulation-only mutations and must not trigger
-	// EIP-161 empty-account clearing.
-	noEIP161Rules := *rules
-	noEIP161Rules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
-	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
+// FinalizeCallTx ends one transaction of a request that runs several on the same state.
+// On the versioned path the writes go to the version map, where the next transaction index
+// reads them; on the materializing path FinalizeTx commits them to the state objects.
+func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	return FinalizeCallTxTo(ibs, rules, nil)
+}
+
+// FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter,
+// as FinalizeTx does for a materialized state; a nil stateWriter takes none.
+func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if !ibs.IsVersioned() {
+		if stateWriter == nil {
+			stateWriter = state.NewNoopWriter()
+		}
+		return ibs.FinalizeTx(rules, stateWriter)
+	}
+	writes, err := ibs.FinalizedWrites(rules)
+	if err != nil {
+		return err
+	}
+	ibs.FlushWritesToVersionMap(writes)
+	if stateWriter != nil {
+		if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+			return err
+		}
+	}
+	ibs.SoftFinalise()
+	ibs.ResetVersionedIO()
+	return nil
+}
+
+// EndCallTx is FinalizeCallTxTo that also moves a versioned state to the next tx index,
+// where the finished tx's writes read back.
+func EndCallTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if err := FinalizeCallTxTo(ibs, rules, stateWriter); err != nil {
+		return err
+	}
+	if ibs.IsVersioned() {
+		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	}
+	return nil
+}
+
+// CommitCallState hands stateWriter the changes not yet handed to it: a versioned
+// state's pending tx, or a materialized state's dirty objects.
+func CommitCallState(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
+	if ibs.IsVersioned() {
+		return FinalizeCallTxTo(ibs, rules, stateWriter)
+	}
+	return ibs.CommitBlock(rules, stateWriter)
 }

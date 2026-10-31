@@ -20,9 +20,7 @@
 package protocol
 
 import (
-	"cmp"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -42,12 +40,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
-var (
-	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-)
+var blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 
 type SyncMode string
 
@@ -57,23 +52,22 @@ const (
 )
 
 type RejectedTx struct {
-	Index int    `json:"index"    gencodec:"required"`
-	Err   string `json:"error"    gencodec:"required"`
+	Index int    `json:"index"`
+	Err   string `json:"error"`
 }
 
 type RejectedTxs []*RejectedTx
 
 type EphemeralExecResult struct {
-	StateRoot        common.Hash           `json:"stateRoot"`
-	TxRoot           common.Hash           `json:"txRoot"`
-	ReceiptRoot      common.Hash           `json:"receiptsRoot"`
-	LogsHash         common.Hash           `json:"logsHash"`
-	Bloom            types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts         types.Receipts        `json:"receipts"`
-	Rejected         RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty       *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed          math.HexOrDecimal64   `json:"gasUsed"`
-	StateSyncReceipt *types.Receipt        `json:"-"`
+	StateRoot   common.Hash           `json:"stateRoot"`
+	TxRoot      common.Hash           `json:"txRoot"`
+	ReceiptRoot common.Hash           `json:"receiptsRoot"`
+	LogsHash    common.Hash           `json:"logsHash"`
+	Bloom       types.Bloom           `json:"logsBloom"`
+	Receipts    types.Receipts        `json:"receipts"`
+	Rejected    RejectedTxs           `json:"rejected,omitempty"`
+	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
+	GasUsed     math.HexOrDecimal64   `json:"gasUsed"`
 }
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -183,7 +177,7 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -201,46 +195,32 @@ func ExecuteBlockEphemerally(
 		Rejected:    rejectedTxs,
 	}
 
-	if chainConfig.Bor != nil {
-		blockLogs := ibs.Logs()
-		var logs []*types.Log
-		for _, receipt := range receipts {
-			logs = append(logs, receipt.Logs...)
-		}
-
-		stateSyncReceipt := &types.Receipt{}
-		if chainConfig.Rules == chain.BorRules && len(blockLogs) > 0 {
-			slices.SortStableFunc(blockLogs, func(i, j *types.Log) int { return cmp.Compare(i.Index, j.Index) })
-
-			if len(blockLogs) > len(logs) {
-				stateSyncReceipt.Logs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
-
-				// fill the state sync with the correct information
-				bortypes.DeriveFieldsForBorReceipt(stateSyncReceipt, block.Hash(), block.NumberU64(), receipts)
-				stateSyncReceipt.Status = types.ReceiptStatusSuccessful
-			}
-		}
-
-		execRs.StateSyncReceipt = stateSyncReceipt
-	}
-
 	return execRs, nil
 }
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
-	var author accounts.Address
-	if isBor {
-		author = accounts.InternAddress(header.Coinbase)
-	} else {
-		author = params.SystemAddress
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+	return SysCallContractWithEVM(nil, contract, data, chainConfig, ibs, header, engine, constCall, vmCfg)
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
+	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse.
+func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
+	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
+}
+
+// SysCallContractWithEVM runs a system call on an EVM owned by the caller.
+// Reuse preserves cancellation but replaces the block and transaction contexts,
+// intra-block state and VM configuration. The EVM must not execute other calls concurrently.
+// A nil EVM or one with a different chainConfig is replaced for this call.
+func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
+	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	msg := types.NewMessage(
 		params.SystemAddress,
 		contract,
@@ -256,17 +236,15 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
-	var txContext evmtypes.TxContext
-	if isBor {
-		txContext = evmtypes.TxContext{}
+	txContext := NewEVMTxContext(msg)
+	if evm == nil || evm.ChainConfig() != chainConfig {
+		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
-		txContext = NewEVMTxContext(msg)
+		evm.ResetForSystemCall(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
 	}
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
@@ -284,10 +262,6 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		*msg.Value(),
 		false,
 	)
-	if isBor && err != nil {
-		return nil, nil
-	}
-
 	return ret, err
 }
 
@@ -307,12 +281,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // state gas reservoir will consume from execution gas for sys calls
@@ -328,14 +301,13 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 }
 
 func FinalizeBlockExecution(
-	engine rules.Engine, stateReader state.StateReader,
+	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
 	logger log.Logger,
-	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
@@ -356,7 +328,7 @@ func FinalizeBlockExecution(
 	}
 
 	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
-	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// write-set — the caller applies ba.BalIO() via ApplyWrites after
 	// assembly, so so.data must not also be flushed here. versionMap==nil callers
 	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
 	if !ibs.IsVersioned() {

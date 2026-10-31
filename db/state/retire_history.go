@@ -17,8 +17,6 @@
 package state
 
 import (
-	"context"
-
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
@@ -72,13 +70,13 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged [
 	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	return deleted, []agedFiles{iAged, agedFiles{ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
+	return deleted, []agedFiles{iAged, {ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
 }
 
 // Retire drops old visible History+InvertedIndex files below their per-domain cutoff.
 // Reads visible only — invisible garbage is the merge clean-up's job (cleanAfterMerge /
 // RemoveOverlaps). Physical deletion is deferred until no reader pins the retired generation.
-func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
+func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
 	}
@@ -87,7 +85,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 	var deleted []string
 	var aged []agedFiles
 	for _, dt := range at.d {
-		if dt.d.Disable || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
+		if !dt.d.Enabled || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
 		cutoffTxNum := cutoffs.Default
@@ -106,7 +104,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 		aged = append(aged, agedList...)
 	}
 	for _, iit := range at.standaloneIIs() {
-		if iit.ii.Disable {
+		if !iit.ii.Enabled {
 			continue
 		}
 		cutoffStep := kv.Step(cutoffs.Default / iit.stepSize)

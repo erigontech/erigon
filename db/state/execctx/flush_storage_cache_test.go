@@ -66,7 +66,7 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 		require.NoError(t, err)
 		defer sd.Close()
 
-		sd.SetStateCacheForTest(sc) // force-enable regardless of USE_STATE_CACHE
+		sd.BindStateCache(sc) // force-enable regardless of USE_STATE_CACHE
 
 		sd.SetTxNum(txNum)
 		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val, txNum, prevVal))

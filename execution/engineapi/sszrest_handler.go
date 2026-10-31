@@ -19,6 +19,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
@@ -71,6 +72,11 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 	case "identity":
 		if len(rest) == 1 && r.Method == http.MethodGet {
 			e.handleSSZIdentity(w, r)
+			return
+		}
+	case "inclusion-list":
+		if len(rest) == 1 && r.Method == http.MethodGet {
+			e.handleSSZGetInclusionList(w, r)
 			return
 		}
 	case "blobs":
@@ -147,15 +153,16 @@ func writeProblem(w http.ResponseWriter, status int, problemType, detail string)
 		Type   string `json:"type"`
 		Detail string `json:"detail,omitempty"`
 	}{Type: problemType, Detail: detail}
-	_ = json.NewEncoder(w).Encode(problem)
+	if err := json.NewEncoder(w).Encode(problem); err != nil {
+		log.Debug("[SSZ-REST] failed to write problem response", "err", err)
+	}
 }
 
 func writeEngineProblem(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
-	var rpcErr rpc.Error
-	if errors.As(err, &rpcErr) {
+	if rpcErr, ok := errors.AsType[rpc.Error](err); ok {
 		switch rpcErr.ErrorCode() {
 		case engine_helpers.UnknownPayloadErr.Code:
 			writeProblem(w, http.StatusNotFound, problemUnknownPayload, err.Error())
@@ -201,8 +208,7 @@ func readSSZBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, err.Error())
 		} else {
 			writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
@@ -214,7 +220,8 @@ func readSSZBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte
 
 func writeSSZ(w http.ResponseWriter, obj interface {
 	EncodeSSZ([]byte) ([]byte, error)
-}) {
+},
+) {
 	out, err := obj.EncodeSSZ(nil)
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
@@ -230,7 +237,9 @@ func writeSSZBytes(w http.ResponseWriter, out []byte) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", jsonContentType)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Debug("[SSZ-REST] failed to write JSON response", "err", err)
+	}
 }
 
 func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
@@ -273,7 +282,7 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
 		return
 	}
-	decodedID, err := decodePayloadID(id)
+	decodedID, err := engine_types.DecodePayloadID(id)
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
 		return
@@ -511,7 +520,7 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 		SupportedForks:         supportedForkNames(e.config),
 		ForkScopedEndpoints:    []string{"payloads", "forkchoice", "bodies"},
 		IndependentlyVersioned: map[string][]string{"blobs": {"v1", "v2", "v3"}},
-		UnscopedEndpoints:      []string{"capabilities", "identity"},
+		UnscopedEndpoints:      []string{"capabilities", "identity", "inclusion-list"},
 		Limits: map[string]uint64{
 			"bodies.max_count":           sszMaxBodiesRequest,
 			"blobs.max_versioned_hashes": sszMaxGetBlobHashes,
@@ -530,4 +539,19 @@ func (e *EngineServer) handleSSZIdentity(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, versions)
+}
+
+func (e *EngineServer) handleSSZGetInclusionList(w http.ResponseWriter, r *http.Request) {
+	resp, err := e.GetInclusionListV1(r.Context())
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
+	}
+	out, err := encodeGetInclusionListResponse(resp)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
+	e.logger.Debug("[SSZ-REST] handled get inclusion list", "path", r.URL.Path)
+	writeSSZBytes(w, out)
 }

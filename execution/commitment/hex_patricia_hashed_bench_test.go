@@ -33,7 +33,6 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	rnd := rand.New(rand.NewSource(133777))
 	keysCount := rnd.Intn(100_0000)
 
-	// generate updates
 	b.Logf("keys count: %d", keysCount)
 	builder := NewUpdateBuilder()
 	for range keysCount {
@@ -61,5 +60,13 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
 		_, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(b, err)
+	}
+}
+
+func BenchmarkStateEncode(b *testing.B) {
+	s := state{Root: make([]byte, 128), RootPresent: true, RootChecked: true}
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = s.Encode(nil)
 	}
 }

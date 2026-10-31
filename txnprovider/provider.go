@@ -29,6 +29,7 @@ import (
 type TxnProvider interface {
 	// ProvideTxns provides transactions ready to be included in a block for block building. Available request options:
 	//   - WithParentBlockNum
+	//   - WithParentBlockWaitStop
 	//   - WithAmount
 	//   - WithGasTarget
 	//   - WithTxnIdsFilter
@@ -41,6 +42,14 @@ type ProvideOption func(opt *ProvideOptions)
 func WithParentBlockNum(blockNum uint64) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.ParentBlockNum = blockNum
+	}
+}
+
+// WithParentBlockWaitStop ends a wait for the parent block once stop is closed; the provider then
+// returns no transactions. Other waits, such as a wait for decryption keys, are not affected.
+func WithParentBlockWaitStop(stop <-chan struct{}) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.ParentBlockWaitStop = stop
 	}
 }
 
@@ -75,12 +84,13 @@ func WithAvailableRlpSpace(size int) ProvideOption {
 }
 
 type ProvideOptions struct {
-	BlockTime         uint64
-	ParentBlockNum    uint64
-	Amount            int
-	GasTarget         mdgas.FullMdGas
-	TxnIdsFilter      mapset.Set[[32]byte]
-	AvailableRlpSpace int
+	BlockTime           uint64
+	ParentBlockNum      uint64
+	ParentBlockWaitStop <-chan struct{}
+	Amount              int
+	GasTarget           mdgas.FullMdGas
+	TxnIdsFilter        mapset.Set[[32]byte]
+	AvailableRlpSpace   int
 }
 
 func ApplyProvideOptions(opts ...ProvideOption) ProvideOptions {

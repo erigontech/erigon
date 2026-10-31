@@ -79,10 +79,10 @@ type beaconStatesCollector struct {
 	payloadExpectedWithdrawalsCollectorDump *etl.Collector
 	executionPayloadAvailabilityCollector   *etl.Collector
 	builderPendingPaymentsCollector         *etl.Collector
-	ptcWindowCollector                      *etl.Collector
+	ptcWindowEpochCollector                 *etl.Collector
 	latestExecutionPayloadBidCollector      *etl.Collector
 	// gloas -- diffs data structures
-	buildersWriter                   *base_encoding.SSZQueueEncoder[*cltypes.Builder]
+	buildersWriter                   *state_accessors.BuildersDiffWriter
 	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
 	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
@@ -140,10 +140,10 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		payloadExpectedWithdrawalsCollectorDump: etl.NewCollectorWithAllocator(kv.PayloadExpectedWithdrawalsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		executionPayloadAvailabilityCollector:   etl.NewCollectorWithAllocator(kv.ExecutionPayloadAvailabilityTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		builderPendingPaymentsCollector:         etl.NewCollectorWithAllocator(kv.BuilderPendingPaymentsTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
-		ptcWindowCollector:                      etl.NewCollectorWithAllocator(kv.PtcWindowTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		ptcWindowEpochCollector:                 etl.NewCollectorWithAllocator(kv.PtcWindowEpochTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 		latestExecutionPayloadBidCollector:      etl.NewCollectorWithAllocator(kv.LatestExecutionPayloadBidTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
 
-		buildersWriter:                   base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b }),
+		buildersWriter:                   new(state_accessors.BuildersDiffWriter),
 		builderPendingWithdrawalsWriter:  base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b }),
 		payloadExpectedWithdrawalsWriter: base_encoding.NewSSZQueueEncoder[*cltypes.Withdrawal](func(a, b *cltypes.Withdrawal) bool { return *a == *b }),
 
@@ -155,7 +155,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 	}
 }
 
-func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *state.CachingBeaconState) error {
+func (i *beaconStatesCollector) addGenesisState(state *state.CachingBeaconState) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
@@ -169,7 +169,7 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	})
 	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
 
-	if err := antiquateField(ctx, roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {
+	if err := antiquateField(roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {
 		return err
 	}
 
@@ -181,6 +181,10 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	}
 
 	if err := i.storeEpochData(state); err != nil {
+		return err
+	}
+	epoch := slot / i.beaconCfg.SlotsPerEpoch
+	if err := i.collectActiveIndices(epoch, state.GetActiveValidatorsIndices(epoch)); err != nil {
 		return err
 	}
 
@@ -201,24 +205,32 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		}
 	}
 	if state.Version() >= clparams.ElectraVersion {
-		if err := antiquateListSSZ(ctx, slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.PendingDeposits(), i.buf, i.compressor, i.pendingDepositsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.PendingConsolidations(), i.buf, i.compressor, i.pendingConsolidationsCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
 			return err
 		}
 	}
 	if state.Version() >= clparams.GloasVersion {
-		if err := antiquateListSSZ(ctx, slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
+		if err := antiquateListSSZ(slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
+		i.buildersWriter.Initialize(state.GetBuilders())
+		i.buf.Reset()
+		if err := i.buildersWriter.WriteDiff(i.buf, state.GetBuilders()); err != nil {
 			return err
 		}
-		if err := antiquateListSSZ(ctx, slot, state.GetPayloadExpectedWithdrawals(), i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump); err != nil {
+		if err := i.buildersCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(slot, state.GetPayloadExpectedWithdrawals(), i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump); err != nil {
 			return err
 		}
 		if err := i.collectExecutionPayloadAvailability(slot, state.GetExecutionPayloadAvailability()); err != nil {
@@ -227,7 +239,7 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		if err := i.collectBuilderPendingPayments(slot, state.GetBuilderPendingPayments()); err != nil {
 			return err
 		}
-		if err := i.collectPtcWindow(slot, state.GetPtcWindow()); err != nil {
+		if err := i.collectPtcWindowEpoch(state); err != nil {
 			return err
 		}
 		if err := i.collectLatestExecutionPayloadBid(slot, state.GetLatestExecutionPayloadBid()); err != nil {
@@ -287,13 +299,13 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateField(context.Background(), slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
+	return antiquateField(slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
 }
 
 func (i *beaconStatesCollector) collectPendingDepositsDump(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
+	return antiquateListSSZ(slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
 }
 
 func (i *beaconStatesCollector) preStateTransitionHook(preState *state.CachingBeaconState) {
@@ -336,13 +348,13 @@ func (i *beaconStatesCollector) collectElectraQueuesDiffs(slot uint64, pendingDe
 func (i *beaconStatesCollector) collectPendingConsolidationsDump(slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
+	return antiquateListSSZ(slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
+	return antiquateListSSZ(slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
 }
 
 // -- gloas queue diffs --
@@ -381,19 +393,19 @@ func (i *beaconStatesCollector) collectGloasQueuesDiffs(
 func (i *beaconStatesCollector) collectBuildersDump(slot uint64, builders *solid.ListSSZ[*cltypes.Builder]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
+	return antiquateListSSZ(slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectBuilderPendingWithdrawalsDump(slot uint64, bpw *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
+	return antiquateListSSZ(slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
 }
 
 func (i *beaconStatesCollector) collectPayloadExpectedWithdrawalsDump(slot uint64, pew *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
+	return antiquateListSSZ(slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
 }
 
 // -- gloas per-slot fields --
@@ -430,8 +442,11 @@ func (i *beaconStatesCollector) collectBuilderPendingPayments(slot uint64, bpp *
 	return i.builderPendingPaymentsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectPtcWindow(slot uint64, ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ]) error {
-	encoded, err := ptcWindow.EncodeSSZ(nil)
+func (i *beaconStatesCollector) collectPtcWindowEpoch(st *state.CachingBeaconState) error {
+	if st.Version() < clparams.GloasVersion {
+		return nil
+	}
+	encoded, err := st.GetPtcWindow().EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -443,7 +458,8 @@ func (i *beaconStatesCollector) collectPtcWindow(slot uint64, ptcWindow *solid.V
 	if err := i.compressor.Close(); err != nil {
 		return err
 	}
-	return i.ptcWindowCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+	slot := i.beaconCfg.RoundSlotToEpoch(st.Slot())
+	return i.ptcWindowEpochCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) collectLatestExecutionPayloadBid(slot uint64, bid *cltypes.ExecutionPayloadBid) error {
@@ -516,12 +532,12 @@ func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_ac
 	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, oldVal, newVal []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldVal, newVal, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
+func (i *beaconStatesCollector) collectBalancesDiffs(slot uint64, oldVal, newVal []byte) error {
+	return antiquateBytesListDiff(base_encoding.Encode64ToBytes4(slot), oldVal, newVal, i.buf, i.balancesCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
-func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(ctx context.Context, slot uint64, oldEffectiveBalances, newEffectiveBalances []byte) error {
-	return antiquateBytesListDiff(ctx, base_encoding.Encode64ToBytes4(slot), oldEffectiveBalances, newEffectiveBalances, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
+func (i *beaconStatesCollector) collectEffectiveBalancesDiffs(slot uint64, oldEffectiveBalances, newEffectiveBalances []byte) error {
+	return antiquateBytesListDiff(base_encoding.Encode64ToBytes4(slot), oldEffectiveBalances, newEffectiveBalances, i.buf, i.effectiveBalanceCollector, base_encoding.ComputeCompressedSerializedUint64ListDiff)
 }
 
 func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityScores []byte) error {
@@ -623,7 +639,7 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.builderPendingPaymentsCollector.Load(tx, kv.BuilderPendingPaymentsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.ptcWindowCollector.Load(tx, kv.PtcWindowTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.ptcWindowEpochCollector.Load(tx, kv.PtcWindowEpochTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := i.latestExecutionPayloadBidCollector.Load(tx, kv.LatestExecutionPayloadBidTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -666,7 +682,7 @@ func (i *beaconStatesCollector) close() {
 	i.payloadExpectedWithdrawalsCollectorDump.Close()
 	i.executionPayloadAvailabilityCollector.Close()
 	i.builderPendingPaymentsCollector.Close()
-	i.ptcWindowCollector.Close()
+	i.ptcWindowEpochCollector.Close()
 	i.latestExecutionPayloadBidCollector.Close()
 }
 
@@ -683,7 +699,7 @@ func antiquateFullUint64List(collector *etl.Collector, slot uint64, raw []byte, 
 	return collector.Collect(base_encoding.Encode64ToBytes4(slot), buffer.Bytes())
 }
 
-func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+func antiquateField(slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
 	buffer.Reset()
 	compressor.Reset(buffer)
 
@@ -697,7 +713,7 @@ func antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffe
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot uint64, l *solid.ListSSZ[T], buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+func antiquateListSSZ[T solid.EncodableHashableSSZ](slot uint64, l *solid.ListSSZ[T], buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
 	buffer.Reset()
 	compressor.Reset(buffer)
 
@@ -715,7 +731,7 @@ func antiquateListSSZ[T solid.EncodableHashableSSZ](ctx context.Context, slot ui
 	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), buffer.Bytes())
 }
 
-func antiquateBytesListDiff(ctx context.Context, key []byte, oldVal, newVal []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, oldVal, newVal []byte) error) error {
+func antiquateBytesListDiff(key, oldVal, newVal []byte, buffer *bytes.Buffer, collector *etl.Collector, diffFn func(w io.Writer, oldVal, newVal []byte) error) error {
 	buffer.Reset()
 
 	// create a diff

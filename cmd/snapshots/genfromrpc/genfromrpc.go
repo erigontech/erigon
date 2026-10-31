@@ -385,7 +385,7 @@ func getBlockByNumber(ctx context.Context, client *rpc.Client, blockNumber *big.
 		Transactions: txs,
 		Uncles:       block.Uncles,
 		Withdrawals:  block.Withdrawals,
-	})
+	}, nil)
 	if verify {
 		if blk.Hash() != block.BlkHash {
 			return nil, fmt.Errorf("block hash mismatch, expected %s, got %s. num=%d", blk.Hash(), block.BlkHash, blockNumber)

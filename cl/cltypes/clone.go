@@ -21,9 +21,9 @@ import (
 	"github.com/erigontech/erigon/common/clonable"
 )
 
-func (s *SignedBeaconBlock) Clone() clonable.Clonable {
-	other := NewSignedBeaconBlock(s.Block.Body.beaconCfg, s.Version())
-	other.Block.Body.Version = s.Block.Body.Version
+func (b *SignedBeaconBlock) Clone() clonable.Clonable {
+	other := NewSignedBeaconBlock(b.Block.Body.beaconCfg, b.Version())
+	other.Block.Body.Version = b.Block.Body.Version
 	return other
 }
 
@@ -47,8 +47,8 @@ func (b *BeaconBody) Clone() clonable.Clonable {
 	return other
 }
 
-func (e *Eth1Block) Clone() clonable.Clonable {
-	return NewEth1Block(e.version, e.beaconCfg)
+func (b *Eth1Block) Clone() clonable.Clonable {
+	return NewEth1Block(b.version, b.beaconCfg)
 }
 
 func (*Eth1Data) Clone() clonable.Clonable {
@@ -75,8 +75,8 @@ func (*SignedAggregateAndProof) Clone() clonable.Clonable {
 	return &SignedAggregateAndProof{}
 }
 
-func (a *SyncAggregate) Clone() clonable.Clonable {
-	return NewSyncAggregateWithSize(len(a.SyncCommiteeBits))
+func (agg *SyncAggregate) Clone() clonable.Clonable {
+	return NewSyncAggregateWithSize(len(agg.SyncCommiteeBits))
 }
 
 func (*SignedVoluntaryExit) Clone() clonable.Clonable {
@@ -141,15 +141,15 @@ func (*Withdrawal) Clone() clonable.Clonable {
 	return &Withdrawal{}
 }
 
-func (s *SignedContributionAndProof) Clone() clonable.Clonable {
+func (a *SignedContributionAndProof) Clone() clonable.Clonable {
 	return &SignedContributionAndProof{}
 }
 
-func (s *ContributionAndProof) Clone() clonable.Clonable {
+func (a *ContributionAndProof) Clone() clonable.Clonable {
 	return &ContributionAndProof{}
 }
 
-func (s *Contribution) Clone() clonable.Clonable {
+func (a *Contribution) Clone() clonable.Clonable {
 	return &Contribution{}
 }
 

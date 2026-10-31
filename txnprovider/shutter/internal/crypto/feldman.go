@@ -114,11 +114,6 @@ func ZeroGammas(degree uint64) *Gammas {
 	return &gammas
 }
 
-// DegreeFromThreshold returns the degree polynomials should have for the given threshold.
-func DegreeFromThreshold(threshold uint64) uint64 {
-	return threshold - 1
-}
-
 // Eval evaluates the polynomial at the given coordinate.
 func (p *Polynomial) Eval(x *big.Int) *big.Int {
 	// uses Horner's method

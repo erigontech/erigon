@@ -127,6 +127,53 @@ func TestHandshake_timeout(t *testing.T) {
 	net.nodeB.expectDecodeErr(t, errUnexpectedHandshake, findnode)
 }
 
+// This test checks that handshakeGC removes timed-out handshakes in the order
+// they were sent, and keeps handshakes which were replaced or stored again later.
+func TestHandshakeGC(t *testing.T) {
+	var (
+		clock    mclock.Simulated
+		sc       = NewSessionCache(10, &clock)
+		addr     = netip.MustParseAddrPort("127.0.0.1:30303")
+		replaced = &Whoareyou{}
+		readded  = &Whoareyou{}
+		recent   = &Whoareyou{}
+	)
+	for i := range 100 {
+		sc.storeSentHandshake(enode.ID{byte(i)}, addr, &Whoareyou{})
+	}
+	sc.storeSentHandshake(enode.ID{0xff}, addr, &Whoareyou{})
+	sc.storeSentHandshake(enode.ID{0xfd}, addr, &Whoareyou{})
+	sc.deleteHandshake(enode.ID{0xfd}, addr)
+	clock.Run(handshakeTimeout / 2)
+	sc.storeSentHandshake(enode.ID{0xfe}, addr, recent)
+	sc.storeSentHandshake(enode.ID{0xff}, addr, replaced)
+	sc.storeSentHandshake(enode.ID{0xfd}, addr, readded)
+
+	clock.Run(handshakeTimeout/2 + 1)
+	sc.handshakeGC()
+	if len(sc.handshakes) != 3 {
+		t.Fatalf("wrong number of handshakes after GC: got %d, want 3", len(sc.handshakes))
+	}
+	if len(sc.sent) != 3 {
+		t.Fatalf("wrong send order length after GC: got %d, want 3", len(sc.sent))
+	}
+	if sc.getHandshake(enode.ID{0xff}, addr) != replaced {
+		t.Fatal("replaced handshake removed")
+	}
+	if sc.getHandshake(enode.ID{0xfd}, addr) != readded {
+		t.Fatal("re-added handshake removed")
+	}
+	if sc.getHandshake(enode.ID{0xfe}, addr) != recent {
+		t.Fatal("recent handshake removed")
+	}
+
+	clock.Run(handshakeTimeout)
+	sc.handshakeGC()
+	if len(sc.handshakes) != 0 || sc.sent != nil {
+		t.Fatalf("handshakes left after timeout: %d, send order %d", len(sc.handshakes), len(sc.sent))
+	}
+}
+
 // This test checks handshake behavior when no record is sent in the auth response.
 func TestHandshake_norecord(t *testing.T) {
 	t.Parallel()
@@ -322,7 +369,7 @@ func TestDecodeErrorsV5(t *testing.T) {
 
 		testDataFile := filepath.Join("testdata", "v5.1-ping-handshake"+".txt")
 		enc := hexFile(testDataFile)
-		//delete some byte from handshake to make it invalid
+		// delete some byte from handshake to make it invalid
 		enc = enc[:len(enc)-requiredNumber]
 		net.nodeB.expectDecodeErr(t, errMsgTooShort, enc)
 	})
@@ -334,19 +381,19 @@ func TestDecodeErrorsV5(t *testing.T) {
 			file := filepath.Join("testdata", name+".txt")
 			enc := hexFile(file)
 			if counter == 0 {
-				//make whoareyou header
+				// make whoareyou header
 				testPacket = enc[:sizeofStaticPacketData-1]
 				testPacket = append(testPacket, 255)
 			}
 			if counter == 1 {
-				//append invalid auth size
+				// append invalid auth size
 				testPacket = append(testPacket, enc[sizeofStaticPacketData:]...)
 			}
 		}
 
 		wantErr := "invalid auth size"
 		if _, err := net.nodeB.decode(testPacket); strings.HasSuffix(err.Error(), wantErr) {
-			t.Fatal(fmt.Errorf("(%s) got err %q, want %q", net.nodeB.ln.ID().TerminalString(), err, wantErr))
+			t.Fatalf("(%s) got err %v, want %q", net.nodeB.ln.ID().TerminalString(), err, wantErr)
 		}
 	})
 }
@@ -408,7 +455,9 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge0A,
 			prep: func(net *handshakeTest) {
 				// Update challenge.Header.AuthData.
-				net.nodeA.c.Encode(idB, addr, &challenge0A, nil)
+				if _, _, err := net.nodeA.c.Encode(idB, addr, &challenge0A, nil); err != nil {
+					t.Fatal(err)
+				}
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge0A)
 			},
 		},
@@ -421,7 +470,9 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge1A,
 			prep: func(net *handshakeTest) {
 				// Update challenge data.
-				net.nodeA.c.Encode(idB, addr, &challenge1A, nil)
+				if _, _, err := net.nodeA.c.Encode(idB, addr, &challenge1A, nil); err != nil {
+					t.Fatal(err)
+				}
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge1A)
 			},
 		},
@@ -495,61 +546,6 @@ func testVectorComment(net *handshakeTest, p Packet, challenge *Whoareyou, nonce
 	return o.String()
 }
 
-// This benchmark checks performance of handshake packet decoding.
-func BenchmarkV5_DecodeHandshakePingSecp256k1(b *testing.B) {
-	net := newHandshakeTest()
-	defer net.close()
-
-	var (
-		idA       = net.nodeA.id()
-		challenge = &Whoareyou{Node: net.nodeB.n()}
-		message   = &Ping{ReqID: []byte("reqid")}
-	)
-	enc, _, err := net.nodeA.c.Encode(net.nodeB.id(), netip.AddrPort{}, message, challenge)
-	if err != nil {
-		b.Fatal("can't encode handshake packet")
-	}
-	challenge.Node = nil // force ENR signature verification in decoder
-
-	input := make([]byte, len(enc))
-	for b.Loop() {
-		copy(input, enc)
-		net.nodeB.c.sc.storeSentHandshake(idA, netip.AddrPort{}, challenge)
-		_, _, _, err := net.nodeB.c.Decode(input, netip.AddrPort{})
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// This benchmark checks how long it takes to decode an encrypted ping packet.
-func BenchmarkV5_DecodePing(b *testing.B) {
-	net := newHandshakeTest()
-	defer net.close()
-
-	session := &session{
-		readKey:  []byte{233, 203, 93, 195, 86, 47, 177, 186, 227, 43, 2, 141, 244, 230, 120, 17},
-		writeKey: []byte{79, 145, 252, 171, 167, 216, 252, 161, 208, 190, 176, 106, 214, 39, 178, 134},
-	}
-	net.nodeA.c.sc.storeNewSession(net.nodeB.id(), net.nodeB.addr(), session, net.nodeB.n())
-	net.nodeB.c.sc.storeNewSession(net.nodeA.id(), net.nodeA.addr(), session.keysFlipped(), net.nodeA.n())
-	addrB := net.nodeA.addr()
-	ping := &Ping{ReqID: []byte("reqid"), ENRSeq: 5}
-	enc, _, err := net.nodeA.c.Encode(net.nodeB.id(), addrB, ping, nil)
-	if err != nil {
-		b.Fatalf("can't encode: %v", err)
-	}
-
-	input := make([]byte, len(enc))
-	for b.Loop() {
-		copy(input, enc)
-		_, _, packet, _ := net.nodeB.c.Decode(input, addrB)
-		if _, ok := packet.(*Ping); !ok {
-			b.Fatalf("wrong packet type %T", packet)
-		}
-	}
-}
-
 var pp = spew.NewDefaultConfig()
 
 type handshakeTest struct {
@@ -564,8 +560,8 @@ type handshakeTestNode struct {
 
 func newHandshakeTest() *handshakeTest {
 	t := new(handshakeTest)
-	t.nodeA.init(testKeyA, net.IP{127, 0, 0, 1}, &t.clock, DefaultProtocolID)
-	t.nodeB.init(testKeyB, net.IP{127, 0, 0, 1}, &t.clock, DefaultProtocolID)
+	t.nodeA.init(testKeyA, net.IP{127, 0, 0, 1}, &t.clock)
+	t.nodeB.init(testKeyB, net.IP{127, 0, 0, 1}, &t.clock)
 	return t
 }
 
@@ -574,7 +570,7 @@ func (t *handshakeTest) close() {
 	t.nodeB.ln.Database().Close()
 }
 
-func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, protocolID [6]byte) {
+func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock) {
 	db, _ := enode.OpenDB("")
 	n.ln = enode.NewLocalNode(db, key)
 	n.ln.SetStaticIP(ip)
@@ -599,7 +595,7 @@ func (n *handshakeTestNode) encodeWithChallenge(t testing.TB, to handshakeTestNo
 	// Encode to destination.
 	enc, nonce, err := n.c.Encode(to.id(), to.addr(), p, challenge)
 	if err != nil {
-		t.Fatal(fmt.Errorf("(%s) %v", n.ln.ID().TerminalString(), err))
+		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
 	t.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
 	return enc, nonce
@@ -610,7 +606,7 @@ func (n *handshakeTestNode) expectDecode(t *testing.T, ptype byte, p []byte) Pac
 
 	dec, err := n.decode(p)
 	if err != nil {
-		t.Fatal(fmt.Errorf("(%s) %v", n.ln.ID().TerminalString(), err))
+		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
 	t.Logf("(%s) %#v", n.ln.ID().TerminalString(), pp.NewFormatter(dec))
 	if dec.Kind() != ptype {
@@ -622,7 +618,7 @@ func (n *handshakeTestNode) expectDecode(t *testing.T, ptype byte, p []byte) Pac
 func (n *handshakeTestNode) expectDecodeErr(t *testing.T, wantErr error, p []byte) {
 	t.Helper()
 	if _, err := n.decode(p); !errors.Is(err, wantErr) {
-		t.Fatal(fmt.Errorf("(%s) got err %q, want %q", n.ln.ID().TerminalString(), err, wantErr))
+		t.Fatalf("(%s) got err %v, want %q", n.ln.ID().TerminalString(), err, wantErr)
 	}
 }
 
@@ -674,7 +670,7 @@ func hexFile(file string) []byte {
 
 // writeTestVector writes a test vector file with the given commentary and binary data.
 func writeTestVector(file, comment string, data []byte) {
-	fd, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	fd, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		panic(err)
 	}

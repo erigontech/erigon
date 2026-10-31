@@ -19,11 +19,13 @@ package consensus_tests
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
@@ -38,17 +40,16 @@ import (
 
 // gossipMeta represents the meta.yaml structure for gossip networking tests.
 type gossipMeta struct {
-	Topic         string          `yaml:"topic"`
-	CurrentTimeMS uint64          `yaml:"current_time_ms"`
-	Messages      []gossipMessage `yaml:"messages"`
+	Topic    string          `yaml:"topic"`
+	Messages []gossipMessage `yaml:"messages"`
 }
 
 type gossipMessage struct {
-	OffsetMS uint64 `yaml:"offset_ms"`
-	SubnetID uint64 `yaml:"subnet_id"`
-	Message  string `yaml:"message"`
-	Expected string `yaml:"expected"`
-	Reason   string `yaml:"reason"`
+	CurrentTimeMS uint64 `yaml:"current_time_ms"`
+	SubnetID      uint64 `yaml:"subnet_id"`
+	Message       string `yaml:"message"`
+	Expected      string `yaml:"expected"`
+	Reason        string `yaml:"reason"`
 }
 
 type gossipConfig struct {
@@ -66,15 +67,11 @@ func gossipBLSToExecutionChangeHandler(t *testing.T, root fs.FS, c spectest.Test
 	}
 	seen := make(map[uint64]struct{})
 	for i, message := range meta.Messages {
-		messageTime, ok := gossipMessageTime(meta.CurrentTimeMS, message.OffsetMS)
-		if !ok {
-			return fmt.Errorf("message %d time overflows", i)
-		}
 		change := &cltypes.SignedBLSToExecutionChange{}
 		if err := spectest.ReadSszOld(root, change, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipBLSToExecutionChange(beaconState, change, messageTime, config.CapellaForkEpoch, seen)
+		result := validateGossipBLSToExecutionChange(beaconState, change, message.CurrentTimeMS, config.CapellaForkEpoch, seen)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -147,15 +144,11 @@ func gossipSyncCommitteeMessageHandler(t *testing.T, root fs.FS, c spectest.Test
 	}
 	seen := make(map[syncCommitteeMessageKey]struct{})
 	for i, message := range meta.Messages {
-		messageTime, ok := gossipMessageTime(meta.CurrentTimeMS, message.OffsetMS)
-		if !ok {
-			return fmt.Errorf("message %d time overflows", i)
-		}
 		syncMessage := &cltypes.SyncCommitteeMessage{}
 		if err := spectest.ReadSszOld(root, syncMessage, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipSyncCommitteeMessage(beaconState, syncMessage, message.SubnetID, messageTime, seen)
+		result := validateGossipSyncCommitteeMessage(beaconState, syncMessage, message.SubnetID, message.CurrentTimeMS, seen)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -179,7 +172,10 @@ func validateGossipSyncCommitteeMessage(
 	if message.ValidatorIndex >= uint64(beaconState.ValidatorLength()) {
 		return "reject"
 	}
-	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.ValidatorIndex)
+	validSubnets, err := subnets.ComputeSubnetsForSyncCommittee(beaconState, message.Slot, message.ValidatorIndex)
+	if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+		return "ignore"
+	}
 	if err != nil || !slices.Contains(validSubnets, subnetID) {
 		return "reject"
 	}
@@ -223,17 +219,13 @@ func gossipSyncContributionHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	seenContributions := make(map[syncContributionKey][][]byte)
 	seenAggregators := make(map[syncContributionAggregatorKey]struct{})
 	for i, message := range meta.Messages {
-		messageTime, ok := gossipMessageTime(meta.CurrentTimeMS, message.OffsetMS)
-		if !ok {
-			return fmt.Errorf("message %d time overflows", i)
-		}
 		contribution := &cltypes.Contribution{}
 		contribution.SetAggregationBitsSize(int(beaconState.BeaconConfig().SyncCommitteeSize / beaconState.BeaconConfig().SyncCommitteeSubnetCount / 8))
 		signedContribution := &cltypes.SignedContributionAndProof{Message: &cltypes.ContributionAndProof{Contribution: contribution}}
 		if err := spectest.ReadSszOld(root, signedContribution, c.Version(), message.Message+".ssz_snappy"); err != nil {
 			return err
 		}
-		result := validateGossipSyncContribution(beaconState, signedContribution, messageTime, seenContributions, seenAggregators)
+		result := validateGossipSyncContribution(beaconState, signedContribution, message.CurrentTimeMS, seenContributions, seenAggregators)
 		if result != message.Expected {
 			return gossipResultError(i, message, result)
 		}
@@ -277,7 +269,14 @@ func validateGossipSyncContribution(
 	if message.AggregatorIndex >= uint64(beaconState.ValidatorLength()) {
 		return "reject"
 	}
-	subcommitteePublicKeys, ok := gossipSyncSubcommitteePublicKeys(beaconState, contribution.SubcommitteeIndex)
+	committee, err := state.SyncCommitteeForMessageSlot(beaconState, contribution.Slot)
+	if errors.Is(err, state.ErrSyncCommitteeNotInState) {
+		return "ignore"
+	}
+	if err != nil {
+		return "reject"
+	}
+	subcommitteePublicKeys, ok := gossipSyncSubcommitteePublicKeys(config, committee, contribution.SubcommitteeIndex)
 	if !ok || len(contribution.AggregationBits)*8 != len(subcommitteePublicKeys) {
 		return "reject"
 	}
@@ -358,17 +357,9 @@ func gossipCurrentSlot(beaconState *state.CachingBeaconState, currentTimeMS uint
 	return (currentTimeMS - genesisTimeMS) / (beaconState.BeaconConfig().SecondsPerSlot * 1000), true
 }
 
-func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, subcommitteeIndex uint64) ([]common.Bytes48, bool) {
-	config := beaconState.BeaconConfig()
+func gossipSyncSubcommitteePublicKeys(config *clparams.BeaconChainConfig, committee *solid.SyncCommittee, subcommitteeIndex uint64) ([]common.Bytes48, bool) {
 	if config.SyncCommitteeSubnetCount == 0 || config.SyncCommitteeSize%config.SyncCommitteeSubnetCount != 0 {
 		return nil, false
-	}
-	committee := beaconState.CurrentSyncCommittee()
-	if beaconState.Slot() == ^uint64(0) {
-		return nil, false
-	}
-	if config.SyncCommitteePeriod(beaconState.Slot()) != config.SyncCommitteePeriod(beaconState.Slot()+1) {
-		committee = beaconState.NextSyncCommittee()
 	}
 	if committee == nil {
 		return nil, false
@@ -383,13 +374,6 @@ func gossipSyncSubcommitteePublicKeys(beaconState *state.CachingBeaconState, sub
 		return nil, false
 	}
 	return publicKeys[start : start+subcommitteeSize], true
-}
-
-func gossipMessageTime(currentTimeMS, offsetMS uint64) (uint64, bool) {
-	if offsetMS > ^uint64(0)-currentTimeMS {
-		return 0, false
-	}
-	return currentTimeMS + offsetMS, true
 }
 
 func markGossipSyncContributionSeen(
@@ -464,7 +448,7 @@ func gossipAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase
 
 		// If valid, mark the slashable indices as seen.
 		if result == "valid" {
-			markAttesterSlashingSeen(beaconState, slashing, seenIndices)
+			markAttesterSlashingSeen(slashing, seenIndices)
 		}
 	}
 	return nil
@@ -542,7 +526,6 @@ func validateAttesterSlashing(
 
 // markAttesterSlashingSeen adds the slashable indices from the intersection to the seen set.
 func markAttesterSlashingSeen(
-	s *state.CachingBeaconState,
 	slashing *cltypes.AttesterSlashing,
 	seenIndices map[uint64]bool,
 ) {

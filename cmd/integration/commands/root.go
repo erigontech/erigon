@@ -18,9 +18,12 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
@@ -28,13 +31,16 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
 )
+
+// mdbxWannaRecovery is MDBX_WANNA_RECOVERY from libmdbx mdbx.h, which mdbx-go does not export.
+const mdbxWannaRecovery = mdbx.Errno(-30419)
 
 var rootCmd = &cobra.Command{
 	Use:   "integration",
@@ -69,17 +75,40 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+func checkExistingDB(opts kv2.MdbxOpts) error {
+	probeOpts := opts.Accede(true).Exclusive(false).WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{}
+	})
+	db, err := probeOpts.Readonly(true).Open(context.Background())
+	if errors.Is(err, mdbxWannaRecovery) {
+		// A read-write retry lets MDBX recover metadata left by an unclean shutdown.
+		db, err = probeOpts.Readonly(false).Open(context.Background())
+	}
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	return db.View(context.Background(), func(tx kv.Tx) error {
+		tables, err := tx.ListTables()
+		if err != nil {
+			return fmt.Errorf("list tables in database %s: %w", db.Path(), err)
+		}
+		if !slices.Contains(tables, kv.DatabaseInfo) {
+			return fmt.Errorf("database %s has no %s table, so it is not a chain database", db.Path(), kv.DatabaseInfo)
+		}
+		return nil
+	})
+}
+
+func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
 	migrationDBs := map[kv.Label]bool{
-		dbcfg.ChainDB:         true,
-		dbcfg.ConsensusDB:     true,
-		dbcfg.HeimdallDB:      true,
-		dbcfg.PolygonBridgeDB: true,
+		dbcfg.ChainDB:     true,
+		dbcfg.ConsensusDB: true,
 	}
 	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
 		panic(opts.GetLabel())
 	}
-
 	// Apply migrations BEFORE the accede-mode open. In accede mode MDBX cannot
 	// create new tables, so if a table was added to the schema after the DB was
 	// originally created (e.g. BlockAccessList) the open would panic. The
@@ -92,15 +121,17 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 			return nil, fmt.Errorf("open migrations db: %w", err)
 		}
 		defer migrationsDB.Close()
-
 		migrator := migrations.NewMigrator(opts.GetLabel())
 		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
 			return nil, err
 		}
 		if has {
+			if err := checkExistingDB(opts); err != nil {
+				return nil, err
+			}
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			rawDBExcl := opts.Exclusive(true).MustOpen()
+			rawDBExcl := opts.Accede(false).Exclusive(true).MustOpen()
 			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
 				rawDBExcl.Close()
 				return nil, err
@@ -108,22 +139,43 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 			rawDBExcl.Close()
 		}
 	}
+	db := opts.MustOpen()
+	if applyMigrations && opts.GetLabel() == dbcfg.ChainDB {
+		if err := migrations.NewMigrator(dbcfg.ChainDB).StampVersion(db, ""); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	return db, nil
+}
 
-	rawDB := opts.MustOpen()
+// isDefaultChaindata compares the flags as given: dirs.Chaindata is absolute and never matches a relative --datadir.
+func isDefaultChaindata(chaindata, datadir string) bool {
+	return chaindata == filepath.Join(datadir, "chaindata")
+}
 
+func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
+	if applyMigrations && isDefaultChaindata(chaindata, datadirCli) {
+		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
+			return nil, err
+		}
+	}
+	rawDB, err := openRawDB(opts, applyMigrations, logger)
+	if err != nil {
+		return nil, err
+	}
 	if err := CheckSaltFilesExist(dirs); err != nil {
 		return nil, err
 	}
-
-	blockSnaps, _, agg, _, _, _, err := allSnapshots(ctx, rawDB, logger)
+	db, err := newTemporalDB(ctx, rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
-
-	db, err := temporal.New(rawDB, agg, blockSnaps)
+	blockSnaps, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		return nil, err
 	}
+	logSnapshotStats(ctx, db, blockSnaps, logger)
 	return db, nil
 }

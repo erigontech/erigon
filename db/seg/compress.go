@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dir"
-	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/etl"
@@ -108,6 +107,7 @@ type Compressor struct {
 	Cfg
 	ctx              context.Context
 	wg               *sync.WaitGroup
+	stopWorkersOnce  sync.Once
 	superstrings     chan []uint16
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
@@ -150,7 +150,7 @@ type Timings struct {
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
-	dir2.MustExist(tmpDir)
+	dir.MustExist(tmpDir)
 	_, fileName := filepath.Split(outputFile)
 
 	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
@@ -199,7 +199,15 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	return cc, nil
 }
 
+func (c *Compressor) stopWorkers() {
+	c.stopWorkersOnce.Do(func() {
+		close(c.superstrings)
+		c.wg.Wait()
+	})
+}
+
 func (c *Compressor) Close() {
+	c.stopWorkers()
 	c.uncompressedFile.CloseAndRemove()
 	for _, collector := range c.suffixCollectors {
 		collector.Close()
@@ -243,7 +251,9 @@ func (c *Compressor) AddWord(word []byte) error {
 		}
 	}
 
-	c.advanceScan(2*len(word) + 2)
+	if err := c.advanceScan(2*len(word) + 2); err != nil {
+		return err
+	}
 	if c.sampledSuperstring() {
 		for _, a := range word {
 			c.superstring = append(c.superstring, uint16(a)+1)
@@ -260,18 +270,30 @@ func (c *Compressor) sampledSuperstring() bool { return c.superstringCount%c.Sam
 // advanceScan accounts for the next word (encoded size l) and cuts a new superstring when the
 // current one would overflow. Bytes are counted for every word so boundaries don't depend on
 // sampling; a superstring fills only when sampled, so only a non-empty buffer is sent and replaced.
-func (c *Compressor) advanceScan(l int) {
+func (c *Compressor) advanceScan(l int) error {
 	if c.scannedBytes+l <= c.superstringLimit {
 		c.scannedBytes += l
-		return
+		return nil
 	}
 
 	if len(c.superstring) > 0 {
-		c.superstrings <- c.superstring
+		if err := c.sendSuperstring(); err != nil {
+			return err
+		}
 		c.superstring = superStringsPool.Get().([]uint16)[:0]
 	}
 	c.superstringCount++
 	c.scannedBytes = 0
+	return nil
+}
+
+func (c *Compressor) sendSuperstring() error {
+	select {
+	case c.superstrings <- c.superstring:
+		return nil
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {
@@ -305,18 +327,19 @@ func (c *Compressor) Compress() error {
 	// submitted for word-level compression, so the pattern dictionary will always be empty.
 	noWordPatterns := c.superstringCount == 0 && len(c.superstring) == 0
 	if len(c.superstring) > 0 {
-		c.superstrings <- c.superstring
+		if err := c.sendSuperstring(); err != nil {
+			return err
+		}
 	}
-	close(c.superstrings)
-	c.wg.Wait()
+	c.stopWorkers()
 
-	cf, err := dir.CreateTemp(c.outputFile)
-	if err != nil {
-		return err
+	cf, createErr := dir.CreateTemp(c.outputFile)
+	if createErr != nil {
+		return createErr
 	}
+	defer dir.RemoveFile(cf.Name()) //nolint:errcheck
+	defer cf.Close()                //nolint:errcheck
 	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName) //nolint:errcheck
-	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
@@ -357,8 +380,7 @@ func (c *Compressor) Compress() error {
 		if c.lvl < log.LvlTrace {
 			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 		}
-		var db *DictionaryBuilder
-		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 		if err != nil {
 			return err
 		}
@@ -382,8 +404,7 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	var outputStat os.FileInfo
-	outputStat, err = os.Stat(c.outputFile)
+	outputStat, err := os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
 	}
@@ -804,80 +825,6 @@ type DynamicCell struct {
 	patternIdx  int // offset of the last element in the pattern slice
 }
 
-type Ring struct {
-	cells             []DynamicCell
-	head, tail, count int
-}
-
-func NewRing() *Ring {
-	return &Ring{
-		cells: make([]DynamicCell, 16),
-		head:  0,
-		tail:  0,
-		count: 0,
-	}
-}
-
-func (r *Ring) Reset() {
-	r.count = 0
-	r.head = 0
-	r.tail = 0
-}
-
-func (r *Ring) ensureSize() {
-	if r.count < len(r.cells) {
-		return
-	}
-	newcells := make([]DynamicCell, r.count*2)
-	if r.tail > r.head {
-		copy(newcells, r.cells[r.head:r.tail])
-	} else {
-		n := copy(newcells, r.cells[r.head:])
-		copy(newcells[n:], r.cells[:r.tail])
-	}
-	r.head = 0
-	r.tail = r.count
-	r.cells = newcells
-}
-
-func (r *Ring) PushFront() *DynamicCell {
-	r.ensureSize()
-	if r.head == 0 {
-		r.head = len(r.cells)
-	}
-	r.head--
-	r.count++
-	return &r.cells[r.head]
-}
-
-func (r *Ring) PushBack() *DynamicCell {
-	r.ensureSize()
-	if r.tail == len(r.cells) {
-		r.tail = 0
-	}
-	result := &r.cells[r.tail]
-	r.tail++
-	r.count++
-	return result
-}
-
-func (r Ring) Len() int {
-	return r.count
-}
-
-func (r *Ring) Get(i int) *DynamicCell {
-	if i < 0 || i >= r.count {
-		return nil
-	}
-	return &r.cells[(r.head+i)&(len(r.cells)-1)]
-}
-
-// Truncate removes all items starting from i
-func (r *Ring) Truncate(i int) {
-	r.count = i
-	r.tail = (r.head + i) & (len(r.cells) - 1)
-}
-
 type DictAggregator struct {
 	collector     *etl.Collector
 	dist          map[int]int
@@ -948,16 +895,11 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	}
 	return &RawWordsFile{filePath: filePath, f: f, w: bufiopool.Writer(f), buf: make([]byte, 128)}, nil
 }
-func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	return &RawWordsFile{filePath: filePath, f: f, w: bufiopool.Writer(f), buf: make([]byte, 128)}, nil
-}
+
 func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
+
 func (f *RawWordsFile) Close() {
 	if f.w != nil {
 		f.w.Flush() //nolint:errcheck
@@ -967,10 +909,12 @@ func (f *RawWordsFile) Close() {
 		f.f = nil
 	}
 }
+
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	dir2.RemoveFile(f.filePath) //nolint:errcheck
+	dir.RemoveFile(f.filePath) //nolint:errcheck
 }
+
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++
 	// For compressed words, the length prefix is shifted to make lowest bit zero
@@ -985,6 +929,7 @@ func (f *RawWordsFile) Append(v []byte) error {
 	}
 	return nil
 }
+
 func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	f.count++
 	// For uncompressed words, the length prefix is shifted to make lowest bit one

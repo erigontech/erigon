@@ -20,17 +20,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
-
 	tests := map[string]struct {
 		params   []byte
 		expected string
@@ -59,6 +60,12 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[6]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 6"}}`,
 		},
+		// JSON-RPC wants exactly one of result and error, so a callback that
+		// succeeds without writing still owes a result.
+		"no_error_no_stream_write": {
+			params:   []byte("[7]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":null}`,
+		},
 	}
 
 	for name, testParams := range tests {
@@ -72,7 +79,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				Result:  nil,
 			}
 
-			dummyFunc := func(id int, stream jsonstream.Stream) error {
+			dummyFunc := func(id int, stream *jsonstream.Stream) error {
 				if id == 1 {
 					stream.WriteNil()
 					return errors.New("id 1")
@@ -86,21 +93,21 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				}
 				if id == 4 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 5 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyObject()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 6 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					// intentionally leave the result object open: the tracer erroring out
 					// mid-write must not leave the response's "result" object unclosed.
@@ -119,16 +126,16 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				streamable:  true,
 			}
 
-			args, err := parsePositionalArguments((msg).Params, cb.argTypes)
+			args, err := parsePositionalArguments(msg.Params, cb.argTypes)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			var buf bytes.Buffer
-			stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+			stream := jsonstream.New(&buf)
 
 			h := handler{}
-			h.runMethod(context.Background(), &msg, cb, args, stream)
+			_, _ = h.runMethod(context.Background(), &msg, cb, args, stream)
 
 			stream.Flush()
 
@@ -136,15 +143,11 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			assert.Equal(t, testParams.expected, output, "expected output should match")
 		})
 	}
-
 }
 
-// TestRunMethodFlushHookNilFunc pins the invariant that runMethod must not panic when the
-// gzip-streaming hook stored on the context is a typed nil func(), not just an untyped nil.
-// The normal masking path (withoutGzipStreamingHook) stores an untyped nil so the type
-// assertion fails outright, but runMethod's guard should not depend on callers always doing
-// that correctly.
-func TestRunMethodFlushHookNilFunc(t *testing.T) {
+// Smoke test for the streamable-callback path: runMethod writes the result
+// through the stream without panicking.
+func TestRunMethodStreamable(t *testing.T) {
 	msg := jsonrpcMessage{
 		Version: "2.0",
 		ID:      []byte{49},
@@ -152,7 +155,7 @@ func TestRunMethodFlushHookNilFunc(t *testing.T) {
 		Params:  []byte("[]"),
 	}
 
-	dummyFunc := func(stream jsonstream.Stream) error {
+	dummyFunc := func(stream *jsonstream.Stream) error {
 		stream.WriteEmptyObject()
 		return nil
 	}
@@ -167,13 +170,105 @@ func TestRunMethodFlushHookNilFunc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.WithValue(context.Background(), httpFlusherContextKey{}, (func())(nil))
+	ctx := context.Background()
 
 	var buf bytes.Buffer
-	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	stream := jsonstream.New(&buf)
 
 	h := handler{}
 	assert.NotPanics(t, func() {
-		h.runMethod(ctx, &msg, cb, args, stream)
+		_, _ = h.runMethod(ctx, &msg, cb, args, stream)
 	})
+}
+
+// A streaming method's response carries exactly one of result and error while nothing of the result
+// has reached the client; after a flush the partial result is closed and the error follows it.
+func TestRunMethodStreamableEnvelope(t *testing.T) {
+	boom := errors.New("boom")
+	for name, tc := range map[string]struct {
+		write func(*jsonstream.Stream) error
+		want  string
+	}{
+		"value": {
+			func(s *jsonstream.Stream) error { s.WriteEmptyObject(); return nil },
+			`{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
+		"nothing written": {
+			func(*jsonstream.Stream) error { return nil },
+			`{"jsonrpc":"2.0","id":1,"result":null}`,
+		},
+		"error before any value": {
+			func(*jsonstream.Stream) error { return boom },
+			`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"boom"}}`,
+		},
+		"error inside a partial value": {func(s *jsonstream.Stream) error {
+			s.WriteArrayStart()
+			s.WriteString("a")
+			s.WriteObjectStart()
+			s.Field("b")
+			return boom
+		}, `{"jsonrpc":"2.0","id":1,"result":["a",{"b":null}],"error":{"code":-32000,"message":"boom"}}`},
+		"error after a flushed value": {func(s *jsonstream.Stream) error {
+			s.WriteArrayStart()
+			s.WriteString("a")
+			if err := s.Flush(); err != nil {
+				return err
+			}
+			return boom
+		}, `{"jsonrpc":"2.0","id":1,"result":["a"],"error":{"code":-32000,"message":"boom"}}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
+			cb := &callback{fn: reflect.ValueOf(tc.write), errPos: 0, streamable: true}
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			_, _ = (&handler{}).runMethod(context.Background(), &msg, cb, nil, stream)
+			require.NoError(t, stream.Flush())
+			require.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+// runMethod answers inside the stream, so the error it reports is the only signal left for the
+// failure metric and the "[rpc] served" log.
+func TestRunMethodReportsAnsweredError(t *testing.T) {
+	msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
+	for name, cb := range map[string]*callback{
+		"streamable": {
+			fn:         reflect.ValueOf(func(stream *jsonstream.Stream) error { return errors.New("boom") }),
+			errPos:     0,
+			streamable: true,
+		},
+		"result encode failure": {
+			fn:     reflect.ValueOf(func() (any, error) { return failingFastJSON{}, nil }),
+			errPos: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			h := handler{}
+
+			answer, err := h.runMethod(context.Background(), &msg, cb, nil, stream)
+
+			require.Error(t, err)
+			require.Nil(t, answer, "the response is already in the stream")
+			require.NoError(t, stream.Flush())
+			require.Contains(t, buf.String(), `"error":`)
+		})
+	}
+}
+
+// Internal and uncoded errors stay visible at default log levels; an error the handler coded as an answer, such as a
+// revert, does not.
+func TestServedLogLevel(t *testing.T) {
+	internal := &CustomError{Code: ErrCodeInternalError, Message: "encode"}
+	require.Equal(t, log.LvlWarn, servedLvl(internal))
+	require.Equal(t, log.LvlWarn, servedLvl(fmt.Errorf("stream: %w", internal)))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeInternalError}))
+	require.Equal(t, log.LvlTrace, servedLvl(&jsonError{Code: 3, Message: "execution reverted", Data: "0x"}))
+	require.Equal(t, log.LvlTrace, servedLvl(&InvalidParamsError{Message: "bad block number"}))
+	require.Equal(t, log.LvlWarn, servedLvl(errors.New("begin tx: mdbx: MDBX_PANIC")))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeDefault, Message: "begin tx: mdbx: MDBX_PANIC"}))
+	require.Equal(t, log.LvlWarn, servedLvl(&jsonError{Code: ErrCodeServerOverloaded}))
 }

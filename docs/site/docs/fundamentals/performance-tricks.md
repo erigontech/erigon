@@ -16,7 +16,7 @@ These instructions are designed to improve the performance of Erigon 3, particul
 --sync.loop.block.limit=10_000 --batchSize=2g
 ```
 
-* Adjust download speed with flag `--torrent.download.rate=[value]` setting your max speed (default value is `512mb`). For example:
+* Adjust the download speed with the `--torrent.download.rate=[value]` flag setting your max speed (default value is `512mb`). For example:
 
 ```bash
 --torrent.download.rate=1024mb
@@ -24,10 +24,10 @@ These instructions are designed to improve the performance of Erigon 3, particul
 
 ## Optimize for Cloud Drives
 
-* Set `SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
+* Set `ERIGON_SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
 
 ```bash
-SNAPSHOT_MADV_RND=false
+export ERIGON_SNAPSHOT_MADV_RND=false
 ```
 
 ## Lock Latest State in RAM

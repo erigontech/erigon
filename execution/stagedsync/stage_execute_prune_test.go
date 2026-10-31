@@ -20,14 +20,27 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // TestRetireCutoffs_ConvertsBlockDistanceToTxNum pins the per-domain
@@ -39,7 +52,7 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	br := freezeblocks.NewBlockReader(snaps, nil)
+	br := freezeblocks.NewBlockReader(snaps)
 
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
@@ -128,4 +141,97 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 		require.Equal(t, uint64(0), cutoffs.Default)
 		require.Equal(t, uint64(100), cutoffs.PerDomain[kv.RCacheDomain])
 	})
+}
+
+func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
+	orig := dbg.NoPrune()
+	t.Cleanup(func() { dbg.SetNoPrune(orig) })
+	dbg.SetNoPrune(false)
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	const (
+		finalisedBlockNum = uint64(100)
+		forwardProgress   = uint64(1_000)
+		maxReorgDepth     = uint64(96)
+	)
+	finalisedHash := common.Hash{0x01}
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, finalisedBlockNum))
+	rawdb.WriteForkchoiceFinalized(tx, finalisedHash)
+	for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1, forwardProgress - maxReorgDepth} {
+		key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
+		require.NoError(t, tx.Put(kv.ChangeSets3, key, []byte{0x01}))
+		require.NoError(t, tx.Put(kv.BlockAccessList, key, []byte{0x01}))
+	}
+	state := &PruneState{
+		ID:              stages.Execution,
+		ForwardProgress: forwardProgress,
+		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true, rawdbv3.TxNums),
+		CurrentSyncCycle: CurrentSyncCycleInfo{
+			IsInitialCycle: true,
+		},
+	}
+	cfg := ExecuteBlockCfg{
+		db:          db,
+		chainConfig: &chain.Config{},
+		syncCfg: ethconfig.Sync{
+			MaxReorgDepth: maxReorgDepth,
+		},
+	}
+	require.NoError(t, PruneExecutionStage(ctx, state, tx, cfg, 0, log.New()))
+	for _, table := range []string{kv.ChangeSets3, kv.BlockAccessList} {
+		for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1} {
+			key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
+			has, err := tx.Has(table, key)
+			require.NoError(t, err)
+			require.False(t, has, "%s retained block %d", table, blockNum)
+		}
+		boundary := forwardProgress - maxReorgDepth
+		key := dbutils.BlockBodyKey(boundary, common.Hash{byte(boundary)})
+		has, err := tx.Has(table, key)
+		require.NoError(t, err)
+		require.True(t, has, "%s pruned the reorg boundary", table)
+	}
+}
+
+// Execution writes the senders of a BAL block that the Senders stage left to the exec workers.
+func TestWriteSendersRecoveredByExec(t *testing.T) {
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	config := chain.AllProtocolChanges
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), *types.MakeSigner(config, 1, 0), key)
+	require.NoError(t, err)
+
+	var zero uint64
+	h := common.Hash{0x01}
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		BaseFee:               uint256.NewInt(1),
+		WithdrawalsHash:       &h,
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &h,
+		RequestsHash:          &h,
+		BlockAccessListHash:   &h,
+	}
+	hash := header.Hash()
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, 1))
+	require.NoError(t, rawdb.WriteBody(tx, hash, 1, &types.Body{Transactions: []types.Transaction{txn}}))
+
+	cfg := ExecuteBlockCfg{chainConfig: config, blockReader: br, readAheader: exec.NewBlockReadAheader()}
+	require.NoError(t, writeSendersRecoveredByExec(ctx, tx, cfg, 1, 1))
+
+	senders, err := rawdb.ReadSenders(tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{crypto.PubkeyToAddress(key.PublicKey)}, senders)
 }

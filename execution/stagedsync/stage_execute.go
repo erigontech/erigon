@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -82,6 +83,24 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
+	// discardCommitment runs execution without computing/persisting commitment
+	// (exec-only). Initialized from dbg.DiscardCommitment() at the stage boundary;
+	// the ephemeral single-block replay harness sets it directly since the env is
+	// read only at package init.
+	discardCommitment bool
+
+	// balSink, when set, receives the BAL derived from each executed block's
+	// VersionedIO (see ProcessBAL). Test-only seam: lets the block-replay
+	// harness capture the derived BAL for a block whose header carries no BAL
+	// hash (pre-Amsterdam), so the harness can own the pre-seed==post-output
+	// reference instead of the header.
+	balSink func(blockNum uint64, bal types.BlockAccessList)
+}
+
+// SetBALSink registers a callback receiving each executed block's derived BAL.
+// Test-only.
+func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) {
+	cfg.balSink = sink
 }
 
 func StageExecuteBlocksCfg(
@@ -107,22 +126,23 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:              db,
-		prune:           pm,
-		batchSize:       batchSize,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		vmConfig:        vmConfig,
-		dirs:            dirs,
-		notifications:   notifications,
-		stateStream:     stateStream,
-		badBlockHalt:    badBlockHalt,
-		blockReader:     blockReader,
-		genesis:         genesis,
-		historyV3:       true,
-		syncCfg:         syncCfg,
-		experimentalBAL: experimentalBAL,
-		readAheader:     readAheader,
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		notifications:     notifications,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		genesis:           genesis,
+		historyV3:         true,
+		syncCfg:           syncCfg,
+		experimentalBAL:   experimentalBAL,
+		readAheader:       readAheader,
+		discardCommitment: dbg.DiscardCommitment(),
 	}
 }
 
@@ -233,16 +253,13 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
-	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
+) error {
 	var currentInc uint64
 
-	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//TODO: This is broken - becuase it does not handle the way value changes
-		// for previous steps are represented - they will pass nil values here
-		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything receives these
-		// changes at what it does with them)
+		// Value changes from previous steps arrive with nil values, which are
+		// indistinguishable from a delete here.
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var account accounts.Account
@@ -292,15 +309,14 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				switch {
-				case entry.Value != nil && len(entry.Value) > 0:
+				if len(entry.Value) > 0 { //nolint:gocritic
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
-				case entry.Value == nil:
+				} else if entry.Value == nil {
 					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-				default:
+				} else {
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
@@ -362,6 +378,23 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
+// resolveExecResumePoint picks where a resumed exec run restarts. The committed
+// commitment boundary (SeekCommitment) is normally authoritative. Exec-only mode
+// (discardCommitment) never advances KeyCommitmentState, so a resume would restart
+// at the stale pre-run boundary and re-execute blocks whose flat state a prior
+// size-limited batch already flushed. When Execution progress has moved past the
+// commitment boundary, resume from Execution progress instead.
+func resolveExecResumePoint(ctx context.Context, txNumReader rawdbv3.TxNumsReader, tx kv.Tx, discardCommitment bool, execProgress, seekTxNum, seekBlock uint64) (txNum, blockNum uint64, err error) {
+	if !discardCommitment || execProgress <= seekBlock {
+		return seekTxNum, seekBlock, nil
+	}
+	execTxNum, err := txNumReader.Max(ctx, tx, execProgress)
+	if err != nil {
+		return 0, 0, err
+	}
+	return execTxNum, execProgress, nil
+}
+
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
@@ -372,16 +405,129 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
-	var to = prevStageProgress
+	to := prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
 		return nil
 	}
+	from := s.BlockNumber + 1
+	defer func() {
+		// A loop-exhausted batch still advanced progress past these blocks.
+		if err == nil || IsOnlyLoopExhausted(err) {
+			if werr := writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber); werr != nil {
+				err = werr
+			}
+		}
+	}()
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
+	// Stage coordination hoisted out of the exec core: resolve the start point
+	// and exec window from committed domains + the txNum index before handing a
+	// resolved execRange to ExecV3.
+	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, rwTx)
+	if err != nil {
 		return err
+	}
+	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, cfg.discardCommitment, s.BlockNumber, initialTxNum, blockNum)
+	if err != nil {
+		return err
+	}
+
+	if s.SyncMode() == stages.ModeApplyingBlocks {
+		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+		if s.CurrentSyncCycle.IsInitialCycle {
+			agg.PresetNonChainTipConcurrency()
+		} else {
+			agg.PresetChainTipConcurrency()
+		}
+	}
+
+	if to < blockNum {
+		return nil
+	}
+
+	inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err := restoreTxNum(ctx, &cfg, rwTx, initialTxNum, to)
+	if err != nil {
+		return err
+	}
+
+	if maxTxNum == 0 {
+		// nothing to exec, make sure the stage is in sync with the sd
+		if s.BlockNumber < blockNum {
+			return s.Update(rwTx, blockNum)
+		}
+		return nil
+	}
+
+	rng := execRange{
+		blockNum:                 blockNum,
+		initialTxNum:             initialTxNum,
+		inputTxNum:               inputTxNum,
+		offsetFromBlockBeginning: offsetFromBlockBeginning,
+		maxBlockNum:              to,
+	}
+
+	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
+		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+	}
+
+	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+
+	// Stage progress: target the SharedDomains overlay (not replaced during exec)
+	// when present, else the live post-exec applyTx (parallel exec may have rolled
+	// the passed-in rwTx via Flush/CommitAndBegin).
+	if savesExecProgress(execErr, out) && out.applyTx != nil {
+		if overlay := doms.BlockOverlay(); overlay != nil {
+			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
+				return err
+			}
+		} else if err := s.Update(out.applyTx, out.lastCommittedBlockNum); err != nil {
+			return err
+		}
+	}
+
+	return renderExecOutcome(execErr, out, cfg, s, u, logger)
+}
+
+// savesExecProgress reports whether a parallel-exec outcome may advance stage
+// progress: a clean or purely-exhausted batch. An operational failure (execErr) or
+// an invalid-block verdict (out.verdict) must not — progress would move past an
+// unexecuted or bad block.
+func savesExecProgress(execErr error, out execV3Outcome) bool {
+	return execErr == nil && out.verdict == nil
+}
+
+// renderExecOutcome converts the parallel executor's typed outcome back to the
+// stage's error contracts. Precedence is fixed by the order of the checks: an
+// operational failure (execErr) outranks a verdict, which outranks a resumable
+// boundary. A non-initial-cycle wrong trie root binary-searches the bad-block
+// unwind from the implicated block; any other verdict propagates for the caller to
+// unwind. Under badBlockHalt (in-memory fork validation), or on the initial cycle,
+// it unwinds nothing and returns the verdict unchanged.
+func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+	if execErr != nil {
+		return execErr
+	}
+
+	if v := out.verdict; v != nil {
+		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+			// During the initial cycle a wrong trie root is fatal: there is no fork to
+			// recover from, and handleIncorrectRootHashError can return nil (hiding the
+			// mismatch) or unwind a canonical block. Propagate it instead.
+			if !s.CurrentSyncCycle.IsInitialCycle {
+				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+			}
+		}
+		// A plain invalid block propagates the error without setting a stage unwind
+		// point — the caller owns the unwind. Setting one here would leave a stale
+		// bad-block verdict that blocks a fresh canonical block at the same height
+		// from being re-executed on the next fork-choice.
+		return v.err
+	}
+
+	if out.exhausted != nil {
+		return out.exhausted
 	}
 	return nil
 }
@@ -479,21 +625,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	// 2026-04: tip-mode commitment-domain prune throughput exceeded the prior
-	// /2 budget. Use a base budget of one-third of a slot and extend it
-	// adaptively when there is a large prunable backlog, capped at two-thirds
-	// of a slot so FCU still has time. The proper fix is a background prune
-	// that defers to FCU when work is pending — out of scope here.
+	// Base budget is one-third of a slot, extended adaptively up to two-thirds when the prunable backlog is large.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
-	stagePruneTimeout := baseTimeout
-	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
-			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
-		}
-	}
+	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+	stagePruneTimeout := min(baseTimeout+extra, maxTimeout)
 	if timeout > 0 && timeout > stagePruneTimeout {
 		stagePruneTimeout = timeout
 	}
@@ -522,20 +658,21 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
+	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
 	// AlwaysGenerateChangesets disables this prune so the node retains
 	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
 	// tool / explicit --experimental.always-generate-changesets flag).
 	// Without the guard, the flag still controls *generation* but every
 	// generated changeset is pruned 96 blocks later, defeating the point.
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		// Some chains produce blocks with 400 chunks of diff = 3mb
 		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
 			pruneChangeSetsStartTime := time.Now()
 			if err := rawdb.PruneTable(
 				tx,
 				kv.ChangeSets3,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				blockPruneTo,
 				ctx,
 				pruneDiffsLimit,
 				pruneChangeSetsTimeout,
@@ -555,20 +692,18 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		}
 	}
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			if err := rawdb.PruneTable(
-				tx,
-				kv.BlockAccessList,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-				ctx,
-				pruneBalLimit,
-				pruneTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			blockPruneTo,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 	}
 

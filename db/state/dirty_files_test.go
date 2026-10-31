@@ -92,13 +92,15 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 
 	// create accesssor files for f1, f2
 	for _, fname := range accessorFor(f1.StepRange(aggStep)) {
-		require.NoError(t, os.WriteFile(fname, []byte("test"), 0644))
-		defer dir.RemoveFile(fname) //nolint:errcheck
+		require.NoError(t, os.WriteFile(fname, []byte("test"), 0o644))
+		f := fname
+		t.Cleanup(func() { _ = dir.RemoveFile(f) })
 	}
 
 	for _, fname := range accessorFor(f2.StepRange(aggStep)) {
-		require.NoError(t, os.WriteFile(fname, []byte("test"), 0644))
-		defer dir.RemoveFile(fname) //nolint:errcheck
+		require.NoError(t, os.WriteFile(fname, []byte("test"), 0o644))
+		f := fname
+		t.Cleanup(func() { _ = dir.RemoveFile(f) })
 	}
 
 	fileItems := fileItemsWithMissedAccessors(df.Items(), aggStep, accessorFor)
@@ -130,7 +132,7 @@ func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
 		{
 			name: "accessor",
 			open: func(t *testing.T, logger log.Logger) {
-				openDirtyAccessor(mask, dirEntries, t.TempDir(), version.Versions{}, func(string) error { return nil }, "test", logger)
+				openDirtyAccessor(mask, dirEntries, t.TempDir(), version.Versions{}, func(string, version.Version) error { return nil }, "test", logger)
 			},
 		},
 	}
@@ -163,7 +165,7 @@ func TestOpenDirtyAccessorLogsOpenErrorAtDebug(t *testing.T) {
 	fileName := "v1.0-accounts.0-1.kvi"
 	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
 
-	openDirtyAccessor("*-accounts.0-1.kvi", []string{fileName}, t.TempDir(), versions, func(string) error {
+	openDirtyAccessor("*-accounts.0-1.kvi", []string{fileName}, t.TempDir(), versions, func(string, version.Version) error {
 		return errors.New("open failed")
 	}, "test", logger)
 

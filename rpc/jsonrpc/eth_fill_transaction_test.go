@@ -18,8 +18,8 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -91,8 +92,8 @@ func TestFillTransactionFillsDefaults(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -103,17 +104,17 @@ func TestFillTransactionFillsDefaults(t *testing.T) {
 	require.NotEmpty(t, result.Raw)
 	require.NotNil(t, result.Tx)
 	require.Greater(t, uint64(result.Tx.Gas), uint64(0))
-	require.True(t, result.Tx.GasPrice != nil || result.Tx.MaxFeePerGas != nil)
+	require.True(t, !(*uint256.Int)(&result.Tx.GasPrice).IsZero() || result.Tx.MaxFeePerGas != nil)
 }
 
 func TestFillTransactionConflictingFees(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	gasPrice := (*hexutil.Big)(big.NewInt(1e9))
-	maxFeePerGas := (*hexutil.Big)(big.NewInt(2e9))
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gasPrice := (*hexutil.U256)(uint256.NewInt(1e9))
+	maxFeePerGas := (*hexutil.U256)(uint256.NewInt(2e9))
 
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		From:         &from,
@@ -129,9 +130,9 @@ func TestFillTransactionChainIDMismatch(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	wrongChainID := (*hexutil.Big)(big.NewInt(999999))
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	wrongChainID := (*hexutil.U256)(uint256.NewInt(999999))
 
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		From:    &from,
@@ -146,7 +147,7 @@ func TestFillTransactionContractCreationNoData(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -159,7 +160,7 @@ func TestFillTransactionNoFrom(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To: &to,
@@ -173,8 +174,8 @@ func TestFillTransactionExplicitNoncePreserved(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	nonce := hexutil.Uint64(7)
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
@@ -190,8 +191,8 @@ func TestFillTransactionExplicitGasPreserved(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	gas := hexutil.Uint64(50000)
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
@@ -203,14 +204,35 @@ func TestFillTransactionExplicitGasPreserved(t *testing.T) {
 	require.Equal(t, gas, result.Tx.Gas, "explicit gas must not be overwritten by estimation")
 }
 
+func TestFillTransactionLoneBlobFeeCapDoesNotFailEstimation(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	supplied := hexutil.Uint64(21000)
+
+	for name, gas := range map[string]*hexutil.Uint64{"estimated gas": nil, "supplied gas": &supplied} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+				From:             &from,
+				To:               &to,
+				Gas:              gas,
+				MaxFeePerBlobGas: (*hexutil.U256)(uint256.NewInt(1)),
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestFillTransactionBlobPreCancun(t *testing.T) {
 	// TestChainBerlinConfig has no Cancun (ExcessBlobGas == nil on head).
 	// A blob tx request must return a clear error, not panic.
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
 
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
@@ -227,8 +249,8 @@ func TestFillTransactionBlobPreCancunExplicitBlobFee(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
 
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
 	gas := hexutil.Uint64(21000)
 
@@ -237,7 +259,7 @@ func TestFillTransactionBlobPreCancunExplicitBlobFee(t *testing.T) {
 		To:                  &to,
 		Gas:                 &gas,
 		BlobVersionedHashes: []common.Hash{blobHash},
-		MaxFeePerBlobGas:    (*hexutil.Big)(big.NewInt(1e9)),
+		MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(1e9)),
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Cancun")
@@ -266,7 +288,7 @@ func TestFillTransactionGasPriceWithAccessListIsTypeOne(t *testing.T) {
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:         &to,
 		Gas:        &gas,
-		GasPrice:   (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		GasPrice:   (*hexutil.U256)(uint256.NewInt(10_000_000_000)),
 		AccessList: &al,
 	})
 	require.NoError(t, err)
@@ -281,7 +303,7 @@ func TestFillTransactionGasPriceWithAuthorizationList(t *testing.T) {
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:                &to,
 		Gas:               &gas,
-		GasPrice:          (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		GasPrice:          (*hexutil.U256)(uint256.NewInt(10_000_000_000)),
 		AuthorizationList: []types.JsonAuthorization{testJsonAuthorization(to)},
 	})
 	require.Error(t, err)
@@ -297,13 +319,13 @@ func TestFillTransactionAuthorizationListIsTypeFour(t *testing.T) {
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:                   &to,
 		Gas:                  &gas,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(10_000_000_000)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
 		AuthorizationList:    []types.JsonAuthorization{testJsonAuthorization(to)},
 	})
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(types.SetCodeTxType), result.Tx.Type)
-	require.Len(t, *result.Tx.Authorizations, 1)
+	require.Len(t, result.Tx.Authorizations, 1)
 }
 
 func TestFillTransactionEmptyAuthorizationList(t *testing.T) {
@@ -314,8 +336,8 @@ func TestFillTransactionEmptyAuthorizationList(t *testing.T) {
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:                   &to,
 		Gas:                  &gas,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(10_000_000_000)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
 		AuthorizationList:    []types.JsonAuthorization{},
 	})
 	require.Error(t, err)
@@ -357,7 +379,7 @@ func TestFillTransactionOnlyMaxFeePerGas(t *testing.T) {
 	api := newLondonApiForTest(t)
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	gas := hexutil.Uint64(21000)
-	maxFee := (*hexutil.Big)(new(big.Int).SetUint64(1_000_000_000_000_000_000)) // 1e18 wei
+	maxFee := (*hexutil.U256)(uint256.NewInt(1_000_000_000_000_000_000)) // 1e18 wei
 
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:           &to,
@@ -381,12 +403,29 @@ func TestFillTransactionOnlyMaxPriorityFeePerGas(t *testing.T) {
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:                   &to,
 		Gas:                  &gas,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(userTip)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(uint64(userTip))),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result.Tx.MaxFeePerGas, "oracle must fill maxFeePerGas")
 	require.Equal(t, userTip+2*initialBaseFee, result.Tx.MaxFeePerGas.ToInt().Int64())
 	require.Equal(t, hexutil.Uint64(types.DynamicFeeTxType), result.Tx.Type)
+}
+
+// maxPriorityFeePerGas near the 256-bit ceiling makes the derived maxFeePerGas
+// wrap. The wrap must be reported as such, not silently produce a small fee or
+// surface as a comparison against a field the caller never set.
+func TestFillTransactionMaxPriorityFeePerGasOverflows(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		MaxPriorityFeePerGas: (*hexutil.U256)(new(uint256.Int).SetAllOne()),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "overflow")
 }
 
 func TestFillTransactionMaxFeePerGasTooLow(t *testing.T) {
@@ -397,8 +436,8 @@ func TestFillTransactionMaxFeePerGasTooLow(t *testing.T) {
 	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:                   &to,
 		Gas:                  &gas,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "maxFeePerGas")
@@ -412,7 +451,7 @@ func TestFillTransactionGasPricePostLondon(t *testing.T) {
 	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
 		To:       &to,
 		Gas:      &gas,
-		GasPrice: (*hexutil.Big)(big.NewInt(10_000_000_000)), // 10 gwei
+		GasPrice: (*hexutil.U256)(uint256.NewInt(10_000_000_000)), // 10 gwei
 	})
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(types.LegacyTxType), result.Tx.Type, "explicit gasPrice must produce a legacy tx")
@@ -420,8 +459,31 @@ func TestFillTransactionGasPricePostLondon(t *testing.T) {
 
 func TestFillTransactionBlobFeeUsesHeadExcess(t *testing.T) {
 	const headExcessBlobGas = uint64(10_000_000)
+	api, m := newBlobApiForTest(t, false, headExcessBlobGas)
 
-	cancunCfg := &chain.Config{
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		BlobVersionedHashes:  []common.Hash{blobHash},
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Tx.MaxFeePerBlobGas)
+
+	head := m.Genesis.HeaderNoCopy()
+	expectedFee, err := misc.GetBlobGasPrice(m.ChainConfig, *head.ExcessBlobGas, head.Time)
+	require.NoError(t, err)
+	b := expectedFee.ToBig()
+	require.Equal(t, b.Lsh(b, 1), result.Tx.MaxFeePerBlobGas.ToInt())
+}
+
+func newBlobApiForTest(t *testing.T, osaka bool, excessBlobGas uint64) (*APIImpl, *execmoduletester.ExecModuleTester) {
+	cfg := &chain.Config{
 		ChainID:               uint256.NewInt(1337),
 		Rules:                 chain.EtHashRules,
 		HomesteadBlock:        common.NewUint64(0),
@@ -438,35 +500,171 @@ func TestFillTransactionBlobFeeUsesHeadExcess(t *testing.T) {
 		CancunTime:            common.NewUint64(0),
 		Ethash:                new(chain.EthashConfig),
 	}
-
-	excess := headExcessBlobGas
-	blobUsed := uint64(0)
-	gspec := &types.Genesis{
-		Config:        cancunCfg,
-		ExcessBlobGas: &excess,
-		BlobGasUsed:   &blobUsed,
+	if osaka {
+		cfg.PragueTime = common.NewUint64(0)
+		cfg.OsakaTime = common.NewUint64(0)
 	}
-
+	blobUsed := uint64(0)
+	gspec := &types.Genesis{Config: cfg, ExcessBlobGas: &excessBlobGas, BlobGasUsed: &blobUsed}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	return newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil), m
+}
 
+func testBlobCallArgs() ethapi.CallArgs {
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	gas := hexutil.Uint64(21000)
-	blobHash := common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")
-
-	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+	blob := make(hexutil.Bytes, params.BlobSize)
+	blob[31] = 1
+	return ethapi.CallArgs{
 		To:                   &to,
 		Gas:                  &gas,
-		BlobVersionedHashes:  []common.Hash{blobHash},
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(10_000_000_000)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
-	})
-	require.NoError(t, err)
-	require.NotNil(t, result.Tx.MaxFeePerBlobGas)
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
+		Blobs:                []hexutil.Bytes{blob},
+	}
+}
 
-	head := m.Genesis.HeaderNoCopy()
-	expectedFee, err := misc.GetBlobGasPrice(cancunCfg, *head.ExcessBlobGas, head.Time)
+func decodeFilledBlobTx(t *testing.T, raw []byte) *types.BlobTxWrapper {
+	t.Helper()
+	txn, err := types.DecodeWrappedTransaction(raw)
 	require.NoError(t, err)
-	b := expectedFee.ToBig()
-	require.Equal(t, b.Lsh(b, 1), result.Tx.MaxFeePerBlobGas.ToInt())
+	wrapper, ok := txn.(*types.BlobTxWrapper)
+	require.True(t, ok, "raw is not a blob transaction with sidecar: %T", txn)
+	return wrapper
+}
+
+// argsWithFilledSidecar returns blob args carrying the commitments and proofs
+// that FillTransaction computed on api, along with the filled transaction.
+func argsWithFilledSidecar(t *testing.T, api *APIImpl) (ethapi.CallArgs, *types.BlobTxWrapper) {
+	t.Helper()
+	filled, err := api.FillTransaction(context.Background(), testBlobCallArgs())
+	require.NoError(t, err)
+	wrapper := decodeFilledBlobTx(t, filled.Raw)
+	args := testBlobCallArgs()
+	args.Commitments = []hexutil.Bytes{wrapper.Commitments[0][:]}
+	for i := range wrapper.Proofs {
+		args.Proofs = append(args.Proofs, wrapper.Proofs[i][:])
+	}
+	return args, wrapper
+}
+
+func TestFillTransactionBlobsBuildSidecar(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+
+	result, err := api.FillTransaction(context.Background(), testBlobCallArgs())
+	require.NoError(t, err)
+
+	wrapper := decodeFilledBlobTx(t, result.Raw)
+	require.Zero(t, wrapper.WrapperVersion)
+	require.Len(t, wrapper.Proofs, 1)
+	require.NoError(t, wrapper.ValidateBlobTransactionWrapper())
+	require.Equal(t, wrapper.Tx.BlobVersionedHashes, result.Tx.BlobVersionedHashes)
+
+	data, err := json.Marshal(result)
+	require.NoError(t, err)
+	var out struct {
+		Tx struct {
+			Blobs       []hexutil.Bytes `json:"blobs"`
+			Commitments []hexutil.Bytes `json:"commitments"`
+			Proofs      []hexutil.Bytes `json:"proofs"`
+		} `json:"tx"`
+	}
+	require.NoError(t, json.Unmarshal(data, &out))
+	require.Equal(t, []hexutil.Bytes{wrapper.Blobs[0][:]}, out.Tx.Blobs)
+	require.Equal(t, []hexutil.Bytes{wrapper.Commitments[0][:]}, out.Tx.Commitments)
+	require.Equal(t, []hexutil.Bytes{wrapper.Proofs[0][:]}, out.Tx.Proofs)
+}
+
+func TestFillTransactionBlobsOsakaCellProofs(t *testing.T) {
+	api, _ := newBlobApiForTest(t, true, 0)
+
+	result, err := api.FillTransaction(context.Background(), testBlobCallArgs())
+	require.NoError(t, err)
+
+	wrapper := decodeFilledBlobTx(t, result.Raw)
+	require.Equal(t, byte(1), wrapper.WrapperVersion)
+	require.Len(t, wrapper.Proofs, int(params.CellsPerExtBlob))
+	require.NoError(t, wrapper.VerifyProofs())
+}
+
+func TestFillTransactionBlobsLegacyProofsRecomputedOnOsaka(t *testing.T) {
+	legacyApi, _ := newBlobApiForTest(t, false, 0)
+	args, _ := argsWithFilledSidecar(t, legacyApi)
+
+	osakaApi, _ := newBlobApiForTest(t, true, 0)
+	result, err := osakaApi.FillTransaction(context.Background(), args)
+	require.NoError(t, err)
+
+	wrapper := decodeFilledBlobTx(t, result.Raw)
+	require.Equal(t, byte(1), wrapper.WrapperVersion)
+	require.Len(t, wrapper.Proofs, int(params.CellsPerExtBlob))
+}
+
+func TestFillTransactionBlobsWithCommitmentsAndProofs(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+	args, want := argsWithFilledSidecar(t, api)
+	args.BlobVersionedHashes = want.Tx.BlobVersionedHashes
+
+	result, err := api.FillTransaction(context.Background(), args)
+	require.NoError(t, err)
+	require.Equal(t, want, decodeFilledBlobTx(t, result.Raw))
+}
+
+func TestFillTransactionBlobsInvalidProof(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+	args, _ := argsWithFilledSidecar(t, api)
+	args.Proofs = args.Commitments
+
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "failed to verify blob proof")
+}
+
+func TestFillTransactionBlobsWithCellProofsOnOsaka(t *testing.T) {
+	api, _ := newBlobApiForTest(t, true, 0)
+	args, want := argsWithFilledSidecar(t, api)
+
+	result, err := api.FillTransaction(context.Background(), args)
+	require.NoError(t, err)
+	require.Equal(t, want, decodeFilledBlobTx(t, result.Raw))
+}
+
+func TestFillTransactionBlobsInvalidCellProofOnOsaka(t *testing.T) {
+	api, _ := newBlobApiForTest(t, true, 0)
+	args, _ := argsWithFilledSidecar(t, api)
+	args.Proofs[0], args.Proofs[1] = args.Proofs[1], args.Proofs[0]
+
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "failed to verify blob proof")
+}
+
+func TestFillTransactionBlobsHashMismatch(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+	args := testBlobCallArgs()
+	args.BlobVersionedHashes = []common.Hash{common.HexToHash("0x0100000000000000000000000000000000000000000000000000000000000001")}
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "blob hash verification failed")
+}
+
+func TestFillTransactionBlobsCommitmentsWithoutProofs(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+	args := testBlobCallArgs()
+	args.Commitments = []hexutil.Bytes{make(hexutil.Bytes, 48)}
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "blob commitments provided while proofs were not")
+}
+
+func TestFillTransactionBlobsWrongBlobSize(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+	args := testBlobCallArgs()
+	args.Blobs = []hexutil.Bytes{make(hexutil.Bytes, 32)}
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "blobs[0]")
+}
+
+func TestFillTransactionBlobsWithAuthorizationList(t *testing.T) {
+	api, _ := newBlobApiForTest(t, false, 0)
+	args := testBlobCallArgs()
+	args.AuthorizationList = []types.JsonAuthorization{testJsonAuthorization(common.HexToAddress("0x01"))}
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "both blobs and authorizationList specified")
 }

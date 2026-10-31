@@ -61,6 +61,9 @@ func FuzzLongestMatch(f *testing.F) {
 		if len(keys) == 0 {
 			return
 		}
+		// keys indexes the generated match data below, so map iteration order
+		// would make the same fuzz input build a different test string each run.
+		slices.Sort(keys)
 		var data []byte
 		for i := 0; i < 4*(len(test)/4); i += 4 {
 			keyIdx := int(binary.BigEndian.Uint32(test[i : i+4]))

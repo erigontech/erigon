@@ -52,6 +52,9 @@ jobs:
       ERIGON_ASSERT: true
 
     steps:
+    - name: Clean workspace
+      run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
     - name: Check out repository
       uses: actions/checkout@v7
       with:
@@ -147,6 +150,14 @@ jobs:
       with:
         name: fd-leak-analysis-${{ env.CHAIN }}-archive
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+    - name: Upload goroutine stacks
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: goroutine-stacks-${{ env.CHAIN }}-archive
+        path: ${{ github.workspace }}/goroutine-stacks.txt
+        if-no-files-found: ignore
 
     - name: Restore rpc-tests cache
       if: ${{ matrix.rpc_tests_supported }}

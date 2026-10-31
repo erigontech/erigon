@@ -21,8 +21,19 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setRateLimiterLastRefill(t *testing.T, rl *peerRateLimiter, key peerProtocolKey, lastRefill time.Time) {
+	t.Helper()
+	bucketI, ok := rl.buckets.Load(key)
+	require.True(t, ok)
+	bucket := bucketI.(*tokenBucket)
+	bucket.mu.Lock()
+	bucket.lastRefill = lastRefill
+	bucket.mu.Unlock()
+}
 
 func TestRateLimiter_AllowRequest(t *testing.T) {
 	rl := newPeerRateLimiter()
@@ -50,6 +61,37 @@ func TestRateLimiter_PingLimit(t *testing.T) {
 	require.True(t, rl.allowRequest(peer, proto, 1))
 	require.True(t, rl.allowRequest(peer, proto, 1))
 	require.False(t, rl.allowRequest(peer, proto, 1), "3rd ping should be rate-limited")
+}
+
+func testRateLimiterRecoversWithoutPunishment(t *testing.T, protocolName string, burst int) {
+	t.Helper()
+	rl := newPeerRateLimiter()
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: protocolName}
+
+	require.True(t, rl.allowRequest(peerID, protocolName, 1))
+	setRateLimiterLastRefill(t, rl, key, time.Now().Add(time.Hour))
+	for range burst - 1 {
+		require.True(t, rl.allowRequest(peerID, protocolName, 1))
+	}
+	require.False(t, rl.allowRequest(peerID, protocolName, 1))
+
+	_, punished := rl.punished.Load(key)
+	assert.False(t, punished)
+	setRateLimiterLastRefill(t, rl, key, time.Now().Add(-time.Second))
+	assert.True(t, rl.allowRequest(peerID, protocolName, 1))
+}
+
+func TestRateLimiter_StatusRecoversWithoutPunishment(t *testing.T) {
+	for _, protocolName := range []string{communication.StatusProtocolV1, communication.StatusProtocolV2} {
+		t.Run(protocolName, func(t *testing.T) {
+			testRateLimiterRecoversWithoutPunishment(t, protocolName, 5)
+		})
+	}
+}
+
+func TestRateLimiter_GoodbyeRecoversWithoutPunishment(t *testing.T) {
+	testRateLimiterRecoversWithoutPunishment(t, communication.GoodbyeProtocolV1, 1)
 }
 
 func TestRateLimiter_Concurrency(t *testing.T) {

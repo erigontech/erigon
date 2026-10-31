@@ -22,7 +22,6 @@ package blockgen
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -54,6 +54,10 @@ type BlockGen struct {
 	chain       []*types.Block
 	header      *types.Header
 	stateReader state.StateReader
+	// txWriter takes each tx's writes: the block's state writer on the serial path, as
+	// serial execution does, so a later tx reads an earlier one's deletes; a no-op
+	// writer on the versioned path, which applies the block's write-sets at the end.
+	txWriter    state.StateWriter
 	ibs         *state.IntraBlockState
 	versionMap  *state.VersionMap
 	blockIO     *state.VersionedIO
@@ -111,6 +115,7 @@ func (b *BlockGen) SetDifficulty(diff uint64) {
 func (b *BlockGen) AddTx(tx types.Transaction) {
 	b.AddTxWithChain(nil, nil, tx)
 }
+
 func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 	b.AddFailedTxWithChain(nil, nil, tx)
 }
@@ -141,19 +146,22 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.txWriter, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
 	}
 
 	if b.ibs.IsVersioned() {
-		writes := b.ibs.FinalizedWrites(b.blockRules())
+		writes, err := b.ibs.FinalizedWrites(b.blockRules())
+		if err != nil {
+			panic(err)
+		}
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
 			b.blockIO.RecordWrites(txVersion, writes)
 		}
-		b.versionMap.FlushVersionedWrites(writes, true, "")
+		b.versionMap.FlushVersionedWrites(writes, true)
 		b.ibs.ResetVersionedIO()
 	}
 
@@ -175,13 +183,32 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
+	if b.ibs.IsVersioned() {
+		b.ibs.ResetVersionedIO()
+	}
+	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
+	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, b.txWriter, b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
-	_ = err // accept failed transactions
+	// A reverted transaction (err==nil, status Failed) is still included: its nonce
+	// bump and gas payment survive the revert and must be flushed so a later tx of
+	// the same sender sees the advanced nonce. A truly invalid tx (err!=nil) bumps
+	// nothing, so its versioned writes are not flushed.
+	if err == nil && b.ibs.IsVersioned() {
+		writes, err := b.ibs.FinalizedWrites(b.blockRules())
+		if err != nil {
+			panic(err)
+		}
+		if b.blockIO != nil {
+			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+			b.blockIO.RecordWrites(txVersion, writes)
+		}
+		b.versionMap.FlushVersionedWrites(writes, true)
+		b.ibs.ResetVersionedIO()
+	}
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
 }
@@ -296,11 +323,10 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Headers          []*types.Header
-	Blocks           []*types.Block
-	Receipts         []types.Receipts
-	TopBlock         *types.Block // Convenience field to access the last block
-	BlockAccessLists [][]byte     // RLP-encoded block access list bytes, indexed parallel to Blocks (nil entry = no BAL)
+	Headers  []*types.Header
+	Blocks   []*types.Block
+	Receipts []types.Receipts
+	TopBlock *types.Block // Convenience field to access the last block
 }
 
 func (cp *ChainPack) Length() int {
@@ -310,16 +336,12 @@ func (cp *ChainPack) Length() int {
 // OneBlock returns a ChainPack which contains just one
 // block with given index
 func (cp *ChainPack) Slice(i, j int) *ChainPack {
-	result := &ChainPack{
+	return &ChainPack{
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
-	if len(cp.BlockAccessLists) > 0 {
-		result.BlockAccessLists = cp.BlockAccessLists[i:j]
-	}
-	return result
 }
 
 // Copy creates a deep copy of the ChainPack.
@@ -345,30 +367,20 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 	topBlock := cp.TopBlock.Copy()
 
-	var blockAccessLists [][]byte
-	if len(cp.BlockAccessLists) > 0 {
-		blockAccessLists = make([][]byte, len(cp.BlockAccessLists))
-		for i, bal := range cp.BlockAccessLists {
-			if bal != nil {
-				blockAccessLists[i] = make([]byte, len(bal))
-				copy(blockAccessLists[i], bal)
-			}
-		}
-	}
-
 	return &ChainPack{
-		Headers:          headers,
-		Blocks:           blocks,
-		Receipts:         receipts,
-		TopBlock:         topBlock,
-		BlockAccessLists: blockAccessLists,
+		Headers:  headers,
+		Blocks:   blocks,
+		Receipts: receipts,
+		TopBlock: topBlock,
 	}
 }
 
-var withdrawalRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd")
-var withdrawalRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(withdrawalRequestCode))
-var consolidationRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
-var consolidationRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(consolidationRequestCode))
+var (
+	withdrawalRequestCode        = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd")
+	withdrawalRequestCodeHash    = accounts.InternCodeHash(crypto.Keccak256Hash(withdrawalRequestCode))
+	consolidationRequestCode     = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
+	consolidationRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(consolidationRequestCode))
+)
 
 func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
 	ctx := context.Background()
@@ -436,9 +448,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginTemporalRo(context.Background())
-	if errBegin != nil {
-		return nil, errBegin
+	tx, err := db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
@@ -448,12 +460,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader := state.NewReaderV3(domains.AsGetter(tx))
+	stateReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
@@ -465,7 +478,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		stateWriter.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		stateWriter state.StateWriter) (*types.Block, types.Receipts, []byte, error) {
+		stateWriter state.StateWriter,
+	) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
@@ -474,15 +488,20 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		needsVersionMap := dbg.Exec3Parallel || config.AmsterdamTime != nil
 		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
+			// SetVersionMap forces noMaterialize: the stateObject cache would let a
+			// reused IBS serve stale account state across txs (e.g. a revived account's
+			// code hash), producing a header the executor's cache-free run disagrees with.
 			ibs.SetVersionMap(versionMap)
 		}
 
-		b := &BlockGen{i: i,
+		b := &BlockGen{
+			i:           i,
 			chain:       blocks,
 			parent:      parent,
 			ibs:         ibs,
 			versionMap:  versionMap,
 			stateReader: stateReader,
+			txWriter:    state.NewNoopWriter(),
 			config:      config,
 			engine:      engine,
 			txs:         make([]types.Transaction, 0, 1),
@@ -492,14 +511,17 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
+		if versionMap == nil {
+			b.txWriter = stateWriter
+		}
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		b.header = makeHeader(chainreader, parent, b.engine)
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit, so create it for any versioned
 		// block, not only Amsterdam.
-		if versionMap != nil || (chainreader.Config().IsEIPEnabled(7928, b.header.Time)) {
+		if versionMap != nil || chainreader.Config().IsEIPEnabled(7928, b.header.Time) {
 			b.blockIO = &state.VersionedIO{}
 		}
 		// Mutate the state and block according to any hard-fork specs
@@ -511,11 +533,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
 		// so that EIP-4788 can store it during initialization.
 		if config.IsCancun(b.header.Time) {
-			var beaconBlockRoot common.Hash
-			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-				return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
-			}
-			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+			beaconBlockRoot := b.header.Hash().U256()
+			beaconBlockRoot.AddUint64(&beaconBlockRoot, 1)
+			parentBeaconBlockRoot := common.U256ToHash(beaconBlockRoot)
+			b.header.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
@@ -525,16 +546,19 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
-				writes := ibs.FinalizedWrites(b.blockRules())
+				writes, err := ibs.FinalizedWrites(b.blockRules())
+				if err != nil {
+					return nil, nil, err
+				}
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
-					b.versionMap.FlushVersionedWrites(writes, true, "")
+					b.versionMap.FlushVersionedWrites(writes, true)
 				}
 				ibs.ResetVersionedIO()
 			}
@@ -563,18 +587,20 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
 			}
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, b.withdrawals, chainreader, syscall, nil, logger)
-
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
+				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
-				writes := ibs.FinalizedWrites(b.blockRules())
+				writes, err := ibs.FinalizedWrites(b.blockRules())
+				if err != nil {
+					return nil, nil, err
+				}
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {
-					b.versionMap.FlushVersionedWrites(writes, true, "")
+					b.versionMap.FlushVersionedWrites(writes, true)
 				}
 				ibs.ResetVersionedIO()
 			}
@@ -583,48 +609,22 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
 			blockRules := blockContext.Rules(config)
 			if b.versionMap != nil && b.blockIO != nil {
-				// Commit from the versionMap write-set via WriteSet.Normalize/Apply
-				// — the same path the parallel executor uses — instead of so.data
-				// via CommitBlock, so generation matches import once the write path
-				// bypasses so.data. Each recorded phase (init txIdx=-1, txs,
-				// finalize) is applied in order; applying a phase before normalizing
-				// the next lets the next phase's stateReader fallback see it.
+				// Commit from the versionMap write-set via ApplyWrites — the same
+				// domain apply the parallel executor uses (rw_v3 handles the
+				// self-destruct delete, EIP-161 removal and storage-subtree cascade)
+				// — instead of so.data via CommitBlock, so generation matches import.
+				// Each recorded phase (init txIdx=-1, txs, finalize) is applied in order.
 				blockNum := b.header.Number.Uint64()
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
-				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
-				isAura := config.Aura != nil
-				for i, ws := range b.blockIO.Outputs() {
+				for _, ws := range b.blockIO.Outputs() {
 					if ws == nil || ws.IsEmpty() {
 						continue
 					}
-					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if domainKeysErr != nil {
-						return nil, nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
-					if normErr != nil {
-						return nil, nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
-					}
-					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
-						return nil, nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
+					if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, nil, blockRules, false); err != nil {
+						return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 					}
 				}
 			} else if err := ibs.CommitBlock(blockRules, stateWriter); err != nil {
-				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
 			if config.IsPrague(b.header.Time) {
@@ -632,37 +632,30 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 
 			var bal types.BlockAccessList
-			var balBytes []byte
 			if config.IsEIPEnabled(7928, b.header.Time) {
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
-				var encErr error
-				balBytes, encErr = types.EncodeBlockAccessListBytes(bal)
-				if encErr != nil {
-					return nil, nil, nil, fmt.Errorf("encode block access list: %w", encErr)
-				}
 			}
 
 			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
-			return block, b.receipts, balBytes, nil
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals, types.NewBlockAccessListSidecar(bal))
+			return block, b.receipts, nil
 		}
-		return nil, nil, nil, errors.New("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
-	blockAccessLists := make([][]byte, n)
 	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}
-		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -670,14 +663,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
-		blockAccessLists[i] = balBytes
 		parent = block
 	}
 
-	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, BlockAccessLists: blockAccessLists, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
+func makeHeader(chain rules.ChainReader, parent *types.Block, engine rules.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
 		time = 10
@@ -686,8 +678,15 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 	}
 
 	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	if chain.Config().IsAmsterdam(time) {
+		// Real slot numbers come from the consensus layer. Synthetic chains use
+		// the block number as a deterministic stand-in.
+		slotNumber := header.Number.Uint64()
+		header.SlotNumber = &slotNumber
+	}
 	header.Coinbase = parent.Coinbase()
-	header.Difficulty = engine.CalcDifficulty(chain, time,
+	header.Difficulty = engine.CalcDifficulty(
+		chain, time,
 		time-10,
 		parent.Difficulty(),
 		parent.NumberU64(),
@@ -713,6 +712,7 @@ func (cr *FakeChainReader) CurrentHeader() *types.Header { return cr.current.Hea
 func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
 	return nil
 }
+
 func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
 	return nil
 }
@@ -723,4 +723,3 @@ func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Bloc
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
-func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }

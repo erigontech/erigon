@@ -18,6 +18,7 @@ package misc
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -41,7 +42,7 @@ func DequeueConsolidationRequests7251(syscall rules.SystemCall, state *state.Int
 	}
 	if res != nil {
 		// Just append the contract output as the request data
-		return &types.FlatRequest{Type: types.ConsolidationRequestType, RequestData: res}, nil
+		return &types.FlatRequest{Type: types.ConsolidationRequestType, RequestData: slices.Clone(res)}, nil
 	}
 	return nil, nil
 }

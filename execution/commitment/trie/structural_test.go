@@ -196,15 +196,15 @@ func TestV2Resolution(t *testing.T) {
 // In order to prevent the branch node on top of the extension node, we will need to manipulate
 // the `groups` array and truncate it to the level of the accounts
 func TestEmbeddedStorage(t *testing.T) {
-	var accountAddress = common.Address{3, 4, 5, 6}
+	accountAddress := common.Address{3, 4, 5, 6}
 	addrHash := crypto.Keccak256(accountAddress[:])
-	var location1 = common.Hash{1}
+	location1 := common.Hash{1}
 	locationKey1 := append(append([]byte{}, addrHash...), crypto.Keccak256(location1[:])...)
-	var location2 = common.Hash{2}
+	location2 := common.Hash{2}
 	locationKey2 := append(append([]byte{}, addrHash...), crypto.Keccak256(location2[:])...)
-	var location3 = common.Hash{3}
+	location3 := common.Hash{3}
 	locationKey3 := append(append([]byte{}, addrHash...), crypto.Keccak256(location3[:])...)
-	var keys = []string{string(locationKey1), string(locationKey2), string(locationKey3)}
+	keys := []string{string(locationKey1), string(locationKey2), string(locationKey3)}
 	slices.Sort(keys)
 	tr := newEmpty()
 	valueShort := []byte("VAL")
@@ -242,7 +242,6 @@ func TestEmbeddedStorage11(t *testing.T) {
 		k []byte
 		v []byte
 	}{
-
 		{
 			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000010d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
 			v: common.FromHex("496e7374616e6365000000000000000000000000000000000000000000000000"),

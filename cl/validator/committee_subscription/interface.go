@@ -20,12 +20,9 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/committee_subscribe_mock.go -package=mock_services . CommitteeSubscribe
 type CommitteeSubscribe interface {
 	AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error
-	AggregateAttestation(att *solid.Attestation) error
-	NeedToAggregate(att *solid.Attestation) bool
 }

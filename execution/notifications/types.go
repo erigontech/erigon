@@ -85,7 +85,8 @@ type BlockBatchNotification struct {
 // LogNotification carries a log event in native types.
 type LogNotification struct {
 	*types.Log
-	Removed bool // true on unwind
+	BlockTimestamp uint64
+	Removed        bool // true on unwind
 }
 
 // ReceiptNotification carries a receipt with its transaction and header context.
@@ -93,7 +94,6 @@ type ReceiptNotification struct {
 	Receipt *types.Receipt
 	Tx      types.Transaction
 	Header  *types.Header
-	Removed bool
 }
 
 // Proto conversion methods — used at the gRPC boundary only.

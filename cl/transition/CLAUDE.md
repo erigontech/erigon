@@ -22,12 +22,13 @@ Use this map when reviewing `cl/transition/machine/`.
 | Go file/function | Spec section |
 | --- | --- |
 | `machine/transition.go`: `TransitionState` | Phase0 `state_transition`: `process_slots`, block signature verification, `process_block`, final state-root assertion |
-| `machine/block.go`: `ProcessBlock` | Phase0 `process_block`; Bellatrix/Capella execution payload and withdrawals; Gloas modified `process_block` ordering with `process_parent_execution_payload`, `process_withdrawals`, and `process_execution_payload_bid` |
-| `machine/block.go`: `ProcessOperations` | Phase0 `process_operations`; Capella `process_bls_to_execution_change`; Electra execution requests; Gloas payload attestations |
+| `machine/block.go`: `ProcessBlock` | Phase0 `process_block`; Bellatrix/Capella execution payload and withdrawals; Gloas modified `process_block` ordering with `process_parent_execution_payload`, `process_withdrawals`, and `process_execution_payload_bid`; batched signature verification (`verify_execution_payload_bid_signature`; signature part of `is_valid_indexed_payload_attestation`) |
+| `machine/block.go`: `ProcessOperations` | Phase0 `process_operations`; Capella `process_bls_to_execution_change`; Electra execution requests; Gloas payload attestations and payload-attestation signature-set collection |
 | `machine/block.go`: `processRandao` | Phase0 `process_randao`; batched signature collection for block-level validation |
 | `machine/block.go`: `processProposerSlashings` | Phase0 `process_proposer_slashing`; signature domain/signing-root validation |
 | `machine/block.go`: `processVoluntaryExits` | Phase0 `process_voluntary_exit`; Capella/Deneb voluntary-exit domain rule; Gloas builder-index exit signature source |
 | `machine/block.go`: `processBlsToExecutionChanges` | Capella `process_bls_to_execution_change`; fork-agnostic BLS-to-execution-change domain |
+| `machine/block.go`: `processPayloadAttestations` | Gloas `process_payload_attestation`; `is_valid_indexed_payload_attestation` signature inputs for block-level batch validation |
 | `machine/block.go`: `forEachProcess` | Local dispatcher for homogeneous SSZ operation lists; review with the operation-specific spec function |
 | `machine/helpers.go`: `executionEnabled` | Bellatrix `is_execution_enabled` merge-transition gate |
 | `impl/eth2/validation.go`: `VerifyTransition`, `VerifyBlockSignature` | Phase0 state-root assertion after `process_block`; `verify_block_signature` |
@@ -42,7 +43,7 @@ Use this map when reviewing `cl/transition/impl/eth2/operations.go`.
 | Go file/function | Spec section |
 | --- | --- |
 | `operations.go`: `FullValidate` | Local validation-mode switch; affects signature and Merkle proof assertions around spec processing |
-| `operations.go`: `ProcessProposerSlashing` | Phase0 `process_proposer_slashing`; Gloas builder pending-payment removal for slashed proposer window |
+| `operations.go`: `ProcessProposerSlashing` | Phase0 `process_proposer_slashing` |
 | `operations.go`: `ProcessAttesterSlashing` | Phase0 `process_attester_slashing`; `is_slashable_attestation_data`; `is_valid_indexed_attestation` |
 | `operations.go`: `ProcessDeposit` | Phase0 `process_deposit`; Electra modified deposit queuing through `pending_deposits` |
 | `operations.go`: `getPendingBalanceToWithdraw` | Electra helper for `process_withdrawal_request`, `process_consolidation_request`, voluntary exits, and pending partial withdrawals |
@@ -50,7 +51,7 @@ Use this map when reviewing `cl/transition/impl/eth2/operations.go`.
 | `operations.go`: `ProcessWithdrawals`, `processWithdrawalsPreGloas`, `processWithdrawalsGloas` | Capella `process_withdrawals`; Electra pending partial withdrawals; Gloas modified `process_withdrawals` with parent-empty early return and payload expected withdrawals |
 | `operations.go`: `applyWithdrawals` | Capella balance decreases; Gloas builder balance withdrawals |
 | `operations.go`: `updateNextWithdrawalIndex`, `updatePendingPartialWithdrawals`, `updateNextWithdrawalValidatorIndex`, `updatePayloadExpectedWithdrawals`, `updateBuilderPendingWithdrawals`, `updateNextWithdrawalBuilderIndex` | Capella/Electra/Gloas withdrawal cursor and queue updates |
-| `operations.go`: `ProcessExecutionPayloadBid`, `verifyExecutionPayloadBidSignature` | Gloas `process_execution_payload_bid`; builder activity, bid coverage, bid signature, blob limit, bid slot/parent/randao checks |
+| `operations.go`: `ProcessExecutionPayloadBid` | Gloas `process_execution_payload_bid`; builder activity, bid coverage, blob limit, bid slot/parent/randao checks |
 | `operations.go`: `ApplyParentExecutionPayload`, `ProcessParentExecutionPayload` | Gloas `apply_parent_execution_payload`; `process_parent_execution_payload`; parent empty/full branching; execution request root commitment |
 | `operations.go`: `ProcessExecutionPayloadEnvelope` | Gloas `process_execution_payload_envelope`; committed bid consistency, execution requests root, timestamp, withdrawals root |
 | `operations_utils.go`: `verifyExecutionPayloadEnvelopeSignature` | Gloas envelope builder signature verification |
@@ -68,7 +69,7 @@ Use this map when reviewing `cl/transition/impl/eth2/operations.go`.
 | `operations.go`: `ProcessDepositRequest` | Electra `process_deposit_request`; Gloas builder deposit routing and deposit-request start-index behavior |
 | `operations.go`: `ProcessWithdrawalRequest`, `processBuilderWithdrawalRequest` | Electra `process_withdrawal_request`; Gloas builder withdrawal/full-exit request handling |
 | `operations.go`: `ProcessConsolidationRequest`, `isValidSwitchToCompoundingRequest`, `switchToCompoundingValidator`, `computeConsolidationEpochAndUpdateChurn` | Electra `process_consolidation_request`; `is_valid_switch_to_compounding_request`; `switch_to_compounding_validator`; `compute_consolidation_epoch_and_update_churn` |
-| `operations.go`: `ProcessPayloadAttestation` | Gloas `process_payload_attestation`; parent block root, previous slot, indexed payload attestation signature |
+| `operations.go`: `ProcessPayloadAttestation` | Gloas `process_payload_attestation`; parent block root and previous-slot checks |
 
 ## Epoch Processing Spec Map
 

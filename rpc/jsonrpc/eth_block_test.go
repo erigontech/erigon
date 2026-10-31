@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -36,12 +37,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -59,8 +61,8 @@ type blockAccessListRPCCase struct {
 
 func TestGetBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableJSON := marshalBlockAccessListJSON(t, chainPack.BlockAccessLists[1])
-	emptyJSON := marshalBlockAccessListJSON(t, chainPack.BlockAccessLists[2])
+	availableJSON := marshalBlockAccessListJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyJSON := marshalBlockAccessListJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableJSON},
 		{name: "available by tag", selector: "safe", want: availableJSON},
@@ -101,10 +103,8 @@ func newBlockAccessListRPCFixture(t *testing.T) (*blockgen.ChainPack, *rpc.Clien
 	return chainPack, client
 }
 
-func marshalBlockAccessListJSON(t *testing.T, data []byte) json.RawMessage {
+func marshalBlockAccessListJSON(t *testing.T, bal types.BlockAccessList) json.RawMessage {
 	t.Helper()
-	bal, err := types.DecodeBlockAccessListBytes(data)
-	require.NoError(t, err)
 	encoded, err := json.Marshal(ethapi.MarshalBlockAccessList(bal))
 	require.NoError(t, err)
 	return encoded
@@ -115,6 +115,13 @@ func marshalHexBytesJSON(t *testing.T, data []byte) json.RawMessage {
 	encoded, err := json.Marshal(hexutil.Bytes(data))
 	require.NoError(t, err)
 	return encoded
+}
+
+func marshalBlockAccessListBytesJSON(t *testing.T, bal types.BlockAccessList) json.RawMessage {
+	t.Helper()
+	data, err := types.EncodeBlockAccessListBytes(bal)
+	require.NoError(t, err)
+	return marshalHexBytesJSON(t, data)
 }
 
 func runBlockAccessListRPCCases(t *testing.T, client *rpc.Client, method string, cases []blockAccessListRPCCase) {
@@ -147,7 +154,7 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
 		require.NoError(t, err)
 		b.AddTx(txn)
@@ -166,14 +173,59 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 	})
 	require.NoError(t, err)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{}, log.New())
-	for i, block := range chainPack.Blocks {
+	for _, block := range chainPack.Blocks {
 		blockNum := rpc.BlockNumber(block.NumberU64())
 		got, err := api.GetBlockAccessList(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 		require.NoError(t, err, "block %d", block.NumberU64())
-		canonical, err := types.DecodeBlockAccessListBytes(chainPack.BlockAccessLists[i])
-		require.NoError(t, err)
-		require.Equal(t, ethapi.MarshalBlockAccessList(canonical), got, "block %d", block.NumberU64())
+		require.Equal(t, ethapi.MarshalBlockAccessList(block.BlockAccessList()), got, "block %d", block.NumberU64())
 	}
+}
+
+func TestGetHeaderByNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	header, err := api.GetHeaderByNumber(ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae"), *header.Hash)
+
+	for _, blockNum := range []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber} {
+		header, err = api.GetHeaderByNumber(ctx, blockNum)
+		require.NoError(t, err, "block %d", blockNum)
+		require.NotNil(t, header, "block %d resolves in the test module", blockNum)
+	}
+
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.LastForkchoice, []byte("safeBlockHash")); err != nil {
+			return err
+		}
+		return tx.Delete(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	}))
+
+	unresolvable := []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber}
+	for _, blockNum := range append(unresolvable, 1_000_000, rpc.PendingBlockNumber) {
+		header, err = api.GetHeaderByNumber(ctx, blockNum)
+		require.NoError(t, err, "block %d", blockNum)
+		require.Nil(t, header, "block %d", blockNum)
+	}
+}
+
+func TestGetHeaderByHash(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	latestHash := common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae")
+	header, err := api.GetHeaderByHash(ctx, latestHash)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, latestHash, *header.Hash)
+
+	header, err = api.GetHeaderByHash(ctx, common.HexToHash("0xdeadbeef"))
+	require.NoError(t, err)
+	require.Nil(t, header)
 }
 
 // Gets the latest block number with the latest tag
@@ -185,7 +237,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
-	assert.Equal(t, expected, b["hash"])
+	assert.Equal(t, expected, *b.Hash)
 }
 
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
@@ -201,13 +253,13 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
-	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
 	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
 	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice head hash")
 	}
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
@@ -215,7 +267,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
@@ -231,7 +283,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		Number: *uint256.NewInt(uint64(expected)),
 	}
 
-	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header))
+	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header, nil))
 	if err != nil {
 		t.Errorf("failed encoding the block: %s", err)
 	}
@@ -244,8 +296,8 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
-	expectedNum := (*hexutil.Big)(uint256.NewInt(uint64(expected)).ToBig())
-	assert.Equal(t, expectedNum, b["number"])
+	expectedNum := (*hexutil.U256)(uint256.NewInt(uint64(expected)))
+	assert.Equal(t, expectedNum, b.Number)
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
@@ -275,13 +327,13 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
-	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
 	rawdb.WriteForkchoiceFinalized(tx, latestBlockHash)
 	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice finalized hash")
 	}
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false)
@@ -289,7 +341,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
@@ -319,13 +371,13 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
-	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64()))
 	rawdb.WriteForkchoiceSafe(tx, latestBlockHash)
 	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice safe block hash")
 	}
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	block, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false)
@@ -333,7 +385,99 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
+}
+
+func TestBlockTransactionCountsWithoutTransactionData(t *testing.T) {
+	m, chainPack, orphanedChains := rpcdaemontest.CreateTestExecModule(t)
+	block := chainPack.Blocks[0]
+	require.NotEmpty(t, block.Transactions())
+	dropTransactions(t, m.DB, 1, chainPack.Blocks[len(chainPack.Blocks)-1].NumberU64()+1)
+
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	client := remoteproto.NewETHBACKENDClient(conn)
+	remoteReader := freezeblocks.NewRemoteBlockReader(client)
+	backend := rpcservices.NewRemoteBackend(client, m.DB, remoteReader)
+
+	want := hexutil.Uint(len(block.Transactions()))
+	zero := hexutil.Uint(0)
+	hashCases := []struct {
+		name string
+		hash common.Hash
+		want *hexutil.Uint
+	}{
+		{"canonical hash", block.Hash(), &want},
+		{"noncanonical hash", orphanedChains[0].Blocks[0].Hash(), &zero},
+		{"genesis", m.Genesis.Hash(), &zero},
+		{"unknown hash", common.Hash{0xff}, nil},
+	}
+	mode := prune.Mode{Initialised: true, History: prune.Distance(2), Blocks: prune.Distance(2)}
+	for _, reader := range []struct {
+		name string
+		base *BaseAPI
+	}{
+		{"local", newBaseApiForTest(m)},
+		{"remote", NewBaseApi(nil, m.StateCache, backend, m.Engine, nil)},
+	} {
+		t.Run(reader.name, func(t *testing.T) {
+			reader.base._pruneMode.Store(&mode)
+			api := newEthApiForTest(reader.base, m.DB, nil, nil)
+			t.Run("by number", func(t *testing.T) {
+				count, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(block.NumberU64()))
+				require.NoError(t, err)
+				require.NotNil(t, count)
+				require.Equal(t, want, *count)
+			})
+			for _, tc := range hashCases {
+				t.Run(tc.name, func(t *testing.T) {
+					count, err := api.GetBlockTransactionCountByHash(ctx, tc.hash)
+					require.NoError(t, err)
+					require.Equal(t, tc.want, count)
+				})
+			}
+		})
+	}
+}
+
+func TestRemoteBlockBodyMetadata(t *testing.T) {
+	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
+	hash := common.Hash{1}
+	uncle := m.Genesis.Header()
+	uncle.Extra = []byte("uncle metadata")
+	uncle.Hash()
+	for _, tc := range []struct {
+		name string
+		body types.BodyForStorage
+	}{
+		{"uncles", types.BodyForStorage{TxCount: 3, Uncles: []*types.Header{uncle}}},
+		{"empty withdrawals", types.BodyForStorage{TxCount: 2, Withdrawals: []*types.Withdrawal{}}},
+		{"withdrawals", types.BodyForStorage{TxCount: 4, Withdrawals: []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+				return rawdb.WriteBodyForStorage(tx, hash, 1, &tc.body)
+			}))
+			body, count, err := reader.Body(ctx, nil, hash, 1)
+			require.NoError(t, err)
+			require.NotNil(t, body)
+			require.Empty(t, body.Transactions)
+			require.Equal(t, tc.body.TxCount-2, count)
+			wantUncles, err := rlp.EncodeToBytes(tc.body.Uncles)
+			require.NoError(t, err)
+			gotUncles, err := rlp.EncodeToBytes(body.Uncles)
+			require.NoError(t, err)
+			require.Equal(t, wantUncles, gotUncles)
+			require.Equal(t, tc.body.Withdrawals, body.Withdrawals)
+		})
+	}
+	t.Run("missing body", func(t *testing.T) {
+		body, count, err := reader.Body(ctx, nil, hash, 2)
+		require.NoError(t, err)
+		require.Nil(t, body)
+		require.Zero(t, count)
+	})
 }
 
 func TestGetBlockTransactionCountByHash(t *testing.T) {
@@ -464,70 +608,4 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedAmount, *txCount)
-}
-
-func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	t.Parallel()
-
-	const chainSize = 20
-	const pruneDistance = uint64(10)
-
-	setup := func(t *testing.T, pm prune.Mode) *APIImpl {
-		t.Helper()
-		m := execmoduletester.New(t, execmoduletester.WithPruneMode(pm))
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(_ int, _ *blockgen.BlockGen) {})
-		require.NoError(t, err)
-		require.NoError(t, m.InsertChain(c))
-
-		ctx := t.Context()
-		tx, err := m.DB.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
-		_, err = prune.EnsureNotChanged(tx, pm)
-		require.NoError(t, err)
-		require.NoError(t, tx.Commit())
-
-		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	}
-
-	legacyFull := prune.Mode{
-		Initialised: true,
-		History:     prune.Distance(pruneDistance),
-		Blocks:      prune.KeepPostMergeBlocksPruneMode,
-	}
-	minimalMode := prune.Mode{
-		Initialised: true,
-		History:     prune.Distance(pruneDistance),
-		Blocks:      prune.Distance(pruneDistance),
-	}
-
-	// In full mode, block bodies are in snapshots and KeepPostMergeBlocksPruneMode means no block-body
-	// gate — GetBlockByNumber must succeed even for blocks older than the state-history window.
-	t.Run("full_mode_old_block_accessible", func(t *testing.T) {
-		t.Parallel()
-		api := setup(t, legacyFull)
-		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
-		require.NoError(t, err)
-		require.NotNil(t, b)
-	})
-
-	// In minimal mode, Blocks=Distance(pruneDistance) gates access: block 0 < head-pruneDistance.
-	t.Run("minimal_mode_old_block_pruned", func(t *testing.T) {
-		t.Parallel()
-		api := setup(t, minimalMode)
-		_, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
-		require.ErrorIs(t, err, state.PrunedError)
-	})
-
-	// Recent blocks (within the prune window) must always be accessible.
-	t.Run("minimal_mode_recent_block_accessible", func(t *testing.T) {
-		t.Parallel()
-		api := setup(t, minimalMode)
-		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(chainSize), false)
-		require.NoError(t, err)
-		require.NotNil(t, b)
-	})
 }

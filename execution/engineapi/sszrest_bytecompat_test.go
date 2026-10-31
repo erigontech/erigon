@@ -21,9 +21,9 @@ package engineapi
 
 import (
 	"encoding/hex"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -69,7 +69,7 @@ func goldenSamplePayload(version clparams.StateVersion) *engine_types.ExecutionP
 	p.GasUsed = 21000
 	p.Timestamp = 1700000000
 	p.ExtraData = hexutil.Bytes("ext")
-	p.BaseFeePerGas = (*hexutil.Big)(big.NewInt(7_000_000_000))
+	p.BaseFeePerGas = (*hexutil.U256)(uint256.NewInt(7_000_000_000))
 	p.BlockHash = common.Hash{0x66}
 	p.Transactions = []hexutil.Bytes{{0x02, 0x03}, {0x04}}
 	if version >= clparams.CapellaVersion {

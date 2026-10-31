@@ -47,7 +47,6 @@ func TestDependency(t *testing.T) {
 		require.Equal(t, resultA, checker.CheckDependentPresent(AccountDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultS, checker.CheckDependentPresent(StorageDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultC, checker.CheckDependentPresent(CommitmentDomainUniversal, All, startTxNum, endTxNum))
-
 	}
 
 	assertFn(0, 1, true, true, true)
@@ -90,7 +89,6 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 		require.Equal(t, resultA, checker.CheckDependentPresent(AccountDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultS, checker.CheckDependentPresent(StorageDomainUniversal, All, startTxNum, endTxNum))
 		require.Equal(t, resultC, checker.CheckDependentPresent(CommitmentDomainUniversal, All, startTxNum, endTxNum))
-
 	}
 
 	assertFn(0, 1, true, true, true)

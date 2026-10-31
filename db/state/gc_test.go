@@ -30,14 +30,14 @@ import (
 // generateAllDomainsOverlap writes {0,1},{1,2} subset files shadowed by a {0,2}
 // covering file for every state domain, so that overlap-cleanup has garbage to
 // retire after OpenFolder.
-func generateAllDomainsOverlap(t *testing.T, agg *Aggregator) {
+func generateAllDomainsOverlap(t *testing.T, db kv.RoDB, agg *Aggregator) {
 	t.Helper()
 	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
 	generateCommitmentFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 }
 
 func mustExist(t *testing.T, path string, want bool) {
@@ -53,8 +53,8 @@ func mustExist(t *testing.T, path string, want bool) {
 // closes. A reader opened after retirement no longer sees it.
 func TestAggregatorReadAfterRetire(t *testing.T) {
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
-	generateAllDomainsOverlap(t, agg)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, db, agg)
 
 	// subset (overlap) files for the accounts history — shadowed by 0-2, non-frozen
 	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
@@ -68,7 +68,7 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 	at := agg.BeginFilesRo()
 
 	// retire the overlap files; they get attached to the generation `at` pins
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 
 	// still pinned by `at` → must NOT be deleted yet
 	mustExist(t, subset01, true)
@@ -96,8 +96,8 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 // under a concurrent accessor build.
 func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
-	generateAllDomainsOverlap(t, agg)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, db, agg)
 
 	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
 	mustExist(t, subset01, true)
@@ -106,7 +106,7 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	rotx := agg.DebugBeginDirtyFilesRo()
 
 	// retire the overlap files; they are pinned by rotx so must be parked, not deleted
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	mustExist(t, subset01, true) // deferred — still on disk
 
 	// releasing the debug pin triggers the deferred deletion
@@ -119,8 +119,8 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 // of FilesItem regardless of how Close and reclamation interleave.
 func TestAggregatorReclaimConcurrent(t *testing.T) {
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
-	generateAllDomainsOverlap(t, agg)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, db, agg)
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -140,7 +140,7 @@ func TestAggregatorReclaimConcurrent(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	close(stop)
 	wg.Wait()
 

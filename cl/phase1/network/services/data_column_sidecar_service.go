@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -13,11 +11,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -34,6 +34,8 @@ const (
 )
 
 var (
+	errGloasSidecarBlockUnavailable = fmt.Errorf("%w: data column sidecar block unavailable", ErrIgnore)
+
 	verifyDataColumnSidecarInclusionProof           = das.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs                = das.VerifyDataColumnSidecarKZGProofs
 	verifyDataColumnSidecar                         = das.VerifyDataColumnSidecar
@@ -51,17 +53,11 @@ type dataColumnSidecarService struct {
 	seenGloasSidecar     *lru.Cache[seenGloasSidecarKey, struct{}] // [New in Gloas:EIP7732]
 	columnSidecarStorage blob_storage.DataColumnStorage
 	emitters             *beaconevents.EventEmitter
+	gossipManager        gossipmgr.Gossip
 
-	// [New in Gloas:EIP7732] Pending sidecars waiting for block to arrive
-	pendingGloasSidecars     sync.Map // map[seenGloasSidecarKey]*pendingGloasSidecarJob
-	pendingGloasSidecarCount atomic.Int32
-}
-
-// pendingGloasSidecarJob holds a sidecar that is waiting for its block to arrive
-type pendingGloasSidecarJob struct {
-	sidecar      *cltypes.DataColumnSidecar
-	subnet       *uint64
-	creationTime time.Time
+	// Key by the full sidecar root so an unverified candidate cannot suppress
+	// another candidate for the same block and column.
+	pendingGloasSidecars *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar]
 }
 
 // seenSidecarKey is used for Fulu (pre-GLOAS) seen tracking
@@ -86,6 +82,7 @@ func NewDataColumnSidecarService(
 	syncDataManager synced_data.SyncedData,
 	columnSidecarStorage blob_storage.DataColumnStorage,
 	emitters *beaconevents.EventEmitter,
+	gossipManager gossipmgr.Gossip,
 ) DataColumnSidecarService {
 	size := cfg.NumberOfColumns * cfg.SlotsPerEpoch * 4
 	seenSidecar, err := lru.New[seenSidecarKey, struct{}]("seenDataColumnSidecar", int(size))
@@ -105,9 +102,25 @@ func NewDataColumnSidecarService(
 		seenGloasSidecar:     seenGloasSidecar,
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
+		gossipManager:        gossipManager,
 	}
-	go s.loopPendingGloasSidecars(ctx)
+	s.pendingGloasSidecars = s.newPendingGloasSidecarQueue(ctx)
 	return s
+}
+
+func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "gloas_data_column_sidecar",
+		capacity:      maxPendingGloasSidecars,
+		expiry:        pendingGloasSidecarExpiry,
+		checkInterval: pendingGloasSidecarTick,
+	},
+		s.tryProcessPendingGloasSidecar,
+		nil,
+		func(_ common.Hash, sidecar *cltypes.DataColumnSidecar) {
+			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+		})
 }
 
 func (s *dataColumnSidecarService) Names() []string {
@@ -137,7 +150,11 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// Version-aware processing
 	if msg.Version() >= clparams.GloasVersion {
-		return s.processGloasMessage(ctx, subnet, msg)
+		err := s.processGloasMessage(ctx, subnet, msg)
+		if errors.Is(err, errGloasSidecarBlockUnavailable) {
+			s.scheduleSidecarForLaterProcessing(msg)
+		}
+		return err
 	}
 	return s.processFuluMessage(ctx, subnet, msg)
 }
@@ -150,6 +167,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	blockHeader := msg.SignedBlockHeader.Header
+	if msg.Version() != s.cfg.GetCurrentStateVersion(blockHeader.Slot/s.cfg.SlotsPerEpoch) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	seenKey := seenSidecarKey{
 		slot:          blockHeader.Slot,
 		proposerIndex: blockHeader.ProposerIndex,
@@ -163,7 +183,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 
 	blockRoot, err := blockHeader.HashSSZ()
 	if err != nil {
-		return fmt.Errorf("failed to get block root: %v", err)
+		return fmt.Errorf("failed to get block root: %w", err)
 	}
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
@@ -174,7 +194,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %v", err)
+			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -202,14 +222,23 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 
-	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot
-	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
+	// One finalized checkpoint for both finality checks below, so that a checkpoint update between
+	// them cannot turn an ignored sidecar into a rejected one.
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that
+	// block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch).
+	// FinalizedSlot() is the last slot of the finalized epoch, so it is not this bound.
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok {
+		return errors.New("finalized checkpoint slot is not representable")
+	}
+	if blockHeader.Slot <= finalizedStartSlot {
 		return ErrIgnore
 	}
 
 	// [REJECT] The proposer signature is valid
 	if pass, err := s.verifyProposerSignature(blockHeader.ProposerIndex, msg.SignedBlockHeader); err != nil {
-		return fmt.Errorf("invalid proposer signature for data column sidecar: %v", err)
+		return fmt.Errorf("invalid proposer signature for data column sidecar: %w", err)
 	} else if !pass {
 		return errors.New("invalid proposer signature for data column sidecar")
 	}
@@ -225,10 +254,8 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("data column sidecar should be from a higher slot than the parent block, but got %d <= %d", blockHeader.Slot, parentHeader.Slot)
 	}
 
-	// [REJECT] The finalized checkpoint is an ancestor
-	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
-	finalizedSlot := finalizedCheckpoint.Epoch * s.cfg.SlotsPerEpoch
-	if s.forkChoice.Ancestor(blockHeader.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
+	// [REJECT] The finalized checkpoint is an ancestor, clamped to the anchor slot.
+	if s.forkChoice.Ancestor(blockHeader.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
@@ -242,10 +269,14 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
-	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %v", err)
+	// Claim the tuple atomically: columns built from EL blobs may have claimed it during validation.
+	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
+		return ErrIgnore
 	}
-	s.seenSidecar.Add(seenKey, struct{}{})
+	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
+		s.seenSidecar.Remove(seenKey)
+		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
+	}
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
@@ -254,10 +285,59 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	return nil
 }
 
+// PublishColumnsFromEL marks each sidecar as seen and publishes it on its subnet, unless a sidecar
+// for its (slot, proposer, index) was seen already. The sidecars must be on subnets this node subscribes to.
+func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+	if len(sidecars) == 0 {
+		return
+	}
+	header := sidecars[0].SignedBlockHeader.Header
+	// The block may have waited for its parent or the EL while finality moved on; peers would ignore
+	// or reject its columns then.
+	if !s.afterFinalizedCheckpoint(header) {
+		log.Debug("[dataColumnSidecarService] not publishing columns built from EL blobs below finality", "slot", header.Slot)
+		return
+	}
+	forkDigest, err := s.ethClock.ComputeForkDigest(header.Slot / s.cfg.SlotsPerEpoch)
+	if err != nil {
+		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of columns built from EL blobs", "slot", header.Slot, "err", err)
+		return
+	}
+	for _, sidecar := range sidecars {
+		key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
+		if seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{}); seen {
+			continue
+		}
+		encoded, err := sidecar.EncodeSSZ(nil)
+		if err == nil {
+			err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
+		}
+		if err != nil {
+			// Unclaimed, a copy from gossip is still processed and relayed.
+			s.seenSidecar.Remove(key)
+			log.Debug("[dataColumnSidecarService] failed to publish a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
+		}
+	}
+}
+
+// afterFinalizedCheckpoint applies the gossip finality rules for a Fulu sidecar: its slot is after the
+// finalized epoch start and the finalized checkpoint is an ancestor of its block.
+func (s *dataColumnSidecarService) afterFinalizedCheckpoint(header *cltypes.BeaconBlockHeader) bool {
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok || header.Slot <= finalizedStartSlot {
+		return false
+	}
+	return s.forkChoice.Ancestor(header.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root == finalizedCheckpoint.Root
+}
+
 // processGloasMessage handles GLOAS data column sidecar validation
 // Reference: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md
 func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	slot := msg.Slot
+	if msg.Version() != s.cfg.GetCurrentStateVersion(slot/s.cfg.SlotsPerEpoch) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	blockRoot := msg.BeaconBlockRoot
 
 	seenKey := seenGloasSidecarKey{
@@ -268,6 +348,12 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	// [IGNORE] The sidecar is the first sidecar for the tuple (sidecar.beacon_block_root, sidecar.index)
 	if _, ok := s.seenGloasSidecar.Get(seenKey); ok {
 		return ErrIgnore
+	}
+
+	// [REJECT] Validate the subnet before queue admission so a wrong-subnet copy
+	// cannot suppress a later copy received on the correct subnet.
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
+		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
 	// [IGNORE] The sidecar is not from a future slot (with some tolerance for clock disparity)
@@ -289,7 +375,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %v", err)
+			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -298,11 +384,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
-	// If not yet seen, queue for deferred validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
-		s.scheduleSidecarForLaterProcessing(msg, subnet)
-		return ErrIgnore
+		return errGloasSidecarBlockUnavailable
 	}
 
 	// [REJECT] The sidecar's slot matches the slot of the block
@@ -328,18 +412,13 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return errors.New("invalid data column sidecar")
 	}
 
-	// [REJECT] The sidecar is for the correct subnet
-	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
-		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
-	}
-
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar, bid.blob_kzg_commitments)
 	if !verifyDataColumnSidecarKZGProofsWithCommitments(msg, kzgCommitments) {
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %v", err)
+		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
 	s.seenGloasSidecar.Add(seenKey, struct{}{})
 
@@ -359,17 +438,17 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	err := s.syncDataManager.ViewHeadState(func(state *st.CachingBeaconState) error {
 		proposer, err := state.ValidatorForValidatorIndex(int(proposerIndex))
 		if err != nil {
-			return fmt.Errorf("unable to retrieve state: %v", err)
+			return fmt.Errorf("unable to retrieve state: %w", err)
 		}
 
-		domain, err := state.GetDomain(s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot))
+		domain, err := fork.ComputeDomainAtEpoch(s.cfg, s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot), state.GenesisValidatorsRoot())
 		if err != nil {
-			return fmt.Errorf("unable to get domain: %v", err)
+			return fmt.Errorf("unable to get domain: %w", err)
 		}
 		pk = proposer.PublicKey()
 		signingRoot, err = computeSigningRoot(signedBlockHeader.Header, domain)
 		if err != nil {
-			return fmt.Errorf("unable to compute signing root: %v", err)
+			return fmt.Errorf("unable to compute signing root: %w", err)
 		}
 		return nil
 	})
@@ -378,96 +457,54 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	}
 	valid, err = blsVerify(signedBlockHeader.Signature[:], signingRoot[:], pk[:])
 	if err != nil {
-		return false, fmt.Errorf("unable to verify signature: %v", err)
+		return false, fmt.Errorf("unable to verify signature: %w", err)
 	}
 	return valid, nil
 }
 
-// scheduleSidecarForLaterProcessing queues a GLOAS sidecar for later processing when its block arrives
-func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar, subnet *uint64) {
-	if s.pendingGloasSidecarCount.Load() >= maxPendingGloasSidecars {
+// scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
+func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar) {
+	// Bound hashing and retained data before the block's commitments are available.
+	// Failed admission keeps the missing-block IGNORE verdict from gossip validation.
+	blobParameters := s.cfg.GetBlobParameters(sidecar.Slot / s.cfg.SlotsPerEpoch)
+	if !verifyDataColumnSidecar(sidecar) || sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
+		return
+	}
+	err := s.pendingGloasSidecars.enqueueLazy(sidecar, func() (common.Hash, error) { return sidecar.HashSSZ() })
+	if errors.Is(err, errPendingJobQueueFull) {
 		log.Trace("[dataColumnSidecarService] pending GLOAS sidecars at capacity, dropping",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
-		return
+	} else if err != nil {
+		log.Warn("[dataColumnSidecarService] failed to hash pending GLOAS sidecar",
+			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
 	}
-
-	key := seenGloasSidecarKey{
-		beaconBlockRoot: sidecar.BeaconBlockRoot,
-		index:           sidecar.Index,
-	}
-
-	// Don't schedule if already pending
-	if _, loaded := s.pendingGloasSidecars.LoadOrStore(key, &pendingGloasSidecarJob{
-		sidecar:      sidecar,
-		subnet:       subnet,
-		creationTime: time.Now(),
-	}); loaded {
-		return
-	}
-	s.pendingGloasSidecarCount.Add(1)
-
-	log.Debug("[dataColumnSidecarService] scheduled GLOAS sidecar for later processing",
-		"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
 }
 
-// loopPendingGloasSidecars periodically retries processing pending sidecars
-func (s *dataColumnSidecarService) loopPendingGloasSidecars(ctx context.Context) {
-	ticker := time.NewTicker(pendingGloasSidecarTick)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		s.pendingGloasSidecars.Range(func(key, value any) bool {
-			job := value.(*pendingGloasSidecarJob)
-			sidecarKey := key.(seenGloasSidecarKey)
-
-			// Check if expired
-			if time.Since(job.creationTime) > pendingGloasSidecarExpiry {
-				s.pendingGloasSidecars.Delete(sidecarKey)
-				s.pendingGloasSidecarCount.Add(-1)
-				log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
-					"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index)
-				return true
-			}
-
-			// Check if slot has become finalized while waiting
-			if job.sidecar.Slot <= s.forkChoice.FinalizedSlot() {
-				s.pendingGloasSidecars.Delete(sidecarKey)
-				s.pendingGloasSidecarCount.Add(-1)
-				log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
-					"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index)
-				return true
-			}
-
-			// Only retry if block is now available in forkChoice (recent blocks only)
-			if _, ok := s.forkChoice.GetBlock(job.sidecar.BeaconBlockRoot); !ok {
-				// Block still not available, keep waiting
-				return true
-			}
-
-			// Block is available, try to process
-			if err := s.processGloasMessage(ctx, job.subnet, job.sidecar); err != nil {
-				// Processing failed for another reason (not block delay), remove from pending
-				s.pendingGloasSidecars.Delete(sidecarKey)
-				s.pendingGloasSidecarCount.Add(-1)
-				if !errors.Is(err, ErrIgnore) {
-					log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
-						"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index, "err", err)
-				}
-				return true
-			}
-
-			// Successfully processed, remove from pending
-			s.pendingGloasSidecars.Delete(sidecarKey)
-			s.pendingGloasSidecarCount.Add(-1)
-			log.Debug("[dataColumnSidecarService] successfully processed pending GLOAS sidecar",
-				"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index)
-			return true
-		})
+func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
+	ctx context.Context,
+	_ common.Hash,
+	sidecar *cltypes.DataColumnSidecar,
+) pendingJobDecision {
+	if sidecar.Slot <= s.forkChoice.FinalizedSlot() {
+		log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
+			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+		return pendingJobRemove
 	}
+	if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {
+		return pendingJobKeep
+	}
+	// Subnet validation already ran before queue admission.
+	if err := s.processGloasMessage(ctx, nil, sidecar); err != nil {
+		if errors.Is(err, errGloasSidecarBlockUnavailable) {
+			return pendingJobKeep
+		}
+		if !errors.Is(err, ErrIgnore) {
+			log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
+		}
+		return pendingJobRemove
+	}
+	log.Debug("[dataColumnSidecarService] successfully processed pending GLOAS sidecar",
+		"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+	return pendingJobRemove
 }

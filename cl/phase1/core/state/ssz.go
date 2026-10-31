@@ -32,6 +32,7 @@ func (b *CachingBeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *CachingBeaconState) DecodeSSZ(buf []byte, version int) error {
+	b.publicKeyIndices = pubkeyIndex{}
 	if err := b.BeaconState.DecodeSSZ(buf, version); err != nil {
 		return err
 	}

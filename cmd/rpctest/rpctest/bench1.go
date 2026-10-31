@@ -19,6 +19,7 @@ package rpctest
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -36,37 +37,32 @@ var routes map[string]string
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFileName string) error {
+func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64) error {
 	setRoutes(erigonURL, gethURL)
 
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
-	go vegetaWrite(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
+	go writePattern(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	resultsCh <- res
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 	prevBn := blockFrom
 	storageCounter := 0
+	var res CallResult
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		resultsCh <- res
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v", bn, res.Err)
+			return fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn, res.Err)
 		}
 
 		if b.Error != nil {
@@ -77,13 +73,13 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v", bn, res.Err)
+				return fmt.Errorf("could not retrieve block (geth) %d: %w", bn, res.Err)
 			}
 			if bg.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
+				return fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
 			}
 			if !compareBlocks(&b, &bg) {
-				return fmt.Errorf("Block difference for %d", bn)
+				return fmt.Errorf("block difference for %d", bn)
 			}
 		}
 
@@ -102,10 +98,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						res = reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKey), &sr)
 						resultsCh <- res
 						if res.Err != nil {
-							return fmt.Errorf("Could not get storageRange (Erigon): %s: %v", txn.Hash, res.Err)
+							return fmt.Errorf("could not get storageRange (Erigon): %s: %w", txn.Hash, res.Err)
 						}
 						if sr.Error != nil {
-							return fmt.Errorf("Error getting storageRange: %d %s", sr.Error.Code, sr.Error.Message)
+							return fmt.Errorf("error getting storageRange: %d %s", sr.Error.Code, sr.Error.Message)
 						}
 
 						for k, v := range sr.Result.Storage {
@@ -124,7 +120,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 							res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKeyG), &srGeth)
 							resultsCh <- res
 							if res.Err != nil {
-								return fmt.Errorf("Could not get storageRange (geth): %s: %v", txn.Hash, res.Err)
+								return fmt.Errorf("could not get storageRange (geth): %s: %w", txn.Hash, res.Err)
 							}
 							if srGeth.Error != nil {
 								fmt.Printf("Error getting storageRange (geth): %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
@@ -145,7 +141,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 							printStorageRange(sm)
 							fmt.Printf("================smg\n")
 							printStorageRange(smg)
-							return errors.New("Storage range different")
+							return errors.New("storage range different")
 						}
 					}
 				}
@@ -160,7 +156,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", txn.Hash, res.Err)
-				print(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash, ""))
+				printRPCRequest(client, routes[Erigon], reqGen.debugTraceTransaction(txn.Hash, ""))
 			}
 
 			if trace.Error != nil {
@@ -172,15 +168,15 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				res = reqGen.Geth("debug_traceTransaction", reqGen.debugTraceTransaction(txn.Hash, ""), &traceg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash, ""))
-					return fmt.Errorf("Could not trace transaction (geth) %s: %v", txn.Hash, res.Err)
+					printRPCRequest(client, routes[Geth], reqGen.debugTraceTransaction(txn.Hash, ""))
+					return fmt.Errorf("could not trace transaction (geth) %s: %w", txn.Hash, res.Err)
 				}
 				if traceg.Error != nil {
-					return fmt.Errorf("Error tracing transaction (geth): %d %s", traceg.Error.Code, traceg.Error.Message)
+					return fmt.Errorf("error tracing transaction (geth): %d %s", traceg.Error.Code, traceg.Error.Message)
 				}
 				if res.Err == nil && trace.Error == nil {
 					if !compareTraces(&trace, &traceg) {
-						return fmt.Errorf("Different traces block %d, txn %s", bn, txn.Hash)
+						return fmt.Errorf("different traces block %d, txn %s", bn, txn.Hash)
 					}
 				}
 			}
@@ -189,28 +185,28 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			res = reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receipt)
 			resultsCh <- res
 			if res.Err != nil {
-				print(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
-				return fmt.Errorf("Count not get receipt (Erigon): %s: %v", txn.Hash, res.Err)
+				printRPCRequest(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
+				return fmt.Errorf("could not get receipt (Erigon): %s: %w", txn.Hash, res.Err)
 			}
 			if receipt.Error != nil {
-				return fmt.Errorf("Error getting receipt (Erigon): %d %s", receipt.Error.Code, receipt.Error.Message)
+				return fmt.Errorf("error getting receipt (Erigon): %d %s", receipt.Error.Code, receipt.Error.Message)
 			}
 			if needCompare {
 				var receiptg EthReceipt
 				res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receiptg)
 				resultsCh <- res
 				if res.Err != nil {
-					print(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
-					return fmt.Errorf("Count not get receipt (geth): %s: %v", txn.Hash, res.Err)
+					printRPCRequest(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
+					return fmt.Errorf("could not get receipt (geth): %s: %w", txn.Hash, res.Err)
 				}
 				if receiptg.Error != nil {
-					return fmt.Errorf("Error getting receipt (geth): %d %s", receiptg.Error.Code, receiptg.Error.Message)
+					return fmt.Errorf("error getting receipt (geth): %d %s", receiptg.Error.Code, receiptg.Error.Message)
 				}
 				if !compareReceipts(&receipt, &receiptg) {
 					fmt.Printf("Different receipts block %d, txn %s\n", bn, txn.Hash)
-					print(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
-					print(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
-					return errors.New("Receipts are different")
+					printRPCRequest(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
+					printRPCRequest(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
+					return errors.New("receipts are different")
 				}
 			}
 		}
@@ -222,23 +218,23 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 		res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
 		resultsCh <- res
 		if res.Err != nil {
-			return fmt.Errorf("Could not get account balance (Erigon): %v", res.Err)
+			return fmt.Errorf("could not get account balance (Erigon): %w", res.Err)
 		}
 		if balance.Error != nil {
-			return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
+			return fmt.Errorf("error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
 		}
 		if needCompare {
 			var balanceg EthBalance
 			res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balanceg)
 			resultsCh <- res
 			if res.Err != nil {
-				return fmt.Errorf("Could not get account balance (geth): %v", res.Err)
+				return fmt.Errorf("could not get account balance (geth): %w", res.Err)
 			}
 			if balanceg.Error != nil {
-				return fmt.Errorf("Error getting account balance (geth): %d %s", balanceg.Error.Code, balanceg.Error.Message)
+				return fmt.Errorf("error getting account balance (geth): %d %s", balanceg.Error.Code, balanceg.Error.Message)
 			}
 			if !compareBalances(&balance, &balanceg) {
-				return fmt.Errorf("Miner %x balance difference for block %d", b.Result.Miner, bn)
+				return fmt.Errorf("miner %x balance difference for block %d", b.Result.Miner, bn)
 			}
 		}
 
@@ -249,10 +245,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 			resultsCh <- res
 			if res.Err != nil {
-				return fmt.Errorf("Could not get modified accounts (Erigon): %v", res.Err)
+				return fmt.Errorf("could not get modified accounts (Erigon): %w", res.Err)
 			}
 			if mag.Error != nil {
-				return fmt.Errorf("Error getting modified accounts (Erigon): %d %s", mag.Error.Code, mag.Error.Message)
+				return fmt.Errorf("error getting modified accounts (Erigon): %d %s", mag.Error.Code, mag.Error.Message)
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 
@@ -272,7 +268,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				resultsCh <- res
 
 				if res.Err != nil {
-					return fmt.Errorf("Could not get accountRange (Erigon): %v", res.Err)
+					return fmt.Errorf("could not get accountRange (Erigon): %w", res.Err)
 				}
 
 				if sr.Error != nil {
@@ -287,7 +283,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					res = reqGen.Geth("debug_accountRange", reqGen.accountRange(bn, pageGeth, 256), &srGeth)
 					resultsCh <- res
 					if res.Err != nil {
-						return fmt.Errorf("Could not get accountRange geth: %v", res.Err)
+						return fmt.Errorf("could not get accountRange geth: %w", res.Err)
 					}
 					if srGeth.Error != nil {
 						fmt.Printf("Error getting accountRange geth: %d %s\n", srGeth.Error.Code, srGeth.Error.Message)
@@ -300,7 +296,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
 					}
 					if !compareAccountRanges(accRangeErigon, accRangeGeth) {
-						return errors.New("Different in account ranges tx")
+						return errors.New("different in account ranges tx")
 					}
 				}
 			}
@@ -310,13 +306,15 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 	return nil
 }
 
-// vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
-// results to /$tmp$/erigon_stress_test/results_*.csv
-// vegeta format going to files /$tmp$/erigon_stress_test/vegeta_*.txt
-func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
+// writePattern (to be run as a goroutine) writes the results of the server calls into files in
+// $tmp$/erigon_stress_test: the call stats to results_<target>_<method>.csv, and the requests of each
+// method both as vegeta targets, vegeta_<target>_<method>.txt, and as <method>.jsonl, one JSON-RPC
+// request per line, the pattern format that rpc_perf replays.
+func writePattern(enabled bool, methods []string, resultsCh chan CallResult) {
 	var err error
 	var files map[string]map[string]*os.File
 	var vegetaFiles map[string]map[string]*os.File
+	var jsonlFiles map[string]*os.File
 	if enabled {
 		files = map[string]map[string]*os.File{
 			Geth:   make(map[string]*os.File),
@@ -326,17 +324,18 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 			Geth:   make(map[string]*os.File),
 			Erigon: make(map[string]*os.File),
 		}
+		jsonlFiles = make(map[string]*os.File)
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
 		dir := filepath.Join(tmpDir, "erigon_stress_test")
-		if err = os.MkdirAll(dir, 0770); err != nil {
+		if err = os.MkdirAll(dir, 0o770); err != nil {
 			panic(err)
 		}
 
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
 				file := filepath.Join(dir, "results_"+route+"_"+method+".csv")
-				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 				if err != nil {
 					panic(err)
 				}
@@ -346,10 +345,18 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
 				file := filepath.Join(dir, "vegeta_"+route+"_"+method+".txt")
-				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 				if err != nil {
 					panic(err)
 				}
+			}
+		}
+
+		for _, method := range methods {
+			file := filepath.Join(dir, method+".jsonl")
+			jsonlFiles[method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+			if err != nil {
+				panic(err)
 			}
 		}
 
@@ -364,9 +371,13 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 					f.Close()
 				}
 			}
+			for _, f := range jsonlFiles {
+				f.Close()
+			}
 		}()
 	}
 
+	var line bytes.Buffer
 	for res := range resultsCh {
 		// If not enabled, simply keep draining the results channel
 		if enabled {
@@ -392,6 +403,17 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 					if _, err := fmt.Fprint(f, row+"\n"); err != nil {
 						panic(err)
 					}
+				}
+			}
+
+			if f, ok := jsonlFiles[res.Method]; ok {
+				line.Reset()
+				if err := json.Compact(&line, []byte(res.RequestBody)); err != nil {
+					panic(fmt.Errorf("invalid %s request %q: %w", res.Method, res.RequestBody, err))
+				}
+				line.WriteByte('\n')
+				if _, err := f.Write(line.Bytes()); err != nil {
+					panic(err)
 				}
 			}
 		}

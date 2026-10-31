@@ -22,10 +22,8 @@ const (
 	KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH = 4
 )
 
-// VerifyDataColumnSidecar verifies if the data column sidecar is valid according to protocol rules.
-// This function is re-entrant and thread-safe.
-// For Fulu: uses KzgCommitments from the sidecar.
-// For GLOAS: use VerifyDataColumnSidecarWithCommitments instead.
+// VerifyDataColumnSidecar checks the sidecar's structure without needing its block.
+// Gloas sidecars also need VerifyDataColumnSidecarWithCommitments once the block is available.
 func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	// The sidecar index must be within the valid range
 	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
@@ -146,18 +144,6 @@ func verifyKZGProofsInternal(sidecar *cltypes.DataColumnSidecar, kzgCommitments 
 		return false
 	}
 	return true
-}
-
-func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
-	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blobs), 0 /* numGoRoutines */)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]cltypes.Cell, len(cells))
-	for i, cell := range &cells {
-		ret[i] = cltypes.Cell(*cell)
-	}
-	return ret, nil
 }
 
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.

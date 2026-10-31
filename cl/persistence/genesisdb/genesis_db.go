@@ -71,7 +71,7 @@ func (g *genesisDB) ReadGenesisState() (*state.CachingBeaconState, error) {
 	version := g.beaconConfig.GetCurrentStateVersion(slot / g.beaconConfig.SlotsPerEpoch)
 	st := state.New(g.beaconConfig)
 	if err := st.DecodeSSZ(decompressedEnc, int(version)); err != nil {
-		return nil, fmt.Errorf("could not deserialize state: %s", err)
+		return nil, fmt.Errorf("could not deserialize state: %w", err)
 	}
 	return st, nil
 }

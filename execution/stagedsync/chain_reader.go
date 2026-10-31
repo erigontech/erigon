@@ -110,6 +110,3 @@ func (cr ChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 }
 
 func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }
-func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
-	return cr.BlockReader.FrozenBorBlocks(align)
-}

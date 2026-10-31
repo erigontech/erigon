@@ -35,7 +35,7 @@ and Gloas helper extensions in `epbs.go`.
 | `accessors.go`: `GetExpectedWithdrawals` | Capella `get_expected_withdrawals`; Electra pending partial withdrawals; Gloas builder withdrawals and builder sweep withdrawals |
 | `accessors.go`: `GetPendingPartialWithdrawals`, `getBalanceAfterWithdrawals` | Electra `get_expected_withdrawals` pending partial withdrawal pass |
 | `accessors.go`: `GetValidatorsSweepWithdrawals` | Capella/Electra validator sweep in `get_expected_withdrawals` |
-| `accessors.go`: `GetBuilderWithdrawals`, `GetBuildersSweepWithdrawals` | Gloas builder withdrawal passes in `get_expected_withdrawals` |
+| `accessors.go`: `GetBuilderWithdrawals`, `GetBuildersSweepWithdrawals`, `getBuilderBalanceAfterWithdrawals` | Gloas builder withdrawal passes in `get_expected_withdrawals` |
 | `accessors.go`: `GetNextSyncCommitteeIndices` | Altair `get_next_sync_committee_indices`; Gloas modified balance-weighted selection |
 | `util.go`: `GetIndexedAttestation` | Phase0 `get_indexed_attestation` |
 | `util.go`: `GetValidatorFromDeposit` | Phase0 deposit validator construction inside `process_deposit` |
@@ -46,7 +46,8 @@ and Gloas helper extensions in `epbs.go`.
 | `util.go`: `IsAttestationSameSlot` | Gloas same-slot attestation helper for builder pending-payment weights |
 | `epbs.go`: `IsBuilderIndex`, `ConvertBuilderIndexToValidatorIndex`, `ConvertValidatorIndexToBuilderIndex` | Gloas builder-index encoding helpers |
 | `epbs.go`: `IsActiveBuilder`, `IsBuilderWithdrawalCredential` | Gloas builder registry and withdrawal-credential helpers |
-| `epbs.go`: `IsValidIndexedPayloadAttestation` | Gloas `is_valid_indexed_payload_attestation` |
+| `epbs.go`: `IndexedPayloadAttestationSignatureSet` | Gloas `is_valid_indexed_payload_attestation` signature verification inputs |
+| `epbs.go`: `ExecutionPayloadBidSignatureSet` | Gloas `verify_execution_payload_bid_signature` inputs |
 | `epbs.go`: `CanBuilderCoverBid`, `GetPendingBalanceToWithdrawForBuilder` | Gloas builder bid coverage and pending-withdrawal helpers |
 | `epbs.go`: `IsPendingValidator`, `IsBuilderPubkey` | Gloas deposit request routing helpers |
 | `util.go`: `GetMaxEffectiveBalanceByVersion` | Electra `get_max_effective_balance`; version-gated effective balance cap |
@@ -78,7 +79,7 @@ helper paths in `epbs.go`.
 | --- | --- |
 | `mutators.go`: `IncreaseBalance` | Phase0 `increase_balance` |
 | `mutators.go`: `DecreaseBalance` | Phase0 `decrease_balance`; saturates at zero |
-| `cache_mutators.go`: `SlashValidator` | Phase0 `slash_validator`; whistleblower/proposer reward split |
+| `cache_mutators.go`: `SlashValidator` | Phase0 `slash_validator`; whistleblower/proposer reward split; Gloas pending-payment clearing |
 | `cache_mutators.go`: `InitiateValidatorExit` | Phase0 `initiate_validator_exit` |
 | `cache_mutators.go`: `ComputeExitEpochAndUpdateChurn` | Electra `compute_exit_epoch_and_update_churn` |
 | `cache_mutators.go`: `InitiateBuilderExit` | Gloas builder exit |

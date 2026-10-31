@@ -59,7 +59,8 @@ func (r *codeReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 // Because codeHash == original.CodeHash, the optimisation deleted the CodePath
 // write, causing subsequent GetCode reads to return empty code via the versionMap.
 func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
-	delegationCode := []byte{0xef, 0x01, 0x00,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00,
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
 		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
 	}
@@ -93,7 +94,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 
 	// Flush TX 88 writes to versionMap
 	writes88 := ibs88.VersionedWrites()
-	vm.FlushVersionedWrites(writes88, true, "")
+	vm.FlushVersionedWrites(writes88, true)
 
 	// Verify TX 88 wrote empty code hash to versionMap
 	ch, rr, ok := vm.ReadCodeHash(addr, 89)
@@ -128,6 +129,76 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 		"TX 90 should have a CodePath write in versionedWrites (the revert-to-original optimisation should NOT have fired)")
 }
 
+// TestSetCodeParallel_ValidatedFloorNotSuppressed pins the early-break wrong-root:
+// SetCode's net-zero suppression must treat a Validated predecessor floor as
+// resolved, not fall back to the stale pre-block original.
+//
+// Scenario (EIP-7702 re-delegation):
+//   - Domain: EOA delegated to A (codehash A).
+//   - TX 17 re-delegates to B → writes codehash B, then Validated (not yet Done).
+//   - TX 46 re-delegates back to A.
+//
+// The tx-start baseline seen by TX 46 is B (TX 17's Validated floor), so writing A
+// is a real change and must be recorded. Before the fix SetCode only trusted a
+// Done floor, so under early-break it took origHash from the pre-block original (A);
+// A == origHash made the suppression fire and dropped the codehash write, leaving
+// the final codehash stuck at B.
+func TestSetCodeParallel_ValidatedFloorNotSuppressed(t *testing.T) {
+	delegationCodeA := []byte{
+		0xef, 0x01, 0x00,
+		0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa,
+		0xab, 0xac, 0xad, 0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4,
+	}
+	delegationCodeB := []byte{
+		0xef, 0x01, 0x00,
+		0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca,
+		0xcb, 0xcc, 0xcd, 0xce, 0xcf, 0xd0, 0xd1, 0xd2, 0xd3, 0xd4,
+	}
+	codeHashA := accounts.InternCodeHash(crypto.Keccak256Hash(delegationCodeA))
+	codeHashB := accounts.InternCodeHash(crypto.Keccak256Hash(delegationCodeB))
+
+	addr := accounts.InternAddress([20]byte{0x5b, 0x2f})
+
+	domainAccount := accounts.NewAccount()
+	domainAccount.CodeHash = codeHashA
+	domainAccount.Nonce = 8
+	reader := &codeReader{addr: addr, account: &domainAccount, code: delegationCodeA}
+
+	vm := NewVersionMap(nil)
+
+	// TX 17: re-delegate to B, flushed as Validated (pre-seal early-break state).
+	ibs17 := NewWithVersionMap(reader, vm)
+	defer ibs17.Close()
+	ibs17.SetTxContext(100, 17)
+	ibs17.SetVersion(0)
+	require.NoError(t, ibs17.SetCode(addr, delegationCodeB, tracing.CodeChangeAuthorization))
+	writes17 := ibs17.VersionedWrites()
+	vm.FlushVersionedWrites(writes17, false)
+	vm.MarkWritesValidated(writes17, nil)
+
+	ch, rr, ok := vm.ReadCodeHash(addr, 46)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultValidated, rr.Status(), "TX 17 floor must be Validated (early-break)")
+	assert.Equal(t, codeHashB, ch)
+
+	// TX 46: re-delegate back to A. A != Validated floor B, so the write stands.
+	ibs46 := NewWithVersionMap(reader, vm)
+	defer ibs46.Close()
+	ibs46.SetTxContext(100, 46)
+	ibs46.SetVersion(0)
+	require.NoError(t, ibs46.SetCode(addr, delegationCodeA, tracing.CodeChangeAuthorization))
+
+	code, err := ibs46.GetCode(addr)
+	require.NoError(t, err)
+	assert.Equal(t, delegationCodeA, code, "GetCode must return the re-delegation, not the Validated floor")
+
+	writes46 := ibs46.VersionedWrites()
+	_, hasCodeWrite := writes46.GetCode(addr)
+	assert.True(t, hasCodeWrite, "TX 46 codehash write must NOT be suppressed against a Validated floor")
+	_, hasHashWrite := writes46.GetCodeHash(addr)
+	assert.True(t, hasHashWrite, "TX 46 must record CodeHashPath so the final codehash is A, not B")
+}
+
 // TestSetCodeParallel_NoMaterialize_DelegateThenRevoke pins the within-tx
 // delegate-then-revoke net-zero elision on the cache-free (noMaterialize) path
 // — the EIP-7702 case that regressed the BAL hive suite.
@@ -139,7 +210,8 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 // written=false for the revoke, and left the first SetCode's cell in place —
 // producing wrong code and a receiptHash mismatch.
 func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
-	delegationCode := []byte{0xef, 0x01, 0x00,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00,
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
 		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
 	}
@@ -151,7 +223,6 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	reader := &codeReader{addr: addr, account: &acc}
 
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
@@ -166,6 +237,46 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	_, hasCodeWrite := writes.GetCode(addr)
 	assert.False(t, hasCodeWrite, "net-zero delegate-then-revoke must fold away the CodePath write")
 	assert.Empty(t, ibs.stateObjects, "noMaterialize SetCode must not cache a stateObject")
+}
+
+// Authorization processing reads an absent authority's code hash before the
+// first delegation creates it. The revoke is not net-zero for an account created
+// in this tx: folding its code writes away would expose that read.
+func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeAbsentAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+
+	_, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
+
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	assert.Equal(t, accounts.EmptyCodeHash, codeHash)
+}
+
+// An account created by an earlier tx exists at tx start through that tx's
+// flushed record. Delegating and revoking it is net-zero, so no code write may
+// remain: it would become a spurious BAL code change.
+func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeBALCreatedAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
+	bal := types.BlockAccessList{{
+		Address:      addr.Value(),
+		NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}},
+	}}
+	vm := NewVersionMap(bal)
+	vm.WriteAddress(addr, Version{TxIndex: 0}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.SetTxContext(100, 1)
+
+	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
+
+	_, hasCodeWrite := ibs.VersionedWrites().GetCode(addr)
+	assert.False(t, hasCodeWrite)
 }
 
 // TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite pins the multi-hop
@@ -184,7 +295,6 @@ func TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite(t *testing.T) {
 	reader := &codeReader{addr: addr, account: &acc}
 
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
@@ -237,4 +347,26 @@ func TestGetDelegatedDesignation_TracksSplitCodePublish(t *testing.T) {
 		return VersionInvalid
 	}, false, "")
 	require.Equal(t, VersionInvalid, validity)
+}
+
+// The stored hash is deliberately not keccak(code): a call must take the hash
+// from the same read as the code, not hash the bytes again.
+func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+	hash := accounts.InternCodeHash([32]byte{0x12, 0x34})
+	r := &codeReader{addr: addr, account: &accounts.Account{CodeHash: hash, Incarnation: 1}, code: code}
+	for _, versioned := range []bool{false, true} {
+		var ibs *IntraBlockState
+		if versioned {
+			ibs = NewWithVersionMap(r, NewVersionMap(nil))
+		} else {
+			ibs = New(r)
+		}
+		got, err := ibs.ResolveCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, code, got.Bytes, "versioned=%v", versioned)
+		require.Equal(t, hash, got.Hash, "versioned=%v", versioned)
+	}
 }

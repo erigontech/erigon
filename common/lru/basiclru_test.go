@@ -20,10 +20,6 @@
 package lru
 
 import (
-	crand "crypto/rand"
-	"fmt"
-	"io"
-	"math/rand"
 	"testing"
 )
 
@@ -185,50 +181,4 @@ func TestBasicLRUPeek(t *testing.T) {
 	if cache.Contains(1) {
 		t.Errorf("should not have updated recent-ness of 1")
 	}
-}
-
-func BenchmarkLRU(b *testing.B) {
-	var (
-		capacity = 1000
-		indexes  = make([]int, capacity*20)
-		keys     = make([]string, capacity)
-		values   = make([][]byte, capacity)
-	)
-	for i := range indexes {
-		indexes[i] = rand.Intn(capacity)
-	}
-	for i := range keys {
-		b := make([]byte, 32)
-		crand.Read(b)
-		keys[i] = string(b)
-		crand.Read(b)
-		values[i] = b
-	}
-
-	var sink []byte
-
-	b.Run("Add/BasicLRU", func(b *testing.B) {
-		cache := NewBasicLRU[int, int](capacity)
-		for i := 0; b.Loop(); i++ {
-			cache.Add(i, i)
-		}
-	})
-	b.Run("Get/BasicLRU", func(b *testing.B) {
-		cache := NewBasicLRU[string, []byte](capacity)
-		for i := range capacity {
-			index := indexes[i]
-			cache.Add(keys[index], values[index])
-		}
-
-		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
-			k := keys[indexes[i%len(indexes)]]
-			v, ok := cache.Get(k)
-			if ok {
-				sink = v
-			}
-		}
-	})
-
-	fmt.Fprintln(io.Discard, sink)
 }

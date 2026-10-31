@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/metrics"
 	"runtime/pprof"
 	"strings"
 	"sync"
@@ -38,7 +39,7 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling
 
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
@@ -47,6 +48,9 @@ var (
 	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+	// CallNoMaterialize runs eth_call on the versioned state path, where reads
+	// go straight to the state reader instead of a resident stateObject.
+	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -57,7 +61,7 @@ var (
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
-	//state v3
+	// state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
@@ -70,7 +74,9 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
-	// allows to collect reading metrics for kv by file level
+	// allows to collect reading metrics for kv by file level. Read
+	// unsynchronised on every domain read, so it may only be written before any
+	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// allow simultaneous build of multiple snapshot types.
@@ -79,7 +85,7 @@ var (
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
-	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", false)
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
 	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
@@ -112,6 +118,8 @@ var (
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -128,31 +136,46 @@ var (
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
-	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
-	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
-	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
-	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead            = EnvBool("READ_AHEAD", true)
-	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
-	// a would-be blocking page fault becomes a non-blocking read that releases the
-	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
-	// if io_uring is unavailable. Not free when on: each gated .kv file runs a
-	// background goroutine that mincore-rescans it every RESIDENCY_REFRESH_SEC
-	// (default 120s) — a real page-table-walk cost across a full datadir. Experimental,
-	// off by default.
-	FilesAsyncIO = EnvBool("FILES_ASYNC_IO", false)
+	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
+	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
+	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead                     = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers              = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
+	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
+	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 
-	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
-	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+	TraceDeletion = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
+	return max(gomaxprocs, 1)
+}
+
+func BALCommitmentWarmupReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(TrieBALWarmupers, 0)
+}
+
+func ReadAheadWorkerReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(ReadAheadWorkers, 1)
+}
 
 func init() {
 	if PerfProfiles {
@@ -166,6 +189,17 @@ func ReadMemStats(m *runtime.MemStats) {
 		return
 	}
 	runtime.ReadMemStats(m)
+}
+
+// MemUsage returns MemStats.Alloc and MemStats.Sys without the stop-the-world
+// of runtime.ReadMemStats, so it is cheap enough for per-block logs.
+func MemUsage() (alloc, sys uint64) {
+	s := []metrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},
+		{Name: "/memory/classes/total:bytes"},
+	}
+	metrics.Read(s)
+	return s[0].Value.Uint64(), s[1].Value.Uint64()
 }
 
 func DiscardCommitment() bool       { return discardCommitment }
@@ -386,12 +420,14 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 	}
 }
 
-var tracedBlocks map[uint64]struct{}
-var traceAllBlocks bool
-var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[unique.Handle[common.Address]]struct{}
-var traceAllDomains bool
-var tracedDomains map[uint16]struct{}
+var (
+	tracedBlocks    map[uint64]struct{}
+	traceAllBlocks  bool
+	tracedTxIndexes map[int64]struct{}
+	tracedAccounts  map[unique.Handle[common.Address]]struct{}
+	traceAllDomains bool
+	tracedDomains   map[uint16]struct{}
+)
 
 var traceInit sync.Once
 

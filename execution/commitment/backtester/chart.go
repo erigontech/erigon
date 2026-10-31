@@ -45,7 +45,7 @@ func renderOverviewPage(agg crossPageAggMetrics, chartsPageFilePaths []string, o
 
 func generateOverviewPage(agg crossPageAggMetrics, chartsPageFilePaths []string) *components.Page {
 	mv := make([]MetricValues, agg.top.Len())
-	for i := len(mv) - 1; i >= 0; i-- {
+	for i := range slices.Backward(mv) {
 		mv[i] = heap.Pop(agg.top).(MetricValues)
 	}
 	page := components.NewPage()

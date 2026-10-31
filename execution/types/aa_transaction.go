@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -27,8 +28,10 @@ const (
 
 const AA_GAS_PENALTY_PCT = 10
 
-var AA_ENTRY_POINT = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
-var AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
+var (
+	AA_ENTRY_POINT    = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
+	AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
+)
 
 type AccountAbstractionTransaction struct {
 	TransactionMisc
@@ -102,6 +105,7 @@ func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
 func (tx *AccountAbstractionTransaction) GetNonce() uint64 {
 	return tx.Nonce
 }
+
 func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
 	return tx.Tip
 }
@@ -114,8 +118,26 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 	return tx.FeeCap
 }
 
+// TotalGasLimit reports whether base plus the declared gas limits fits in a uint64.
+func (tx *AccountAbstractionTransaction) TotalGasLimit(base uint64) (uint64, bool) {
+	total := base
+	for _, gas := range [...]uint64{tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.GasLimit, tx.PostOpGasLimit} {
+		sum, overflow := math.SafeAdd(total, gas)
+		if overflow {
+			return 0, false
+		}
+		total = sum
+	}
+	return total, true
+}
+
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	// Saturate: the interface cannot report overflow, and a wrapped-small total would pass gas checks.
+	total, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return math.MaxUint64
+	}
+	return total
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
@@ -147,10 +169,11 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 }
 
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
+	// No blobHashes: an AA txn carries no blobs, and a non-nil slice would make
+	// the message look blob-carrying to EIP-4844 validation.
 	return &Message{
-		to:         accounts.NilAddress,
-		gasPrice:   *tx.FeeCap,
-		blobHashes: []common.Hash{},
+		to:       accounts.NilAddress,
+		gasPrice: *tx.FeeCap,
 	}, nil
 }
 

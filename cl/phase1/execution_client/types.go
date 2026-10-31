@@ -16,7 +16,11 @@
 
 package execution_client
 
-import "github.com/erigontech/erigon/execution/engineapi/engine_types"
+import (
+	"context"
+
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+)
 
 type PayloadStatus int
 
@@ -26,6 +30,12 @@ const (
 	PayloadStatusInvalidated
 	PayloadStatusValidated
 )
+
+// ValidationInterrupted reports a NewPayload call that ended with the context instead of an EL
+// verdict; such a result must not be recorded as a payload status.
+func ValidationInterrupted(ctx context.Context, status PayloadStatus, err error) bool {
+	return err != nil && status == PayloadStatusNone && ctx.Err() != nil
+}
 
 func newPayloadStatusByEngineStatus(status engine_types.EngineStatus) PayloadStatus {
 	switch status {

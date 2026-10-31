@@ -6,9 +6,9 @@ sidebar_position: 2
 
 # erigon
 
-Erigon provides several RPC namespaces that extend beyond the standard Ethereum JSON-RPC API, exposing Erigon-specific functionality and data structures. The primary Erigon-specific namespace is **`erigon_`** which offer extended blockchain data access methods.
+Erigon provides several RPC namespaces that extend beyond the standard Ethereum JSON-RPC API, exposing Erigon-specific functionality and data structures. The primary Erigon-specific namespace is **`erigon_`**, which offers extended blockchain data access methods.
 
-These methods must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon.
+The namespace is enabled by default; if you set `--http.api`, include `erigon` in the list.
 
 ### Namespace Availability
 
@@ -23,7 +23,7 @@ These methods must be explicitly enabled using the `--http.api` flag when starti
 ### Enhanced Features
 
 * `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
-* `erigon_getLogs` returns enhanced ErigonLog objects with additional metadata like timestamps
+* `erigon_getLogs`, `erigon_getLatestLogs` and `erigon_getLogsByHash` return each log's block time as `blockTimestamp`, the same field as `eth_getLogs`
 * `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
 
 See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
@@ -203,7 +203,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogsByHash","params":["0x1d
 
 | Type  | Description                                               |
 | ----- | --------------------------------------------------------- |
-| Array | Array of arrays of log objects, one array per transaction |
+| Array | Array of arrays of log objects, one array per transaction; each log carries `blockTimestamp` |
 
 ***
 
@@ -228,7 +228,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[{"fromBlock
 
 | Type  | Description                                       |
 | ----- | ------------------------------------------------- |
-| Array | Array of ErigonLog objects with enhanced metadata |
+| Array | Array of RPCLog objects; each carries the block time as `blockTimestamp` |
 
 :::note
 The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamentals/configuring-erigon#rpc--api) (default `20000`). Set to `0` to remove the limit. The block range of the query is independently capped by `--rpc.blockrange.limit` (default `1000`).
@@ -238,7 +238,7 @@ The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamenta
 
 ## **erigon\_getLatestLogs**
 
-Returns the latest logs matching a filter criteria in descending order with advanced pagination and topic matching options.
+Returns the latest logs matching the filter criteria in descending order with advanced pagination and topic matching options.
 
 **Parameters**
 
@@ -258,7 +258,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLatestLogs","params":[{"add
 
 | Type  | Description                                                  |
 | ----- | ------------------------------------------------------------ |
-| Array | Array of ErigonLog objects in descending chronological order |
+| Array | Array of RPCLog objects in descending chronological order; each carries `blockTimestamp` |
 
 :::note
 The number of logs returned is capped by [`--rpc.logs.maxresults`](../fundamentals/configuring-erigon#rpc--api) (default `20000`). Set to `0` to remove the limit.
