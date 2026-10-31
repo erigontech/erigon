@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/pprof"
+	"runtime/trace"
 	"slices"
 	"strings"
 	"sync"
@@ -365,6 +366,15 @@ func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfi
 	var mu sync.Mutex
 	return func(kind, id string) func() {
 		mu.Lock()
+		if traceDir := os.Getenv("EVM_TRACE_DIR"); traceDir != "" {
+			if f, err := os.Create(profileFilename(traceDir, kind, id, "trace")); err == nil && trace.Start(f) == nil {
+				return func() {
+					defer mu.Unlock()
+					trace.Stop()
+					f.Close()
+				}
+			}
+		}
 		var cpuFile, wallFile *os.File
 		var stopFgprof func() error
 		if cpuDir != "" {
