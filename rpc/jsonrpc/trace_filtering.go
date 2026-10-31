@@ -768,7 +768,7 @@ func (api *TraceAPIImpl) callBlock(
 	// The block-start system calls come before tx 0, as block execution runs them.
 	ibs.SetTxContext(block.NumberU64(), -1)
 
-	logger := log.New("trace_filtering")
+	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
@@ -1082,7 +1082,7 @@ func (api *TraceAPIImpl) callTransaction(
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 
-	logger := log.New("trace_filtering")
+	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
