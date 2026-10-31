@@ -359,7 +359,7 @@ func TestBackwardBlockDownloader_HeaderRangeFailuresDoNotMarkPeersMissing(t *tes
 	tracker := NewPeerTracker(logger, nil)
 	tracker.PeerConnected(PeerIdFromUint64(1))
 	tracker.PeerConnected(PeerIdFromUint64(2))
-	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, tracker), &PeerPenalizer{}, tracker, t.TempDir())
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, tracker), tracker, t.TempDir())
 	collector := etl.NewCollector("test", t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer collector.Close()
 	peers := newPeersContext([]*PeerId{PeerIdFromUint64(2), PeerIdFromUint64(1)})
