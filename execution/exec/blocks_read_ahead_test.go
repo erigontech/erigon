@@ -956,3 +956,42 @@ func TestBlockReadAheaderWaitForRunningWarmup(t *testing.T) {
 	bra.WaitForRunningWarmup(ctx)
 	require.NoError(t, ctx.Err(), "waited for the suspension")
 }
+
+type blockedBeginRoDB struct {
+	kv.RoDB
+	started chan struct{}
+}
+
+func (db *blockedBeginRoDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	select {
+	case db.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	db := &blockedBeginRoDB{started: make(chan struct{}, 1)}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	body := &types.Body{Transactions: types.Transactions{types.NewTransaction(0, common.Address{19: 1}, nil, 0, nil, nil)}}
+	bra := NewBlockReadAheader()
+	bra.AddHeaderAndBody(t.Context(), db, struct{ kv.Getter }{}, header, body)
+	<-db.started
+
+	waited := make(chan struct{})
+	go func() {
+		bra.WaitForRunningWarmup(t.Context())
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("returned while the body warmup was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	bra.CancelWarmup()
+	<-waited
+}
