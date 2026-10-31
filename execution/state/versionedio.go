@@ -1696,8 +1696,6 @@ func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield f
 	return true
 }
 
-// AllHeaders visits the type-agnostic header of every write; the value is read
-// typed-by-path from the per-path maps, so nothing is erased to an interface.
 func (ws *WriteSet) txIndex() int {
 	for h := range ws.AllHeaders() {
 		return h.Version.TxIndex
@@ -1705,6 +1703,8 @@ func (ws *WriteSet) txIndex() int {
 	panic("write stamp: empty write set")
 }
 
+// AllHeaders visits the type-agnostic header of every write; the value is read
+// typed-by-path from the per-path maps, so nothing is erased to an interface.
 func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 	return func(yield func(WriteHeader) bool) {
 		if ws == nil {
