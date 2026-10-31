@@ -184,6 +184,29 @@ func TestQueuedUnknownParentBlockStartsELColumnsImportOnce(t *testing.T) {
 	require.Len(t, started, 1)
 }
 
+// Equivocating blocks of one proposer and slot, queued on the same unknown parent, start a single EL import.
+func TestQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
+	service, child, _, root, job := parkUnknownParentBlockForRetry(t, true)
+	encoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(service.beaconCfg, child.Version())
+	require.NoError(t, other.DecodeSSZ(encoded, int(child.Version())))
+	other.Block.Body.Graffiti = common.Hash{0x01}
+	otherJob, _ := service.scheduleBlockForLaterProcessing(other, nil, false)
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, child.Block.ProposerIndex, other.Block.ProposerIndex)
+	require.NotEqual(t, root, common.Hash(otherRoot))
+	started := 0
+	service.startELColumnsImport = func(context.Context, *cltypes.SignedBeaconBlock) { started++ }
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	service.processScheduledBlock(t.Context(), otherRoot, otherJob, time.Now())
+
+	require.ErrorIs(t, otherJob.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Equal(t, 1, started)
+}
+
 func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
 	service, _, _, root, job := parkUnknownParentBlockForRetry(t, false)
 	started := 0

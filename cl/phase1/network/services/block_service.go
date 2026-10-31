@@ -79,7 +79,6 @@ type blockJob struct {
 	retryDelay          time.Duration
 	storageErrorLogged  bool
 	finishPayloadImport func()
-	elColumnsStarted    atomic.Bool
 }
 
 type blockJobAttempt struct {
@@ -203,6 +202,9 @@ type blockService struct {
 	validationCache *lru.Cache[blockValidationContextKey, *blockValidationContext]
 	validationCalls map[blockValidationContextKey]*blockValidationContextCall
 	validationSlots chan struct{}
+	// proposer and slot of the blocks whose EL column import has started
+	elImportsStarted *lru.Cache[proposerIndexAndSlot, struct{}]
+	elImportsMu      sync.Mutex
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
@@ -249,18 +251,23 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
+	elImportsStarted, err := lru.New[proposerIndexAndSlot, struct{}]("el_column_imports", seenBlockCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	b := &blockService{
-		forkchoiceStore: forkchoiceStore,
-		syncedData:      syncedData,
-		ethClock:        ethClock,
-		beaconCfg:       beaconCfg,
-		seenBlocksCache: seenBlocksCache,
-		reservations:    make(map[proposerIndexAndSlot]*blockReservation),
-		validationCache: validationCache,
-		validationCalls: make(map[blockValidationContextKey]*blockValidationContextCall),
-		validationSlots: make(chan struct{}, maxConcurrentBlockValidationContexts),
-		emitter:         emitter,
-		db:              db,
+		forkchoiceStore:  forkchoiceStore,
+		syncedData:       syncedData,
+		ethClock:         ethClock,
+		beaconCfg:        beaconCfg,
+		seenBlocksCache:  seenBlocksCache,
+		reservations:     make(map[proposerIndexAndSlot]*blockReservation),
+		validationCache:  validationCache,
+		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
+		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
+		elImportsStarted: elImportsStarted,
+		emitter:          emitter,
+		db:               db,
 	}
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
@@ -296,7 +303,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
-	b.startELColumnsImport(ctx, msg)
+	b.startELColumnsImportOnce(ctx, msg)
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if waitsForBlockDependency(err) {
 			b.ScheduleBlockForLaterProcessing(msg)
@@ -314,6 +321,21 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	return nil
+}
+
+// startELColumnsImportOnce starts the EL column import for the first block of a proposer and slot only, so equivocating
+// blocks and retries of a queued block do not repeat the getBlobs call and the column work.
+func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+	key := blockGossipKey(block)
+	b.elImportsMu.Lock()
+	started := b.elImportsStarted.Contains(key)
+	if !started {
+		b.elImportsStarted.Add(key, struct{}{})
+	}
+	b.elImportsMu.Unlock()
+	if !started {
+		b.startELColumnsImport(ctx, block)
+	}
 }
 
 // importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
@@ -1206,9 +1228,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
 				}
 				authenticated = true
-				if job.elColumnsStarted.CompareAndSwap(false, true) {
-					b.startELColumnsImport(ctx, job.block)
-				}
+				b.startELColumnsImportOnce(ctx, job.block)
 			}
 			return b.processAndStoreBlock(ctx, job.block)
 		}
