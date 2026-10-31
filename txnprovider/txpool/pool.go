@@ -78,12 +78,12 @@ const txMaxBroadcastSize = 4 * 1024
 //go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
 type Pool interface {
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
-	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) (Hashes, *RemoteTxnsResult)
+	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, previous *RemoteTxnsResult) (Hashes, *RemoteTxnsResult)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
-	P2PRetry(ctx context.Context, hashes Hashes, seenRevision uint64) (revision uint64, retry bool, err error)
+	P2PRetry(ctx context.Context, tx kv.Tx, hashes Hashes, seenRevision uint64) (revision uint64, retry bool, err error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
@@ -105,7 +105,7 @@ type remoteSource struct {
 }
 
 type RemoteTxnsResult struct {
-	invalidSidecar atomic.Bool
+	invalidSidecar *atomic.Bool
 	incomplete     atomic.Bool
 }
 
@@ -662,12 +662,12 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 
 // P2PRetry checks cached hashes while leaving sidecar failures to the packet verdict.
 // Nonce-gap retries require new progress beyond each packet's recorded revision.
-func (p *TxPool) P2PRetry(ctx context.Context, hashes Hashes, seenRevision uint64) (revision uint64, retry bool, err error) {
+func (p *TxPool) P2PRetry(ctx context.Context, tx kv.Tx, hashes Hashes, seenRevision uint64) (revision uint64, retry bool, err error) {
 	if len(hashes) == 0 {
 		return p.nonceRetryRevision.Load(), false, nil
 	}
 	p.lock.Lock()
-	retry, needsView, err := p.p2pRetryLocked(hashes, seenRevision, nil)
+	retry, needsView, err := p.p2pRetryLocked(tx, hashes, seenRevision, nil)
 	revision = p.nonceRetryRevision.Load()
 	p.lock.Unlock()
 	if err != nil || retry || !needsView {
@@ -675,14 +675,14 @@ func (p *TxPool) P2PRetry(ctx context.Context, hashes Hashes, seenRevision uint6
 	}
 	err = p.withLockedState(ctx, nil, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var checkErr error
-		retry, _, checkErr = p.p2pRetryLocked(hashes, seenRevision, view)
+		retry, _, checkErr = p.p2pRetryLocked(tx, hashes, seenRevision, view)
 		revision = p.nonceRetryRevision.Load()
 		return checkErr
 	})
 	return revision, retry, err
 }
 
-func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache.CacheView) (retry, needsView bool, err error) {
+func (p *TxPool) p2pRetryLocked(tx kv.Tx, hashes Hashes, seenRevision uint64, view kvcache.CacheView) (retry, needsView bool, err error) {
 	if p.cfg.NoGossip {
 		return false, false, nil
 	}
@@ -694,7 +694,11 @@ func (p *TxPool) p2pRetryLocked(hashes Hashes, seenRevision uint64, view kvcache
 		record, found := p.discardReasonsLRU.Get(hash)
 		if !found {
 			if _, rejected := p.precheckLRU.Get(hash); !rejected {
-				retry = true
+				known, err := tx.Has(kv.PoolTransaction, hashes[i:i+32])
+				if err != nil {
+					return false, false, err
+				}
+				retry = retry || !known
 			}
 			continue
 		}
@@ -1081,7 +1085,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) (submitted Hashes, result *RemoteTxnsResult) {
+func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, previous *RemoteTxnsResult) (submitted Hashes, result *RemoteTxnsResult) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -1092,7 +1096,15 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if previous != nil && previous.invalidSidecar.Load() {
+		return nil, nil
+	}
 	result = new(RemoteTxnsResult)
+	if previous != nil {
+		result.invalidSidecar = previous.invalidSidecar
+	} else {
+		result.invalidSidecar = new(atomic.Bool)
+	}
 	src := remoteSource{peerID: peerID, sentry: sentry, result: result}
 	for i, txn := range newTxns.Txns {
 		hashS := string(txn.IDHash[:])

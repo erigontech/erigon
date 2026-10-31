@@ -53,7 +53,7 @@ func TestProcessRemoteTxnsDoesNotLeakSenderIDsForRejectedTxns(t *testing.T) {
 	idsBefore, addrsBefore := len(pool.senders.senderIDs), len(pool.senders.senderID2Addr)
 	pool.lock.Unlock()
 
-	pool.AddRemoteTxns(ctx, slots, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
+	pool.AddRemoteTxns(ctx, slots, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil, nil)
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	pool.lock.Lock()

@@ -464,7 +464,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 				Id:     tt.id,
 				Data:   tt.data,
 				PeerId: peerID,
-			}, sentryClient)
+			}, sentryClient, nil)
 			require.NoError(t, err, "malformed message should be handled gracefully (penalize + return nil)")
 		})
 	}
@@ -535,7 +535,7 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 				Id:     tt.id,
 				Data:   tt.data,
 				PeerId: peerID,
-			}, sentryClient)
+			}, sentryClient, nil)
 			require.NoError(t, err, "oversized announcement should be handled gracefully")
 		})
 	}
@@ -717,7 +717,7 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 		Id:     sentryproto.MessageId_TRANSACTIONS_66,
 		Data:   validPayload,
 		PeerId: peerID,
-	}, sentryClient)
+	}, sentryClient, nil)
 	require.Error(t, err, "internal DB error should be propagated, not swallowed")
 }
 
@@ -820,7 +820,7 @@ func TestFetchRepeatedHashesShareAdmissionAttempt(t *testing.T) {
 					entry, err = fetch.handleInboundMessageWithTx(ctx, tx, &sentryproto.InboundMessage{
 						Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, PeerId: peerID,
 						Data: EncodePooledTransactions66(encodeFetchTestTransactions(t, txns...), 1, nil),
-					}, client)
+					}, client, nil)
 					return err
 				}))
 				return entry
@@ -846,12 +846,16 @@ func TestFetchRepeatedHashesShareAdmissionAttempt(t *testing.T) {
 			reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnderPriced, txpoolcfg.UnderPriced}, reasons)
-			_, retry, err = entry.retry(ctx, pool)
-			require.NoError(t, err)
+			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+				_, retry, err = entry.retry(ctx, tx, pool)
+				return err
+			}))
 			require.False(t, retry, "repeated hashes cannot reuse an admission attempt's nonce progress")
 			pool.discardReasonsLRU.Purge()
-			_, retry, err = entry.retry(ctx, pool)
-			require.NoError(t, err)
+			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+				_, retry, err = entry.retry(ctx, tx, pool)
+				return err
+			}))
 			require.True(t, retry, "a precheck cannot outlive the real discard record it did not own")
 			require.Empty(t, sent)
 			require.Empty(t, penalties)
@@ -1445,6 +1449,111 @@ func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
 	}
 }
 
+func TestFetchRetainsPendingSidecarVerdictAcrossRetries(t *testing.T) {
+	for _, duringParse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("during_parse=%t", duringParse), func(t *testing.T) {
+			ctx := t.Context()
+			pool, good, badWire, goodWire, _ := newFetchBlobRetryFixture(t, 0)
+			pool.cfg.MaxNonceGap = 64
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			updateP2PRetryNonce(t, pool, sender, 2, 2)
+			var signed []types.Transaction
+			for _, nonce := range []uint64{66, 0, 1} {
+				txn := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000).Txn.(*types.DynamicFeeTransaction)
+				txn.ChainID = pool.chainID
+				signedTxn, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), key)
+				require.NoError(t, err)
+				signed = append(signed, signedTxn)
+			}
+			addFetchTestLocalTransactions(t, pool, signed[0])
+			hash := signed[0].Hash()
+			blobHash := good.Hash()
+			body := EncodePooledTransactions66([][]byte{encodeFetchTestTransactions(t, signed[0])[0], badWire}, 1, nil)
+			client, sent, _ := newFetchTestClient(t)
+			var wg sync.WaitGroup
+			fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+			parses := countFetchTestParses(fetch)
+			var validationReasons []txpoolcfg.DiscardReason
+			var validationErr error
+			validateRLP := fetch.pooledTxnsParseCtx.validateRlp
+			fetch.pooledTxnsParseCtx.ValidateRLP(func(rlp []byte) error {
+				if err := validateRLP(rlp); err != nil {
+					return err
+				}
+				if duringParse && parses() == 3 {
+					validationReasons, validationErr = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+				}
+				return nil
+			})
+			reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
+			retryReply := &sentryproto.InboundMessage{
+				Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: gointerfaces.ConvertHashToH512([64]byte{2}),
+			}
+			receiveFetchTestMessages(t, fetch, client,
+				func() *sentryproto.InboundMessage { return reply },
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+					require.Equal(t, [32]byte(blobHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
+					updateP2PRetryNonce(t, pool, sender, 0, 3)
+					require.NotContains(t, pool.byHash, string(hash[:]))
+					record, found := pool.discardReasonsLRU.Peek(string(hash[:]))
+					require.True(t, found)
+					require.Equal(t, txpoolcfg.NonceTooDistant, record.reason)
+					addFetchTestLocalTransactions(t, pool, signed[1:]...)
+					return retryReply
+				},
+				func() *sentryproto.InboundMessage {
+					if duringParse {
+						require.NoError(t, validationErr)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, validationReasons)
+						require.Empty(t, pool.unprocessedRemoteTxns.Txns, "an invalid-sidecar verdict during parsing must prevent requeue")
+						require.NotContains(t, pool.byHash, string(hash[:]))
+					} else {
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
+						require.Equal(t, [32]byte(hash), pool.unprocessedRemoteTxns.Txns[1].IDHash)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success}, reasons)
+						require.Contains(t, pool.byHash, string(hash[:]))
+					}
+					require.Equal(t, int64(4), parses())
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+					require.NotContains(t, pool.byHash, string(blobHash[:]))
+					return retryReply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns, "a late invalid-sidecar verdict must survive replacement of the cached attempt")
+					require.Equal(t, int64(4), parses())
+					return &sentryproto.InboundMessage{
+						Id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+						Data: EncodePooledTransactions66([][]byte{encodeFetchTestTransactions(t, signed[0])[0], goodWire}, 1, nil), PeerId: retryReply.PeerId,
+					}
+				},
+				func() *sentryproto.InboundMessage {
+					expectedReasons := []txpoolcfg.DiscardReason{txpoolcfg.Success}
+					if duringParse {
+						expectedReasons = append(expectedReasons, txpoolcfg.Success)
+					}
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, len(expectedReasons))
+					last := pool.unprocessedRemoteTxns.Txns[len(expectedReasons)-1]
+					require.Equal(t, [32]byte(blobHash), last.IDHash)
+					require.Equal(t, byte(1), last.BlobBundles[0].Blob[31])
+					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					require.NoError(t, err)
+					require.Equal(t, expectedReasons, reasons)
+					require.Contains(t, pool.byHash, string(blobHash[:]))
+					require.Contains(t, pool.byHash, string(hash[:]))
+					return nil
+				},
+			)
+			require.Equal(t, int64(6), parses())
+			require.Empty(t, sent)
+		})
+	}
+}
+
 func TestFetchRetriesMixedHonestPacketAfterNonceProgressAndQueuedSidecarFailure(t *testing.T) {
 	ctx := t.Context()
 	pool, good, badWire, goodWire, key := newFetchBlobRetryFixture(t, 65)
@@ -1651,4 +1760,99 @@ func TestFetchRevalidatesBodiesAfterRejectionHistoryEviction(t *testing.T) {
 	require.Equal(t, int64(4), parses())
 	require.Empty(t, sent)
 	require.Empty(t, penalties)
+}
+
+func TestFetchRetriesDiscardedBodyAfterDatabaseDeletion(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("persisted=%t", persisted), func(t *testing.T) {
+			ctx := t.Context()
+			pool, db, signed, _ := newFetchTestTransactions(t, 0, 1)
+			addFetchTestLocalTransactions(t, pool, signed...)
+			if persisted {
+				_, err := pool.flushNoFsync(ctx)
+				require.NoError(t, err)
+			}
+			history, err := simplelru.NewLRU[string, discardRecord](1, nil)
+			require.NoError(t, err)
+			pool.discardReasonsLRU = history
+			discard := func(txn types.Transaction) {
+				t.Helper()
+				hash := txn.Hash()
+				pool.lock.Lock()
+				mt := pool.byHash[string(hash[:])]
+				pool.removeFromSubPool(mt, "test")
+				pool.discardLocked(mt, discardRecord{reason: txpoolcfg.PendingPoolOverflow})
+				pool.lock.Unlock()
+			}
+			hash := signed[0].Hash()
+			discard(signed[0])
+			body := EncodePooledTransactions66(encodeFetchTestTransactions(t, signed[0]), 1, nil)
+			client, sent, penalties := newFetchTestClient(t)
+			var wg sync.WaitGroup
+			fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+			parses := countFetchTestParses(fetch)
+			reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
+			receiveFetchTestMessages(t, fetch, client,
+				func() *sentryproto.InboundMessage { return reply },
+				func() *sentryproto.InboundMessage {
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+					require.Equal(t, int64(1), parses())
+					discard(signed[1])
+					require.False(t, history.Contains(string(hash[:])))
+					require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+						has, err := tx.Has(kv.PoolTransaction, hash[:])
+						require.NoError(t, err)
+						require.Equal(t, persisted, has)
+						known, err := pool.IdHashKnown(tx, hash[:])
+						require.NoError(t, err)
+						require.Equal(t, persisted, known)
+						return nil
+					}))
+					return reply
+				},
+				func() *sentryproto.InboundMessage {
+					if persisted {
+						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+						require.Equal(t, int64(1), parses(), "a retained database row must suppress reparsing after discard-history eviction")
+					} else {
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "evicted history must allow retry when the database row is absent")
+						require.Equal(t, int64(2), parses())
+					}
+					return reply
+				},
+				func() *sentryproto.InboundMessage {
+					if persisted {
+						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+						require.Equal(t, int64(1), parses())
+						_, err := pool.flushNoFsync(ctx)
+						require.NoError(t, err)
+						require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+							has, err := tx.Has(kv.PoolTransaction, hash[:])
+							require.NoError(t, err)
+							require.False(t, has)
+							known, err := pool.IdHashKnown(tx, hash[:])
+							require.NoError(t, err)
+							require.False(t, known)
+							return nil
+						}))
+					}
+					return reply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+					require.Equal(t, int64(2), parses())
+					require.NoError(t, pool.processRemoteTxns(ctx))
+					require.Contains(t, pool.byHash, string(hash[:]))
+					return reply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+					return nil
+				},
+			)
+			require.Equal(t, int64(2), parses())
+			require.Empty(t, sent)
+			require.Empty(t, penalties)
+		})
+	}
 }

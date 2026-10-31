@@ -346,11 +346,11 @@ func (entry bodyCacheEntry) hasInvalidSidecar() bool {
 	return entry.result != nil && entry.result.invalidSidecar.Load()
 }
 
-func (entry bodyCacheEntry) retry(ctx context.Context, pool Pool) (revision uint64, retry bool, err error) {
+func (entry bodyCacheEntry) retry(ctx context.Context, tx kv.Tx, pool Pool) (revision uint64, retry bool, err error) {
 	if entry.hasInvalidSidecar() {
 		return entry.revision, false, nil
 	}
-	revision, retry, err = pool.P2PRetry(ctx, entry.hashes, entry.revision)
+	revision, retry, err = pool.P2PRetry(ctx, tx, entry.hashes, entry.revision)
 	// Unvalidated hashes have not used this packet's nonce-progress opportunity.
 	if err == nil && !retry {
 		unvalidated := entry.unsubmitted
@@ -358,7 +358,7 @@ func (entry bodyCacheEntry) retry(ctx context.Context, pool Pool) (revision uint
 			unvalidated = entry.hashes
 		}
 		if len(unvalidated) > 0 {
-			revision, retry, err = pool.P2PRetry(ctx, unvalidated, 0)
+			revision, retry, err = pool.P2PRetry(ctx, tx, unvalidated, 0)
 		}
 	}
 	if entry.hasInvalidSidecar() {
@@ -468,6 +468,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 					defer f.wg.Done()
 				}
 				var revision uint64
+				var previous *RemoteTxnsResult
 				cacheable := isBody(req)
 				key := bodyCacheKey{}
 				if cacheable {
@@ -476,16 +477,17 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 					var retry bool
 					var err error
 					if found {
-						revision, retry, err = entry.retry(streamCtx, f.pool)
+						previous = entry.result
+						revision, retry, err = entry.retry(streamCtx, tx, f.pool)
 						if err == nil && !retry {
 							return
 						}
 					} else {
-						revision, _, err = f.pool.P2PRetry(streamCtx, nil, 0)
+						revision, _, err = f.pool.P2PRetry(streamCtx, tx, nil, 0)
 					}
 					cacheable = err == nil
 				}
-				entry, handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient)
+				entry, handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient, previous)
 				if handleErr != nil {
 					if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
 						f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
@@ -541,7 +543,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 }
 
 // Non-nil hashes permit caching, including immutable rejections and empty packets.
-func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (entry bodyCacheEntry, err error) {
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, previous *RemoteTxnsResult) (entry bodyCacheEntry, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -686,6 +688,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
 		entry.hashes = Hashes{}
+		entry.result = previous
 		txns := TxnSlots{}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
@@ -760,7 +763,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 		var submitted Hashes
 		if len(txns.Txns) > 0 {
-			submitted, entry.result = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
+			var result *RemoteTxnsResult
+			submitted, result = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient, previous)
+			if result != nil {
+				entry.result = result
+			}
 		}
 		var submittedIDs map[common.Hash]struct{}
 		for i, next := 0, 0; i < len(entry.hashes); i += 32 {
