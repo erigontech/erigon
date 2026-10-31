@@ -884,6 +884,36 @@ func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
 		"a revival write after the destruct re-creates the account — the read stays valid")
 }
 
+// TestValidateRead_BALStorage_InvalidatedByInRangeRemoval pins the consensus fix: on a
+// BAL block, a storage slot served from the committed origin is trusted only while the
+// account lives. A Done self-destruct between the origin read and the validating tx wipes
+// the slot, so the origin read is stale and must invalidate — EIP-7928 carries no removal
+// field, so the BAL exemption cannot cover an in-range removal. Fails on main (which
+// validates the origin read), passes here.
+func TestValidateRead_BALStorage_InvalidatedByInRangeRemoval(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(123)
+	key := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+	// Committed-origin slot value (seeded at originIndex) and a Done self-destruct at tx 3.
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: originIndex, Incarnation: 0}, *uint256.NewInt(7), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 3, Incarnation: 0}, true, true)
+
+	// Tx 5 read the slot cold, served from the origin at {originIndex, 0}.
+	io := NewVersionedIO(6)
+	rs := ReadSet{}
+	rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex, Incarnation: 0}},
+		Val:        *uint256.NewInt(7),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
+		"a slot wiped by an in-range self-destruct must invalidate the committed-origin read, even on a BAL block")
+}
+
 // A revival writes SelfDestruct=false above the destruct and no nonce, so a nonce read
 // from before the destruct is stale; one rewritten after the destruct stays valid.
 func TestValidateRead_NonceBeforeDestructStaleAfterRevival(t *testing.T) {
