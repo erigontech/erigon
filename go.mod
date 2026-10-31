@@ -73,7 +73,7 @@ require (
 	github.com/mark3labs/mcp-go v1.4.0
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
-	github.com/maypok86/otter/v2 v2.3.1-0.20261014230019-58758580496f
+	github.com/maypok86/otter/v2 v2.4.0
 	github.com/miekg/dns v1.1.73
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
