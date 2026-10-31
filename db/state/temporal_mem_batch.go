@@ -690,8 +690,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return fmt.Errorf("can't merge %T into *TemporalMemBatch", o)
 	}
 
-	for domain, otherShards := range other.domains {
-		for sh, otherEntries := range otherShards {
+	for domain := range other.domains {
+		for sh, otherEntries := range other.domains[domain] {
 			maps.Copy(sd.domains[domain][sh], otherEntries)
 		}
 	}
