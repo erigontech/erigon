@@ -101,6 +101,7 @@ service Sentinel {
     rpc SetStatus(Status) returns(EmptyMessage); // Set status for peer filtering.
     rpc GetPeers(EmptyMessage) returns (PeerCount);
     rpc BanPeer(Peer) returns(EmptyMessage);
+    rpc BanPeerForInvalidData(Peer) returns(EmptyMessage);
     rpc UnbanPeer(Peer) returns(EmptyMessage);
     rpc PenalizePeer(Peer) returns(EmptyMessage);
     rpc RewardPeer(Peer) returns(EmptyMessage);
