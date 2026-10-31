@@ -30,13 +30,11 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -321,132 +319,105 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	if txn.Type() == types.AccountAbstractionTxType {
-		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
+	var sharedDomains *execctx.SharedDomains
+	defer func() {
+		if sharedDomains != nil {
+			sharedDomains.Close()
+		}
+	}()
+
+	var stateWriter state.StateWriter
+
+	if calculatePostState && postState.CommitmentHistory {
+		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 		if err != nil {
 			return nil, err
 		}
 
-		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, cfg)
-		evm = vm.NewEVM(blockContext, evmtypes.TxContext{}, genEnv.ibs, cfg, vm.Config{})
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, genEnv.ibs, genEnv.gp, header, evm, cfg)
+		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
 		if err != nil {
 			return nil, err
 		}
 
-		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-		defer cancel()
-		defer context.AfterFunc(ctx, evm.Cancel)()
-
-		status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, genEnv.gp, evm, header, genEnv.ibs)
+		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 
-		logs := genEnv.ibs.GetLogs(genEnv.ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-		receipt = aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(genEnv.ibs.TxnIndex()), logs)
-	} else {
-		var sharedDomains *execctx.SharedDomains
-		defer func() {
-			if sharedDomains != nil {
-				sharedDomains.Close()
-			}
-		}()
-
-		var stateWriter state.StateWriter
-
-		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
-			if err != nil {
-				return nil, err
-			}
-
-			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
-			if err != nil {
-				return nil, err
-			}
-
-			minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-
-			// commitment is indexed by txNum of the first tx (system-tx) of the block
-			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
-			if err != nil {
-				return nil, err
-			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
-
-			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
-			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
-			defer cancel()
-			defer context.AfterFunc(ctx, evm.Cancel)()
-
-			// re-run previous txs of the blocks
-			for txnIndex := range index {
-				currTxn := postState.Txns[txnIndex]
-
-				genEnv.ibs.SetTxContext(blockNum, txnIndex)
-				_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
-				if err != nil {
-					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
-				}
-				if evm.Cancelled() {
-					return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
-				}
-
-				if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-					return nil, fmt.Errorf("CommitBlock failed: %w", err)
-				}
-			}
-
-			genEnv.ibs.SetTxContext(blockNum, index)
-		} else {
-			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
-			if err != nil {
-				return nil, err
-			}
-			stateWriter = genEnv.noopWriter
+		// commitment is indexed by txNum of the first tx (system-tx) of the block
+		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
+		latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+		if err != nil {
+			return nil, err
 		}
+		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
 		defer context.AfterFunc(ctx, evm.Cancel)()
 
-		receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
-		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
-		}
+		// re-run previous txs of the blocks
+		for txnIndex := range index {
+			currTxn := postState.Txns[txnIndex]
 
-		if calculatePostState {
+			genEnv.ibs.SetTxContext(blockNum, txnIndex)
+			_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
+			if err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
+			}
+			if evm.Cancelled() {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
+			}
+
 			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
 				return nil, fmt.Errorf("CommitBlock failed: %w", err)
 			}
-
-			// calculate state root after tx identified by txNum (txNim+1)
-			var stateRoot []byte
-			if postState.CommitmentHistory {
-				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
-				if err != nil {
-					return nil, err
-				}
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
-				if err != nil {
-					return nil, err
-				}
-			} else { // use state history to compute commitment
-				stateRoot, err = g.computeCommitmentFromStateHistory(ctx, tx, blockNum, txNum)
-				if err != nil {
-					return nil, err
-				}
-			}
-			receipt.PostState = stateRoot
 		}
+
+		genEnv.ibs.SetTxContext(blockNum, index)
+	} else {
+		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
+		if err != nil {
+			return nil, err
+		}
+		stateWriter = genEnv.noopWriter
+	}
+
+	evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
+	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
+	defer cancel()
+	defer context.AfterFunc(ctx, evm.Cancel)()
+
+	receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
+	if err != nil {
+		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
+	}
+
+	if calculatePostState {
+		if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
+			return nil, fmt.Errorf("CommitBlock failed: %w", err)
+		}
+
+		// calculate state root after tx identified by txNum (txNim+1)
+		var stateRoot []byte
+		if postState.CommitmentHistory {
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
+			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
+				return nil, err
+			}
+			stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
+			if err != nil {
+				return nil, err
+			}
+		} else { // use state history to compute commitment
+			stateRoot, err = g.computeCommitmentFromStateHistory(ctx, tx, blockNum, txNum)
+			if err != nil {
+				return nil, err
+			}
+		}
+		receipt.PostState = stateRoot
 	}
 
 	if evm.Cancelled() {
@@ -466,7 +437,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	g.addToCacheReceipt(txNum, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
-		g.assertEqualReceipts(receipt, receiptFromDB)
+		g.assertEqualReceipts(receipt, receiptFromDB, txn)
 	}
 	return receipt, nil
 }
@@ -566,7 +537,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.AssertEnabled && receiptsFromDB != nil {
 			for i, receipt := range receipts {
 				if i < len(receiptsFromDB) {
-					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+					g.assertEqualReceipts(receipt, receiptsFromDB[i], block.Transactions()[i])
 				}
 			}
 		}
@@ -652,7 +623,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.AssertEnabled && receiptsFromDB != nil {
 			for i, receipt := range receipts {
 				if i < len(receiptsFromDB) {
-					g.assertEqualReceipts(receipt, receiptsFromDB[i])
+					g.assertEqualReceipts(receipt, receiptsFromDB[i], block.Transactions()[i])
 				}
 			}
 		}
@@ -672,7 +643,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	return receipts, nil
 }
 
-func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
+func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, txn types.Transaction) {
 	toJson := func(v any) string {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -682,6 +653,8 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	}
 
 	generated := fromExecution.Copy()
+	// Blob gas is derived from the transaction and is not stored in the receipt cache.
+	fromDB.BlobGasUsed = txn.GetBlobGas()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
 		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
 	}

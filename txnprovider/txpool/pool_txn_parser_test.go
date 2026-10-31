@@ -79,6 +79,43 @@ func TestParseTransactionRLP(t *testing.T) {
 	}
 }
 
+func TestFrameSerializedSizeLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dataSize int
+		wrapped  bool
+		tooLarge bool
+	}{
+		{"plain", 0, false, false},
+		{"large plain", 128 * 1024, false, true},
+		{"blob sidecar", 0, true, false},
+		{"large wrapped body", 128 * 1024, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := framePoolSlot(t, common.Address{1}, 1, 2).Txn.(*types.FrameTransaction)
+			frame.Frames[0].Data = make([]byte, tc.dataSize)
+			var encoded bytes.Buffer
+			if tc.wrapped {
+				frame.BlobVersionedHashes = []common.Hash{{1}}
+				wrapped := &types.FrameTxWrapper{FrameTransaction: frame, WrapperVersion: 1, Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, 128)}
+				require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+			} else {
+				require.NoError(t, frame.MarshalBinary(&encoded))
+			}
+			enveloped, err := rlp.EncodeToBytes(encoded.Bytes())
+			require.NoError(t, err)
+			for _, payload := range [][]byte{encoded.Bytes(), enveloped} {
+				err := ValidateSerializedTxn(payload)
+				if tc.tooLarge {
+					require.ErrorIs(t, err, ErrRlpTooBig)
+				} else {
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
+}
+
 func TestTransactionSignatureValidity1(t *testing.T) {
 	chainId := new(uint256.Int).SetUint64(1)
 	ctx := NewTxnParseContext(*chainId)

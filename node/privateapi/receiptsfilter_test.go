@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -471,4 +472,14 @@ func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 			assert.Equal(t, tc.wantPrice, gointerfaces.ConvertH256ToUint256Int(reply.BlobGasPrice))
 		})
 	}
+}
+
+func TestFrameReceiptSubscription(t *testing.T) {
+	payer := common.Address{1}
+	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1}}}
+	aggregator := &ReceiptsFilterAggregator{}
+	notification := aggregator.receiptNotificationToProto(&notifications.ReceiptNotification{Receipt: receipt})
+	result := ethutils.MarshalSubscribeReceipt(notification)
+	require.Equal(t, &payer, result.Payer)
+	require.Len(t, result.FrameReceipts, 1)
 }

@@ -219,6 +219,13 @@ func init() {
 	cAms.AmsterdamTime = common.NewUint64(0)
 	Forks["Amsterdam"] = cAms
 
+	cBogota := configCopy(cAms)
+	cBogota.BogotaTime = common.NewUint64(15_000)
+	Forks["AmsterdamToBogotaAtTime15k"] = cBogota
+	cBogota = configCopy(cBogota)
+	cBogota.BogotaTime = common.NewUint64(0)
+	Forks["Bogota"] = cBogota
+
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)
 	c.Bpo3Time = common.NewUint64(15_000)

@@ -1715,8 +1715,7 @@ func TestNoBALSkipsAccessRecording(t *testing.T) {
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	entries := map[string]func(*TxnExecutor) error{
-		"Execute":    func(st *TxnExecutor) error { _, err := st.Execute(true, false); return err },
-		"ApplyFrame": func(st *TxnExecutor) error { _, err := st.ApplyFrame(); return err },
+		"Execute": func(st *TxnExecutor) error { _, err := st.Execute(true, false); return err },
 	}
 	for name, apply := range entries {
 		for _, noBAL := range []bool{false, true} {

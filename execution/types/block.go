@@ -1475,8 +1475,7 @@ var txnFieldCount = map[byte]int{
 	DynamicFeeTxType: 12,
 	BlobTxType:       14,
 	SetCodeTxType:    13,
-
-	AccountAbstractionTxType: 19,
+	FrameTxType:      8,
 }
 
 // checkTxnShape reports whether binary is framed as one transaction of a type this code knows: the
@@ -1630,14 +1629,18 @@ func CopyTxs(in Transactions) Transactions {
 		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
 	for i, txn := range in {
-		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
+		switch txWrapper := txn.(type) {
+		case *BlobTxWrapper:
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				Tx:          blobTx.copyData(),
-				Commitments: txWrapper.Commitments.copy(),
-				Blobs:       txWrapper.Blobs.copy(),
-				Proofs:      txWrapper.Proofs.copy(),
+				Tx:             blobTx.copyData(),
+				WrapperVersion: txWrapper.WrapperVersion,
+				Commitments:    txWrapper.Commitments.copy(),
+				Blobs:          txWrapper.Blobs.copy(),
+				Proofs:         txWrapper.Proofs.copy(),
 			}
+		case *FrameTxWrapper:
+			out[i] = &FrameTxWrapper{FrameTransaction: out[i].(*FrameTransaction), WrapperVersion: txWrapper.WrapperVersion, Blobs: txWrapper.Blobs.copy(), Commitments: txWrapper.Commitments.copy(), Proofs: txWrapper.Proofs.copy()}
 		}
 	}
 	return out

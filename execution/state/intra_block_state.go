@@ -587,12 +587,18 @@ func (ibs *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	return ibs.logs.forTx(txIndex).Copy()
 }
 
-func (ibs *IntraBlockState) Logs() types.Logs {
-	if len(ibs.logs.entries) == 0 {
+func (ibs *IntraBlockState) LogCount() int { return len(ibs.logs.entries) }
+
+// LogsSince deep-copies entries added after a saved LogCount.
+func (ibs *IntraBlockState) LogsSince(first int) types.Logs {
+	logs := ibs.logs.entries[first:]
+	if len(logs) == 0 {
 		return nil
 	}
-	return ibs.logs.entries.Copy()
+	return logs.Copy()
 }
+
+func (ibs *IntraBlockState) Logs() types.Logs { return ibs.LogsSince(0) }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (ibs *IntraBlockState) LogsRlpHash() common.Hash {

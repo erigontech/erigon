@@ -56,3 +56,13 @@ func TestBlockContextRulesNoL2(t *testing.T) {
 	assert.Equal(t, uint64(0), rules.L2Version)
 	assert.False(t, rules.IsCancun)
 }
+
+func TestBlockContextRulesBogota(t *testing.T) {
+	t.Parallel()
+	fork := uint64(10)
+	c := chain.Config{BogotaTime: &fork}
+	bc := BlockContext{Time: 9}
+	assert.False(t, bc.Rules(&c).IsBogota)
+	bc.Time = 10
+	assert.True(t, bc.Rules(&c).IsBogota)
+}

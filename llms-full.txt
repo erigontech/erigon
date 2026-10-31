@@ -2505,9 +2505,6 @@ Options for configuring the [transaction pool](https://docs.erigon.tech/fundamen
   - Default: `3h0m0s`
   - Set to `0` to disable dormancy-based eviction.
 
-- `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
-  - Default: `false`
-
 ### Network and Peers
 
 These flags manage network connectivity, peer discovery, and traffic control. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) for the full port map.

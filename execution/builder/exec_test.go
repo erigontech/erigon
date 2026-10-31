@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -95,6 +96,164 @@ func TestFakeTxnProviderDefaultAmount(t *testing.T) {
 	got, err := provider.ProvideTxns(context.Background())
 	require.NoError(t, err)
 	require.Len(t, got, 3)
+}
+
+type frameFilterState struct {
+	state.NoopReader
+	state.NoopWriter
+	account *accounts.Account
+}
+
+func (s *frameFilterState) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return s.account, nil
+}
+
+func (s *frameFilterState) UpdateAccountData(_ accounts.Address, _, account *accounts.Account) error {
+	s.account = account
+	return nil
+}
+
+func TestFrameFilterAllowsSponsoredSender(t *testing.T) {
+	for _, deployed := range []bool{false, true} {
+		t.Run(fmt.Sprint(deployed), func(t *testing.T) {
+			sim := &frameFilterState{}
+			if deployed {
+				sim.account = &accounts.Account{CodeHash: accounts.InternCodeHash(common.Hash{1})}
+			}
+			tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, Fees: types.FrameFees{FeeCap: *uint256.NewInt(1)}}
+			got, nonceTooHigh, err := filterBadTransactions([]types.Transaction{tx}, uint256.NewInt(1), chain.AllProtocolChanges, 1, &types.Header{BaseFee: uint256.NewInt(0)}, sim, sim, log.New(), nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			require.Empty(t, nonceTooHigh)
+			require.Equal(t, uint64(1), sim.account.Nonce)
+			require.True(t, sim.account.Balance.IsZero())
+		})
+	}
+}
+
+func TestFrameFilterKeyedNonce(t *testing.T) {
+	t.Parallel()
+	const accountNonce = uint64(7)
+	for _, test := range []struct {
+		name    string
+		seq     uint64
+		wrapped bool
+	}{
+		{name: "below account nonce", seq: 0},
+		{name: "equal to account nonce", seq: accountNonce},
+		{name: "above account nonce", seq: accountNonce + 1},
+		{name: "wrapped frame", seq: 0, wrapped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sim := &frameFilterState{account: &accounts.Account{Nonce: accountNonce}}
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{{1}}, Nonce: test.seq, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+			}
+			var tx types.Transaction = frame
+			if test.wrapped {
+				tx = &types.FrameTxWrapper{FrameTransaction: frame}
+			}
+			got, nonceTooHigh, err := filterBadTransactions([]types.Transaction{tx}, uint256.NewInt(1), chain.AllProtocolChanges, 1, &types.Header{BaseFee: uint256.NewInt(0)}, sim, sim, log.New(), nil)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			require.Empty(t, nonceTooHigh)
+			require.Same(t, tx, got[0])
+			require.Equal(t, accountNonce, sim.account.Nonce)
+		})
+	}
+}
+
+func TestGetNextTransactionsFrameNonceRetry(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name         string
+		key          uint64
+		wrapped      bool
+		wantNonceGap bool
+	}{
+		{name: "legacy nonce gap", key: 0, wantNonceGap: true},
+		{name: "keyed nonce with low fee", key: 1},
+		{name: "wrapped keyed nonce with low fee", key: 1, wrapped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sim := &frameFilterState{account: &accounts.Account{}}
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, Nonce: 1, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+			}
+			var tx types.Transaction = frame
+			if test.wrapped {
+				tx = &types.FrameTxWrapper{FrameTransaction: frame}
+			}
+			header := &types.Header{GasLimit: 30_000_000, BaseFee: uint256.NewInt(2)}
+			cfg := BuilderExecCfg{
+				builderState: BuilderState{BuiltBlock: &exec.AssembledBlock{Header: header}},
+				chainConfig:  chain.AllProtocolChanges,
+				txnProvider:  &fakeTxnProvider{txns: []types.Transaction{tx}},
+			}
+			yielded := mapset.NewSet[[32]byte](tx.Hash())
+			nonceTooHigh := map[accounts.Address][][32]byte{}
+			got, provided, err := getNextTransactions(t.Context(), cfg, uint256.NewInt(1), header, protocol.GasUsed{}, 1, 0, yielded, nonceTooHigh, sim, sim, log.New(), nil)
+			require.NoError(t, err)
+			require.Empty(t, got)
+			require.Equal(t, 1, provided)
+			require.True(t, yielded.Contains(tx.Hash()))
+			sender, _ := tx.GetSender()
+			if test.wantNonceGap {
+				require.Equal(t, [][32]byte{tx.Hash()}, nonceTooHigh[sender])
+			} else {
+				require.Empty(t, nonceTooHigh)
+			}
+		})
+	}
+}
+
+func TestGetNextTransactionsFrameReleasesNonceGap(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		key     uint64
+		wrapped bool
+	}{
+		{name: "legacy nonce", key: 0},
+		{name: "keyed nonce", key: 1},
+		{name: "wrapped keyed nonce", key: 1, wrapped: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sender := accounts.InternAddress(common.Address{1})
+			st := newFundedState(sender)
+			gapped := newTxnFrom(sender, 1, params.TxGas)
+			frame := &types.FrameTransaction{
+				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, ChainID: *chain.AllProtocolChanges.ChainID, SenderAddress: sender.Value(),
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+				Fees:   types.FrameFees{FeeCap: *uint256.NewInt(1)},
+			}
+			var tx types.Transaction = frame
+			if test.wrapped {
+				tx = &types.FrameTxWrapper{FrameTransaction: frame}
+			}
+			header := &types.Header{GasLimit: 30_000_000, BaseFee: uint256.NewInt(1)}
+			cfg := BuilderExecCfg{
+				builderState: BuilderState{BuiltBlock: &exec.AssembledBlock{Header: header}},
+				chainConfig:  chain.AllProtocolChanges,
+				txnProvider:  &prioritisedProvider{ordered: []types.Transaction{gapped, tx}},
+			}
+			yielded := mapset.NewSet[[32]byte]()
+			nonceTooHigh := map[accounts.Address][][32]byte{}
+			got, _, err := getNextTransactions(t.Context(), cfg, cfg.chainConfig.ChainID, header, protocol.GasUsed{}, 1, 0, yielded, nonceTooHigh, st, st, log.New(), nil)
+			require.NoError(t, err)
+			require.Empty(t, got)
+			require.Equal(t, [][32]byte{gapped.Hash()}, nonceTooHigh[sender])
+			got, _, err = getNextTransactions(t.Context(), cfg, cfg.chainConfig.ChainID, header, protocol.GasUsed{}, 1, 0, yielded, nonceTooHigh, st, st, log.New(), nil)
+			require.NoError(t, err)
+			require.Equal(t, []types.Transaction{tx}, got)
+			require.Equal(t, test.key != 0, yielded.Contains(gapped.Hash()))
+			require.Equal(t, test.key != 0, len(nonceTooHigh[sender]) != 0)
+		})
+	}
 }
 
 // prioritisedProvider mimics the txpool's best(): it walks a fixed priority order, skips IDs in

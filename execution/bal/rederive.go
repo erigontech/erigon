@@ -121,10 +121,6 @@ func RederiveBlockAccessList(
 	vmCfg := vm.Config{}
 	receipts := make(types.Receipts, 0, len(txns))
 	for i, txn := range txns {
-		// The live executor runs RIP-7560 transactions on their own path.
-		if txn.Type() == types.AccountAbstractionTxType {
-			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: account abstraction transactions are not replayed", i, blockNum)
-		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)

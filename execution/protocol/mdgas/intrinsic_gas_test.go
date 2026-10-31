@@ -455,56 +455,6 @@ func TestEIP8038AccessListIntrinsicGas(t *testing.T) {
 	}
 }
 
-func TestAmsterdamAAIntrinsicGas(t *testing.T) {
-	cases := map[string]struct {
-		accessListLen     uint64
-		storageKeysLen    uint64
-		authorizationsLen uint64
-		expectedExecution uint64
-	}{
-		"access list address only": {
-			accessListLen:     1,
-			expectedExecution: params.TxAAGas + params.TxAccessListAddressGasEIP8038,
-		},
-		"access list address and storage key": {
-			accessListLen:     1,
-			storageKeysLen:    1,
-			expectedExecution: params.TxAAGas + params.TxAccessListAddressGasEIP8038 + params.TxAccessListStorageKeyGasEIP8038,
-		},
-		"access list address and three keys": {
-			accessListLen:     1,
-			storageKeysLen:    3,
-			expectedExecution: params.TxAAGas + params.TxAccessListAddressGasEIP8038 + 3*params.TxAccessListStorageKeyGasEIP8038,
-		},
-		"single authorization": {
-			authorizationsLen: 1,
-			expectedExecution: params.TxAAGas + params.PerAuthExecutionCostEIP8038,
-		},
-		"two authorizations": {
-			authorizationsLen: 2,
-			expectedExecution: params.TxAAGas + 2*params.PerAuthExecutionCostEIP8038,
-		},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
-				AccessListLen:     c.accessListLen,
-				StorageKeysLen:    c.storageKeysLen,
-				AuthorizationsLen: c.authorizationsLen,
-				IsEIP2:            true,
-				IsEIP2028:         true,
-				IsEIP2780:         true,
-				IsAATxn:           true,
-			})
-			assert.False(t, overflow)
-			assert.Equal(t, IntrinsicGasCalcResult{
-				ExecutionGas: c.expectedExecution,
-				FloorGasCost: params.TxAAGas,
-			}, result)
-		})
-	}
-}
-
 // TestEIP7981NotActive verifies that when IsEIP7981 is false (but EIP-7976 is on),
 // the EIP-7976 floor formula is used and the access list is NOT included in the
 // floor or added to the standard intrinsic gas.

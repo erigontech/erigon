@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -92,17 +91,11 @@ type Task interface {
 	isNil() bool
 }
 
-type AAValidationResult struct {
-	PaymasterContext []byte
-	GasUsed          uint64
-}
-
 // TxResult is the ouput of the task execute process
 type TxResult struct {
 	Task
-	ExecutionResult   evmtypes.ExecutionResult
-	ValidationResults []AAValidationResult
-	Err               error
+	ExecutionResult evmtypes.ExecutionResult
+	Err             error
 	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
 	Operational bool
 	Coinbase    accounts.Address
@@ -172,9 +165,11 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
-		Logs:                     r.Logs,
+		Payer:                    r.ExecutionResult.Payer,
+		FrameReceipts:            r.ExecutionResult.FrameReceipts,
 		FirstLogIndexWithinBlock: firstLogIndex,
 	}
+	receipt.SetLogs(r.Logs)
 
 	for _, l := range receipt.Logs {
 		l.TxHash = receipt.TxHash
@@ -193,7 +188,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		return nil, err
 	}
 
-	if txMessage != nil && txMessage.To().IsNil() {
+	if txMessage != nil && r.Tx().IsContractDeploy() {
 		txSender, err := r.TxSender()
 		if err != nil {
 			return nil, err
@@ -225,14 +220,12 @@ type TxTask struct {
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
-	Tracer                *calltracer.CallTracer
-	Hooks                 *tracing.Hooks
-	Config                *chain.Config
-	Engine                rules.Engine
-	Logger                log.Logger
-	Trace                 bool
-	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
-	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	Tracer *calltracer.CallTracer
+	Hooks  *tracing.Hooks
+	Config *chain.Config
+	Engine rules.Engine
+	Logger log.Logger
+	Trace  bool
 
 	gasPool      *protocol.GasPool
 	sender       accounts.Address
@@ -308,7 +301,7 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 	}
 	txn := t.Tx()
 	isPlain := txn != nil && txn.GetValue().IsZero() && len(txn.GetAuthorizations()) == 0 &&
-		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType
+		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.FrameTxType
 	if !isPlain {
 		return false
 	}
@@ -556,20 +549,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		if t.Tx().Type() == types.AccountAbstractionTxType {
-			if !chainConfig.AllowAA {
-				result.Err = errors.New("account abstraction transactions are not allowed")
-				return &result
-			}
-			aaTxn, ok := t.Tx().(*types.AccountAbstractionTransaction)
-			if !ok {
-				result.Err = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", t.Tx)
-				return &result
-			}
-
-			result = *t.executeAA(aaTxn, evm, t.GasPool(), ibs, chainConfig)
-			break
-		}
 
 		result.Coinbase = evm.Context.Coinbase
 
@@ -652,85 +631,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TxIn = t.VersionedReads(ibs)
 		}
 	}
-
-	return &result
-}
-
-func (t *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
-	evm *vm.EVM,
-	gasPool *protocol.GasPool,
-	ibs *state.IntraBlockState,
-	chainConfig *chain.Config,
-) *TxResult {
-	var result TxResult
-
-	if !t.InBatch {
-		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
-		startIdx := uint64(t.TxIndex)
-		endIdx := startIdx + t.AAValidationBatchSize
-
-		validationResults := make([]AAValidationResult, t.AAValidationBatchSize+1)
-		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
-
-		var outerErr error
-		for i := startIdx; i <= endIdx; i++ {
-			// check if next n transactions are AA transactions and run validation
-			if t.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := t.Txs[i].(*types.AccountAbstractionTransaction)
-				if !ok {
-					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", t.Tx)
-					break
-				}
-
-				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, t.Header, evm, chainConfig)
-				if err != nil {
-					outerErr = err
-					break
-				}
-
-				validationResults[i-startIdx] = AAValidationResult{
-					PaymasterContext: paymasterContext,
-					GasUsed:          validationGasUsed,
-				}
-			} else {
-				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
-				break
-			}
-		}
-
-		if outerErr != nil {
-			result.Err = outerErr
-			return &result
-		}
-		log.Info("✅[aa] validated AA bundle", "len", endIdx-startIdx+1)
-
-		result.ValidationResults = validationResults
-	}
-
-	if len(result.ValidationResults) == 0 {
-		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", t.TxIndex)
-		return &result
-	}
-
-	validationRes := result.ValidationResults[0]
-	result.ValidationResults = result.ValidationResults[1:]
-
-	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, gasPool, evm, t.Header, ibs)
-	if err != nil {
-		result.Err = err
-		return &result
-	}
-
-	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
-	// The versionMap path produces its write-set from the recorded IO after
-	// the switch; only the serial path clears pending changes here.
-	if !ibs.IsVersioned() {
-		ibs.SoftFinalise()
-	}
-	result.Logs = ibs.GetLogs(t.TxIndex, t.TxHash(), t.BlockNumber(), t.BlockHash())
-
-	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", t.TxIndex, "status", status)
 
 	return &result
 }

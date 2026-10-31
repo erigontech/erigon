@@ -181,7 +181,7 @@ func (t *flatCallTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasU
 	}
 	// Parity traces don't include CALL/STATICCALLs to precompiles.
 	// By default we remove them from the callstack.
-	if t.config.IncludePrecompiles {
+	if t.config.IncludePrecompiles || (t.tracer.frameTx != nil && depth == 1) {
 		return
 	}
 	parent := t.tracer.callstack[len(t.tracer.callstack)-1]
@@ -225,6 +225,9 @@ func (t *flatCallTracer) GetResult() (json.RawMessage, error) {
 	flat, err := flatFromNested(&t.tracer.callstack[0], []int{}, t.config.ConvertParityErrors, t.ctx)
 	if err != nil {
 		return nil, err
+	}
+	if t.tracer.frameTx != nil && flat[0].Result == nil {
+		flat[0].Result = newFlatCall(&t.tracer.callstack[0]).Result
 	}
 
 	res, err := json.Marshal(flat)

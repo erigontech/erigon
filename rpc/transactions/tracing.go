@@ -143,7 +143,7 @@ func TraceTx(
 			return result, err
 		}
 		if tracer != nil && tracer.HasTxEndHook() {
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
+			tracer.EmitTxEnd(result.ReceiptForTracing(), result.TxnGasUsage, nil)
 		}
 		txnGasUsage = result.TxnGasUsage
 		return result, err

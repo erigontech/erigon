@@ -103,6 +103,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
+				if evm.FrameContext != nil {
+					// EIP-8141 attributes later refills to the frame that paid for the slot.
+					// The journal restores ownership if the subsequent gas charge fails.
+					// https://eips.ethereum.org/EIPS/eip-8141#state-gas-attribution-and-refills
+					evm.FrameContext.RecordStorageCharge(callContext.Address(), slot)
+				}
 				return mdgas.MdGasCost{Execution: access + writeCreate, State: int64(stateCreate)}, nil
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
@@ -122,6 +128,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if original.Eq(&value) {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				evm.IntraBlockState().AddRefund(writeCreate)
+				if evm.FrameContext != nil {
+					evm.FrameContext.RefillStorageGas(callContext.Address(), slot, stateCreate)
+				}
 				return mdgas.MdGasCost{Execution: access, State: -int64(stateCreate)}, nil
 			} else { // reset to original existing slot (2.2.2.2)
 				evm.IntraBlockState().AddRefund(writeExisting)
@@ -371,9 +380,15 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		availableGas.Execution -= executionBase
 
 		if statefulBaseGas.State > 0 {
-			var used mdgas.MdGasUsage
-			if !mdgas.Consume(&availableGas, &used, uint64(statefulBaseGas.State), mdgas.StateGas) {
-				return mdgas.MdGasCost{}, ErrOutOfGas
+			if evm.FrameContext != nil {
+				if uint64(statefulBaseGas.State) > evm.FrameContext.StateGasLeft() {
+					return mdgas.MdGasCost{}, ErrOutOfGas
+				}
+			} else {
+				var used mdgas.MdGasUsage
+				if !mdgas.Consume(&availableGas, &used, uint64(statefulBaseGas.State), mdgas.StateGas) {
+					return mdgas.MdGasCost{}, ErrOutOfGas
+				}
 			}
 		}
 

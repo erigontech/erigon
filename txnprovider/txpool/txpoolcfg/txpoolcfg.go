@@ -59,9 +59,6 @@ type Config struct {
 	MdbxWriteMap    bool
 
 	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
-
-	// Account Abstraction
-	AllowAA bool
 }
 
 var DefaultConfig = Config{
@@ -92,49 +89,48 @@ var DefaultConfig = Config{
 type DiscardReason uint8
 
 const (
-	NotSet               DiscardReason = 0 // analog of "nil-value", means it will be set in future
-	Success              DiscardReason = 1
-	AlreadyKnown         DiscardReason = 2
-	Mined                DiscardReason = 3
-	ReplacedByHigherTip  DiscardReason = 4
-	UnderPriced          DiscardReason = 5
-	ReplaceUnderpriced   DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
-	FeeTooLow            DiscardReason = 7
-	OversizedData        DiscardReason = 8
-	InvalidSender        DiscardReason = 9
-	NegativeValue        DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
-	Spammer              DiscardReason = 11
-	PendingPoolOverflow  DiscardReason = 12
-	BaseFeePoolOverflow  DiscardReason = 13
-	QueuedPoolOverflow   DiscardReason = 14
-	GasUintOverflow      DiscardReason = 15
-	IntrinsicGas         DiscardReason = 16
-	RLPTooLong           DiscardReason = 17
-	NonceTooLow          DiscardReason = 18
-	InsufficientFunds    DiscardReason = 19
-	NotReplaced          DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
-	DuplicateHash        DiscardReason = 21 // There was an existing transaction with the same hash
-	InitCodeTooLarge     DiscardReason = 22 // EIP-3860 - transaction init code is too large
-	TypeNotActivated     DiscardReason = 23 // For example, an EIP-4844 transaction is submitted before Cancun activation
-	InvalidCreateTxn     DiscardReason = 24 // EIP-4844 & 7702 transactions cannot have the form of a create transaction
-	NoBlobs              DiscardReason = 25 // Blob transactions must have at least one blob
-	TooManyBlobs         DiscardReason = 26 // There's a limit on how many blobs a block (and thus any transaction) may have
-	UnequalBlobTxExt     DiscardReason = 27 // blob_versioned_hashes, blobs, commitments and proofs must have equal number
-	BlobHashCheckFail    DiscardReason = 28 // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
-	UnmatchedBlobTxExt   DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
-	BlobTxReplace        DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
-	BlobPoolOverflow     DiscardReason = 31 // The total number of blobs (through blob txns) in the pool has reached its limit
-	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
-	GasLimitTooHigh      DiscardReason = 33 // Gas limit is too high
-	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
-	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
-	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
-	NonceTooDistant      DiscardReason = 37 // Gap exceeds MaxNonceGap; the transaction can be retried after the gap shrinks
-	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
-	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
-	TipAboveFeeCap       DiscardReason = 40 // EIP-1559: max priority fee per gas cannot exceed max fee per gas
-	DelegatedNonceGap    DiscardReason = 41 // Delegated account transaction nonce is not currently executable
-	DelegatedTxnLimit    DiscardReason = 42 // Delegated account already has an executable transaction
+	NotSet DiscardReason = iota // analog of "nil-value", means it will be set in future
+	Success
+	AlreadyKnown
+	Mined
+	ReplacedByHigherTip
+	UnderPriced
+	ReplaceUnderpriced // if a transaction is attempted to be replaced with a different one without the required price bump.
+	FeeTooLow
+	InvalidSender
+	Spammer
+	PendingPoolOverflow
+	BaseFeePoolOverflow
+	QueuedPoolOverflow
+	GasUintOverflow
+	IntrinsicGas
+	RLPTooLong
+	NonceTooLow
+	InsufficientFunds
+	NotReplaced                // There was an existing transaction with the same sender and nonce, not enough price bump to replace
+	DuplicateHash              // There was an existing transaction with the same hash
+	InitCodeTooLarge           // EIP-3860 - transaction init code is too large
+	TypeNotActivated           // For example, an EIP-4844 transaction is submitted before Cancun activation
+	InvalidCreateTxn           // EIP-4844 & 7702 transactions cannot have the form of a create transaction
+	NoBlobs                    // Blob transactions must have at least one blob
+	TooManyBlobs               // There's a limit on how many blobs a block (and thus any transaction) may have
+	UnequalBlobTxExt           // Mismatched blob/hash/commitment counts, or legacy proof counts
+	BlobHashCheckFail          // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
+	UnmatchedBlobTxExt         // KZGcommitments must match the corresponding blobs and proofs
+	BlobTxReplace              // Cannot replace a transaction with blobs by one without blobs
+	BlobPoolOverflow           // The total number of blobs (through blob txns) in the pool has reached its limit
+	NoAuthorizations           // EIP-7702 transactions with an empty authorization list are invalid
+	GasLimitTooHigh            // Gas limit is too high
+	ErrAuthorityReserved       // EIP-7702 transaction with authority already reserved
+	InvalidFrame               // Admission failed validation or pool policy checks
+	FrameValidationUnavailable // No usable validation result; the transaction may be retried
+	FrameStateChanged          // Revalidation or payer reservation failed after admission; the transaction may be retried
+	NonceTooDistant            // Gap exceeds MaxNonceGap; the transaction can be retried after the gap shrinks
+	QueuedDormant              // Sender had no on-chain state change for longer than QueuedDormancyDuration
+	ErrGetSenderInfo           // Error getting sender nonce/balance from state during validation
+	TipAboveFeeCap             // EIP-1559: max priority fee per gas cannot exceed max fee per gas
+	DelegatedNonceGap          // Delegated account transaction nonce is not currently executable
+	DelegatedTxnLimit          // Delegated account already has an executable transaction
 )
 
 func (r DiscardReason) String() string {
@@ -155,12 +151,8 @@ func (r DiscardReason) String() string {
 		return "replacement transaction underpriced"
 	case FeeTooLow:
 		return "fee too low"
-	case OversizedData:
-		return "oversized data"
 	case InvalidSender:
 		return "invalid sender"
-	case NegativeValue:
-		return "negative value"
 	case Spammer:
 		return "spammer"
 	case PendingPoolOverflow:
@@ -209,10 +201,12 @@ func (r DiscardReason) String() string {
 		return "blob_versioned_hashes, blobs, commitments and proofs must have equal number"
 	case ErrAuthorityReserved:
 		return "EIP-7702 transaction with authority already reserved"
-	case InvalidAA:
-		return "RIP-7560 transaction failed validation"
-	case ErrGetCode:
-		return "error getting account code during RIP-7560 validation"
+	case InvalidFrame:
+		return "frame transaction failed validation"
+	case FrameValidationUnavailable:
+		return "frame transaction validation unavailable"
+	case FrameStateChanged:
+		return "frame transaction no longer valid against current state"
 	case NonceTooDistant:
 		return "nonce gap too large: transaction nonce is too far ahead of sender's on-chain nonce"
 	case QueuedDormant:

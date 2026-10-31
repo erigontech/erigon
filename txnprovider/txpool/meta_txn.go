@@ -19,7 +19,7 @@ package txpool
 import "github.com/holiman/uint256"
 
 func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
-	mt := &metaTxn{TxnSlot: slot, worstIndex: -1, bestIndex: -1, timestamp: timestamp}
+	mt := &metaTxn{TxnSlot: slot, keyedNonce: slot.hasKeyedNonce(), worstIndex: -1, bestIndex: -1, timestamp: timestamp}
 	if isLocal {
 		mt.subPool = IsLocal
 	}
@@ -40,6 +40,7 @@ type metaTxn struct {
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
 	announced                 bool // has entered pending once; a later return is not announced
+	keyedNonce                bool
 	minedBlockNum             uint64
 }
 
@@ -149,9 +150,15 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	return mt.timestamp > than.timestamp
 }
 
+// SortByNonceLess separates keyed sequences from account nonces. One keyed domain
+// in this index is enough because pool policy allows only one frame transaction
+// per sender; replacement separately requires an identical nonce-key set.
 func SortByNonceLess(a, b *metaTxn) bool {
 	if a.TxnSlot.SenderID != b.TxnSlot.SenderID {
 		return a.TxnSlot.SenderID < b.TxnSlot.SenderID
+	}
+	if a.keyedNonce != b.keyedNonce {
+		return !a.keyedNonce
 	}
 	return a.TxnSlot.Nonce < b.TxnSlot.Nonce
 }

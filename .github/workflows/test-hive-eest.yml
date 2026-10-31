@@ -131,7 +131,7 @@ jobs:
               fixtures-tarball: eest_stable
               max-failures: 0
               commitment_mode: parallel
-            # Devnet consume-enginex: split by fork (~79k tests total). Each runs twice —
+            # Devnet consume-enginex: split by fork. Each runs twice —
             # serial and parallel commitment.
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -139,7 +139,7 @@ jobs:
               shard: paris+shanghai-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 4 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -147,7 +147,7 @@ jobs:
               shard: paris+shanghai-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 4 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -155,7 +155,7 @@ jobs:
               shard: cancun-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -163,7 +163,7 @@ jobs:
               shard: cancun-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -171,7 +171,7 @@ jobs:
               shard: prague-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -179,7 +179,7 @@ jobs:
               shard: prague-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             # BPO2ToAmsterdam includes BAL validation and belongs with Amsterdam.
             - sim: consume-enginex
@@ -188,7 +188,7 @@ jobs:
               shard: osaka-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -196,7 +196,7 @@ jobs:
               shard: osaka-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -205,7 +205,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -214,7 +214,25 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              commitment_mode: parallel
+            - sim: consume-enginex
+              runner: ubuntu-latest
+              sim-limit: ".*/.*fork_Bogota"
+              shard: bogota-devnet
+              fixtures-tarball: eest_devnet
+              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
+              max-failures: 282 # 280 EIP-7906 + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              commitment_mode: serial
+            - sim: consume-enginex
+              runner: ubuntu-latest
+              sim-limit: ".*/.*fork_Bogota"
+              shard: bogota-devnet
+              fixtures-tarball: eest_devnet
+              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
+              max-failures: 282 # 280 EIP-7906 + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
         shell: bash
         run: |
@@ -392,7 +410,7 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
-          eels_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].ref // empty' erigon-full/test-fixtures.json)
+          eels_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].consumer_ref // .[$t].ref // empty' erigon-full/test-fixtures.json)
           eels_ref_arg=""
           if [ -n "$eels_ref" ]; then
             eels_ref_arg="--sim.buildarg branch=$eels_ref"

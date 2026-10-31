@@ -116,7 +116,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
 	if !cfg.NoReceipts {
 		// by the txn
-		receipt = MakeReceipt(&header.Number, header.Hash(), msg, txn, gasUsed.Receipt, result, ibs, evm)
+		receipt = MakeReceipt(&header.Number, header.Hash(), txn, gasUsed.Receipt, result, ibs, evm)
 	}
 
 	return receipt, err
@@ -154,14 +154,13 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 func MakeReceipt(
 	blockNumber *uint256.Int,
 	blockHash common.Hash,
-	msg *types.Message,
 	txn types.Transaction,
 	cumulativeGasUsed uint64,
 	result *evmtypes.ExecutionResult,
 	ibs *state.IntraBlockState,
 	evm *vm.EVM,
 ) *types.Receipt {
-	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed}
+	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed, Payer: result.Payer, FrameReceipts: result.FrameReceipts}
 	if result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
@@ -169,19 +168,13 @@ func MakeReceipt(
 	}
 	receipt.TxHash = txn.Hash()
 	receipt.GasUsed = result.ReceiptGasUsed
-	// In the case of blob transaction, we need to possibly unwrap and store the gas used by blobs
-	if t, ok := txn.(*types.BlobTxWrapper); ok {
-		txn = &t.Tx
-	}
-	if txn.Type() == types.BlobTxType {
-		receipt.BlobGasUsed = txn.GetBlobGas()
-	}
+	receipt.BlobGasUsed = txn.GetBlobGas()
 	// If the transaction created a contract, store the creation address in the receipt.
-	if msg.To().IsNil() {
+	if txn.IsContractDeploy() {
 		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash)
+	receipt.SetLogs(ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNumber.Uint64(), blockHash))
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(ibs.TxnIndex())

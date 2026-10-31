@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -109,7 +108,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	e.ibs.SetTxContext(e.blockNum, txIndex)
 
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
-	if txn.Type() != types.AccountAbstractionTxType && err != nil {
+	if err != nil {
 		return err
 	}
 	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
@@ -120,26 +119,12 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
-	if txn.Type() == types.AccountAbstractionTxType {
-		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		evm := vm.NewEVM(blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
-		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
-		if err != nil {
-			return err
+	result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+	if err != nil {
+		if result == nil {
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)
 		}
-
-		_, _, err = aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gp, evm, e.header, e.ibs)
-		if err != nil {
-			return err
-		}
-	} else {
-		result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
-		if err != nil {
-			if result == nil {
-				return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)
-			}
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %w", err, e.blockNum, txNum, result.Err)
-		}
+		return fmt.Errorf("%w: blockNum=%d, txNum=%d, %w", err, e.blockNum, txNum, result.Err)
 	}
 
 	e.ibs.SoftFinalise()

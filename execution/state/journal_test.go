@@ -7,6 +7,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -52,6 +54,22 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
 		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, 0, val) }},
+		{"frameApproval", kindFrameApproval, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+			ctx.SetApproval(true, addr)
+		}},
+		{"frameStateGas", kindFrameStateGas, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 1}}}}, uint256.Int{})
+			ctx.ChargeStateGas(1)
+		}},
+		{"frameStorageOwner", kindFrameStorageOwner, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+			ctx.RecordStorageCharge(addr, key)
+		}},
+		{"frameTransient", kindFrameTransient, func(j *journal) {
+			ibs := &IntraBlockState{journal: j, transientStorage: transientStorage{addr: &transientSlots{}}}
+			ibs.ResetFrameTransientStorage()
+		}},
 	}
 
 	covered := map[entryKind]bool{}

@@ -69,7 +69,7 @@ service ETHBACKEND {
   // PendingBlock returns latest built block.
   rpc PendingBlock(google.protobuf.Empty) returns (PendingBlockReply);
 
-  rpc AAValidation(AAValidationRequest) returns (AAValidationReply);
+  rpc FrameValidation(FrameValidationRequest) returns (FrameValidationReply);
 
   rpc BlockForTxNum(BlockForTxNumRequest) returns(BlockForTxNumResponse);
 
@@ -215,6 +215,15 @@ message SubscribeReceiptsReply {
   types.H256 blob_gas_price = 19;
   bool last_in_block = 20; // the last receipt of its block sent on this stream
   types.H256 effective_gas_price = 21;
+  types.H160 payer = 22;
+  repeated FrameReceipt frame_receipts = 23;
+}
+
+message FrameReceipt {
+  uint64 status = 1;
+  uint64 execution_gas_used = 2;
+  uint64 state_gas_used = 3;
+  repeated SubscribeLogsReply logs = 4;
 }
 
 message BlockRequest {
@@ -277,12 +286,20 @@ message EngineGetPayloadBodiesByRangeV1Request {
   uint64 count = 2;
 } 
 
-message AAValidationRequest {
-  types.AccountAbstractionTransaction tx = 1;
+message FrameValidationRequest {
+  bytes transaction = 1;
+  types.H256 expected_block_hash = 2;
 }
 
-message AAValidationReply {
+message FrameValidationReply {
   bool valid = 1;
+  bytes payer = 2;
+  bytes max_cost = 3;
+  bytes payer_balance = 4;
+  bool paymaster = 5;
+  uint64 deadline = 6;
+  repeated bytes dependencies = 7;
+  repeated FrameCreationNonce creation_nonces = 8;
 }
 
 message BlockForTxNumRequest {
@@ -313,4 +330,10 @@ message SetHeadReply {
 message BlockBodyReply {
   bytes body_rlp = 1;
   uint32 tx_count = 2;
+}
+
+message FrameCreationNonce {
+  bytes address = 1;
+  uint64 min_nonce = 2;
+  uint64 max_nonce = 3;
 }

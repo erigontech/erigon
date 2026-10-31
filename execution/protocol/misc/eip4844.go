@@ -147,13 +147,11 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 	}
 	actualBlobHashes := []common.Hash{}
 	for _, txn := range *transactions {
-		if txn.Type() == types.BlobTxType {
-			for _, h := range txn.GetBlobHashes() {
-				if h[0] != kzg.BlobCommitmentVersionKZG {
-					return ErrInvalidVersionedHash
-				}
-				actualBlobHashes = append(actualBlobHashes, h)
+		for _, h := range txn.GetBlobHashes() {
+			if h[0] != kzg.BlobCommitmentVersionKZG {
+				return ErrInvalidVersionedHash
 			}
+			actualBlobHashes = append(actualBlobHashes, h)
 		}
 	}
 	if len(actualBlobHashes) > int(maxBlobsPerBlock) {

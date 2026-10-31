@@ -247,15 +247,34 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
-
-	nounce, _ := env.IntraBlockState.GetNonce(from)
-
-	if tx.GetTo() == nil {
-		t.create = true
-		t.to = accounts.InternAddress(types.CreateAddress(from.Value(), nounce))
-	} else {
+	t.create = tx.IsContractDeploy()
+	t.lookupAccount(from)
+	t.lookupAccount(env.Coinbase)
+	if frameTx, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+		// Capture direct targets before any frame runs; earlier frames may change
+		// the account state or delegation that a later frame will observe.
+		for _, frame := range frameTx.Frames {
+			target := accounts.InternAddress(frame.ResolvedTarget(frameTx.SenderAddress))
+			t.lookupAccount(target)
+			code, _ := env.IntraBlockState.GetCode(target)
+			if delegated, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(delegated)
+			}
+		}
+		if !frameTx.UsesLegacyNonce() {
+			manager := accounts.InternAddress(types.FrameNonceManager)
+			t.lookupAccount(manager)
+			for _, key := range frameTx.NonceKeys {
+				t.lookupStorage(manager, types.FrameNonceSlot(frameTx.SenderAddress, key))
+			}
+		}
+	} else if t.create {
+		nonce, _ := env.IntraBlockState.GetNonce(from)
+		t.to = accounts.InternAddress(types.CreateAddress(from.Value(), nonce))
+		t.lookupAccount(t.to)
+	} else if tx.GetTo() != nil {
 		t.to = accounts.InternAddress(*tx.GetTo())
-		t.create = false
+		t.lookupAccount(t.to)
 		// Lookup the delegation target
 		if t.env.ChainConfig.IsPrague(t.env.Time) {
 			code, _ := t.env.IntraBlockState.GetCode(t.to)
@@ -264,10 +283,6 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 			}
 		}
 	}
-
-	t.lookupAccount(from)
-	t.lookupAccount(t.to)
-	t.lookupAccount(env.Coinbase)
 
 	// Add accounts with authorizations to the prestate before they get applied.
 	auths := tx.GetAuthorizations()

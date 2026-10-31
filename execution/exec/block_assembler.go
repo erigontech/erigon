@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -20,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
 	"github.com/erigontech/erigon/db/dbservices"
 )
@@ -262,38 +260,6 @@ func (ba *BlockAssembler) AddTransactions(
 		snap := ibs.PushSnapshot()
 		defer ibs.PopSnapshot(snap)
 
-		if txn.Type() == types.AccountAbstractionTxType {
-			aaTxn := txn.(*types.AccountAbstractionTransaction)
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), ba.cfg.Engine, coinbase, chainConfig)
-			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
-			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
-			if err != nil {
-				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
-				return nil, err
-			}
-
-			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
-			if err != nil {
-				ibs.RevertToSnapshot(snap, err)
-				gasPool = protocol.NewBlockGasPool(executionGasSnap, stateGasSnap, blobGasSnap)
-				return nil, err
-			}
-
-			// EIP-8037: AA txns don't go through protocol.ApplyTransaction, so
-			// update cumulative gas manually. We attribute aaGasUsed entirely to
-			// execution gas (AA has no state-gas dimension yet).
-			gasUsed.BlockExecution += aaGasUsed
-			gasUsed.Blob += txn.GetBlobGas()
-			protocol.SetGasUsed(header, gasUsed)
-			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
-
-			current.AddTxn(txn)
-			current.Receipts = append(current.Receipts, receipt)
-			return receipt.Logs, nil
-		}
-
 		// Snapshot cumulative gas so we can restore on tx failure.
 		gasSnapshot := *gasUsed
 
@@ -345,9 +311,8 @@ LOOP:
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
-		// If we don't have enough gas for any further transactions then we're done.
-		// Only the execution dimension bounds this exit: AA txns draw solely on the
-		// execution pool, so a state-gas exit would drop ones that still fit.
+		// Transactions can have a zero state gas limit, so only the execution
+		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true

@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -832,21 +831,6 @@ func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
 	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
 }
 
-func TestAATotalGasLimitOverflow(t *testing.T) {
-	t.Parallel()
-
-	tx := &AccountAbstractionTransaction{ValidationGasLimit: 1, PaymasterValidationGasLimit: 2, PostOpGasLimit: 4}
-	tx.GasLimit = 8
-	total, ok := tx.TotalGasLimit(16)
-	assert.True(t, ok)
-	assert.Equal(t, uint64(31), total)
-
-	overflowing := &AccountAbstractionTransaction{ValidationGasLimit: ^uint64(0), PaymasterValidationGasLimit: 1}
-	_, ok = overflowing.TotalGasLimit(params.TxAAGas)
-	assert.False(t, ok)
-	assert.Equal(t, ^uint64(0), overflowing.GetGasLimit())
-}
-
 // decodeAccessList backs every tuple's StorageKeys with one arena, so a tuple's
 // slice must be capped: appending to it may not reach the next tuple's keys.
 func TestDecodeAccessListKeysDoNotAlias(t *testing.T) {
@@ -1064,7 +1048,6 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 		signedDynFeeTx,
 		&BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
 		&SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []Authorization{{ChainID: u256.Num1, Address: to, Nonce: 2}}},
-		&AccountAbstractionTransaction{ChainID: uint256.NewInt(1), NonceKey: uint256.NewInt(0), Nonce: 1, Tip: uint256.NewInt(1), FeeCap: uint256.NewInt(2), BuilderFee: uint256.NewInt(0), GasLimit: 21000},
 	} {
 		var binary bytes.Buffer
 		require.NoError(t, txn.MarshalBinary(&binary))

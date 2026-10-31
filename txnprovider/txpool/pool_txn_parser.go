@@ -27,11 +27,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 const (
@@ -40,7 +40,7 @@ const (
 	DynamicFeeTxnType byte = 2 // EIP-1559
 	BlobTxnType       byte = 3 // EIP-4844
 	SetCodeTxnType    byte = 4 // EIP-7702
-	AATxnType         byte = 5 // RIP-7560
+	FrameTxnType      byte = 6 // EIP-8141
 )
 
 var (
@@ -62,6 +62,7 @@ type TxnParseContext struct {
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
+	poolRules       bool
 }
 
 func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
@@ -98,6 +99,11 @@ func (ctx *TxnParseContext) ChainIDRequired() *TxnParseContext {
 	return ctx
 }
 
+func (ctx *TxnParseContext) WithPoolRules() *TxnParseContext {
+	ctx.poolRules = true
+	return ctx
+}
+
 // decodeTxn decodes a transaction from raw bytes using the reusable bytes.Reader
 // on the context to avoid per-call allocations. It dispatches to the right
 // transaction type's DecodeRLP directly instead of going through
@@ -128,8 +134,8 @@ func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error)
 		txn = &types.BlobTx{}
 	case SetCodeTxnType:
 		txn = &types.SetCodeTransaction{}
-	case AATxnType:
-		txn = &types.AccountAbstractionTransaction{}
+	case FrameTxnType:
+		txn = &types.FrameTransaction{}
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %d", txBytes[0])
 	}
@@ -215,12 +221,19 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 3: Decode the transaction using standard types.
-	// For blob wrappers, we parse the wrapper structure manually (zero-copy for
-	// large blob data) and decode only the inner tx_payload_body via the standard
-	// decoder, producing a *types.BlobTx (not *types.BlobTxWrapper).
+	// Parse type-3 and frame wrappers separately to keep large blob data zero-copy.
+	// Only the inner transaction body goes through the standard decoder.
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
-	if !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs {
+	wrapped := !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs
+	if !legacy && txBytes[0] == FrameTxnType && wrappedWithBlobs {
+		bodyPos, bodyLen, err := rlp.ParseList(txBytes, 1)
+		if err != nil || bodyLen == 0 {
+			return 0, fmt.Errorf("%w: invalid frame transaction body", ErrParseTxn)
+		}
+		wrapped = txBytes[bodyPos] >= 0xc0
+	}
+	if wrapped {
 		// Structure: type_byte || rlp([ rlp(tx_body), [wrapper_version], blobs, commitments, proofs ])
 		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
 		if err != nil {
@@ -242,7 +255,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			ctx.innerTxBuf = make([]byte, innerLen)
 		}
 		innerTxBytes = ctx.innerTxBuf[:innerLen]
-		innerTxBytes[0] = BlobTxnType
+		innerTxBytes[0] = txBytes[0]
 		copy(innerTxBytes[1:], txBytes[wrapperListPos:innerBodyPos+innerBodyLen])
 
 		// Decode only the inner tx (no blobs/commitments/proofs).
@@ -263,6 +276,10 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 			wp++
 			proofsPerBlob = int(params.CellsPerExtBlob)
+		}
+
+		if txn.Type() == FrameTxnType && (proofsPerBlob != int(params.CellsPerExtBlob) || len(txn.GetBlobHashes()) == 0) {
+			return 0, fmt.Errorf("%w: frame blobs require a nonempty version 1 wrapper", ErrParseTxn)
 		}
 
 		// Parse blobs list (zero-copy: slices point into original payload).
@@ -369,7 +386,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 5: Store the decoded transaction and compute hash.
 	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
-	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
+	// Wrapped transactions include the type byte and inner body in the hash, but no sidecar.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
 	hashInput := txBytes
@@ -384,9 +401,22 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// Step 6: Store raw RLP bytes and cache size (Rlp may be nilled later after DB flush).
-	// For wrapped blob txns, store the full wrapper RLP (needed for PooledTransactions gossip),
-	// but Size reflects the full wrapper.
+	if frame, ok := txn.(*types.FrameTransaction); ok {
+		if ctx.poolRules {
+			if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
+				return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
+			}
+		}
+		if err := frame.Validate(); err != nil {
+			return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
+		}
+		if wrappedWithBlobs && frame.GetBlobGas() > 0 && !wrapped {
+			return 0, fmt.Errorf("%w: missing frame blob sidecar", ErrParseTxn)
+		}
+	}
+
+	// Step 6: Keep the full network encoding for gossip and cache its size,
+	// including any blob sidecar. Rlp may be cleared after flushing to the database.
 	slot.Rlp = txBytes
 	slot.Size = uint32(len(txBytes))
 
@@ -395,24 +425,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 	// Step 8: Recover sender if needed.
 	if ctx.withSender && len(sender) == length.Addr {
-		if aaTx, ok := txn.(*types.AccountAbstractionTransaction); ok {
-			senderAddr := aaTx.SenderAddress.Value()
-			copy(sender, senderAddr[:])
-			if aaTx.Paymaster != nil {
-				copy(sender, aaTx.Paymaster[:])
-			}
-		} else {
-			signer := ctx.signer
-			if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
-				signer = ctx.malleableSigner
-			}
-			addr, err := txn.Sender(*signer)
-			if err != nil {
-				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
-			}
-			addrBytes := addr.Value()
-			copy(sender, addrBytes[:])
+		signer := ctx.signer
+		if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
+			signer = ctx.malleableSigner
 		}
+		addr, err := txn.Sender(*signer)
+		if err != nil {
+			return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
+		}
+		addrBytes := addr.Value()
+		copy(sender, addrBytes[:])
 	}
 
 	return p, nil
@@ -430,11 +452,10 @@ type PoolBlobBundle struct {
 	Proofs     []goethkzg.KZGProof // Can be 1 or more Proofs/CellProofs
 }
 
-// TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
-// Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues.
-// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce).
+// TxnSlot holds an unwrapped transaction and its pool metadata.
+// Txn must be non-nil except in the B-tree search sentinel, which uses SenderID and Nonce.
 type TxnSlot struct {
-	Txn      types.Transaction // The decoded standard transaction (BlobTx, not BlobTxWrapper, for blob txns)
+	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
@@ -442,13 +463,14 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	BlobBundles []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
+	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
 
 	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
 	// Invalid tuples and authorizations for other chains are omitted.
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
-	AuthAndNonces []AuthAndNonce
+	AuthAndNonces   []AuthAndNonce
+	frameValidation *protocol.FrameValidation
 }
 
 // Accessor methods that delegate to the stored Transaction.
@@ -463,25 +485,18 @@ func (tx *TxnSlot) GetFeeCap() *uint256.Int { return tx.Txn.GetFeeCap() }
 func (tx *TxnSlot) GetValue() *uint256.Int  { return tx.Txn.GetValue() }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
+	if frame, ok := tx.Txn.(*types.FrameTransaction); ok {
+		return &frame.Fees.BlobFeeCap
+	}
 	if bt, ok := tx.Txn.(*types.BlobTx); ok {
 		return &bt.MaxFeePerBlobGas
 	}
 	return new(uint256.Int)
 }
 
-func (tx *TxnSlot) GetDataLen() int {
-	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-		return len(aaTx.DeployerData) + len(aaTx.PaymasterData) + len(aaTx.ExecutionData)
-	}
-	return len(tx.Txn.GetData())
-}
+func (tx *TxnSlot) GetDataLen() int { return len(tx.Txn.GetData()) }
 
-func (tx *TxnSlot) GetDataNonZeroLen() int {
-	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-		return mdgas.CountNonZeroBytes(aaTx.DeployerData) + mdgas.CountNonZeroBytes(aaTx.PaymasterData) + mdgas.CountNonZeroBytes(aaTx.ExecutionData)
-	}
-	return mdgas.CountNonZeroBytes(tx.Txn.GetData())
-}
+func (tx *TxnSlot) GetDataNonZeroLen() int { return mdgas.CountNonZeroBytes(tx.Txn.GetData()) }
 
 func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessList()) }
 func (tx *TxnSlot) GetAccessListStorCount() int { return tx.Txn.GetAccessList().StorageKeys() }
@@ -521,58 +536,6 @@ func (tx *TxnSlot) BlobBundle(i int) (blob []byte, commitment goethkzg.KZGCommit
 	}
 	bb := &tx.BlobBundles[i]
 	return bb.Blob, bb.Commitment, bb.Proofs
-}
-
-// ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction
-func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstractionTransaction {
-	if tx == nil {
-		return nil
-	}
-	aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction)
-	if !ok {
-		return nil
-	}
-
-	var paymasterData, deployerData, paymaster, deployer, builderFee, nonceKey []byte
-	if aaTx.PaymasterData != nil {
-		paymasterData = aaTx.PaymasterData
-	}
-	if aaTx.DeployerData != nil {
-		deployerData = aaTx.DeployerData
-	}
-	if aaTx.Paymaster != nil {
-		paymaster = aaTx.Paymaster[:]
-	}
-	if aaTx.Deployer != nil {
-		deployer = aaTx.Deployer[:]
-	}
-	if aaTx.BuilderFee != nil {
-		builderFee = aaTx.BuilderFee.Bytes()
-	}
-	if aaTx.NonceKey != nil {
-		nonceKey = aaTx.NonceKey.Bytes()
-	}
-
-	senderAddr := aaTx.SenderAddress.Value()
-	return &typesproto.AccountAbstractionTransaction{
-		Nonce:                       aaTx.Nonce,
-		ChainId:                     aaTx.ChainID.Bytes(),
-		Tip:                         aaTx.Tip.Bytes(),
-		FeeCap:                      aaTx.FeeCap.Bytes(),
-		Gas:                         aaTx.GasLimit,
-		SenderAddress:               senderAddr[:],
-		SenderValidationData:        aaTx.SenderValidationData,
-		ExecutionData:               aaTx.ExecutionData,
-		Paymaster:                   paymaster,
-		PaymasterData:               paymasterData,
-		Deployer:                    deployer,
-		DeployerData:                deployerData,
-		BuilderFee:                  builderFee,
-		ValidationGasLimit:          aaTx.ValidationGasLimit,
-		PaymasterValidationGasLimit: aaTx.PaymasterValidationGasLimit,
-		PostOpGasLimit:              aaTx.PostOpGasLimit,
-		NonceKey:                    nonceKey,
-	}
 }
 
 type TxnSlots struct {
@@ -673,3 +636,7 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 }
 
 var addressesGrowth = make([]byte, length.Addr)
+
+func (tx *TxnSlot) HasBlobs() bool {
+	return tx.TxType() == BlobTxnType || tx.Txn.GetBlobGas() != 0
+}

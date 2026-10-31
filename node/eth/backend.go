@@ -408,7 +408,6 @@ func New(
 	if compatErr != nil {
 		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
 	}
-	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()

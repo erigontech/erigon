@@ -33,7 +33,7 @@ import (
 
 // BySenderAndNonce - designed to perform most expensive operation in TxPool:
 // "recalculate all ephemeral fields of all transactions" by algo
-//   - for all senders - iterate over all transactions in nonce growing order
+//   - for all senders - iterate over transactions by nonce domain, then increasing nonce
 //
 // Performances decisions:
 //   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
@@ -43,12 +43,14 @@ type BySenderAndNonce struct {
 	search            *metaTxn
 	senderIDTxnCount  map[uint64]int    // count of sender's txns in the pool - may differ from nonce
 	senderIDBlobCount map[uint64]uint64 // count of sender's total number of blobs in the pool
+	senderIDFrameTxn  map[uint64]*metaTxn
 }
 
 func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = math.MaxUint64
+	s.keyedNonce = false
 
 	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID == senderID {
@@ -70,6 +72,7 @@ func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = 0
+	s.keyedNonce = false
 	b.tree.AscendGreaterOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID != senderID {
 			return false
@@ -82,6 +85,7 @@ func (b *BySenderAndNonce) descend(senderID uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = math.MaxUint64
+	s.keyedNonce = true
 	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID != senderID {
 			return false
@@ -106,6 +110,7 @@ func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = txNonce
+	s.keyedNonce = false
 	if found, ok := b.tree.Get(s); ok {
 		return found
 	}
@@ -124,6 +129,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 		}
 
 		senderID := mt.TxnSlot.SenderID
+		if mt.TxnSlot.TxType() == FrameTxnType {
+			delete(b.senderIDFrameTxn, senderID)
+		}
 		count := b.senderIDTxnCount[senderID]
 		if count > 1 {
 			b.senderIDTxnCount[senderID] = count - 1
@@ -145,6 +153,12 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 
 func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *metaTxn {
 	it, ok := b.tree.ReplaceOrInsert(mt)
+	if ok && it.TxnSlot.TxType() == FrameTxnType {
+		delete(b.senderIDFrameTxn, it.TxnSlot.SenderID)
+	}
+	if mt.TxnSlot.TxType() == FrameTxnType {
+		b.senderIDFrameTxn[mt.TxnSlot.SenderID] = mt
+	}
 
 	if ok {
 		if mt.TxnSlot.Traced {

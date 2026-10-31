@@ -132,6 +132,8 @@ type callTracer struct {
 	config      callTracerConfig
 	gasLimit    uint64
 	isAmsterdam bool
+	frameTx     *types.FrameTransaction
+	topDepth    int
 	depth       int
 	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
 	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
@@ -179,10 +181,10 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 func (t *callTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)
-	if t.config.OnlyTopCall && depth > 0 {
+	if t.config.OnlyTopCall && depth > t.topDepth {
 		return
 	}
-	if precompile && !t.config.IncludePrecompiles {
+	if precompile && !t.config.IncludePrecompiles && !(t.frameTx != nil && depth == 1) {
 		return
 	}
 	// Skip if tracing was interrupted
@@ -222,13 +224,6 @@ func (t *callTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage
 
 	t.depth = depth - 1
 
-	if t.config.OnlyTopCall {
-		return
-	}
-	size := len(t.callstack)
-	if size <= 1 {
-		return
-	}
 	precompilesLastIdx := len(t.precompiles) - 1
 	if precompilesLastIdx < 0 {
 		return
@@ -236,7 +231,14 @@ func (t *callTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage
 	// pop precompile
 	precompile := t.precompiles[precompilesLastIdx]
 	t.precompiles = t.precompiles[:precompilesLastIdx]
-	if precompile && !t.config.IncludePrecompiles {
+	if t.config.OnlyTopCall && depth > t.topDepth {
+		return
+	}
+	if precompile && !t.config.IncludePrecompiles && !(t.frameTx != nil && depth == 1) {
+		return
+	}
+	size := len(t.callstack)
+	if size <= 1 {
 		return
 	}
 	// pop call
@@ -262,6 +264,13 @@ func (t *callTracer) captureEnd(output []byte, err error) {
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.gasLimit = tx.GetGasLimit()
 	t.isAmsterdam = env.Rules.IsAmsterdam
+	t.frameTx, _ = tx.Unwrap().(*types.FrameTransaction)
+	t.topDepth = 0
+	if t.frameTx != nil {
+		// Each transaction frame is a top-level operation beneath the synthetic
+		// root, so OnlyTopCall must retain those children too.
+		t.topDepth = 1
+	}
 }
 
 func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
@@ -283,6 +292,23 @@ func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasU
 		t.callstack[0].StateGasUsed = &stateGasUsed
 		t.callstack[0].GasRefund = toHexUint64Ptr(txnGasUsage.GasRefund)
 	}
+	if t.frameTx != nil {
+		// A later frame can refill an earlier frame's state gas. Use final receipts
+		// instead of the gas usage observed when each individual call exited.
+		for i := range min(len(receipt.FrameReceipts), len(t.callstack[0].Calls)) {
+			frame, call := &receipt.FrameReceipts[i], &t.callstack[0].Calls[i]
+			call.Gas = hexutil.Uint64(t.frameTx.Frames[i].Limits.Total())
+			call.GasUsed = hexutil.Uint64(frame.GasUsed.Total())
+			stateGasUsed := hexutil.Int64(frame.GasUsed.State)
+			call.StateGasUsed = &stateGasUsed
+			if t.config.WithLog {
+				// Batch rollback can remove logs from successful frames. A failed
+				// frame does not remove logs from its other siblings.
+				clearFailedLogs(call, len(frame.Logs) == 0)
+			}
+		}
+		return
+	}
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
 		clearFailedLogs(&t.callstack[0], false)
@@ -295,7 +321,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 		return
 	}
 	// Avoid processing nested calls when only caring about top call
-	if t.config.OnlyTopCall && t.depth > 0 {
+	if t.config.OnlyTopCall && t.depth > t.topDepth {
 		return
 	}
 	// Skip if tracing was interrupted

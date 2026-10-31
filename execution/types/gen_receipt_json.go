@@ -6,10 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/holiman/uint256"
 )
 
 var _ = (*receiptMarshaling)(nil)
@@ -17,18 +16,22 @@ var _ = (*receiptMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (r *Receipt) MarshalJSON() ([]byte, error) {
 	type Receipt struct {
-		Type              hexutil.Uint64 `json:"type,omitempty"`
-		PostState         hexutil.Bytes  `json:"root"`
-		Status            hexutil.Uint64 `json:"status"`
-		CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-		Bloom             Bloom          `json:"logsBloom"         gencodec:"required"`
-		Logs              []*Log         `json:"logs"              gencodec:"required"`
-		TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress   common.Address `json:"contractAddress"`
-		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		BlockHash         common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.U256  `json:"blockNumber,omitempty"`
-		TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
+		Type                     hexutil.Uint64  `json:"type,omitempty"`
+		PostState                hexutil.Bytes   `json:"root" codec:"1"`
+		Status                   hexutil.Uint64  `json:"status" codec:"2"`
+		CumulativeGasUsed        hexutil.Uint64  `json:"cumulativeGasUsed" gencodec:"required"`
+		Bloom                    Bloom           `json:"logsBloom"         gencodec:"required"`
+		Logs                     Logs            `json:"logs"              gencodec:"required"`
+		Payer                    *common.Address `json:"payer,omitempty"`
+		FrameReceipts            []FrameReceipt  `json:"frameReceipts,omitempty"`
+		TxHash                   common.Hash     `json:"transactionHash" gencodec:"required"`
+		ContractAddress          common.Address  `json:"contractAddress"`
+		GasUsed                  hexutil.Uint64  `json:"gasUsed" gencodec:"required"`
+		BlobGasUsed              hexutil.Uint64  `json:"blobGasUsed,omitempty"`
+		BlockHash                common.Hash     `json:"blockHash,omitempty"`
+		BlockNumber              *hexutil.U256   `json:"blockNumber,omitempty"`
+		TransactionIndex         hexutil.Uint    `json:"transactionIndex"`
+		FirstLogIndexWithinBlock uint32          `json:"-"`
 	}
 	var enc Receipt
 	enc.Type = hexutil.Uint64(r.Type)
@@ -37,14 +40,16 @@ func (r *Receipt) MarshalJSON() ([]byte, error) {
 	enc.CumulativeGasUsed = hexutil.Uint64(r.CumulativeGasUsed)
 	enc.Bloom = r.Bloom
 	enc.Logs = r.Logs
+	enc.Payer = r.Payer
+	enc.FrameReceipts = r.FrameReceipts
 	enc.TxHash = r.TxHash
 	enc.ContractAddress = r.ContractAddress
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
+	enc.BlobGasUsed = hexutil.Uint64(r.BlobGasUsed)
 	enc.BlockHash = r.BlockHash
-	if r.BlockNumber != nil {
-		enc.BlockNumber = (*hexutil.U256)(r.BlockNumber)
-	}
+	enc.BlockNumber = (*hexutil.U256)(r.BlockNumber)
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
+	enc.FirstLogIndexWithinBlock = r.FirstLogIndexWithinBlock
 	return json.Marshal(&enc)
 }
 
@@ -52,18 +57,22 @@ func (r *Receipt) MarshalJSON() ([]byte, error) {
 func (r *Receipt) UnmarshalJSON(input []byte) error {
 	r.derivedBloom.Store(nil)
 	type Receipt struct {
-		Type              *hexutil.Uint64 `json:"type,omitempty"`
-		PostState         *hexutil.Bytes  `json:"root"`
-		Status            *hexutil.Uint64 `json:"status"`
-		CumulativeGasUsed *hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-		Bloom             *Bloom          `json:"logsBloom"         gencodec:"required"`
-		Logs              []*Log          `json:"logs"              gencodec:"required"`
-		TxHash            *common.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress   *common.Address `json:"contractAddress"`
-		GasUsed           *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		BlockHash         *common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *uint256.Int    `json:"blockNumber,omitempty"`
-		TransactionIndex  *hexutil.Uint   `json:"transactionIndex"`
+		Type                     *hexutil.Uint64 `json:"type,omitempty"`
+		PostState                *hexutil.Bytes  `json:"root" codec:"1"`
+		Status                   *hexutil.Uint64 `json:"status" codec:"2"`
+		CumulativeGasUsed        *hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+		Bloom                    *Bloom          `json:"logsBloom"         gencodec:"required"`
+		Logs                     *Logs           `json:"logs"              gencodec:"required"`
+		Payer                    *common.Address `json:"payer,omitempty"`
+		FrameReceipts            []FrameReceipt  `json:"frameReceipts,omitempty"`
+		TxHash                   *common.Hash    `json:"transactionHash" gencodec:"required"`
+		ContractAddress          *common.Address `json:"contractAddress"`
+		GasUsed                  *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
+		BlobGasUsed              *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
+		BlockHash                *common.Hash    `json:"blockHash,omitempty"`
+		BlockNumber              *hexutil.U256   `json:"blockNumber,omitempty"`
+		TransactionIndex         *hexutil.Uint   `json:"transactionIndex"`
+		FirstLogIndexWithinBlock *uint32         `json:"-"`
 	}
 	var dec Receipt
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -89,7 +98,13 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 	if dec.Logs == nil {
 		return errors.New("missing required field 'logs' for Receipt")
 	}
-	r.Logs = dec.Logs
+	r.Logs = *dec.Logs
+	if dec.Payer != nil {
+		r.Payer = dec.Payer
+	}
+	if dec.FrameReceipts != nil {
+		r.FrameReceipts = dec.FrameReceipts
+	}
 	if dec.TxHash == nil {
 		return errors.New("missing required field 'transactionHash' for Receipt")
 	}
@@ -101,14 +116,20 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		return errors.New("missing required field 'gasUsed' for Receipt")
 	}
 	r.GasUsed = uint64(*dec.GasUsed)
+	if dec.BlobGasUsed != nil {
+		r.BlobGasUsed = uint64(*dec.BlobGasUsed)
+	}
 	if dec.BlockHash != nil {
 		r.BlockHash = *dec.BlockHash
 	}
 	if dec.BlockNumber != nil {
-		r.BlockNumber = dec.BlockNumber
+		r.BlockNumber = (*uint256.Int)(dec.BlockNumber)
 	}
 	if dec.TransactionIndex != nil {
 		r.TransactionIndex = uint(*dec.TransactionIndex)
+	}
+	if dec.FirstLogIndexWithinBlock != nil {
+		r.FirstLogIndexWithinBlock = *dec.FirstLogIndexWithinBlock
 	}
 	return nil
 }
