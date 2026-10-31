@@ -19,6 +19,8 @@ package main
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -339,9 +341,17 @@ func runEngineXGroup(
 // usable.
 var safeFilenameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
+// maxFilenameLen is the file name limit of common filesystems (NAME_MAX).
+const maxFilenameLen = 255
+
 func profileFilename(dir, kind, id, ext string) string {
-	clean := safeFilenameRe.ReplaceAllString(id, "_")
-	return filepath.Join(dir, kind+"__"+clean+"."+ext)
+	name, suffix := kind+"__"+safeFilenameRe.ReplaceAllString(id, "_"), "."+ext
+	if len(name)+len(suffix) > maxFilenameLen {
+		sum := sha256.Sum256([]byte(name))
+		tag := "_" + hex.EncodeToString(sum[:8])
+		name = name[:maxFilenameLen-len(suffix)-len(tag)] + tag
+	}
+	return filepath.Join(dir, name+suffix)
 }
 
 // makeRequestProfileHook returns a hook that writes one CPU profile and/or
