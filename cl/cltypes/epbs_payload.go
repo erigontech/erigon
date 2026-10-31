@@ -241,9 +241,13 @@ type IndexedPayloadAttestation struct {
 	Signature        common.Bytes96          `json:"signature"`
 }
 
-func NewIndexedPayloadAttestation() *IndexedPayloadAttestation {
+func NewIndexedPayloadAttestation(cfg *clparams.BeaconChainConfig) *IndexedPayloadAttestation {
+	limit := int(clparams.MaxPtcSize)
+	if cfg != nil && cfg.PtcSize > 0 {
+		limit = int(cfg.PtcSize)
+	}
 	return &IndexedPayloadAttestation{
-		AttestingIndices: solid.NewRawUint64List(int(clparams.MaxPtcSize), []uint64{}),
+		AttestingIndices: solid.NewRawUint64List(limit, nil),
 		Data:             &PayloadAttestationData{},
 	}
 }
@@ -257,7 +261,11 @@ func (i *IndexedPayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
-	i.AttestingIndices = solid.NewRawUint64List(int(clparams.MaxPtcSize), nil)
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices != nil && i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	i.AttestingIndices = solid.NewRawUint64List(limit, nil)
 	i.Data = new(PayloadAttestationData)
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
@@ -272,7 +280,11 @@ func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
-	newIndices := solid.NewRawUint64List(int(clparams.MaxPtcSize), make([]uint64, i.AttestingIndices.Length()))
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	newIndices := solid.NewRawUint64List(limit, make([]uint64, i.AttestingIndices.Length()))
 	for idx := 0; idx < i.AttestingIndices.Length(); idx++ {
 		newIndices.Set(idx, i.AttestingIndices.Get(idx))
 	}
