@@ -1166,6 +1166,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"valSkip", blockExecutor.cntValidationSkip,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -1774,8 +1775,6 @@ type balTx struct {
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
 
-var valSkipCount atomic.Int64
-
 // goReused runs f on an idle task goroutine when there is one, so f starts on an
 // already grown stack instead of growing a new one.
 func (pe *parallelExecutor) goReused(f func()) {
@@ -2032,7 +2031,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			prevWrites = result.TxOut
 			pe.releaseWorker(w)
 
-			result.ValStamp = be.versionMap.WriteSeq()
 			valid, target, blocker := be.selfLoopEvaluate(tv, result)
 			if !valid {
 				if blocker > be.frontier() && !waitTo(blocker) {
@@ -2051,7 +2049,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				if !waitTo(target) {
 					return
 				}
-				result.ValStamp = be.versionMap.WriteSeq()
 				valid, _, _ = be.selfLoopEvaluate(tv, result)
 			}
 			if valid {
@@ -2126,6 +2123,7 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // out of order rather than behind the whole linear prefix. valid=false forces
 // re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
+	result.ValStamp = be.versionMap.WriteSeq()
 	blocker = -1
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
@@ -2876,7 +2874,7 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntValidationFail int
+	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
@@ -3215,13 +3213,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			dirty := be.revalidate[tx]
 			if dirty || dbg.AssertEnabled {
-				if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-					func(rv, wv state.Version) state.VersionValidity {
-						if rv != wv {
-							return state.VersionInvalid
-						}
-						return state.VersionValid
-					}, false, "") != state.VersionValid {
+				if !be.validateNow(txVersion.TxIndex) {
 					if !dirty {
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
@@ -3468,6 +3460,27 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return slices.Sorted(maps.Keys(set))
 }
 
+func (be *blockExecutor) validateNow(txIdx int) bool {
+	return be.versionMap.ValidateVersion(txIdx, be.blockIO,
+		func(rv, wv state.Version) state.VersionValidity {
+			if rv != wv {
+				return state.VersionInvalid
+			}
+			return state.VersionValid
+		}, false, "") == state.VersionValid
+}
+
+func (be *blockExecutor) arrivalValid(txIdx int, valStamp uint64) bool {
+	if !be.versionMap.QuietBelow(txIdx, valStamp) {
+		return be.validateNow(txIdx)
+	}
+	be.cntValidationSkip++
+	if dbg.AssertEnabled && !be.validateNow(txIdx) && be.versionMap.QuietBelow(txIdx, valStamp) {
+		panic(fmt.Sprintf("validation skip oracle: tx %d skipped arrival validation but is stale", txIdx))
+	}
+	return true
+}
+
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
 // contiguous validated-but-not-finalized prefix, then validates the dependency-ready
 // txs out of order, committing each or cascading a re-validation of successors on
@@ -3493,24 +3506,12 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			// Re-validate against the CURRENT versionMap, not the worker's verdict: a
-			// predecessor may have changed or sealed since (including an in-flight
-			// Validated cell the reader early-broke on), so trusting the stale verdict
-			// would commit against a value that has moved. The worker's verdict is
-			// trusted only when no tx below this one wrote since it was stamped.
-			skip := txResult.ValStamp != 0 && be.versionMap.QuietBelow(txVersion.TxIndex, txResult.ValStamp)
-			valid := skip
-			if skip {
-				valSkipCount.Add(1)
-			} else {
-				valid = be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-					func(rv, wv state.Version) state.VersionValidity {
-						if rv != wv {
-							return state.VersionInvalid
-						}
-						return state.VersionValid
-					}, false, "") == state.VersionValid
-			}
+			// Trust the worker's verdict only when no tx below this one wrote since it was
+			// stamped. Otherwise re-validate against the CURRENT versionMap: a predecessor
+			// may have changed or sealed since (including an in-flight Validated cell the
+			// reader early-broke on), so a stale verdict would commit against a value that
+			// has moved.
+			valid := be.arrivalValid(txVersion.TxIndex, txResult.ValStamp)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader

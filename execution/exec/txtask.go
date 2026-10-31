@@ -124,6 +124,8 @@ type TxResult struct {
 	// means every read was settled.
 	Dep int
 
+	// ValStamp is the versionMap write sequence loaded before the worker's read-set
+	// validation; 0 means not validated.
 	ValStamp uint64
 }
 
