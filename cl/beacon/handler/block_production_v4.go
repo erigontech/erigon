@@ -55,7 +55,7 @@ func decodeGloasBlockProductionOptions(w http.ResponseWriter, r *http.Request, t
 	}
 	parsedVersion, err := clparams.StringToClVersion(version)
 	if err != nil || parsedVersion != clparams.GloasVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("v4 block production requires gloas consensus version"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("v4 block production requires gloas consensus version"))
 	}
 	includePayloadValue := r.URL.Query().Get("include_payload")
 	if includePayloadValue == "" {
