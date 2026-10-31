@@ -1201,3 +1201,34 @@ func TestLogResolver_TransactionLoadsEachBlockOnce(t *testing.T) {
 	require.Contains(t, query(`{logs(filter:{}){transaction{hash}}}`), txns[1].Hash().Hex())
 	require.Zero(t, mock.byHash.Load())
 }
+
+type notFoundBlocksAPI struct {
+	mockGraphQLAPI
+}
+
+func (m *notFoundBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockNumber, _ *bool) (map[string]any, error) {
+	return nil, rpc.BlockNotFoundErr{BlockId: number.String()}
+}
+
+func (m *notFoundBlocksAPI) GetBlockDetailsByHash(_ context.Context, hash common.Hash, _ *bool) (map[string]any, error) {
+	return nil, rpc.BlockNotFoundErr{BlockId: hash.Hex()}
+}
+
+func TestQueryResolver_Block_UnknownIsNull(t *testing.T) {
+	t.Parallel()
+
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: &notFoundBlocksAPI{}}}))
+	srv.AddTransport(transport.POST{})
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	require.JSONEq(t, `{"data":{"block":null}}`, query(`{block(number:"0x7fffffff"){number}}`))
+	require.JSONEq(t, `{"data":{"block":null}}`, query(`{block(hash:"0x`+strings.Repeat("ab", 32)+`"){number}}`))
+}
