@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/math"
 )
 
 // ByteListSSZ is a variable-length SSZ byte list (ByteList[N]) with a
@@ -109,21 +108,18 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	chunkLimit := (b.limit + 31) / 32
 
 	// Pack the data into 32-byte chunks and merkleize with the chunk limit.
-	leafCount := math.NextPowerOfTwo(uint64((len(b.data) + 31) / length.Hash))
-	if leafCount == 0 {
-		leafCount = 1
-	}
-	leaves := make([]byte, leafCount*uint64(length.Hash))
+	leaves := make([]byte, (len(b.data)+31)/length.Hash*length.Hash)
 	copy(leaves, b.data)
 
-	if err := merkle_tree.MerkleRootFromFlatLeavesWithLimit(leaves, leaves, chunkLimit); err != nil {
+	var root [32]byte
+	if err := merkle_tree.MerkleRootFromFlatLeavesWithLimit(leaves, root[:], chunkLimit); err != nil {
 		return [32]byte{}, err
 	}
 
 	// mix_in_length: hash(root || length)
 	var result [32]byte
 	mixIn := make([]byte, 64)
-	copy(mixIn[:32], leaves[:length.Hash])
+	copy(mixIn[:32], root[:])
 	binary.LittleEndian.PutUint64(mixIn[32:], uint64(len(b.data)))
 	if err := merkle_tree.HashByteSlice(result[:], mixIn); err != nil {
 		return [32]byte{}, err
