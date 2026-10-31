@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -22,8 +38,7 @@ func TestValSkip_SelfDestructPromotionBumpsStamp(t *testing.T) {
 
 	vm.WriteStorage(addr, slot, Version{TxIndex: k}, val, true)
 
-	sd := &WriteSet{}
-	sd.SetSelfDestruct(addr, &VersionedWrite[bool]{
+	sd := newWriteSet(&VersionedWrite[bool]{
 		WriteHeader: WriteHeader{Address: addr, Version: Version{TxIndex: j}, Path: SelfDestructPath},
 		Val:         true,
 	})
@@ -133,41 +148,21 @@ func TestQuietBelow_FlushBumpsStampOfWriterSlot(t *testing.T) {
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	stamp := vm.WriteSeq()
-	ws := &WriteSet{}
-	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Version: Version{TxIndex: 2}, Path: BalancePath},
-		Val:         *uint256.NewInt(1),
-	})
-	vm.FlushVersionedWrites(ws, false)
+	flushLifecycle(vm, addr, 2, BalancePath)
 	require.False(t, vm.QuietBelow(3, stamp), "flush by tx 2 blocks tx 3")
 	require.True(t, vm.QuietBelow(2, stamp), "flush by tx 2 does not block tx 2")
 }
 
-type cellKind int
-
-const (
-	cellIncarnation cellKind = iota
-	cellCreateContract
-	cellSelfDestruct
-	cellBalance
-)
-
-func flushLifecycle(vm *VersionMap, addr accounts.Address, tx int, kind cellKind) *WriteSet {
-	ws := &WriteSet{}
-	h := WriteHeader{Address: addr, Version: Version{TxIndex: tx}}
-	switch kind {
-	case cellIncarnation:
-		h.Path = IncarnationPath
-		ws.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: h, Val: 1})
-	case cellCreateContract:
-		h.Path = CreateContractPath
-		ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: h, Val: true})
-	case cellSelfDestruct:
-		h.Path = SelfDestructPath
-		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: h, Val: true})
-	case cellBalance:
-		h.Path = BalancePath
-		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: h, Val: *uint256.NewInt(1)})
+func flushLifecycle(vm *VersionMap, addr accounts.Address, tx int, path AccountPath) *WriteSet {
+	h := WriteHeader{Address: addr, Version: Version{TxIndex: tx}, Path: path}
+	var ws *WriteSet
+	switch path {
+	case IncarnationPath:
+		ws = newWriteSet(&VersionedWrite[uint64]{WriteHeader: h, Val: 1})
+	case CreateContractPath, SelfDestructPath:
+		ws = newWriteSet(&VersionedWrite[bool]{WriteHeader: h, Val: true})
+	default:
+		ws = newWriteSet(&VersionedWrite[uint256.Int]{WriteHeader: h, Val: *uint256.NewInt(1)})
 	}
 	vm.FlushVersionedWrites(ws, false)
 	return ws
@@ -176,14 +171,14 @@ func flushLifecycle(vm *VersionMap, addr accounts.Address, tx int, kind cellKind
 func TestValSkip_LifecyclePromotionBumpsStamp(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x02"))
-	for name, kind := range map[string]cellKind{
-		"incarnation":    cellIncarnation,
-		"createContract": cellCreateContract,
-		"selfDestruct":   cellSelfDestruct,
+	for name, path := range map[string]AccountPath{
+		"incarnation":    IncarnationPath,
+		"createContract": CreateContractPath,
+		"selfDestruct":   SelfDestructPath,
 	} {
 		t.Run(name, func(t *testing.T) {
 			vm := newStampedMap(32)
-			ws := flushLifecycle(vm, addr, 3, kind)
+			ws := flushLifecycle(vm, addr, 3, path)
 			stamp := vm.WriteSeq()
 			require.True(t, vm.QuietBelow(5, stamp))
 			vm.MarkWritesValidated(ws, nil)
@@ -196,7 +191,7 @@ func TestValSkip_CompleteOnLifecycleCellBumps(t *testing.T) {
 	t.Parallel()
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x03"))
-	ws := flushLifecycle(vm, addr, 3, cellSelfDestruct)
+	ws := flushLifecycle(vm, addr, 3, SelfDestructPath)
 	vm.MarkWritesValidated(ws, nil)
 	stamp := vm.WriteSeq()
 	require.True(t, vm.QuietBelow(5, stamp))
@@ -208,43 +203,64 @@ func TestValSkip_PromotionWithoutLifecycleCellDoesNotBump(t *testing.T) {
 	t.Parallel()
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x04"))
-	ws := flushLifecycle(vm, addr, 3, cellBalance)
+	ws := flushLifecycle(vm, addr, 3, BalancePath)
 	stamp := vm.WriteSeq()
 	vm.MarkWritesValidated(ws, nil)
 	require.True(t, vm.QuietBelow(5, stamp), "Estimate->Validated on a plain account must not bump")
 	vm.MarkWritesComplete(ws)
 	require.True(t, vm.QuietBelow(5, stamp), "Validated->Done on a plain account must not bump")
-	require.Zero(t, vm.stamps.inflight[vm.stamps.slot(3)+1].Load(), "cancelled brackets leave no in-flight count")
 }
 
 func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x05"))
-	for _, tc := range []struct {
-		j     int
-		quiet bool
-	}{{3, false}, {4, false}, {5, true}, {9, true}} {
-		vm := newStampedMap(32)
-		flushLifecycle(vm, addr, tc.j, cellBalance)
-		stamp := vm.WriteSeq()
-		vm.Delete(addr, BalancePath, accounts.NilKey, tc.j, true)
-		require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "Delete by j=%d against i=5", tc.j)
+	ops := map[string]func(vm *VersionMap, j int){
+		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, true) },
+		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+	}
+	for name, op := range ops {
+		for _, tc := range []struct {
+			j     int
+			quiet bool
+		}{{3, false}, {4, false}, {5, true}, {9, true}} {
+			vm := newStampedMap(32)
+			flushLifecycle(vm, addr, tc.j, BalancePath)
+			stamp := vm.WriteSeq()
+			op(vm, tc.j)
+			require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "%s by j=%d against i=5", name, tc.j)
+		}
 	}
 }
 
-func TestQuietBelow_DeleteAllBumpsStamp(t *testing.T) {
+func TestQuietBelow_WritePrimitivesBumpStamp(t *testing.T) {
 	t.Parallel()
-	addr := accounts.InternAddress(common.HexToAddress("0x06"))
-	for _, tc := range []struct {
-		j     int
-		quiet bool
-	}{{3, false}, {4, false}, {5, true}, {9, true}} {
-		vm := newStampedMap(32)
-		flushLifecycle(vm, addr, tc.j, cellBalance)
-		stamp := vm.WriteSeq()
-		vm.DeleteAll(addr, tc.j)
-		require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "DeleteAll by j=%d against i=5", tc.j)
-	}
+	vm := newStampedMap(32)
+	addr := accounts.InternAddress(common.HexToAddress("0x07"))
+	stamp := vm.WriteSeq()
+	vm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1), true)
+	require.False(t, vm.QuietBelow(5, stamp), "a Write* after InitStamps must stamp its writer")
+}
+
+func TestQuietBelow_NoOpBALFlushDoesNotBump(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x08"))
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1), true)
+	vm.HasBAL = true
+	vm.InitStamps(32)
+	stamp := vm.WriteSeq()
+	flushLifecycle(vm, addr, 3, BalancePath)
+	require.True(t, vm.QuietBelow(5, stamp), "a flush that changes no cell must not stamp")
+}
+
+func TestQuietBelow_WriterOutsideLayoutPanics(t *testing.T) {
+	t.Parallel()
+	const last = 7
+	vm := newStampedMap(last)
+	require.Panics(t, func() { vm.mutBegin(last + 1) })
+	require.Panics(t, func() { vm.mutBegin(-2) })
+	vm.mutBegin(last)
+	vm.mutEnd(last)
 }
 
 func TestQuietBelow_StampsSizedForLastIndex(t *testing.T) {

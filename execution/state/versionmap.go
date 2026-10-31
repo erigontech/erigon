@@ -277,9 +277,16 @@ func (st *writeStamps) slot(txIdx int) int {
 	return min(max(txIdx+1, 0), st.n-1)
 }
 
+func (st *writeStamps) writerSlot(txIdx int) int {
+	if txIdx < -1 || txIdx > st.n-2 {
+		panic(fmt.Sprintf("write stamp: txIdx %d outside [-1, %d]", txIdx, st.n-2))
+	}
+	return txIdx + 1
+}
+
 func (vm *VersionMap) mutBegin(txIdx int) {
 	if st := vm.stamps; st != nil {
-		for k := st.slot(txIdx) + 1; k <= st.n; k += k & -k {
+		for k := st.writerSlot(txIdx) + 1; k <= st.n; k += k & -k {
 			st.inflight[k].Add(1)
 		}
 	}
@@ -291,7 +298,7 @@ func (vm *VersionMap) mutEnd(txIdx int) {
 		return
 	}
 	seq := vm.writeSeq.Add(1)
-	slot := st.slot(txIdx)
+	slot := st.writerSlot(txIdx)
 	for k := slot + 1; k <= st.n; k += k & -k {
 		for {
 			old := st.last[k].Load()
@@ -305,14 +312,10 @@ func (vm *VersionMap) mutEnd(txIdx int) {
 	}
 }
 
-func (vm *VersionMap) mutCancel(txIdx int) {
-	if st := vm.stamps; st != nil {
-		for k := st.slot(txIdx) + 1; k <= st.n; k += k & -k {
-			st.inflight[k].Add(-1)
-		}
-	}
-}
-
+// hasLifecycleCells is checked per entry, not per write set: a read of this account is
+// validated against every lifecycle cell in the entry, so promoting any cell of it can
+// turn a verdict Valid -> Invalid even when the promoting tx wrote only storage. On an
+// entry without lifecycle cells a promotion can only move a verdict Invalid -> Valid.
 func hasLifecycleCells(e *AddressEntry) bool {
 	return e.SelfDestruct != nil && e.SelfDestruct.Len() > 0 ||
 		e.Incarnation != nil && e.Incarnation.Len() > 0 ||
@@ -324,7 +327,7 @@ func (vm *VersionMap) QuietBelow(txIdx int, stamp uint64) bool {
 	if st == nil || stamp == 0 {
 		return false
 	}
-	for k := min(max(txIdx+1, 0), st.n-1); k > 0; k -= k & -k {
+	for k := st.slot(txIdx); k > 0; k -= k & -k {
 		if st.inflight[k].Load() != 0 || st.last[k].Load() > stamp {
 			return false
 		}
@@ -332,38 +335,40 @@ func (vm *VersionMap) QuietBelow(txIdx int, stamp uint64) bool {
 	return true
 }
 
-func writeTxIdx(ws *WriteSet, addr accounts.Address) int {
-	if vw, ok := ws.balance[addr]; ok {
+func (ws *WriteSet) txIndex() int {
+	for _, vw := range ws.address {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.address[addr]; ok {
+	for _, vw := range ws.balance {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.nonce[addr]; ok {
+	for _, vw := range ws.nonce {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.incarnation[addr]; ok {
+	for _, vw := range ws.incarnation {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.selfDestruct[addr]; ok {
+	for _, vw := range ws.selfDestruct {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.createContract[addr]; ok {
+	for _, vw := range ws.createContract {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.code[addr]; ok {
+	for _, vw := range ws.code {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.codeHash[addr]; ok {
+	for _, vw := range ws.codeHash {
 		return vw.Version.TxIndex
 	}
-	if vw, ok := ws.codeSize[addr]; ok {
+	for _, vw := range ws.codeSize {
 		return vw.Version.TxIndex
 	}
-	for _, vw := range ws.storage[addr] {
-		return vw.Version.TxIndex
+	for _, inner := range ws.storage {
+		for _, vw := range inner {
+			return vw.Version.TxIndex
+		}
 	}
-	return -1
+	panic("write stamp: empty write set")
 }
 
 type originStorageKey struct {
@@ -559,6 +564,8 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 // wrong-type writes are caught at compile time.
 
 func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *accounts.Account, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -566,6 +573,8 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -573,6 +582,8 @@ func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value 
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -580,6 +591,8 @@ func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint2
 }
 
 func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -587,6 +600,8 @@ func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64,
 }
 
 func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value uint64, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -594,6 +609,8 @@ func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value u
 }
 
 func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts.Code, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -601,6 +618,8 @@ func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts
 }
 
 func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value accounts.CodeHash, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -608,6 +627,8 @@ func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value acco
 }
 
 func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -615,6 +636,8 @@ func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int,
 }
 
 func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, value bool, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -622,6 +645,8 @@ func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, valu
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
+	vm.mutBegin(v.TxIndex)
+	defer vm.mutEnd(v.TxIndex)
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -1339,6 +1364,12 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 	// become visible atomically. Cross-account partial visibility is resolved by
 	// commit-time ValidateVersion.
 	seen := make(map[accounts.Address]struct{})
+	wtx, stamped := 0, false
+	defer func() {
+		if stamped {
+			vm.mutEnd(wtx)
+		}
+	}()
 	writes.forEachAddr(func(addr accounts.Address) {
 		if _, dup := seen[addr]; dup {
 			return
@@ -1358,9 +1389,10 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				}
 			}
 		}
-		wtx := writeTxIdx(writes, addr)
-		vm.mutBegin(wtx)
-		defer vm.mutEnd(wtx)
+		if !stamped && vm.stamps != nil {
+			wtx, stamped = writes.txIndex(), true
+			vm.mutBegin(wtx)
+		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
@@ -1448,19 +1480,13 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		if e == nil {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
-		wtx := writeTxIdx(writes, addr)
-		vm.mutBegin(wtx)
-		life := false
-		defer func() {
-			if life {
-				vm.mutEnd(wtx)
-			} else {
-				vm.mutCancel(wtx)
-			}
-		}()
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		life = hasLifecycleCells(e)
+		if vm.stamps != nil && hasLifecycleCells(e) {
+			wtx := writes.txIndex()
+			vm.mutBegin(wtx)
+			defer vm.mutEnd(wtx)
+		}
 		if vw, ok := writes.address[addr]; ok {
 			markCellComplete(e.Address, addr, AddressPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 		}
@@ -1520,19 +1546,13 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, isFeeRecipient func(
 		if e == nil {
 			panic(fmt.Sprintf("markValidated: no entry addr=%x", addr.Value()))
 		}
-		wtx := writeTxIdx(writes, addr)
-		vm.mutBegin(wtx)
-		life := false
-		defer func() {
-			if life {
-				vm.mutEnd(wtx)
-			} else {
-				vm.mutCancel(wtx)
-			}
-		}()
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		life = hasLifecycleCells(e)
+		if vm.stamps != nil && hasLifecycleCells(e) {
+			wtx := writes.txIndex()
+			vm.mutBegin(wtx)
+			defer vm.mutEnd(wtx)
+		}
 		mark := func(path AccountPath, key accounts.StorageKey, v Version) {
 			markFlag(e, addr, path, key, v.TxIndex, v.Incarnation, FlagValidated)
 		}
