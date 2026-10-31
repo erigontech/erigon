@@ -28,6 +28,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -157,6 +158,9 @@ func isDefaultChaindata(chaindata, datadir string) bool {
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
 	if applyMigrations && isDefaultChaindata(chaindata, datadirCli) {
+		if err := app.RetireStateIfStepsInDB(ctx, dirs, 3, logger); err != nil {
+			return nil, err
+		}
 		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 			return nil, err
 		}
