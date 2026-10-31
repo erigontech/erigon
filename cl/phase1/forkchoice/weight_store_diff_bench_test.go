@@ -85,14 +85,14 @@ func BenchmarkGloasWeightTreePrepare(b *testing.B) {
 	})
 	b.Run("dirty-one", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.markDirty(dirtyOne)
+			f.gloasWeightTree.update(dirtyOne)
 			f.gloasWeightTree.prepare(justified, cs)
 		}
 	})
 	b.Run("dirty-10pct", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			for _, vi := range dirtyTenPercent {
-				f.gloasWeightTree.markDirty(vi)
+				f.gloasWeightTree.update(vi)
 			}
 			f.gloasWeightTree.prepare(justified, cs)
 		}
@@ -100,7 +100,7 @@ func BenchmarkGloasWeightTreePrepare(b *testing.B) {
 	b.Run("dirty-all", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			for _, vi := range dirtyAll {
-				f.gloasWeightTree.markDirty(vi)
+				f.gloasWeightTree.update(vi)
 			}
 			f.gloasWeightTree.prepare(justified, cs)
 		}
