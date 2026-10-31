@@ -310,6 +310,12 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 		)
 		return nil
 	}
+	if fcuStatus == execmodule.ExecutionStatusBadBlock {
+		ve := common.Deref(validationErr)
+		e.ReportBadHeader(block.Hash(), common.Hash{}, ve)
+		e.ReportBadHeader(requested, common.Hash{}, ve)
+		return fmt.Errorf("bad block when updating fork choice for batch download: tip=%s, err=%s", block.Hash(), ve)
+	}
 	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(
 			"unsuccessful status when updating fork choice for batch download: status=%s, tip=%s, latestValidHash=%s",

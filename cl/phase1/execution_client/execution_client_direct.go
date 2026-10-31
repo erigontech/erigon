@@ -81,7 +81,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	body := payload.Body()
-	txs, err := types.DecodeTransactions(body.Transactions)
+	txs, err := DecodePayloadTransactions(payload)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err

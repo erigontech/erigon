@@ -213,7 +213,6 @@ func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.
 		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
 			Log:            l,
 			BlockTimestamp: blockTimestamp,
-			Removed:        rn.Removed,
 		}))
 	}
 

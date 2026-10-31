@@ -334,7 +334,7 @@ func TestApplyEnvelopeDoesNotQueueUnavailableRetry(t *testing.T) {
 
 	_, err = store.applyEnvelope(t.Context(), envelope, false, true, true, retryQueuedEnvelope, time.Now())
 
-	require.ErrorIs(t, err, errEnvelopeStateUnavailable)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
 	require.False(t, pending.Contains(envelope.Message.BeaconBlockRoot))
 }
 
@@ -355,7 +355,7 @@ func TestOnExecutionPayloadDoesNotQueueUnavailableStateAfterConcurrentApply(t *t
 
 	err = store.OnExecutionPayload(t.Context(), envelope, false, true)
 
-	require.ErrorIs(t, err, errEnvelopeStateUnavailable)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
 	require.False(t, pending.Contains(envelope.Message.BeaconBlockRoot))
 }
 

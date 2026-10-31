@@ -244,8 +244,7 @@ type ApiHandler struct {
 
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
-	// unregisteredProposers remembers which proposers have already been warned about, so the
-	// warning is once per proposer rather than once per proposal.
+	// Bounded cache for fee-recipient warnings; eviction permits a later warning for a proposer.
 	unregisteredProposers     *lru.Cache[uint64, struct{}]
 	blobBundles               blobBundleCache // Keep recent bundled blobs from the execution layer.
 	engine                    execution_client.ExecutionEngine

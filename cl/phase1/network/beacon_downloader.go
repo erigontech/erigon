@@ -560,7 +560,10 @@ Process:
 					ctx,
 					f.rpc,
 					fullRoots,
-					newEnvelopeCommitmentValidator(f.beaconCfg, processBlocks),
+					newEnvelopeValidator(processBlocks, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+						return ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope)
+					}),
+					nil,
 					processBlocks...,
 				)
 				if envErr != nil {

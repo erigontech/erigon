@@ -111,8 +111,9 @@ func TestNewPayloadGapExceedsLimit(t *testing.T) {
 // ahead of its TxNums index.
 type domainAheadExecStub struct {
 	execmodule.ExecutionModule
-	fcuStatus execmodule.ExecutionStatus
-	fcuCalls  int
+	fcuStatus      execmodule.ExecutionStatus
+	fcuLatestValid common.Hash
+	fcuCalls       int
 }
 
 func (*domainAheadExecStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
@@ -121,7 +122,7 @@ func (*domainAheadExecStub) ValidateChain(context.Context, common.Hash, uint64) 
 
 func (s *domainAheadExecStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
 	s.fcuCalls++
-	return execmodule.ForkChoiceResult{Status: s.fcuStatus, ValidationError: "domain ahead of blocks"}, nil
+	return execmodule.ForkChoiceResult{Status: s.fcuStatus, ValidationError: "domain ahead of blocks", LatestValidHash: s.fcuLatestValid}, nil
 }
 
 // A domain-ahead fork choice has already stored the batch's canonical markers
@@ -147,5 +148,23 @@ func TestExecDownloadedBatch_RejectedForkChoiceFails(t *testing.T) {
 			require.Error(t, e.execDownloadedBatch(t.Context(), block, block.Hash()))
 			require.Equal(t, 1, exec.fcuCalls)
 		})
+	}
+}
+
+// The fork choice names the pre-batch head as latest valid, which the batch
+// blocks below the bad one are not known to fail, so the ancestor stays unknown.
+func TestExecDownloadedBatch_BadBlockForkChoiceMarksBatchBad(t *testing.T) {
+	e := newTestBadHeadersDownloader(t)
+	e.logger = testlog.Logger(t, log.LvlCrit)
+	exec := &domainAheadExecStub{fcuStatus: execmodule.ExecutionStatusBadBlock, fcuLatestValid: common.Hash{0x01}}
+	e.chainRW = chainreader.NewChainReaderEth1(nil, exec, 0)
+	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(5000)}, nil)
+	requested := common.Hash{0x02}
+	require.Error(t, e.execDownloadedBatch(t.Context(), block, requested))
+	for _, h := range []common.Hash{block.Hash(), requested} {
+		bad, lastValid, validationErr := e.IsBadHeader(h)
+		require.True(t, bad, h)
+		require.Equal(t, common.Hash{}, lastValid)
+		require.Equal(t, "domain ahead of blocks", validationErr)
 	}
 }
