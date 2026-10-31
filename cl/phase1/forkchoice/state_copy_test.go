@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -66,6 +67,121 @@ func TestGetStateAtBlockRootHoldsReadLockDuringCurrentStateCopy(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("writer did not enter after current state copy completed")
 	}
+}
+
+func TestViewCurrentStateAtBlockRoot(t *testing.T) {
+	currentRoot := common.Hash{0x01}
+	currentState := state.New(&clparams.MainnetBeaconConfig)
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{currentRoot: currentState},
+		currentStateRoot: currentRoot,
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+	for _, test := range []struct {
+		name       string
+		root       common.Hash
+		wantCalled bool
+	}{
+		{name: "non-current root", root: common.Hash{0x02}},
+		{name: "current root", root: currentRoot, wantCalled: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			called := false
+			err := store.ViewCurrentStateAtBlockRoot(test.root, func(headState *state.CachingBeaconState) error {
+				called = true
+				require.Same(t, currentState, headState)
+				return nil
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, test.wantCalled, called)
+		})
+	}
+}
+
+func TestViewCurrentStateAtBlockRootHoldsReadLockUntilCallbackReturns(t *testing.T) {
+	root := common.Hash{0x01}
+	currentState := state.New(&clparams.MainnetBeaconConfig)
+	store := &ForkChoiceStore{forkGraph: &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: currentState},
+		currentStateRoot: root,
+	}}
+	callbackErr := errors.New("callback failed")
+	callbackEntered := make(chan struct{})
+	callbackRelease := make(chan struct{})
+	viewDone := make(chan error, 1)
+	go func() {
+		viewDone <- store.ViewCurrentStateAtBlockRoot(root, func(*state.CachingBeaconState) error {
+			close(callbackEntered)
+			<-callbackRelease
+			return callbackErr
+		})
+	}()
+	<-callbackEntered
+
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		store.mu.Lock()
+		close(writerDone)
+		store.mu.Unlock()
+	}()
+	<-writerStarted
+	select {
+	case <-writerDone:
+		t.Fatal("writer entered while the callback held the current state")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(callbackRelease)
+	require.ErrorIs(t, <-viewDone, callbackErr)
+	select {
+	case <-writerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer did not enter after the callback returned")
+	}
+}
+
+func TestViewCurrentStateAtBlockRootWaitsForWriter(t *testing.T) {
+	root := common.Hash{0x01}
+	currentState := state.New(&clparams.MainnetBeaconConfig)
+	replacementState := state.New(&clparams.MainnetBeaconConfig)
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: currentState},
+		currentStateRoot: root,
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+	store.mu.Lock()
+	graph.states[root] = replacementState
+	viewStarted := make(chan struct{})
+	callbackEntered := make(chan struct{})
+	viewDone := make(chan error, 1)
+	go func() {
+		close(viewStarted)
+		viewDone <- store.ViewCurrentStateAtBlockRoot(root, func(headState *state.CachingBeaconState) error {
+			close(callbackEntered)
+			if headState != replacementState {
+				return errors.New("viewed stale current state")
+			}
+			return nil
+		})
+	}()
+	<-viewStarted
+	select {
+	case <-callbackEntered:
+		store.mu.Unlock()
+		t.Fatal("callback entered while the writer held the lock")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	store.mu.Unlock()
+	select {
+	case <-callbackEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("callback did not enter after the writer released the lock")
+	}
+	require.NoError(t, <-viewDone)
 }
 
 // Each call already holds f.mu when it reads the current state; locking again would

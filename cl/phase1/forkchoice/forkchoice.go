@@ -908,6 +908,16 @@ func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*s
 	return fn(blockState)
 }
 
+func (f *ForkChoiceStore) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	current := f.forkGraph.CurrentStateLocked(blockRoot)
+	if current == nil {
+		return nil
+	}
+	return fn(current)
+}
+
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot common.Hash) uint64 {
 	if ret, ok := f.preverifiedSizes.Get(blockRoot); ok {
 		return ret.validatorLength

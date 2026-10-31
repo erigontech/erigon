@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -113,11 +115,61 @@ type lockOrderFixture struct {
 	view       *pausingHeadView
 }
 
-func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
-	return newLockOrderFixtureWithConfig(t, slot, nil, common.Hash{}, false)
+type blockingStateCopyForkGraph struct {
+	fork_graph.ForkGraph
+	armed                    atomic.Bool
+	blocked                  atomic.Bool
+	released                 atomic.Bool
+	hideCurrentView          bool
+	currentViewStateOverride *state.CachingBeaconState
+	started                  chan struct{}
+	release                  chan struct{}
 }
 
-func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_client.ExecutionEngine, executionHash common.Hash, gloas bool) lockOrderFixture {
+func (g *blockingStateCopyForkGraph) CurrentStateLocked(root common.Hash) *state.CachingBeaconState {
+	current := g.ForkGraph.CurrentStateLocked(root)
+	if !g.armed.Load() {
+		return current
+	}
+	pcs := make([]uintptr, 16)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(1, pcs)])
+	viewCurrent := false
+	getOwned := false
+	for {
+		frame, more := frames.Next()
+		viewCurrent = viewCurrent || strings.HasSuffix(frame.Function, ".ViewCurrentStateAtBlockRoot")
+		getOwned = getOwned || strings.HasSuffix(frame.Function, ".GetOwnedStateAtBlockRoot")
+		if !more {
+			break
+		}
+	}
+	if viewCurrent {
+		if g.hideCurrentView {
+			return nil
+		}
+		if g.currentViewStateOverride != nil {
+			return g.currentViewStateOverride
+		}
+	}
+	if !getOwned || g.blocked.Swap(true) {
+		return current
+	}
+	close(g.started)
+	<-g.release
+	return current
+}
+
+func (g *blockingStateCopyForkGraph) releaseCopy() {
+	if g.released.CompareAndSwap(false, true) {
+		close(g.release)
+	}
+}
+
+func newLockOrderFixture(t *testing.T, slot uint64) lockOrderFixture {
+	return newLockOrderFixtureWithConfig(t, slot, nil, common.Hash{}, false, nil)
+}
+
+func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_client.ExecutionEngine, executionHash common.Hash, gloas bool, wrapGraph func(fork_graph.ForkGraph) fork_graph.ForkGraph) lockOrderFixture {
 	t.Helper()
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.GloasForkEpoch = math.MaxUint64
@@ -137,9 +189,11 @@ func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_c
 	headState.SetGenesisTime(genesisTime)
 	require.NoError(t, headState.SetSlot(slot))
 	headState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: slot})
+	if gloas {
+		headState.SetVersion(clparams.GloasVersion)
+	}
 	if executionHash != (common.Hash{}) {
 		if gloas {
-			headState.SetVersion(clparams.GloasVersion)
 			headState.SetLatestBlockHash(executionHash)
 		} else {
 			headState.SetVersion(clparams.FuluVersion)
@@ -158,6 +212,9 @@ func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_c
 		beacon_router_configuration.RouterConfiguration{},
 	)
 	require.NoError(t, err)
+	if wrapGraph != nil {
+		graph = wrapGraph(graph)
+	}
 	store, err := forkchoice.NewForkChoiceStore(
 		clock,
 		headState,
@@ -197,6 +254,264 @@ func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_c
 		headRoot:   headRoot,
 		view:       pausedView,
 	}
+}
+
+func startPostForkchoiceWithBlockedCopy(t *testing.T, blocker *blockingStateCopyForkGraph, configure func(lockOrderFixture)) (lockOrderFixture, <-chan *beaconevents.EventStream, <-chan error) {
+	t.Helper()
+	fixture := newLockOrderFixtureWithConfig(t, 1, nil, common.Hash{}, false, func(graph fork_graph.ForkGraph) fork_graph.ForkGraph {
+		blocker.ForkGraph = graph
+		return blocker
+	})
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	fixture.cfg.syncedData = fixture.syncedData
+	if configure != nil {
+		configure(fixture)
+	}
+	events := make(chan *beaconevents.EventStream, 3)
+	subscription := fixture.cfg.emitter.State().Subscribe(events)
+	t.Cleanup(subscription.Unsubscribe)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	blocker.armed.Store(true)
+	done := make(chan error, 1)
+	go func() {
+		done <- postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		blocker.releaseCopy()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("post-forkchoice operation did not stop")
+		}
+	})
+	select {
+	case <-blocker.started:
+	case <-time.After(time.Second):
+		t.Fatal("head-state copy did not start")
+	}
+	return fixture, events, done
+}
+
+func receiveStateEvent(t *testing.T, events <-chan *beaconevents.EventStream) *beaconevents.EventStream {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("state event was not emitted")
+		return nil
+	}
+}
+
+func requireNoHeadEvents(t *testing.T, events <-chan *beaconevents.EventStream) {
+	t.Helper()
+	for {
+		select {
+		case event := <-events:
+			require.NotEqual(t, beaconevents.StateHead, event.Event)
+			require.NotEqual(t, beaconevents.StateHeadV2, event.Event)
+		default:
+			return
+		}
+	}
+}
+
+func TestPostForkchoiceOperationsEmitsHeadEventsBeforeStateCopy(t *testing.T) {
+	blocker := &blockingStateCopyForkGraph{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	fixture, events, done := startPostForkchoiceWithBlockedCopy(t, blocker, nil)
+	stateRoot, err := fixture.headState.HashSSZ()
+	require.NoError(t, err)
+	var legacy *beaconevents.HeadData
+	var v2 *beaconevents.HeadV2Data
+	for range 2 {
+		select {
+		case event := <-events:
+			switch event.Event {
+			case beaconevents.StateHead:
+				legacy = event.Data.(*beaconevents.HeadData)
+			case beaconevents.StateHeadV2:
+				v2 = event.Data.(*beaconevents.HeadV2Data)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("head events were not emitted before the head-state copy completed")
+		}
+	}
+	require.Equal(t, &beaconevents.HeadData{
+		Slot:                      1,
+		Block:                     fixture.headRoot,
+		State:                     stateRoot,
+		EpochTransition:           false,
+		PreviousDutyDependentRoot: common.Hash{},
+		CurrentDutyDependentRoot:  common.Hash{},
+		ExecutionOptimistic:       false,
+	}, legacy)
+	require.Equal(t, &beaconevents.HeadV2Data{
+		Version: clparams.Phase0Version.String(),
+		Data: beaconevents.HeadV2Content{
+			Slot:                      1,
+			Block:                     fixture.headRoot,
+			State:                     stateRoot,
+			PayloadStatus:             "full",
+			EpochTransition:           false,
+			CurrentEpochDependentRoot: common.Hash{},
+			NextEpochDependentRoot:    common.Hash{},
+			ExecutionOptimistic:       false,
+		},
+	}, v2)
+
+	blocker.releaseCopy()
+	require.NoError(t, <-done)
+	requireNoHeadEvents(t, events)
+}
+
+func TestHeadEventBeforeStateCopyMatchesCopiedStateEvent(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		gloasForkEpoch    uint64
+		stateVersion      clparams.StateVersion
+		headSlot          uint64
+		wantPayloadStatus string
+	}{
+		{name: "pre-Gloas", gloasForkEpoch: 2, stateVersion: clparams.FuluVersion, headSlot: 31, wantPayloadStatus: "full"},
+		{name: "Gloas state with pre-Gloas head slot", gloasForkEpoch: 1, stateVersion: clparams.GloasVersion, headSlot: 31, wantPayloadStatus: "full"},
+		{name: "first Gloas head slot", gloasForkEpoch: 1, stateVersion: clparams.GloasVersion, headSlot: 32, wantPayloadStatus: "empty"},
+		{name: "after first Gloas head slot", gloasForkEpoch: 1, stateVersion: clparams.GloasVersion, headSlot: 33, wantPayloadStatus: "empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.AltairForkEpoch = 0
+			beaconCfg.BellatrixForkEpoch = 0
+			beaconCfg.CapellaForkEpoch = 0
+			beaconCfg.DenebForkEpoch = 0
+			beaconCfg.ElectraForkEpoch = 0
+			beaconCfg.FuluForkEpoch = 0
+			beaconCfg.GloasForkEpoch = test.gloasForkEpoch
+			beaconCfg.InitializeForkSchedule()
+			stateSlot := test.headSlot + 1
+			genesisTime := uint64(time.Now().Unix()) - (stateSlot+1)*beaconCfg.SecondsPerSlot
+			clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
+			anchorState := state.New(&beaconCfg)
+			anchorState.SetGenesisTime(genesisTime)
+			anchorState.SetVersion(test.stateVersion)
+			require.NoError(t, anchorState.SetSlot(stateSlot))
+			anchorState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: test.headSlot, Root: common.Hash{0xaa}})
+			manager := synced_data.NewSyncedDataManager(&beaconCfg, true)
+			graph, err := fork_graph.NewForkGraphDisk(anchorState, manager, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			store, err := forkchoice.NewForkChoiceStore(
+				clock,
+				anchorState,
+				nil,
+				pool.NewOperationsPool(&beaconCfg),
+				graph,
+				beaconevents.NewEventEmitter(),
+				manager,
+				nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(),
+				validator_params.NewValidatorParams(),
+				false,
+				nil,
+			)
+			require.NoError(t, err)
+			head, headSlot, err := store.GetHeadNode()
+			require.NoError(t, err)
+			require.Equal(t, test.headSlot, headSlot)
+			earlyEmitter := beaconevents.NewEventEmitter()
+			earlyEvents := make(chan *beaconevents.EventStream, 2)
+			earlySubscription := earlyEmitter.State().Subscribe(earlyEvents)
+			defer earlySubscription.Unsubscribe()
+			oldEmitter := beaconevents.NewEventEmitter()
+			oldEvents := make(chan *beaconevents.EventStream, 2)
+			oldSubscription := oldEmitter.State().Subscribe(oldEvents)
+			defer oldSubscription.Unsubscribe()
+
+			emitted := emitHeadEventBeforeStateCopy(&beaconCfg, store, earlyEmitter, headSlot, head.Root)
+			require.True(t, emitted)
+			copied, err := store.GetOwnedStateAtBlockRoot(head.Root)
+			require.NoError(t, err)
+			require.NoError(t, emitHeadEvent(&beaconCfg, store, oldEmitter, headSlot, head.Root, copied))
+
+			require.Equal(t, receiveStateEvent(t, oldEvents), receiveStateEvent(t, earlyEvents))
+			oldV2 := receiveStateEvent(t, oldEvents)
+			earlyV2 := receiveStateEvent(t, earlyEvents)
+			require.Equal(t, test.wantPayloadStatus, oldV2.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+			require.Equal(t, oldV2, earlyV2)
+		})
+	}
+}
+
+func TestPostForkchoiceOperationsFallsBackToCopiedState(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		hideCurrentView   bool
+		zeroPreviousState bool
+	}{
+		{name: "head root is not current state", hideCurrentView: true},
+		{name: "previous state root is zero", zeroPreviousState: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			blocker := &blockingStateCopyForkGraph{
+				hideCurrentView: test.hideCurrentView,
+				started:         make(chan struct{}),
+				release:         make(chan struct{}),
+			}
+			var configure func(lockOrderFixture)
+			if test.zeroPreviousState {
+				configure = func(fixture lockOrderFixture) {
+					viewState, err := fixture.headState.Copy()
+					require.NoError(t, err)
+					viewState.SetPreviousStateRoot(common.Hash{})
+					blocker.currentViewStateOverride = viewState
+				}
+			}
+			_, events, done := startPostForkchoiceWithBlockedCopy(t, blocker, configure)
+			require.Empty(t, events)
+
+			blocker.releaseCopy()
+			require.NoError(t, <-done)
+			require.Equal(t, beaconevents.StateHead, receiveStateEvent(t, events).Event)
+			require.Equal(t, beaconevents.StateHeadV2, receiveStateEvent(t, events).Event)
+			requireNoHeadEvents(t, events)
+		})
+	}
+}
+
+func TestHeadEventBeforeStateCopyDropsHeadChangedBeforeSend(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	headRoot := common.Hash{1}
+	headState := state.New(&beaconCfg)
+	require.NoError(t, headState.SetSlot(1))
+	stateRoot, err := headState.HashSSZ()
+	require.NoError(t, err)
+	headState.SetPreviousStateRoot(stateRoot)
+	store := &mock_services.ForkChoiceStorageMock{
+		HeadVal:             headRoot,
+		HeadSlotVal:         1,
+		StateAtBlockRootVal: map[common.Hash]*state.CachingBeaconState{headRoot: headState},
+	}
+	store.ViewCurrentStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+		err := fn(headState)
+		store.HeadVal = common.Hash{2}
+		return err
+	}
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	emitted := emitHeadEventBeforeStateCopy(&beaconCfg, store, emitter, 1, headRoot)
+	require.False(t, emitted)
+	require.Empty(t, events)
 }
 
 func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, operationDone <-chan error) {
@@ -263,7 +578,7 @@ func TestComputeForkChoiceFallsBackWithoutSyncedHeadState(t *testing.T) {
 func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false)
+	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, false, nil)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.Phase0Version).
 		Return(nil, nil).Times(2)
 
@@ -280,7 +595,7 @@ func TestComputeForkChoiceSendsPreGloasExecutionHeadEveryPass(t *testing.T) {
 
 func TestComputeForkChoiceRecordsExecutionHeadWithoutEngine(t *testing.T) {
 	executionHash := common.Hash{0x41}
-	fixture := newLockOrderFixtureWithConfig(t, 0, nil, executionHash, false)
+	fixture := newLockOrderFixtureWithConfig(t, 0, nil, executionHash, false, nil)
 
 	_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), fixture.cfg)
 
@@ -341,7 +656,7 @@ func TestComputeForkChoiceSendsGloasEmptyExecutionHead(t *testing.T) {
 func TestComputeForkChoiceFallsBackForUnresolvedGloasHead(t *testing.T) {
 	executionHash := common.Hash{0x41}
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, true)
+	fixture := newLockOrderFixtureWithConfig(t, 0, engine, executionHash, true, nil)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), executionHash, executionHash, executionHash, nil, clparams.GloasVersion).
 		Return(nil, nil)
 
@@ -1017,6 +1332,13 @@ func TestEmitHeadEventKeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			beaconCfg := clparams.MainnetBeaconConfig
+			beaconCfg.AltairForkEpoch = 0
+			beaconCfg.BellatrixForkEpoch = 0
+			beaconCfg.CapellaForkEpoch = 0
+			beaconCfg.DenebForkEpoch = 0
+			beaconCfg.ElectraForkEpoch = 0
+			beaconCfg.FuluForkEpoch = 0
+			beaconCfg.GloasForkEpoch = 0
 			headState := state.New(&beaconCfg)
 			headState.SetVersion(clparams.GloasVersion)
 			require.NoError(t, headState.SetSlot(1))
@@ -1050,10 +1372,11 @@ func TestEmitHeadEventsDropsStaleSnapshot(t *testing.T) {
 	defer sub.Unsubscribe()
 	headRoot := common.Hash{1}
 
-	err := emitHeadEventsIfCurrent(emitter, &beaconevents.HeadV2Data{}, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+	emitted, err := emitHeadEventsIfCurrent(emitter, &beaconevents.HeadV2Data{}, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
 		return common.Hash{3}, 11, "pending", false, nil
 	})
 	require.NoError(t, err)
+	require.False(t, emitted)
 	require.Empty(t, ch)
 }
 
@@ -1065,10 +1388,11 @@ func TestEmitHeadEventsDropsStalePayloadStatus(t *testing.T) {
 	headRoot := common.Hash{1}
 	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "pending"}}
 
-	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+	emitted, err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
 		return headRoot, 10, "full", false, nil
 	})
 	require.NoError(t, err)
+	require.False(t, emitted)
 	require.Empty(t, ch)
 }
 
@@ -1083,7 +1407,7 @@ func TestEmitHeadEventsDoesNotHoldHeadEventLockWhileLegacySubscriberBlocks(t *te
 	validated := make(chan struct{})
 	emitDone := make(chan error, 1)
 	go func() {
-		emitDone <- emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		_, err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
 			select {
 			case <-validated:
 			default:
@@ -1091,6 +1415,7 @@ func TestEmitHeadEventsDoesNotHoldHeadEventLockWhileLegacySubscriberBlocks(t *te
 			}
 			return headRoot, 10, "pending", false, nil
 		})
+		emitDone <- err
 	}()
 	<-validated
 
@@ -1132,7 +1457,7 @@ func TestEmitHeadEventsKeepsPairOrderedAgainstConcurrentUpdate(t *testing.T) {
 	var updated atomic.Bool
 	emitDone := make(chan error, 1)
 	go func() {
-		emitDone <- emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{3}, func() (common.Hash, uint64, string, bool, error) {
+		_, err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{3}, func() (common.Hash, uint64, string, bool, error) {
 			if validationCalls.Add(1) == 1 {
 				close(validated)
 			}
@@ -1141,6 +1466,7 @@ func TestEmitHeadEventsKeepsPairOrderedAgainstConcurrentUpdate(t *testing.T) {
 			}
 			return headRoot, 10, "pending", false, nil
 		})
+		emitDone <- err
 	}()
 	<-validated
 
@@ -1185,10 +1511,11 @@ func TestEmitHeadEventsPreservesLegacyHeadFields(t *testing.T) {
 		ExecutionOptimistic:       true,
 	}}
 
-	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+	emitted, err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
 		return headRoot, 10, "pending", true, nil
 	})
 	require.NoError(t, err)
+	require.True(t, emitted)
 	legacy := (<-ch).Data.(*beaconevents.HeadData)
 	require.False(t, legacy.EpochTransition)
 	require.True(t, legacy.ExecutionOptimistic)
@@ -1204,10 +1531,11 @@ func TestEmitHeadEventsPreGloasEmitsHeadV2AsFull(t *testing.T) {
 	headRoot := common.Hash{1}
 	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "full"}}
 
-	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+	emitted, err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
 		return headRoot, 10, "full", false, nil
 	})
 	require.NoError(t, err)
+	require.True(t, emitted)
 	require.Equal(t, beaconevents.StateHead, (<-ch).Event)
 	select {
 	case v2 := <-ch:

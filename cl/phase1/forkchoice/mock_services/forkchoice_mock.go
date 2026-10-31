@@ -64,6 +64,7 @@ type ForkChoiceStorageMock struct {
 	TryGetHeadNodeFn                      func() (forkchoice.ForkChoiceNode, bool)
 	GetStateAtBlockRootFn                 func(common.Hash) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
+	ViewCurrentStateAtBlockRootFn         func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
 	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
 	// unless HasImportedDescendantAfterFn is set.
@@ -425,6 +426,17 @@ func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn f
 	}
 	if blockState == nil {
 		return errors.New("block state not found")
+	}
+	return fn(blockState)
+}
+
+func (f *ForkChoiceStorageMock) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	if f.ViewCurrentStateAtBlockRootFn != nil {
+		return f.ViewCurrentStateAtBlockRootFn(blockRoot, fn)
+	}
+	blockState := f.StateAtBlockRootVal[blockRoot]
+	if blockState == nil {
+		return nil
 	}
 	return fn(blockState)
 }
