@@ -1343,7 +1343,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if !sender.IsNil() && !chargedAtValidation {
 				addresses = append(addresses, sender.Value())
 			}
-			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
+			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil && !chargedAtValidation {
 				addresses = append(addresses, *tx.GetTo())
 			}
 			for _, address := range addresses {
@@ -1356,6 +1356,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// transfer to it still waits for its charge.
 			if chargedAtValidation && !sender.IsNil() {
 				prevAccountTx[sender.Value()] = i
+			}
+			if tx := t.Tx(); chargedAtValidation && tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
+				prevAccountTx[*tx.GetTo()] = i
 			}
 		}
 
@@ -2667,7 +2670,8 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		return nil, nil, err
 	}
 	sender := msg.From()
-	acc, err := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader).ReadAccountData(sender)
+	reader := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, vm, stateReader)
+	acc, err := reader.ReadAccountData(sender)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2700,6 +2704,23 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: nonceReason},
 		Val:         acc.Nonce + 1,
 	})
+	// A run that skipped the transfer frame left the recipient credit to validation.
+	if to := msg.To(); !to.IsNil() && to != sender && result.ExecutionResult.Err == nil && !msg.Value().IsZero() {
+		if _, credited := result.TxOut.GetBalance(to); !credited {
+			recipient, err := reader.ReadAccountData(to)
+			if err != nil {
+				return nil, nil, err
+			}
+			if recipient == nil {
+				return nil, nil, nil
+			}
+			state.SeedOrigin(vm, to, recipient)
+			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
+				Val:         u256.Add(recipient.Balance, *msg.Value()),
+			})
+		}
+	}
 	return ws, acc, nil
 }
 
@@ -3249,7 +3270,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Serial execution reads the sender before charging it; the block access list
 				// needs that read to tell a balance spent to zero from a no-op touch.
 				reads := be.blockIO.ReadSet(txVersion.TxIndex)
-				for sender := range senderWrites.Balances() {
+				if sender, err := chainTx.TxSender(); err == nil {
 					reads.SetBalance(sender, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Balance})
 					reads.SetNonce(sender, state.VersionedRead[uint64]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: charged.Nonce})
 				}
