@@ -315,6 +315,9 @@ func (f *Follower) boot(ctx context.Context) error {
 	if id != f.l2.L1ChainID {
 		return fmt.Errorf("%w: chain %d, want %d", ErrL1ChainID, id, f.l2.L1ChainID)
 	}
+	if err := f.readFinalized(ctx); err != nil {
+		return err
+	}
 	if x := f.l2.RollupX; x != nil {
 		if err := f.checkL1Reference(ctx, &x.L1Reference); err != nil {
 			return err
@@ -366,14 +369,8 @@ func (f *Follower) resume(ctx context.Context, head uint64) (uint64, error) {
 // reference: its canonical block at the reference's number has the
 // reference's hash, timestamp and mixHash.
 func (f *Follower) checkL1Reference(ctx context.Context, ref *config.L1Reference) error {
-	if ref.Number > 0 {
-		fin, err := f.reader.Finalized(ctx)
-		if err != nil {
-			return err
-		}
-		if fin.Number < ref.Number {
-			return fmt.Errorf("L1 finalized block %d is below the genesis's L1 reference %d", fin.Number, ref.Number)
-		}
+	if f.l1Finalized < ref.Number {
+		return fmt.Errorf("L1 finalized block %d is below the genesis's L1 reference %d", f.l1Finalized, ref.Number)
 	}
 	h, err := f.reader.HeaderByNumber(ctx, ref.Number)
 	if err != nil {
@@ -476,9 +473,31 @@ func (f *Follower) Sync(ctx context.Context) error {
 			f.publish()
 		}
 		f.scanned = reached
+		// Finality applied per range advances the finalized block and
+		// prunes the index through a long catch-up.
+		if err := f.readFinalized(ctx); err != nil {
+			return err
+		}
+		if err := f.deriver.OnFinalized(ctx, f.l1Finalized); err != nil {
+			return err
+		}
 		f.publish()
 	}
 	return f.deriver.OnFinalized(ctx, f.l1Finalized)
+}
+
+// readFinalized reads the latest finalized L1 block; there is none until L1
+// finalizes one.
+func (f *Follower) readFinalized(ctx context.Context) error {
+	h, err := f.reader.Finalized(ctx)
+	if errors.Is(err, l1.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	f.l1Finalized = max(f.l1Finalized, h.Number)
+	return nil
 }
 
 // revalidate rewinds to below the latest settlement whose L1 block is no

@@ -209,14 +209,15 @@ func (o *observing) Logs(ctx context.Context, from, to uint64, address common.Ad
 	return o.ChainReader.Logs(ctx, from, to, address, topics)
 }
 
-// TestStatusDuringCatchUp checks that the status follows each scanned
-// range of a catch-up, not only its end.
+// TestStatusDuringCatchUp checks that the status and L1 finality follow
+// each scanned range of a catch-up, not only its end.
 func TestStatusDuringCatchUp(t *testing.T) {
 	c := derivertest.NewComposer(t)
 	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
 	c.Post(derivertest.Posting{Batch: first})
 	second := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
 	l1Second := c.Post(derivertest.Posting{Batch: second}).Header.Number
+	require.NoError(t, c.L1.Finalize(l1Second))
 
 	reader := &observing{ChainReader: c.L1, seen: map[uint64]follower.Status{}}
 	_, chain := derivertest.NewL2(t)
@@ -234,6 +235,8 @@ func TestStatusDuringCatchUp(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, l1Second-1, during.L1Scanned)
 	require.Equal(t, uint64(1), during.Cursor)
+	require.Equal(t, l1Second, during.L1Finalized)
+	require.Equal(t, uint64(1), during.Finalized)
 	require.Equal(t, l1Second, f.Status().L1Scanned)
 	require.Equal(t, uint64(2), f.Status().Cursor)
 
