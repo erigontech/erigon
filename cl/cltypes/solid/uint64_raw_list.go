@@ -201,13 +201,19 @@ func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &strs); err != nil {
 		return err
 	}
-	arr.u = make([]uint64, len(strs))
+	if len(strs) > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(strs), arr.c)
+	}
+	values := make([]uint64, len(strs))
 	for i, s := range strs {
 		v, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
 			return err
 		}
-		arr.u[i] = v
+		values[i] = v
 	}
+	arr.u = values
+	arr.cachedHash = common.Hash{}
+	clear(arr.hahsBuffer)
 	return nil
 }
