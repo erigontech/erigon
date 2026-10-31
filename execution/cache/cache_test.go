@@ -177,12 +177,28 @@ func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
 	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
 
-	// Updating an existing key always succeeds in either mode.
+	// Updating an existing key succeeds while the update fits.
 	newValue := []byte{100, 101, 102}
 	c.Put(makeAddr(1), newValue, 0)
 	v, ok := c.Get(makeAddr(1))
 	assert.True(t, ok)
 	assert.Equal(t, newValue, v)
+}
+
+func TestDomainCache_GrowingUpdateKeepsOtherKeys_NoOpMode(t *testing.T) {
+	two := 2 * oneEntryBytes(makeAddr(1), makeValue(1))
+	c := closeOnCleanup(t, NewDomainCacheMode(two+two/4, ModeNoOp))
+	c.Put(makeAddr(1), makeValue(1), 0)
+	c.Put(makeAddr(2), makeValue(2), 0)
+
+	c.Put(makeAddr(1), make([]byte, len(makeValue(1))+int(two/2)), 0)
+	c.data.c.CleanUp()
+
+	v, ok := c.Get(makeAddr(2))
+	require.True(t, ok, "an update that does not fit must not evict another key")
+	require.Equal(t, makeValue(2), v)
+	_, ok = c.Get(makeAddr(1))
+	require.False(t, ok, "the old value of an updated key must not stay live")
 }
 
 func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {

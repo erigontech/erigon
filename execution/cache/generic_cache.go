@@ -184,9 +184,18 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 		}
 		e := entry[T]{val: value, size: uint32(min(newSize, math.MaxUint32)), txNum: txNum, epoch: c.coh.Epoch()}
 		// "Drop new keys when full": the lock-free layer would admit and evict.
-		if c.mode == ModeNoOp && !sameKey && c.data.SizeBytes()+weighEntry(h, e) > int64(c.capacityB) {
-			c.dropped.Add(1)
-			return existing, otter.CancelOp
+		if c.mode == ModeNoOp {
+			grow := weighEntry(h, e)
+			if sameKey {
+				grow -= weighEntry(h, existing)
+			}
+			if c.data.SizeBytes()+grow > int64(c.capacityB) {
+				c.dropped.Add(1)
+				if sameKey {
+					return existing, otter.InvalidateOp // the old value is superseded
+				}
+				return existing, otter.CancelOp
+			}
 		}
 		if sameKey {
 			e.key = existing.key // the stored buffer still holds this key
