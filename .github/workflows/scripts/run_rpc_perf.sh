@@ -20,11 +20,11 @@ fi
 result_file=$CLIENT-$label-result.json
 
 # clean temporary area
-cd "$RUNNER_WS/rpc-tests/perf"
+cd "$RUNNER_WS/rpc-tests/perf" || exit 1
 rm -rf "./reports/$CHAIN/"*
 
 # Move to home dir of rpc-tests
-cd ..
+cd .. || exit 1
 ./build/bin/rpc_perf --blockchain "$CHAIN" \
                      --test-type "$method" \
                      --pattern-file perf/pattern/"$CHAIN"/"$pattern".tar \
