@@ -3066,7 +3066,7 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 func cmpReaderTx(r addrReader, tx int) int { return r.tx - tx }
 
 // dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
-const dispatchWindow = 32
+const dispatchWindow = 128
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
