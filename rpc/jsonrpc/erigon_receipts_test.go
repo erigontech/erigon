@@ -795,6 +795,38 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 	require.NotZero(t, seen)
 }
 
+func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		for _, topic := range []common.Hash{{0x11}, {0x22}, {0x33}} {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+	want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
+	require.NoError(t, err)
+	require.Len(t, want, 3)
+	slices.Reverse(want)
+
+	got, err := NewErigonAPI(newBaseApiForTest(m), m.DB, nil).GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestErigonGetLogsFromLatest(t *testing.T) {
 	m := execmoduletester.New(
 		t,
