@@ -23,6 +23,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -36,18 +38,79 @@ type DerivableList interface {
 	EncodeIndex(i int, w *bytes.Buffer)
 }
 
+// largeLeafBytes is the item size from which DeriveSha hashes the item's leaf on its own goroutine.
+const largeLeafBytes = 64 * 1024
+
 func DeriveSha(list DerivableList) common.Hash {
 	if list.Len() < 1 {
 		return empty.RootHash
 	}
+	value := func(i int, buf *bytes.Buffer) []byte {
+		buf.Reset()
+		list.EncodeIndex(i, buf)
+		return buf.Bytes()
+	}
+	txs, ok := list.(BinaryTransactions)
+	if !ok {
+		return deriveSha(list, value, nil, nil)
+	}
+	value = func(i int, _ *bytes.Buffer) []byte { return txs[i] }
+	large := 0
+	for _, tx := range txs {
+		if len(tx) >= largeLeafBytes {
+			large++
+		}
+	}
+	if large < 2 {
+		return deriveSha(list, value, nil, nil)
+	}
+	// The trie shape depends only on the keys, so a first pass with every leaf hash stubbed out
+	// finds each leaf's key suffix; the large leaves are then hashed in parallel.
+	n := list.Len()
+	hashes, set := make([][32]byte, n), make([]bool, n)
+	for k := range set {
+		set[k] = true
+	}
+	var keys [][]byte
+	var order []int
+	deriveSha(list, value, func(hb *trie.HashBuilder) {
+		hb.SetLeafHashes(hashes, set)
+		hb.RecordLeafKeys(&keys)
+	}, &order)
+	clear(set)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for k, idx := range order {
+		if len(txs[idx]) < largeLeafBytes {
+			continue
+		}
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			h, hashed, err := trie.NewHashBuilder(false).LeafHash(keys[k], rlp.RlpEncodedBytes(txs[idx]))
+			if err != nil {
+				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+			}
+			hashes[k], set[k] = h, hashed
+		})
+	}
+	wg.Wait()
+	return deriveSha(list, value, func(hb *trie.HashBuilder) { hb.SetLeafHashes(hashes, set) }, nil)
+}
 
+// deriveSha builds the root over list in key order; setup prepares the builder and order, when set,
+// receives the list index of every leaf in leaf order.
+func deriveSha(list DerivableList, value func(int, *bytes.Buffer) []byte, setup func(*trie.HashBuilder), order *[]int) common.Hash {
 	var curr bytes.Buffer
 	var succ bytes.Buffer
-	var value bytes.Buffer
+	var buf bytes.Buffer
 
 	hb := trie.NewHashBuilder(false)
 
 	hb.Reset()
+	if setup != nil {
+		setup(hb)
+	}
 	curr.Reset()
 	succ.Reset()
 
@@ -68,11 +131,11 @@ func DeriveSha(list DerivableList) common.Hash {
 			}
 		}
 
-		value.Reset()
-
 		if curr.Len() > 0 {
-			list.EncodeIndex(i, &value)
-			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
+			if order != nil {
+				*order = append(*order, i)
+			}
+			leafData.Value = rlp.RlpEncodedBytes(value(i, &buf))
 			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
 		}
 	})

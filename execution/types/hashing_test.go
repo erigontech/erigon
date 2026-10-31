@@ -126,3 +126,27 @@ var (
 		BaseFee:     uint256.NewInt(7),
 	}
 )
+
+func TestDeriveShaLargeBinaryTransactions(t *testing.T) {
+	t.Parallel()
+	item := func(i, size int) []byte {
+		b := make([]byte, size)
+		for k := range b {
+			b[k] = byte(i*31 + k)
+		}
+		return b
+	}
+	for _, n := range []int{2, 3, 17, 128, 129, 300} {
+		for _, every := range []int{1, 2, 7} {
+			txs := make(BinaryTransactions, n)
+			for i := range txs {
+				size := 40 + i
+				if i%every == 0 {
+					size = largeLeafBytes + i
+				}
+				txs[i] = item(i, size)
+			}
+			checkDeriveSha(t, txs)
+		}
+	}
+}
