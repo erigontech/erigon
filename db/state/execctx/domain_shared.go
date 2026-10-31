@@ -1363,13 +1363,9 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 }
 
 type getLatestOptions struct {
-	codeHash []byte
-	buf      []byte
-}
-
-func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
-	opts.codeHash = codeHash
-	return opts
+	codeHash    []byte
+	buf         []byte
+	hashFromMem bool
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1498,9 +1494,13 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
-		if fillsCode {
+		switch {
+		case fillsCode && opts.hashFromMem:
+			fillView.Fill(domain, k, v, readTxNum)
+			v = bytes.Clone(v)
+		case fillsCode:
 			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
-		} else {
+		default:
 			fillView.Fill(domain, k, v, readTxNum)
 		}
 	}
@@ -1539,9 +1539,12 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
-	var codeHash []byte
+	var codeHash, fillHash []byte
 	if sd.stateCache != nil {
 		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
+			if !sd.uncommittedCodeInMem(addr) {
+				fillHash = codeHash
+			}
 			if size, ok := view.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
@@ -1562,13 +1565,13 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		if !found || size == 0 {
 			return 0, false, nil
 		}
-		if len(codeHash) == len(common.Hash{}) {
-			view.FillCodeSize(codeHash, size, txNum)
+		if len(fillHash) == len(common.Hash{}) && !sd.uncommittedCodeInMem(addr) {
+			view.FillCodeSize(fillHash, size, txNum)
 		}
 		return size, true, nil
 	}
 
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash})
 	if err != nil {
 		return 0, false, err
 	}
@@ -1576,6 +1579,14 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		return 0, false, nil
 	}
 	return len(v), true, nil
+}
+
+func (sd *SharedDomains) uncommittedCodeInMem(addr []byte) bool {
+	if _, _, _, ok := sd.latestFromMem(kv.AccountsDomain, addr); ok {
+		return true
+	}
+	_, _, _, ok := sd.latestFromMem(kv.CodeDomain, addr)
+	return ok
 }
 
 func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte, view cache.ReadView) (size int, found bool, answered bool, err error) {
@@ -1628,7 +1639,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf})
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, hashFromMem: sd.stateCache != nil && len(codeHash) > 0 && sd.uncommittedCodeInMem(addr)})
 	if err != nil {
 		return nil, false, err
 	}
