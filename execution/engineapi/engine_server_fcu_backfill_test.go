@@ -64,7 +64,7 @@ func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServ
 	fetcher := &initialHeaderRecorder{requested: make(chan common.Hash, 1)}
 	peerTracker := p2p.NewPeerTracker(logger, nil)
 	peerTracker.PeerConnected(p2p.PeerIdFromUint64(1))
-	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, &p2p.PeerPenalizer{}, peerTracker, t.TempDir())
+	bbd := p2p.NewBackwardBlockDownloader(logger, fetcher, peerTracker, t.TempDir())
 
 	cfg := preCancunChainConfig()
 	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), logger, stub, nil, nil, cfg, ethconfig.Sync{}, bbd)
