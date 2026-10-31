@@ -108,9 +108,8 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 			vm := state.NewVersionMap(nil)
 			vm.SetBaseTxNum(0)
 			vm.FlushVersionedWrites(ws, true)
-			vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
 
-			got := emitTouchedUpdates(t, vm, T, nil, vm.WritesAtTxIndex(txIdx, false))
+			got := emitTouchedUpdates(t, vm, T, nil, state.NewVersionMapWriteView(ws, vm, txIdx))
 			require.Equal(t, sc.expect(), got)
 		})
 	}
@@ -163,12 +162,11 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.SetBaseTxNum(0)
 		vm.FlushVersionedWrites(flushed, true)
-		vm.RecordWriteKeysAtTxIndex(txIdx, false, recorded)
 		base := &testStorageBase{
 			accounts: map[accounts.Address]*accounts.Account{addr: &acc},
 			storage:  map[string]uint256.Int{storKey: *uint256.NewInt(42)},
 		}
-		got := emitTouchedUpdates(t, vm, T, base, vm.WritesAtTxIndex(txIdx, false))
+		got := emitTouchedUpdates(t, vm, T, base, state.NewVersionMapWriteView(recorded, vm, txIdx))
 		b := uint256.NewInt(42).Bytes()
 		want := commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(b))}
 		copy(want.Storage[:], b)
@@ -179,12 +177,11 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.SetBaseTxNum(0)
 		vm.FlushVersionedWrites(flushed, true)
-		vm.RecordWriteKeysAtTxIndex(txIdx, false, recorded)
 		base := &testStorageBase{
 			accounts: map[accounts.Address]*accounts.Account{addr: &acc},
 			storage:  map[string]uint256.Int{},
 		}
-		got := emitTouchedUpdates(t, vm, T, base, vm.WritesAtTxIndex(txIdx, false))
+		got := emitTouchedUpdates(t, vm, T, base, state.NewVersionMapWriteView(recorded, vm, txIdx))
 		require.Equal(t, commitment.Update{Flags: commitment.DeleteUpdate}, got[storKey], "a slot the base no longer carries is deleted")
 		require.Contains(t, got, acctKey, "the account is still emitted")
 	})

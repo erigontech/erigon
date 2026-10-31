@@ -2246,12 +2246,15 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	// invalidated.  newObject normalises the zero-value CodeHash to
 	// EmptyCodeHash, so this records keccak256("") for a fresh account.
 	ibs.recordWriteCodeHash(addr, newobj.data.CodeHash)
-	// Write NoncePath only when recreating a destroyed account: its version-map
-	// floor still holds the prior incarnation's nonce, which a write-set view
-	// would otherwise resurrect. A genuinely fresh account has no stale floor, so
-	// a nonce=0 write here would be a net-zero change the BAL wrongly reports.
+	// Write NoncePath only when a prior incarnation's nonce still sits in the version-map
+	// floor, which a commitment read would otherwise resurrect. A genuinely fresh account
+	// has no floor, so a nonce=0 write there is a net-zero change the BAL wrongly reports.
 	if previous != nil {
 		ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
+	} else if ibs.versionMap != nil {
+		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
+			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
+		}
 	}
 	return newobj
 }
@@ -2841,11 +2844,16 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		if !bal.IsZero() || nonce != 0 || !codeHash.IsEmpty() {
 			continue
 		}
-		// Clear the whole account footprint, not just the fields: a surviving
-		// AddressPath (or code/incarnation) write at this tx index alongside the
-		// SelfDestruct is the exact cell layout of a same-tx SD+CREATE2 recreate, so
-		// AccountLifecycleAt would read the removed account as Revived.
-		writes.SetEmptyRemoval(addr, ibs.Version())
+		// Clear the whole account footprint, not just the fields: a surviving AddressPath
+		// write alongside the SelfDestruct reads as a same-tx SD+CREATE2 recreate, so
+		// AccountLifecycleAt would see the removed account as Revived. A real SELFDESTRUCT
+		// was a contract: keep the CodeHash ValueDeleted "code removed" signal so the fee
+		// calc burns its delayed fee instead of reviving it as an EOA.
+		if sd, ok := writes.GetSelfDestruct(addr); ok && sd.Val {
+			writes.SetContractRemoval(addr, ibs.Version())
+		} else {
+			writes.SetEmptyRemoval(addr, ibs.Version())
+		}
 	}
 }
 
@@ -2920,10 +2928,14 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 		if err := after.Err(); err != nil {
 			return err
 		}
-		bal, hasBal := writes.GetBalance(addr)
-		removed := hasBal && bal.Deletes()
-		if account == nil || removed {
-			if hasBal && !removed && !bal.Val.IsZero() {
+		// A ValueDeleted balance write is the removal verdict (an EIP-161 touched-empty or a
+		// burning self-destruct) encoded as data at finalization; compose() does not gate on
+		// it, so force the account absent to take the delete / EIP-8246-preserve path below.
+		if bal, ok := writes.GetBalance(addr); ok && bal.Deletes() {
+			account = nil
+		}
+		if account == nil {
+			if bal, ok := writes.GetBalance(addr); ok && !bal.Deletes() && !bal.Val.IsZero() {
 				// An EIP-8246 SELFDESTRUCT leaves a balance-only account, as updateAccount does.
 				preserved := accounts.NewAccount()
 				preserved.Balance = bal.Val
@@ -3671,18 +3683,20 @@ func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *acco
 // lock-free origin layer (write-once), so later reads resolve the pre-block base without taking
 // an account's e.mu. The origin is immutable pre-block state, so it lives outside the OCC cells.
 func (ibs *IntraBlockState) PublishOrigins() {
-	if ibs.versionMap == nil {
+	if ibs.versionMap == nil || ibs.versionedOrigins.IsEmpty() {
 		return
 	}
 	ws := &ibs.versionedOrigins
-	for addr, vw := range ws.address {
-		ibs.versionMap.StoreOriginAccount(addr, vw.Val)
-	}
-	for addr, inner := range ws.storage {
-		for key, vw := range inner {
-			ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
+	ws.forEachAddr(func(addr accounts.Address) {
+		if vw, ok := ws.address[addr]; ok {
+			ibs.versionMap.StoreOriginAccount(addr, vw.Val)
 		}
-	}
+		if inner, ok := ws.storage[addr]; ok {
+			for key, vw := range inner {
+				ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
+			}
+		}
+	})
 	ws.ReleaseAndReset()
 }
 

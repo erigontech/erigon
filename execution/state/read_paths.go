@@ -789,6 +789,20 @@ reread:
 			}
 		}
 		if so == nil && r.account == nil {
+			if s.noMaterialize {
+				// An absent account's field is its default. readAccountInternal already
+				// resolved the committed base (seedOrigin); a nil result means the account
+				// is in neither the map nor the base, so a materialized stateObject could
+				// add nothing. Record the absent read and return the default — the
+				// noMaterialize flow must never resolve through a stateObject.
+				hdr.Source = StorageRead
+				r.outcome = outcomeStorageRead
+				r.hdr = hdr
+				r.recordVR = true
+				r.source = StorageRead
+				r.version = hdr.Version
+				return
+			}
 			hdr.Source = StorageRead
 			obj, err := s.getStateObject(addr, true)
 			if err != nil {
@@ -799,6 +813,9 @@ reread:
 				return
 			}
 			so = obj
+		}
+		if s.noMaterialize && so != nil {
+			panic(fmt.Sprintf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key}))
 		}
 		r.outcome = outcomeStorageRead
 		r.so = so

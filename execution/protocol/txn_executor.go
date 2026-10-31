@@ -959,6 +959,16 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 			}
 		}
 
+		// A delegation set on a removed account resurrects it: SetCode writes no balance,
+		// so the removal's ValueDeleted would otherwise linger and read the account absent.
+		// Stamp balance 0 ValueChanged to supersede the removal (a never-existed authority
+		// composes the same zero balance, so this is uniform across the !exists cases).
+		if !exists {
+			if err := st.state.SetBalance(authority, uint256.Int{}, tracing.BalanceChangeUnspecified); err != nil {
+				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			}
+		}
+
 		// 8. increase the nonce of authority
 		if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
 			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)

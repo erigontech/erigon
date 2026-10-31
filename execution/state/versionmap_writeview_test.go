@@ -310,16 +310,17 @@ func TestVersionMapWriteView_IteratorsDoNotAllocatePerElement(t *testing.T) {
 	}
 }
 
-// On a BAL block a net-zero storage write is not materialized in the version map, so the cell at the
-// writer's index is the access list's, which can disagree with the tx. The view must publish the
-// value the tx wrote.
-func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) {
+// The version map is the sole value source: a net-zero (ValueUnchanged) write publishes
+// the version-map value even when the write-set value it carries differs, and
+// StorageChanges filters the net-zero write from the leaf set.
+func TestVersionMapWriteView_NetZeroStorageReadsVersionMapValue(t *testing.T) {
 	t.Parallel()
 
 	const txIdx = 1
 	addr := getAddress(3)
 	key := accounts.InternKey(common.Hash{0x04})
-	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: txIdx + 1, Value: *uint256.NewInt(42)}}}}}})
+	seed := *uint256.NewInt(42)
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: txIdx + 1, Value: seed}}}}}})
 	keys := &WriteSet{}
 	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: txIdx}, valStatus: ValueUnchanged},
@@ -328,12 +329,20 @@ func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) 
 
 	vm.FlushVersionedWrites(keys, false)
 
+	view := NewVersionMapWriteView(keys, vm, txIdx)
+
 	published := 0
-	for _, inner := range NewVersionMapWriteView(keys, vm, txIdx).Storages() {
+	for _, inner := range view.Storages() {
 		for _, vw := range inner {
-			require.Equal(t, *uint256.NewInt(5), vw.Val)
+			require.Equal(t, seed, vw.Val, "net-zero write publishes the version-map value, not the write-set value")
 			published++
 		}
 	}
 	require.Equal(t, 1, published)
+
+	changed := 0
+	for _, inner := range view.StorageChanges() {
+		changed += len(inner)
+	}
+	require.Equal(t, 0, changed, "net-zero write is filtered from StorageChanges")
 }

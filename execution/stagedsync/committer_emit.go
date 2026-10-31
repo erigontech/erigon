@@ -160,7 +160,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash}
 			u.DeleteStorageSubtree = true
 		}
-		if _, destructed := cc.destructed[addr]; destructed {
+		if view.WasDestroyed(addr) {
 			u.DeleteStorageSubtree = true
 		}
 		updates.TouchPlainKeyDirect(string(address[:]), &u)

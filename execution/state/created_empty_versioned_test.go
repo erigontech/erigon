@@ -56,7 +56,7 @@ func TestSetEmptyRemoval(t *testing.T) {
 		require.False(t, ok, "the footprint is cleared")
 	})
 
-	t.Run("EIP-161 empty gains no self-destruct marker", func(t *testing.T) {
+	t.Run("EIP-161 empty gains the self-destruct marker", func(t *testing.T) {
 		addr := accounts.InternAddress([20]byte{0xe0})
 		ws := &WriteSet{}
 		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}})
@@ -66,8 +66,25 @@ func TestSetEmptyRemoval(t *testing.T) {
 
 		bal, ok := ws.GetBalance(addr)
 		require.True(t, ok && bal.Deletes(), "removal stamps the balance-deleted verdict")
-		_, ok = ws.GetSelfDestruct(addr)
-		require.False(t, ok, "a touched-empty EOA carries no self-destruct marker")
+		sd, ok := ws.GetSelfDestruct(addr)
+		require.True(t, ok && sd.Val, "the removal carries the self-destruct wipe marker")
+		_, ok = ws.GetCodeHash(addr)
+		require.False(t, ok, "a touched-empty EOA was not a contract, so no code-deleted marker")
+	})
+
+	t.Run("contract removal stamps the code-deleted marker", func(t *testing.T) {
+		addr := accounts.InternAddress([20]byte{0xc0})
+		ws := &WriteSet{}
+		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+
+		ws.SetContractRemoval(addr, ver)
+
+		bal, ok := ws.GetBalance(addr)
+		require.True(t, ok && bal.Deletes(), "removal stamps the balance-deleted verdict")
+		sd, ok := ws.GetSelfDestruct(addr)
+		require.True(t, ok && sd.Val, "the removal carries the self-destruct wipe marker")
+		ch, ok := ws.GetCodeHash(addr)
+		require.True(t, ok && ch.Deletes(), "a destroyed contract stamps the code-deleted marker (was a contract, code removed)")
 	})
 }
 
@@ -132,8 +149,8 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	bal, hasBalance := writes.GetBalance(addr)
 	require.True(t, hasBalance && bal.Deletes(),
 		"a withheld created-empty account emits the balance-deleted removal verdict, overriding its lingering during-tx cells")
-	_, hasDelete := writes.GetSelfDestruct(addr)
-	require.False(t, hasDelete)
+	sd, hasDelete := writes.GetSelfDestruct(addr)
+	require.True(t, hasDelete && sd.Val, "the removal carries the self-destruct wipe marker")
 
 	vm.FlushVersionedWrites(writes, true)
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
@@ -174,8 +191,8 @@ func TestFinalizedWritesEmptyRemovalClearsWholeAccountCell(t *testing.T) {
 	require.False(t, hasAddress,
 		"empty removal must not leave a whole-account AddressPath cell alongside the removal "+
 			"(same layout as a metamorphic recreate -> AccountLifecycleAt would read it as Revived)")
-	_, hasDelete := writes.GetSelfDestruct(addr)
-	require.False(t, hasDelete, "the removal is encoded as a balance-deleted verdict, not a self-destruct cell")
+	sd, hasDelete := writes.GetSelfDestruct(addr)
+	require.True(t, hasDelete && sd.Val, "the removal is encoded as a self-destruct wipe marker plus the balance-deleted verdict")
 }
 
 func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
@@ -257,14 +274,14 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, 0))
 	vm.FlushVersionedWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true)
 
-	// The emptied pre-existing account is dropped from the trie: the commitment
-	// verdict reads it absent (its balance write is stamped ValueDeleted).
+	// The emptied pre-existing account is removed: a later tx reads it absent, and
+	// an earlier tx's existence read predating the removal is stale (invalidated).
 	_, ok := vm.View(2, reader).GetAccount(addr)
 	require.False(t, ok, "an EIP-161-emptied account is removed from the trie")
-	// The removal is a balance write to zero (the value the early reader already
-	// saw on the empty base), so a higher tx's balance read stays valid — an empty
-	// account and a removed one are observationally identical post EIP-161.
-	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
+	exists, err = newTx(2).Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 // Sequential executors run FinalizeTx, which clears the journal, before

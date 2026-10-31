@@ -17,7 +17,6 @@
 package state
 
 import (
-	"iter"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,11 +25,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestTxAccessList_RecordsKeysAndReadsValuesFromMap pins the access-list contract: a tx's
-// write-set is recorded key-only into the version map's per-tx access list, and WritesAt
-// enumerates those keys while reading each value back from the map's cells — so the
-// retained write-set need not escape execution.
-func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
+// TestVersionMapWriteView_ReadsValuesFromMap pins the write-view contract: it enumerates a
+// tx's key-set and reads each value back from the version map's cells, so commitment and
+// domain-apply need no retained write-set copy.
+func TestVersionMapWriteView_ReadsValuesFromMap(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xa1})
 	key := accounts.InternKey([32]byte{0x07})
 	bal := *uint256.NewInt(1234)
@@ -39,7 +37,6 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 
 	vm := NewVersionMap(nil)
 
-	// A tx's writes land in the version map's cells…
 	ws := &WriteSet{}
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: txIdx}, valStatus: ValueChanged},
@@ -51,10 +48,7 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 	})
 	vm.FlushVersionedWrites(ws, true)
 
-	// …and only its key-set is frozen into the access list.
-	vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
-
-	view := vm.WritesAtTxIndex(txIdx, false)
+	view := NewVersionMapWriteView(ws, vm, txIdx)
 	require.False(t, view.IsEmpty())
 
 	gotBal := false
@@ -64,7 +58,7 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 			require.True(t, vw.Val.Eq(&bal), "balance value must be read back from the version map cell")
 		}
 	}
-	require.True(t, gotBal, "recorded BalancePath key must enumerate")
+	require.True(t, gotBal, "BalancePath key must enumerate")
 
 	gotSlot := false
 	for a, slots := range view.Storages() {
@@ -76,17 +70,16 @@ func TestTxAccessList_RecordsKeysAndReadsValuesFromMap(t *testing.T) {
 			require.True(t, vw.Val.Eq(&slotVal), "storage value must be read back from the version map cell")
 		}
 	}
-	require.True(t, gotSlot, "recorded StoragePath key must enumerate")
+	require.True(t, gotSlot, "StoragePath key must enumerate")
 
-	// An unrecorded slot yields an empty view.
-	require.True(t, vm.WritesAtTxIndex(99, false).IsEmpty())
+	// An empty key-set yields an empty view.
+	require.True(t, NewVersionMapWriteView(&WriteSet{}, vm, 99).IsEmpty())
 }
 
-// TestTxAccessList_StorageChangesMatchesWriteSet pins the B→C equivalence: the
-// key-only access-list view and a retained-write-set view produce the same
-// StorageChanges result (net-zero ValueUnchanged writes filtered) because the
-// status is read from the version map cell, not the key-set.
-func TestTxAccessList_StorageChangesMatchesWriteSet(t *testing.T) {
+// TestVersionMapWriteView_StorageChangesFiltersNetZero pins that StorageChanges drops a
+// net-zero (ValueUnchanged) write while Storages keeps it — the status read from the
+// version map cell decides, so the domain/commitment leaf is untouched for net-zero.
+func TestVersionMapWriteView_StorageChangesFiltersNetZero(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xb2})
 	changed := accounts.InternKey([32]byte{0x01})
 	unchanged := accounts.InternKey([32]byte{0x02})
@@ -104,38 +97,28 @@ func TestTxAccessList_StorageChangesMatchesWriteSet(t *testing.T) {
 		Val:         *uint256.NewInt(0),
 	})
 	vm.FlushVersionedWrites(ws, true)
-	vm.RecordWriteKeysAtTxIndex(txIdx, false, ws)
 
-	collect := func(view WriteSetView, seq func(WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]) map[accounts.StorageKey]uint256.Int {
-		got := map[accounts.StorageKey]uint256.Int{}
-		for a, slots := range seq(view) {
-			if a != addr {
-				continue
-			}
-			for k, vw := range slots {
-				got[k] = vw.Val
-			}
+	view := NewVersionMapWriteView(ws, vm, txIdx)
+
+	changedCount := 0
+	for a, slots := range view.StorageChanges() {
+		if a == addr {
+			changedCount += len(slots)
 		}
-		return got
 	}
-	changedSeq := func(v WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-		return v.StorageChanges()
-	}
-	allSeq := func(v WriteSetView) iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-		return v.Storages()
-	}
+	require.Equal(t, 1, changedCount, "ValueUnchanged write must be filtered from StorageChanges")
 
-	wsView := NewVersionMapWriteView(ws, vm, txIdx)
-	alView := vm.WritesAtTxIndex(txIdx, false)
-
-	require.Equal(t, collect(wsView, changedSeq), collect(alView, changedSeq), "StorageChanges must match across view backings")
-	require.Len(t, collect(alView, changedSeq), 1, "ValueUnchanged write must be filtered")
-	require.Equal(t, collect(wsView, allSeq), collect(alView, allSeq), "Storages (unfiltered) must match across view backings")
-	require.Len(t, collect(alView, allSeq), 2, "unfiltered view keeps both writes")
+	allCount := 0
+	for a, slots := range view.Storages() {
+		if a == addr {
+			allCount += len(slots)
+		}
+	}
+	require.Equal(t, 2, allCount, "unfiltered Storages keeps both writes")
 }
 
 // TestVersionMap_BlockTxIndex pins the global-txNum ⇄ block-relative-TxIndex mapping
-// (txNum = baseTxNum + TxIndex + 1) the access list is keyed by.
+// (txNum = baseTxNum + TxIndex + 1).
 func TestVersionMap_BlockTxIndex(t *testing.T) {
 	vm := NewVersionMap(nil)
 	vm.SetBaseTxNum(100)

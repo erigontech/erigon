@@ -248,13 +248,8 @@ type VersionMap struct {
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
 
-	// writeKeys is the per-tx access list (txAccessKey -> *txAccessList): the frozen
-	// key-set each tx wrote, enumerable lock-free. Commitment and domain-apply source
-	// their key enumeration here and read values back from the cells, so a tx's
-	// write-set need not escape execution. See versionmap_access.go.
-	writeKeys sync.Map
 	// baseTxNum is the block's first global txNum (block-start system tx, TxIndex -1),
-	// so a global txNum maps to the block-relative TxIndex the access list is keyed by.
+	// so a global txNum maps to the block-relative TxIndex: txNum = baseTxNum + TxIndex + 1.
 	baseTxNum atomic.Uint64
 
 	// fieldMissHook runs after an account-field probe missed, before the
@@ -957,7 +952,10 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		// the read side (readSelfDestructMemo→resolved) already treats it as a
 		// destruct, so this single lifecycle authority must too, or the two disagree
 		// on a validated destruct and a wiped-slot read never settles.
-		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value {
+		// A ValueDeleted stamp retracts the destruct (a fee credit revived a recipient a
+		// worker had already removed): the cell records that a wipe happened, but the
+		// account stays live and keeps its storage.
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value && v.valStatus != ValueDeleted {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}

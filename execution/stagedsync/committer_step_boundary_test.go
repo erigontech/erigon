@@ -72,15 +72,16 @@ func newRawViewVM(firstTxNum uint64) *state.VersionMap {
 	return vm
 }
 
-// recordTx records ws into vm — as exec's publish does — and returns the txResult
-// carrying that version map, from which the calculator folds commitment. Every
-// production txResult carries be.versionMap; the writes field is only a fallback.
+// recordTx flushes ws into vm — as exec's publish does — and returns the txResult
+// carrying that version map plus a map-view over the tx's writes, from which the
+// calculator folds commitment, exactly as a production txResult does.
 func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNum uint64, rules *chain.Rules, ws *state.WriteSet) *txResult {
+	var writes state.WriteSetView
 	if ws != nil {
 		vm.FlushVersionedWrites(ws, true)
-		vm.RecordWriteKeysAtTxIndex(int(txNum-vm.BaseTxNum())-1, false, ws)
+		writes = state.NewVersionMapWriteView(ws, vm, int(txNum-vm.BaseTxNum())-1)
 	}
-	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: ws, versionMap: vm}
+	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: writes, versionMap: vm}
 }
 
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
@@ -943,7 +944,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 		bal := *uint256.NewInt(txNum * 1000)
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
-		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	// A partial first block computes without checking the root; the test header

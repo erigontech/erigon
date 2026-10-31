@@ -1356,18 +1356,38 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 // and must not gain one. deleteAddr still clears the AddressPath so neither is mistaken for
 // a same-tx SD+CREATE2 recreate.
 func (ws *WriteSet) SetEmptyRemoval(addr accounts.Address, version Version) {
-	sd, selfDestructed := ws.GetSelfDestruct(addr)
-	selfDestructed = selfDestructed && sd.Val
 	ws.deleteAddr(addr)
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version},
+		Val:         true,
+	})
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: version, valStatus: ValueDeleted},
 	})
-	if selfDestructed {
-		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
-			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version},
-			Val:         true,
-		})
-	}
+}
+
+// SetContractRemoval is SetEmptyRemoval for a destroyed contract rather than a
+// touched-empty EOA. It additionally stamps the CodeHash ValueDeleted — the "code now
+// removed" signal that survives the footprint clear, letting the fee calc tell a
+// destroyed contract (burn the delayed fee, stay removed) from an EIP-161 empty EOA
+// (credit the fee, revive).
+func (ws *WriteSet) SetContractRemoval(addr accounts.Address, version Version) {
+	ws.SetEmptyRemoval(addr, version)
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version, valStatus: ValueDeleted},
+		Val:         accounts.EmptyCodeHash,
+	})
+}
+
+// MarkSelfDestructDeleted retracts a removal a worker already emitted: it stamps the
+// SelfDestruct cell ValueDeleted, which the lifecycle reads as retracted — the account
+// stays live and keeps its storage, while the cell still records that a wipe happened.
+// calcFees uses it when a fee credit revives a touched-empty recipient the worker removed.
+func (ws *WriteSet) MarkSelfDestructDeleted(addr accounts.Address, version Version) {
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version, valStatus: ValueDeleted},
+		Val:         true,
+	})
 }
 
 func (ws *WriteSet) deleteAddr(addr accounts.Address) {
@@ -1878,6 +1898,10 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int) {
 	if vw, ok := ws.balance[addr]; ok {
 		vw.Val = val
+		// Reverting restores a live prior balance, so clear any ValueDeleted stamp a
+		// self-destruct left on the cell — otherwise GetAccount still reads the
+		// account as removed after its destruct was rolled back.
+		vw.valStatus = ValueChanged
 	}
 }
 
@@ -2119,7 +2143,7 @@ func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int)
 }
 
 func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
-	val, res, ok := vm.ReadStorage(addr, key, txIndex)
+	val, res, ok := liveStorage(vm, addr, key, txIndex)
 	if ok && res.Status() != MVReadResultNone {
 		return val, true
 	}

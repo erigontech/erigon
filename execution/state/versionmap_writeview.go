@@ -11,9 +11,9 @@ import (
 // versionMapWriteView is a read-only WriteSetView over a tx's versionMap slice.
 // The key-set (which cells the tx wrote) comes from keys; the values are read
 // from the versionMap floor at the tx's txIndex rather than from a copied
-// WriteSet. Storage values come from a WriteSet's keys: a storage cell at txIndex
-// holds the key-set's value for every write the flush materializes, and a net-zero
-// write on a BAL block has no cell. A key-only access list reads them from the map. Yielded VersionedWrite values are reused per element, never pointers
+// WriteSet. Storage values come from keys: a storage cell at txIndex holds the
+// key-set's value for every write the flush materializes, and a net-zero write on
+// a BAL block has no cell. Yielded VersionedWrite values are reused per element, never pointers
 // into the map, so a consumer cannot mutate the map through the view.
 type versionMapWriteView struct {
 	keys  WriteSetView
@@ -115,6 +115,13 @@ func (v *versionMapWriteView) SelfDestructs() iter.Seq2[accounts.Address, *Versi
 			val := kw.Val
 			if sd, res, ok := v.vm.ReadSelfDestruct(addr, v.txIdx+1); ok && res.resolved() {
 				val = sd
+				if sd {
+					// Take the lifecycle verdict (WasDestroyed), not the raw cell — a retracted
+					// destruct stays live, so apply must not wipe it. On a map miss the key-set
+					// value stands, so an uncelled delete is not dropped.
+					st, _, _, _ := v.vm.AccountLifecycleAt(addr, v.txIdx+1)
+					val = st != LifecycleLive
+				}
 			}
 			vw = VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: val}
 			if !yield(addr, &vw) {
@@ -150,8 +157,9 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			}
 			scratch = scratch[:len(inner)]
 			i := 0
-			for key, kw := range inner {
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: v.storageVal(addr, key, kw)}
+			for key := range inner {
+				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -183,7 +191,8 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 				if kw.valStatus == ValueUnchanged {
 					continue
 				}
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: v.storageVal(addr, key, kw)}
+				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -195,15 +204,6 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 			}
 		}
 	}
-}
-
-func (v *versionMapWriteView) storageVal(addr accounts.Address, key accounts.StorageKey, kw *VersionedWrite[uint256.Int]) uint256.Int {
-	if _, keyOnly := v.keys.(*txAccessList); keyOnly {
-		if val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1); ok {
-			return val
-		}
-	}
-	return kw.Val
 }
 
 func (v *versionMapWriteView) AccountChanges() iter.Seq[accounts.Address] {
