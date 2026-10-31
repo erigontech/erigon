@@ -64,9 +64,7 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
-	}
+	sd.initDomainMaps()
 
 	const keysPerDomain = 200
 	const cutoff = uint64(keysPerDomain / 2)
@@ -117,9 +115,7 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
-	}
+	sd.initDomainMaps()
 	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
 
 	flushing := make(chan struct{})
@@ -172,9 +168,7 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 				inMemHistoryReads: inMemHistoryReads,
 			}
-			for d := range sd.domains {
-				sd.domains[d] = map[string][]dataWithTxNum{}
-			}
+			sd.initDomainMaps()
 
 			// Each case is the FIRST write after the borrow, so the slot still holds
 			// the borrowed buffer when the arm runs. A shorter value fits that buffer,
@@ -202,5 +196,33 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTemporalMemBatchWriteDoesNotWaitForReaderOfAnotherShard(t *testing.T) {
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	sd.initDomainMaps()
+	reader := sd.shard(kv.AccountsDomain, "reader")
+	key := "writer"
+	for i := 0; sd.shard(kv.AccountsDomain, key) == reader; i++ {
+		require.Less(t, i, 1000, "every key maps to the reader's shard")
+		key = fmt.Sprintf("writer-%d", i)
+	}
+	reader.RLock()
+	defer reader.RUnlock()
+
+	done := make(chan struct{})
+	go func() {
+		sd.putLatest(kv.AccountsDomain, key, []byte("v"), 1)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a write waited for a reader of another key")
 	}
 }
