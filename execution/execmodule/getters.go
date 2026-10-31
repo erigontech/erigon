@@ -436,11 +436,22 @@ func (e *ExecModule) GetTD(ctx context.Context, blockHash *common.Hash, blockNum
 }
 
 func (e *ExecModule) GetForkChoice(ctx context.Context) (ForkChoiceState, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	view, cleanup, err := e.beginOverlayView(ctx)
 	if err != nil {
 		return ForkChoiceState{}, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	var tx kv.Getter = view
+	if cleanup != nil {
+		defer cleanup()
+	} else {
+		// The fork choice is a plain table: a temporal tx would open every domain's file view for it.
+		roTx, err := e.db.BeginRo(ctx)
+		if err != nil {
+			return ForkChoiceState{}, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
+		}
+		defer roTx.Rollback()
+		tx = roTx
+	}
 
 	return ForkChoiceState{
 		HeadHash:      rawdb.ReadForkchoiceHead(tx),
