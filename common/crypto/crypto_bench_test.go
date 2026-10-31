@@ -116,4 +116,12 @@ func BenchmarkKeccak256HashCache(b *testing.B) {
 			}
 		})
 	}
+	// Parallel workers hashing the same inputs, as txs of one block do.
+	b.Run("cached/hit-parallel", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for i := 0; pb.Next(); i++ {
+				_ = Keccak256Hash(inputs[i%1024])
+			}
+		})
+	})
 }
