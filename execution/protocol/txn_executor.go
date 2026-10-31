@@ -682,6 +682,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		case contractCreation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 		case st.chargeSenderAtValidation && st.recipientCreditedAtValidation(coinbase):
+			tracer := vmConfig.Tracer
+			tracer.EmitEnter(0, byte(vm.CALL), sender, st.to(), false, st.data, st.gasRemaining, st.value, nil)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 		default:
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
@@ -866,7 +869,7 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 // no code, so validation credits it after every lower tx, or reruns the tx if it does not exist.
 func (st *TxnExecutor) recipientCreditedAtValidation(coinbase accounts.Address) bool {
 	to := st.to()
-	if st.value.IsZero() || to == coinbase || to == st.msg.From() || st.evm.Config().Tracer.HasEnterHook() || slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), to) {
+	if st.value.IsZero() || to == coinbase || to == st.msg.From() || st.evm.Config().Tracer.HasGasChangeHook() || st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnBalanceChange != nil || slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), to) {
 		return false
 	}
 	// A recorded read of the recipient would conflict with every lower credit; validation
