@@ -297,7 +297,7 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 		leases:        pool,
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
-		metrics:       NewMetrics(""),
+		metrics:       &Metrics{},
 		grain:         ForkGrainNever,
 	}
 	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
@@ -338,7 +338,7 @@ func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
 		pu:            pu,
-		metrics:       NewMetrics(""),
+		metrics:       &Metrics{},
 		grain:         ForkGrainNever,
 	}
 	l, err := pool.acquire(context.Background())
@@ -395,7 +395,7 @@ func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
 			accountKeyLen: length.Addr,
 			cfg:           DefaultTrieConfig(),
 			pu:            ut.parallel,
-			metrics:       NewMetrics(""),
+			metrics:       &Metrics{},
 			grain:         1,
 		}
 		bw := &walker{trie: base}
@@ -488,7 +488,7 @@ func TestForkWalk_HelperErrorIsNotMaskedByCancellation(t *testing.T) {
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
 		pu:            ut.parallel,
-		metrics:       NewMetrics(""),
+		metrics:       &Metrics{},
 		grain:         1,
 	}
 	bw := &walker{trie: base}
