@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -621,8 +620,9 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 	b.WriteString("[")
 	first := true
 	var err error
+	filter := validatorIndexSet(filterIndicies)
 	validators.Range(func(i int, v solid.Validator, l int) bool {
-		if len(filterIndicies) > 0 && !slices.Contains(filterIndicies, uint64(i)) {
+		if !filter.contains(uint64(i)) {
 			return true
 		}
 		// "{\"index\":\"%d\",\"status\":\"%s\",\"balance\":\"%d\",\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":\"%d\",\"slashed\":%t,\"activation_eligibility_epoch\":\"%d\",\"activation_epoch\":\"%d\",\"exit_epoch\":\"%d\",\"withdrawable_epoch\":\"%d\"}}"
@@ -696,8 +696,9 @@ func responseValidatorsBalances(filterIndicies []uint64, balances solid.Uint64Li
 	}
 
 	balancesResponse := make([]BalanceResponse, 0)
+	filter := validatorIndexSet(filterIndicies)
 	balances.Range(func(i int, v uint64, l int) bool {
-		if len(filterIndicies) > 0 && !slices.Contains(filterIndicies, uint64(i)) {
+		if !filter.contains(uint64(i)) {
 			return true
 		}
 		balancesResponse = append(balancesResponse, BalanceResponse{
@@ -710,6 +711,27 @@ func responseValidatorsBalances(filterIndicies []uint64, balances solid.Uint64Li
 	return newBeaconResponse(balancesResponse).
 		WithFinalized(finalized).
 		WithOptimistic(optimistic)
+}
+
+type indexFilter map[uint64]struct{}
+
+func validatorIndexSet(indicies []uint64) indexFilter {
+	if len(indicies) == 0 {
+		return nil
+	}
+	set := make(indexFilter, len(indicies))
+	for _, idx := range indicies {
+		set[idx] = struct{}{}
+	}
+	return set
+}
+
+func (f indexFilter) contains(idx uint64) bool {
+	if f == nil {
+		return true
+	}
+	_, ok := f[idx]
+	return ok
 }
 
 func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) bool {
