@@ -187,6 +187,11 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), d)
 	require.True(t, s.be.execTasks.isBlocked(2))
 	require.False(t, s.be.selfLoopDispatched[2])
+	// The run executes the frame of a funded precompile, so a transfer to it still waits.
+	p := accounts.InternAddress(common.BytesToAddress([]byte{1}))
+	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p}))
+	require.True(t, s.be.execTasks.isBlocked(2))
+	require.False(t, s.be.selfLoopDispatched[2])
 }
 
 // The run peeks at the recipient's code at block start; validation credits only a recipient that
@@ -221,4 +226,13 @@ func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
 			}
 		})
 	}
+	t.Run("balance_overflow", func(t *testing.T) {
+		to := accounts.NewAccount()
+		to.Balance.SetAllOne()
+		reader.accounts[recipient] = &to
+		result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+		ws, _, err := chargeSenderAtValidation(task, result, state.Version{}, state.NewVersionMap(nil), reader)
+		require.NoError(t, err)
+		require.Nil(t, ws, "a credit that wraps the balance skipped the empty-account cleanup of a full run")
+	})
 }

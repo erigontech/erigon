@@ -863,8 +863,6 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 	return gasRemaining, gasUsed, err
 }
 
-// verifyAuthorities applies the EIP-7702 authorization list, mutating state;
-// callers must first validate the list with validateSetCodePrerequisites.
 // recipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
 // recipient exists and has no code, so validation credits it after every lower tx. A recorded read
 // of the recipient would conflict with each lower credit, so the run peeks at block-start state and
@@ -879,6 +877,8 @@ func (st *TxnExecutor) recipientCreditedAtValidation(coinbase accounts.Address) 
 	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
+// verifyAuthorities applies the EIP-7702 authorization list, mutating state;
+// callers must first validate the list with validateSetCodePrerequisites.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {

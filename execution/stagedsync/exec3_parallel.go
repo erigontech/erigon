@@ -1357,7 +1357,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
-				if to := *tx.GetTo(); chargedAtValidation && to != executor.coinbase.Value() && codeless(to) {
+				if to := *tx.GetTo(); chargedAtValidation && to != executor.coinbase.Value() &&
+					!slices.Contains(vm.ActivePrecompiles(txTask.Rules()), accounts.InternAddress(to)) && codeless(to) {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
 				} else {
@@ -2729,10 +2730,14 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			if recipient == nil || !recipient.CodeHash.IsEmpty() {
 				return nil, nil, nil
 			}
+			credit, overflow := u256.AddOverflow(recipient.Balance, *msg.Value())
+			if overflow {
+				return nil, nil, nil
+			}
 			state.SeedOrigin(vm, to, recipient)
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
-				Val:         u256.Add(recipient.Balance, *msg.Value()),
+				Val:         credit,
 			})
 		}
 	}
