@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,7 +40,9 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -237,7 +240,19 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
+	var domainOpts []execctx.SharedDomainOption
+	if !latest {
+		baseTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+		mem, ok := tx.Debug().NewMemBatch(kvmetrics.NewDomainMetrics()).(*dbstate.TemporalMemBatch)
+		if !ok {
+			return nil, errors.New("eth_simulateV1: unexpected in-memory batch type")
+		}
+		domainOpts = append(domainOpts, execctx.WithMemBatch(&baseStateMemBatch{TemporalMemBatch: mem, tx: tx, txNum: baseTxNum, touchedKeys: sim.touchedKeys}))
+	}
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger, domainOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -757,7 +772,11 @@ func (s *simulator) simulateBlock(
 	// Determine the active precompiled contracts for this block.
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum, s.touchedKeys)
+	domainsTx := tx
+	if !latest {
+		domainsTx = baseStateTx{TemporalTx: tx, txNum: firstMinTxNum}
+	}
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(domainsTx), minTxNum, s.touchedKeys)
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
 
 	// Override the state before block execution.
@@ -809,7 +828,7 @@ func (s *simulator) simulateBlock(
 			intraBlockState.MergeTxIOInto(balIO, writes)
 			intraBlockState.FlushWritesToVersionMap(writes)
 			stateWriter.trackWrites(writes)
-			if err := state.ApplyWrites(writes, sharedDomains, tx, blockNumber, minTxNum, nil, rules, false); err != nil {
+			if err := state.ApplyWrites(writes, sharedDomains, domainsTx, blockNumber, minTxNum, nil, rules, false); err != nil {
 				return fmt.Errorf("apply simulated writes: %w", err)
 			}
 			intraBlockState.ResetVersionedIO()
@@ -1032,7 +1051,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
 	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, baseStateTx{TemporalTx: tx, txNum: firstMinTxNum}, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
 		if err != nil {
 			return err
 		}
@@ -1316,6 +1335,79 @@ func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomain
 	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
 }
 
+// baseStateTx returns account, storage and code state as of txNum, the end of the
+// base block, in place of the latest state. SharedDomains skips a write that
+// matches the state it reads, so on an old base it must read the base state.
+type baseStateTx struct {
+	kv.TemporalTx
+	txNum uint64
+}
+
+func (tx baseStateTx) GetLatest(domain kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain != kv.AccountsDomain && domain != kv.StorageDomain && domain != kv.CodeDomain {
+		return tx.TemporalTx.GetLatest(domain, k, opts)
+	}
+	v, _, err := tx.GetAsOf(domain, k, tx.txNum)
+	return v, 0, err
+}
+
+// baseStateMemBatch is the in-memory batch of a simulation on an old base. A storage
+// wipe lists the account's slots through IteratePrefix, which would read the latest
+// state; here it lists the slots at the end of the base block (txNum) together with
+// the slots the simulation wrote, which touchedKeys holds. Deleted storage keys are
+// added to touchedKeys, so the state root replay updates them too.
+type baseStateMemBatch struct {
+	*dbstate.TemporalMemBatch
+	tx          kv.TemporalTx
+	txNum       uint64
+	touchedKeys keysByAccount
+}
+
+func (m *baseStateMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, prevVal []byte) error {
+	if domain == kv.StorageDomain {
+		address := accounts.InternAddress(common.BytesToAddress([]byte(k[:length.Addr])))
+		m.touchedKeys[address] = append(m.touchedKeys[address], accounts.InternKey(common.BytesToHash([]byte(k[length.Addr:]))))
+	}
+	return m.TemporalMemBatch.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (m *baseStateMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
+	if domain != kv.StorageDomain || len(prefix) != length.Addr {
+		return m.TemporalMemBatch.IteratePrefix(domain, prefix, roTx, it)
+	}
+	values := map[string][]byte{}
+	for _, slot := range m.touchedKeys[accounts.InternAddress(common.BytesToAddress(prefix))] {
+		slotValue := slot.Value()
+		values[string(prefix)+string(slotValue[:])] = nil
+	}
+	to, _ := kv.NextSubtree(prefix)
+	base, err := m.tx.RangeAsOf(domain, prefix, to, m.txNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer base.Close()
+	for base.HasNext() {
+		k, v, err := base.Next()
+		if err != nil {
+			return err
+		}
+		values[string(k)] = bytes.Clone(v)
+	}
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		v := values[k]
+		if written, _, ok := m.TemporalMemBatch.GetLatest(domain, []byte(k)); ok {
+			v = written
+		}
+		if len(v) == 0 {
+			continue
+		}
+		if cont, err := it([]byte(k), v); err != nil || !cont {
+			return err
+		}
+	}
+	return nil
+}
+
 // simulationIntraBlockStateReader is a state.StateReader for the 2nd+ block of an eth_simulateV1
 // multi-block simulation.
 //
@@ -1439,7 +1531,7 @@ func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomain
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
 func (s *simulator) computeCommitmentFromStateHistory(
 	ctx context.Context,
-	tx kv.TemporalTx,
+	tx, stateTx kv.TemporalTx,
 	sd *execctx.SharedDomains,
 	touched keysByAccount,
 	baseBlockNum uint64,
@@ -1451,7 +1543,7 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
 	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
+		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, stateTx, tsd, sd))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
 			addrValue := address.Value()
