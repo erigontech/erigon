@@ -1973,6 +1973,9 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			return be.waitDep(tv.index, t)
 		}
 		var prevWrites *state.WriteSet
+		if t, ok := tv.Task.(*exec.TxTask); ok && tv.versionMap.HasBAL {
+			_, _ = t.TxSender()
+		}
 		for {
 			// Whether this run executes against fully-committed state below it. Captured
 			// BEFORE execution: the frontier is monotonic and finalized tasks never
