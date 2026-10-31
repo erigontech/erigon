@@ -446,7 +446,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	execErr := func() (err error) {
 		defer func() {
-			if rec := recover(); rec != nil {
+			rec := recover()
+			switch {
+			case rec != nil:
 				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
 				// Surface the panic as the loop's error; otherwise execImpl returns
 				// nil with sd.mem partly folded and the caller mistakes an internal
@@ -454,10 +456,34 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				if err == nil {
 					err = fmt.Errorf("apply loop panic: %v", rec)
 				}
-			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+			case err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})):
 				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
-			} else {
+			default:
 				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
+			}
+			// Any non-clean exit (panic or an error return before the channel-close
+			// drain) can leave the exec loop blocked on a mustDeliver send into a full
+			// applyResults; mustDeliver ignores ctx, so the cancel alone cannot release
+			// it. The exec loop can equally be blocked sending into commitResults while
+			// the calculator is blocked sending into a full rootResults (which this loop
+			// stopped consuming), so draining only applyResults leaves both producers
+			// stuck and neither channel closes. Drain both to EOF concurrently so the
+			// calculator and exec loop wind down and close their channels, else pe.wait()
+			// hangs. A clean exit already drained to the close.
+			if rec != nil || err != nil {
+				pe.cancelExecLoop(&stopCause{kind: stopOperational, err: err})
+				var drainWG sync.WaitGroup
+				drainWG.Go(func() {
+					for range applyResults {
+					}
+				})
+				if rootResults != nil {
+					drainWG.Go(func() {
+						for range rootResults {
+						}
+					})
+				}
+				drainWG.Wait()
 			}
 		}()
 
@@ -2126,10 +2152,10 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				// A same-writer re-publication names no blocker: the value tiebreaker
-				// may forgive it, and parking would wait on a writer that did not
-				// invalidate this read. If the value did change, re-executing at once is
-				// right — the new value is already published.
+				// A same-writer re-publication (same TxIndex, new incarnation) names no
+				// blocker: parking would wait on a writer that will just re-publish, so
+				// re-execute at once — the new value is already published. Only a different
+				// writer that moved the version is a blocker to wait for.
 				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
 					// Invariant: a read can only be invalidated by a PREDECESSOR write.
 					// A blocker >= this task is a forward dependency (a future write

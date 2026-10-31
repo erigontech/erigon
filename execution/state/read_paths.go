@@ -517,7 +517,7 @@ reread:
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        true,
+						Val:        r.life.state == LifecycleAbsent,
 					})
 					recordWipedCodeRead(s, addr, path, Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc})
 				}
@@ -538,7 +538,7 @@ reread:
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        true,
+						Val:        r.life.state == LifecycleAbsent,
 					})
 					// Record the wiped slot read anchored on the destruct version, matching
 					// liveStorage: a later store above the destruct resolves there and
@@ -660,6 +660,26 @@ reread:
 				r.version = sdVer
 				return
 			}
+		}
+
+		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
+		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
+		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		if path == StoragePath && r.life.state != LifecycleLive {
+			if !commited {
+				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
+					Val:        r.life.state == LifecycleAbsent,
+				})
+				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}},
+					Val:        uint256.Int{},
+				})
+			}
+			r.outcome = outcomeReturnZero
+			r.source = MapRead
+			r.version = r.life.canonicalVer
+			return
 		}
 
 		// A prior tx that bumped Incarnation cleared the old incarnation's storage and

@@ -28,11 +28,13 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -112,6 +114,41 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
+}
+
+// failingAccountTemporalTx fails GetLatest for one account in the Accounts domain and
+// passes everything else through, so a finalize-time beneficiary read surfaces as a
+// state-read error rather than a block verdict.
+type failingAccountTemporalTx struct {
+	kv.TemporalTx
+	address common.Address
+	err     error
+}
+
+func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && common.BytesToAddress(key) == tx.address {
+		return nil, 0, tx.err
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func (tx failingAccountTemporalTx) AggTx() any { return nil }
+
+// TestSerialFinalizeStateReadErrorPassesThrough pins that a withdrawal-beneficiary read
+// failure during Finalize is an infrastructure failure: it surfaces via ibs.StateReadError()
+// and passes through unwrapped, not as ErrInvalidBlock. Complements
+// TestSerialFinalizeClassifiesRulesEngineError (which covers the invalid-block verdict side).
+func TestSerialFinalizeStateReadErrorPassesThrough(t *testing.T) {
+	se, task := newSerialFinalizeTestExec(t, merge.New(ethash.NewFaker()))
+	cause := errors.New("withdrawal account read failed")
+	beneficiary := common.Address{19: 0x42}
+	se.applyTx = failingAccountTemporalTx{TemporalTx: se.applyTx, address: beneficiary, err: cause}
+	task.Withdrawals = types.Withdrawals{{Address: beneficiary, Amount: 1}}
+
+	_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
+
+	require.ErrorIs(t, err, cause)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
 
 func TestWarmTxsHashesSkipsAuthListAboveGasLimit(t *testing.T) {

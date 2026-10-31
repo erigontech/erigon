@@ -17,7 +17,9 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -27,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -121,9 +124,9 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 // so the very first lazy-load fires with asOfReader.txNum=0. On a synced-
 // from-genesis chain that's in-window so seekInFiles handles it
 // gracefully; on a snapshot-loaded chain whose visible window starts
-// well past genesis (e.g. perf-devnet-3 starting at txNum~2.9B) it fails
-// hard with `seekInFiles(invIndex=storage,txNum=0) but data before
-// txNum=N not available` and FCU fails on every block.
+// well past genesis it fails hard with `seekInFiles(invIndex=storage,
+// txNum=0) but data before txNum=N not available` and FCU fails on every
+// block.
 //
 // The fix in handleMessage's *txResult branch pins asOfReader.txNum to
 // the current tx's txNum BEFORE ApplyWrites runs. computeAndPublish /
@@ -296,4 +299,61 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+func TestComputeAheadCap_StopsOperationalWindDown(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cause := errors.New("commitment lazy-load failed")
+	pe := &parallelExecutor{cancelExecLoop: cancel}
+	pe.cancelOperational(4, cause)
+
+	sc, ok := stopCauseOf(signalCtx)
+	require.True(t, ok, "operational cancellation must publish its block boundary")
+	require.Equal(t, uint64(4), sc.block)
+	require.Equal(t, stopOperational, sc.kind)
+	require.Same(t, cause, sc.err)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  100,
+	}
+
+	cc.maybeComputeAhead(context.Background(), 5)
+	assert.False(t, cc.computedAhead[5], "failure wind-down must not compute ahead past its block")
+}
+
+func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
+	first := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	second := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	cc := &commitmentCalculator{updates: first, spare: second}
+
+	touch := func(u *commitment.Updates, addr byte) {
+		u.TouchPlainKey(string(bytes.Repeat([]byte{addr}, 20)), nil, u.TouchAccount)
+	}
+
+	touch(cc.updates, 1)
+	handed := cc.handOffUpdates()
+	require.Same(t, first, handed, "the filled buffer must be the one handed off")
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, second, cc.updates, "the spare must rotate in")
+	require.Zero(t, cc.updates.Size(), "the rotated-in buffer must be empty")
+
+	touch(cc.updates, 2)
+	handed = cc.handOffUpdates()
+	require.Same(t, second, handed)
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
+	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
 }

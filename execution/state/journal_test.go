@@ -116,3 +116,51 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 		}
 	}
 }
+
+// TestJournalResetDropsEntriesItReslicesPast pins that Reset clears the journalExtra
+// pointers in the capacity tail it reslices past, so a large prevcode payload cannot be
+// pinned alive by a stale entry after the journal is reused.
+func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
+	j := newJournal()
+	t.Cleanup(j.release)
+
+	addr := accounts.InternAddress(common.Address{1})
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	if len(j.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(j.entries))
+	}
+
+	j.Reset()
+
+	tail := j.entries[:cap(j.entries)]
+	for i, e := range tail {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
+
+// TestJournalRevertDropsTheEntriesItTruncates pins the same for revert: the entries a
+// revert truncates must not keep their journalExtra pinned after a following Reset.
+func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
+	addr := accounts.InternAddress(common.Address{1})
+	ibs.stateObjects[addr] = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
+
+	j := ibs.journal
+	for range 4 {
+		j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	}
+
+	j.revert(ibs, 2)
+	j.Reset()
+
+	for i, e := range j.entries[:cap(j.entries)] {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
