@@ -607,7 +607,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 		if len(unknownHashes) > 0 {
-			if err = f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
+			if err := f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
 				return err
 			}
 		}
@@ -636,7 +636,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 
 		if len(unknownHashes) > 0 {
-			if err = f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
+			if err := f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
 				return err
 			}
 		}
