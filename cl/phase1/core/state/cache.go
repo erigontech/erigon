@@ -267,16 +267,22 @@ func (b *CachingBeaconState) initCaches() error {
 
 func (b *CachingBeaconState) InitBeaconState() error {
 	b.rebuildPubkeyIndex()
-	return b.reinitCaches()
+	return b.reinitCaches(nil)
 }
 
 func (b *CachingBeaconState) rebuildPubkeyIndex() {
 	b.publicKeyIndices = newPubkeyIndex(b.ValidatorSet())
 }
 
-func (b *CachingBeaconState) reinitCaches() error {
-	b.totalActiveBalanceCache = nil
-	b._refreshActiveBalancesIfNeeded()
+func (b *CachingBeaconState) reinitCaches(totalActiveBalance *uint64) error {
+	if totalActiveBalance == nil {
+		b.totalActiveBalanceCache = nil
+		b._refreshActiveBalancesIfNeeded()
+	} else {
+		total := max(b.BeaconConfig().EffectiveBalanceIncrement, *totalActiveBalance)
+		b.totalActiveBalanceCache = &total
+		b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(total)
+	}
 	b.previousStateRoot = common.Hash{}
 	if err := b.initCaches(); err != nil {
 		return err
