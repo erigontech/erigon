@@ -65,6 +65,18 @@ type FrontierFunc func(domain kv.Domain) (visibleEnd uint64, ok bool)
 
 func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return f(domain) }
 
+// ClampFillTxNum bounds a read-fill stamp by a read-only snapshot's last visible
+// txNum. A nil frontier leaves the stamp unchanged; use it for writable backing
+// transactions, whose visible bounds may lag behind writes.
+func ClampFillTxNum(f Frontier, domain kv.Domain, txNum uint64) uint64 {
+	if f != nil {
+		if end, ok := f.DomainVisibleEnd(domain); ok && end > 0 {
+			return min(txNum, end-1)
+		}
+	}
+	return txNum
+}
+
 // rejectedFrontier distinguishes a non-retryable rejection from a nil, retryable
 // binding without growing ReadView, which is embedded in every state getter.
 type rejectedFrontier struct{}

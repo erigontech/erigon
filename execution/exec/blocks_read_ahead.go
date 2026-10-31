@@ -128,14 +128,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
-		readTxNum := step.LastTxNum(cpg.stepSize)
-		// A step-end stamp can hide a valid fill from snapshot-bounded reads.
-		// Only read-only bounds are safe here; writable bounds can lag behind writes.
-		if cpg.snapshot != nil {
-			if end, ok := cpg.snapshot.DomainVisibleEnd(name); ok && end > 0 {
-				readTxNum = min(readTxNum, end-1)
-			}
-		}
+		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
 			var codeHash common.Hash
