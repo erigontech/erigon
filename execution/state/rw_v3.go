@@ -614,7 +614,7 @@ func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { ret
 // account's latest state, so the block's writes must already be applied. StartChange
 // must be called on the accumulator first.
 func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.TemporalTx, blockWrites []WriteSetView) error {
-	if accumulator == nil {
+	if accumulator == nil || dbg.EnvBool("NOTIFY_OFF_DBG", false) {
 		return nil
 	}
 
