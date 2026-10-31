@@ -160,8 +160,7 @@ func TestFrozenBlobsReportsVisibleSegmentEnd(t *testing.T) {
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
 }
 
-// Blocks run ahead of blobs (blobs only start at Deneb) and the block tip is
-// dumped before it is indexed, so the watermarks legitimately disagree.
+// Blocks run ahead of blobs (blobs only start at Deneb).
 func TestCaplinWatermarks(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -187,6 +186,45 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
 	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+}
+
+// The archive backfill takes SegmentsMax as the last slot readable from beacon-block
+// snapshots, so blob segments past a block gap or past the last block segment must not raise it.
+func TestCaplinSegmentsMaxIgnoresBlobSidecars(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	for _, tc := range []struct {
+		name   string
+		blocks [][2]uint64
+		blobs  [][2]uint64
+	}{
+		{
+			name:   "blobs past a block gap",
+			blocks: [][2]uint64{{0, limit}, {2 * limit, 3 * limit}},
+			blobs:  [][2]uint64{{0, limit}, {limit, 2 * limit}, {2 * limit, 3 * limit}},
+		},
+		{
+			name:   "blobs past the last block segment",
+			blocks: [][2]uint64{{0, limit}},
+			blobs:  [][2]uint64{{0, 2 * limit}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for _, r := range tc.blocks {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], true)
+			}
+			for _, r := range tc.blobs {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, r[0], r[1], true)
+			}
+
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+		})
+	}
 }
 
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain

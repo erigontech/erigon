@@ -97,6 +97,8 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
+func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
+
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
 		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1))
