@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -69,6 +70,7 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 		wg.Go(func() {
 			for !stop.Load() {
 				for i := w; i < numBlobs; i += 4 {
+					pool.blobs.putCells(hashes[i], &[goethkzg.CellsPerExtBlob]*goethkzg.Cell{})
 					pool.blobs.put(hashes[i], owners[i], bundles[i])
 				}
 				for i := w; i < numBlobs; i += 4 {

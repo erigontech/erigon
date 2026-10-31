@@ -19,13 +19,19 @@ package txpool
 import (
 	"sync"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon/common"
 )
 
 type blobStore struct {
 	mu      sync.RWMutex
 	bundles map[common.Hash]blobStoreEntry
+	cells   *lru.Cache[common.Hash, *[goethkzg.CellsPerExtBlob]*goethkzg.Cell]
 }
+
+const blobCellsCacheSize = 256
 
 type blobStoreEntry struct {
 	bundle  PoolBlobBundle
@@ -33,7 +39,12 @@ type blobStoreEntry struct {
 }
 
 func newBlobStore() *blobStore {
-	return &blobStore{bundles: make(map[common.Hash]blobStoreEntry)}
+	cells, _ := lru.New[common.Hash, *[goethkzg.CellsPerExtBlob]*goethkzg.Cell](blobCellsCacheSize)
+	return &blobStore{bundles: make(map[common.Hash]blobStoreEntry), cells: cells}
+}
+
+func (s *blobStore) putCells(blobHash common.Hash, cells *[goethkzg.CellsPerExtBlob]*goethkzg.Cell) {
+	s.cells.Add(blobHash, cells)
 }
 
 func (s *blobStore) put(blobHash, txnHash common.Hash, bundle PoolBlobBundle) {
@@ -62,6 +73,7 @@ func (s *blobStore) get(blobHashes []common.Hash) []PoolBlobBundle {
 	for i, h := range blobHashes {
 		if e, ok := s.bundles[h]; ok {
 			bundles[i] = e.bundle
+			bundles[i].Cells, _ = s.cells.Get(h)
 		}
 	}
 	return bundles
