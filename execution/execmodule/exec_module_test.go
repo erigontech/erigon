@@ -4158,8 +4158,10 @@ func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
 	genesis := &types.Genesis{Config: chain.TestChainOsakaConfig, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(keys[1]))
 	// The deployed code stores the call value, so a credit that skips it changes the state root.
-	storeCallValue := []byte{byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
-		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.RETURN)}
+	storeCallValue := []byte{
+		byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.RETURN),
+	}
 	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		nonces := make([]uint64, len(keys))
 		add := func(k int, to *common.Address, value uint64, data []byte) {
