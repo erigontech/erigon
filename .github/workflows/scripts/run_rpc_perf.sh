@@ -46,6 +46,12 @@ else
   db_version=$COMMIT
 fi
 
+if [ "$perf_exit_status" -eq 0 ] && [ ! -f "$RESULT_DIR/$result_file" ]; then
+  # rpc_perf only logs a failure to write the JSON report and still exits 0
+  echo "::error::rpc_perf succeeded on $label but did not write $result_file"
+  perf_exit_status=1
+fi
+
 if [ "$perf_exit_status" -eq 0 ]; then
   outcome=success
 
