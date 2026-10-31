@@ -243,7 +243,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	slotData := func() []byte {
 		var b bytes.Buffer
 		sdata := &state_accessors.SlotData{Version: clparams.BellatrixVersion, ValidatorLength: valCount, Eth1Data: &cltypes.Eth1Data{}, Fork: &cltypes.Fork{}}
-		require.NoError(t, sdata.WriteTo(&b))
+		require.NoError(t, sdata.Serialize(&b))
 		return bytes.Clone(b.Bytes())
 	}
 
