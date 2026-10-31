@@ -10,6 +10,7 @@ import (
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -91,6 +92,46 @@ func ComputeColumnsForCustodyGroup(custodyGroup CustodyIndex) ([]ColumnIndex, er
 
 // rowRecoverySlots bounds the blob rows recovered at once across all callers.
 var rowRecoverySlots = make(chan struct{}, runtime.GOMAXPROCS(0))
+
+// ComputeCells returns the cells of the extended blob.
+func ComputeCells(blob *cltypes.Blob) ([]cltypes.Cell, error) {
+	cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(blob), 0 /* numGoRoutines */)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]cltypes.Cell, len(cells))
+	for i, cell := range &cells {
+		ret[i] = cltypes.Cell(*cell)
+	}
+	return ret, nil
+}
+
+// ComputeBlobsCells returns the cells of each blob, computed in parallel.
+func ComputeBlobsCells(blobs [][]byte) ([][]cltypes.Cell, error) {
+	for i, blob := range blobs {
+		if len(blob) != len(cltypes.Blob{}) {
+			return nil, fmt.Errorf("blob %d: got %d bytes", i, len(blob))
+		}
+	}
+	cells := make([][]cltypes.Cell, len(blobs))
+	// A separate bound from rowRecoverySlots: a head block's columns must not queue behind a recovery backlog.
+	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for i, blob := range blobs {
+		g.Go(func() error {
+			blobCells, err := ComputeCells((*cltypes.Blob)(blob))
+			if err != nil {
+				return fmt.Errorf("blob %d: %w", i, err)
+			}
+			cells[i] = blobCells
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return cells, nil
+}
 
 // RecoverMatrix takes a partial matrix and the total blob count and returns a complete matrix.
 // Rows are recovered in parallel; an error names the lowest row that cannot be recovered.

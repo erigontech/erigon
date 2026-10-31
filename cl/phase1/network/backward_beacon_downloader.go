@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -131,7 +132,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 	if rpc != nil {
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
 		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-			return RequestEnvelopesFrantically(ctx, rpc, roots, blocks...)
+			return requestEnvelopesFranticallyWithValidator(ctx, rpc, roots, newEnvelopeValidator(blocks, b.validateGloasEnvelope), rpc.BanPeerForInvalidData, blocks...)
 		}
 	}
 	return b
@@ -991,36 +992,30 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return nil, fullRootSet
 	}
 
-	// When HTTP has been working, skip the slow P2P envelope fetch entirely.
-	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
-		envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
-		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
-		b.discardInvalidGloasEnvelopes(responses, envelopes)
-		if result.fetched > 0 {
-			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
-		}
-		b.recordRequiredEnvelopeAttempt(fullRootSet, envelopes)
-		return envelopes, fullRootSet
-	}
-
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	var err error
-	if b.requestEnvelopes != nil {
-		envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
-	} else {
-		err = errors.New("no P2P envelope source configured")
-	}
-	if err != nil {
-		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
-	}
-	b.discardInvalidGloasEnvelopes(responses, envelopes)
-	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
-	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
-		if envelopes == nil {
-			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
+	if !b.httpPreferred.Load() || b.httpFallbackURL == "" {
+		var err error
+		if b.requestEnvelopes != nil {
+			envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
+		} else {
+			err = errors.New("no P2P envelope source configured")
 		}
-		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
-		b.discardInvalidGloasEnvelopes(responses, envelopes)
+		if err != nil {
+			log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+		}
+	}
+	// P2P envelopes have already passed validateGloasEnvelope. Keep HTTP results
+	// separate to avoid repeating those expensive checks on P2P results.
+	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
+		missingRoots := filterReceived(fullRoots, envelopes)
+		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(missingRoots))
+		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, missingRoots, httpEnvelopes, b.beaconCfg)
+		b.discardInvalidGloasEnvelopes(responses, httpEnvelopes)
+		if envelopes == nil {
+			envelopes = httpEnvelopes
+		} else {
+			maps.Copy(envelopes, httpEnvelopes)
+		}
 		if result.fetched > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
 		}
@@ -1346,11 +1341,6 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeP2P(ctx context.Context, b
 		return nil, err
 	}
 	if envelope := envelopes[blockRoot]; envelope != nil && envelope.Message != nil && envelope.Message.BeaconBlockRoot == blockRoot {
-		if b.validateGloasEnvelope != nil {
-			if err := b.validateGloasEnvelope(block, envelope); err != nil {
-				return nil, fmt.Errorf("invalid P2P GLOAS envelope: %w", err)
-			}
-		}
 		return envelope, nil
 	}
 	return nil, errExecutionPayloadEnvelopeNotFound

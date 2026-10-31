@@ -139,7 +139,14 @@ func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.R
 			rawDBExcl.Close()
 		}
 	}
-	return opts.MustOpen(), nil
+	db := opts.MustOpen()
+	if applyMigrations && opts.GetLabel() == dbcfg.ChainDB {
+		if err := migrations.NewMigrator(dbcfg.ChainDB).StampVersion(db, ""); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	return db, nil
 }
 
 // isDefaultChaindata compares the flags as given: dirs.Chaindata is absolute and never matches a relative --datadir.
