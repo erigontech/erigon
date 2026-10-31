@@ -53,9 +53,8 @@ type account struct {
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
-	// empty records whether the account existed before the tx, decided at first
-	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
-	// its own storage during the tx don't retroactively make it look non-empty.
+	// empty is based on the account fields and any known prestate storage.
+	// Live storage alone cannot prove that an account existed before creation.
 	empty bool
 }
 
@@ -155,8 +154,20 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		}
 		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
-		if param.Uint64() <= 1 {
-			t.lookupStorage(addr, stackData[stackLen-3].Bytes32())
+		if param.Uint64() <= 1 && !t.config.DisableStorage {
+			key := stackData[stackLen-3].Bytes32()
+			value, err := t.env.PrestateStorage(addr, accounts.InternKey(key))
+			if err != nil {
+				t.Stop(err)
+				return
+			}
+			// Replace values cached after a storage wipe. A nonzero original
+			// slot also proves that a storage-only account belongs in prestate.
+			pre := t.pre[addr]
+			pre.Storage[key] = value.Bytes32()
+			if !value.IsZero() {
+				pre.empty = false
+			}
 		}
 	case stackLen >= 1 && (op == vm.SLOAD || op == vm.SSTORE):
 		slot := common.Hash(stackData[stackLen-1].Bytes32())

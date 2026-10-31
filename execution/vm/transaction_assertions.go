@@ -17,13 +17,27 @@
 package vm
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func inPostTx(evm *EVM) bool {
 	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx
+}
+
+func (evm *EVM) prestateStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if !inPostTx(evm) {
+		return uint256.Int{}, ErrFrameContext
+	}
+	trace, err := evm.FrameContext.TransactionTrace(evm.IntraBlockState())
+	if err != nil {
+		return uint256.Int{}, err
+	}
+	return trace.Storage(evm.IntraBlockState(), address, key, true)
 }
 
 func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {

@@ -64,6 +64,9 @@ type VMContext struct {
 	GasPrice        uint256.Int
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
+	// PrestateStorage returns transaction-start storage during POST_TX,
+	// including values cleared by contract creation.
+	PrestateStorage func(accounts.Address, accounts.StorageKey) (uint256.Int, error) `json:"-"`
 
 	// Rules is the resolved rule set the EVM ran under. Tracers classify
 	// precompiles from it rather than rebuilding one, so a chain whose forks or
