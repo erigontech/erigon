@@ -19,13 +19,17 @@ package solid
 import (
 	"encoding/json"
 	"math/bits"
+	"runtime"
 	"slices"
 	"strconv"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ParticipationBitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
@@ -154,27 +158,45 @@ func (u *ParticipationBitList) HashSSZProgressive() ([32]byte, error) {
 	return merkle_tree.ProgressiveBasicListRoot(u.Bytes(), uint64(u.l))
 }
 
-func (u *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
-	elements := u.u
-	offset := 32*(u.l/32) + 32
-	if len(u.u) <= offset {
-		elements = append(elements, make([]byte, offset-len(u.u)+1)...)
+// participationSubtreeChunks is the number of chunks one goroutine hashes. Larger subtrees lower the
+// parallelism; down to 1024 chunks, smaller ones only add goroutines.
+const participationSubtreeChunks = 4096
+
+func (u *ParticipationBitList) getBaseHash(out []byte, depth uint8) error {
+	u.makeBuf((u.l + length.Hash - 1) / length.Hash * length.Hash)
+	subtreeDepth := min(depth, merkle_tree.GetDepth(participationSubtreeChunks))
+	subtreeSize := (1 << subtreeDepth) * length.Hash
+	subtrees := (len(u.buf) + subtreeSize - 1) / subtreeSize
+	roots := make([]byte, subtrees*length.Hash)
+	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for i := range subtrees {
+		g.Go(func() error {
+			start := i * subtreeSize
+			// Full regions hold a power-of-two chunk count and never pad, so only the last region can append past its end.
+			region := u.buf[start:min(start+subtreeSize, len(u.buf))]
+			clear(region[copy(region, u.u[start:u.l]):])
+			return merkleizeLayers(region, roots[i*length.Hash:], 0, subtreeDepth)
+		})
 	}
-	elements = elements[:offset]
-	for i := range depth {
-		// Sequential
-		layerLen := len(elements)
-		if layerLen%64 == 32 {
-			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	return merkleizeLayers(roots, out, subtreeDepth, depth)
+}
+
+// merkleizeLayers overwrites layer while hashing it, and its zero-hash padding may append past len(layer).
+func merkleizeLayers(layer, out []byte, fromDepth, toDepth uint8) error {
+	for depth := fromDepth; depth < toDepth; depth++ {
+		if len(layer)%64 == length.Hash {
+			layer = append(layer, merkle_tree.ZeroHashes[depth][:]...)
 		}
-		outputLen := len(elements) / 2
-		u.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(u.buf, elements); err != nil {
+		if err := merkle_tree.HashByteSlice(layer, layer); err != nil {
 			return err
 		}
-		elements = u.buf
+		layer = layer[:len(layer)/2]
 	}
-	copy(xs, elements[:32])
+	copy(out, layer[:length.Hash])
 	return nil
 }
 
