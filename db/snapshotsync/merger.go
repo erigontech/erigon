@@ -103,6 +103,7 @@ func (m *Merger) mergeSubSegment(
 			}
 		}
 		if err != nil {
+			newDirtySegment.close()
 			f := sn.Path
 			_ = dir.RemoveFile(f)
 			_ = dir.RemoveFile(f + ".torrent")
@@ -204,6 +205,16 @@ func (m *Merger) Merge(
 	in := make(map[snaptype.Enum][]*DirtySegment)
 	out := make(map[snaptype.Enum][]*DirtySegment)
 	mergedFileNames := make([]string, 0, 16)
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, segments := range in {
+			for _, segment := range segments {
+				segment.close()
+			}
+		}
+	}()
 
 	for _, r := range mergeRanges {
 		mergedFileNames = mergedFileNames[:0]

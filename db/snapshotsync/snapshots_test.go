@@ -19,10 +19,12 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 
@@ -284,6 +286,74 @@ func TestMergeSnapshots(t *testing.T) {
 	// defer d.Close()
 	// a = d.Count()
 	// require.Equal(10, a)
+}
+
+func openBeaconBlocksFds(t *testing.T) int {
+	t.Helper()
+	const fdDir = "/dev/fd"
+	d, err := os.Open(fdDir)
+	if err != nil {
+		t.Skip("no /dev/fd on this platform")
+	}
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	require.NoError(t, err)
+	count := 0
+	for _, name := range names {
+		link, err := os.Readlink(filepath.Join(fdDir, name))
+		if errors.Is(err, syscall.EINVAL) {
+			t.Skip("fd entries are not links on this platform")
+		}
+		if strings.Contains(link, "beaconblocks") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestMergeFailureClosesMergedSegments(t *testing.T) {
+	injected := errors.New("injected")
+
+	for _, tc := range []struct {
+		name        string
+		failIdxFrom uint64
+		onMerge     func([]string) error
+		onDelete    func(context.Context, []string) error
+	}{
+		{name: "onDelete fails", failIdxFrom: 40_000, onDelete: func(context.Context, []string) error { return injected }},
+		{name: "onMerge fails", failIdxFrom: 40_000, onMerge: func([]string) error { return injected }},
+		{name: "index build fails", failIdxFrom: 0},
+		{name: "later range fails", failIdxFrom: 20_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			dir, require := t.TempDir(), require.New(t)
+			for i := range uint64(4) {
+				createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype.CaplinEnums.BeaconBlocks, dir, version.V1_0, logger)
+			}
+			types := []snaptype.Type{snaptype.BeaconBlocks}
+			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype.BeaconBlocks, true, logger)
+			defer s.Close()
+			require.NoError(s.OpenFolder())
+			s.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+				if info.From >= tc.failIdxFrom {
+					return injected
+				}
+				return BeaconSimpleIdx(ctx, info, salt, tmpDir, p, lvl, logger)
+			}))
+
+			merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+			merger.DisableFsync()
+			ranges := []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}
+
+			before := openBeaconBlocksFds(t)
+			require.Positive(before)
+			for range 3 {
+				require.ErrorIs(merger.Merge(t.Context(), s, types, ranges, dir, true, tc.onMerge, tc.onDelete), injected)
+			}
+			require.LessOrEqual(openBeaconBlocksFds(t), before)
+		})
+	}
 }
 
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
