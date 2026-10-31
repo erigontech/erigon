@@ -3065,8 +3065,8 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 
 func cmpReaderTx(r addrReader, tx int) int { return r.tx - tx }
 
-// balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
-const balDispatchWindow = 32
+// dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
+const dispatchWindow = 32
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
@@ -4014,10 +4014,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		budget := len(be.tasks)
 		// Dispatch at most window tasks past the commit frontier, so results arrive
 		// close to block order and the per-result reader scans stay short.
-		lastTx := len(be.tasks) - 1
-		if be.versionMap.HasBAL {
-			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
-		}
+		lastTx := min(len(be.tasks)-1, be.frontier()+dispatchWindow)
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {
