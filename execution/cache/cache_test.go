@@ -343,6 +343,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	for i := range 1100 {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
+	c.addrToHash.c.CleanUp()
 
 	// Residency stays bounded: the cache neither holds all 1100 nor collapses
 	// to nothing. Which addresses survive is W-TinyLFU's choice, not recency,

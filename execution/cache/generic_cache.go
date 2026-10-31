@@ -43,7 +43,7 @@ type entry[T any] struct {
 }
 
 // GenericCache is a byte-bounded cache for key-value data, backed by the same
-// lock-free layer as the content caches: a read never blocks on a lock.
+// lock-free layer as the content caches: a lookup never blocks on a lock.
 // Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
 	data      *ByteLRU[entry[T]]
