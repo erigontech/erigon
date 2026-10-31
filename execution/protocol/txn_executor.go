@@ -544,8 +544,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				// An in-flight dependency pauses and re-reads (see waitCommit), it
-				// does not panic, so any panic here is a genuine failure.
+				// An in-flight dependency aborts via result.Dep, it does not panic,
+				// so any panic here is a genuine failure.
 				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
 			}
 		}()

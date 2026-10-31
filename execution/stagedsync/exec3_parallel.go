@@ -104,12 +104,6 @@ type parallelExecutor struct {
 	// sd read, so it sees earlier blocks' writes that apply has not yet committed
 	// to the shared domain. Dropped from the tail on commit; nil when the gate is off.
 	prevBlocks *state.PrevBlockList
-	// mintedWorkers are extra WorkerContexts created when the runSem pool is empty
-	// because in-flight workers are parked mid-EVM on a dependency (holding their
-	// context). Reused via runSem and reclaimed at teardown. CPU concurrency stays
-	// bounded by execSem, so extra contexts add memory, not parallelism.
-	mintedWorkers []*exec.WorkerContext
-	mintMu        sync.Mutex
 	// cancelExecLoop publishes the stop cause on execLoopCtx. Normal stops finish
 	// work up to the coalesce block; failures can abort speculative work in progress.
 	cancelExecLoop context.CancelCauseFunc
@@ -117,22 +111,9 @@ type parallelExecutor struct {
 	// the explicit ordered halt the exec loop calls once it has produced up to the
 	// coalesce block.
 	cancelWorkers context.CancelFunc
-	// runSem holds the idle worker contexts; runWG tracks task goroutines, busy or
-	// idle, for teardown.
-	runSem chan *exec.WorkerContext
-	// execSem decouples the CPU-parallelism gate (sized to the worker count) from the
-	// WorkerContext-object pool (runSem). A worker resting mid-EVM on a dependency
-	// keeps its object but releases its execSem slot, so resting does not reduce
-	// concurrency — another worker runs on a different object. runSem must hold enough
-	// objects for the peak of executing+resting workers; execSem sizes parallelism.
-	execSem chan struct{}
-	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
-	// open and close one; like applyTx it lives for one exec loop.
-	slotTxs chan kv.TemporalTx
-	runWG   sync.WaitGroup
-	// idleGo hands a task to a finished task goroutine, so its grown stack is reused.
-	idleGo     chan func()
-	workersCtx context.Context
+	pool          *taskPool
+	runWG         sync.WaitGroup
+	workersCtx    context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
 	results        chan *exec.TxResult
 	workerCount    int
@@ -963,20 +944,6 @@ func (pe *parallelExecutor) resetWorkers(rs *state.StateV3Buffered) {
 	}
 }
 
-// newExecWorker mints an extra WorkerContext when the runSem pool is empty
-// because in-flight workers are parked mid-EVM on a dependency (holding their
-// context). Reset against the same shared state; tracked for teardown.
-func (pe *parallelExecutor) newExecWorker() *exec.WorkerContext {
-	w := exec.NewWorkerContext(pe.workersCtx, true, pe.taskExecMetrics, pe.cfg.db,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
-	_ = w.ResetState(pe.rs, nil, nil, state.NewNoopWriter(), nil)
-	w.EnablePrevBlockReads(pe.prevBlocks)
-	pe.mintMu.Lock()
-	pe.mintedWorkers = append(pe.mintedWorkers, w)
-	pe.mintMu.Unlock()
-	return w
-}
-
 // prevBlockBase wraps a freshly-built committed-base reader with the prev-block
 // layers for blockNum, so those reads also see prior blocks' not-yet-committed
 // writes — matching the per-task worker reader. Without this, coinbase
@@ -984,32 +951,6 @@ func (pe *parallelExecutor) newExecWorker() *exec.WorkerContext {
 // current block's versionMap.
 func (pe *parallelExecutor) prevBlockBase(raw state.StateReader, blockNum uint64) state.StateReader {
 	return state.PrevBlockBase(raw, pe.prevBlocks, blockNum)
-}
-
-// acquireWorker takes a context from the pool, or grows the pool when it is
-// empty (paused workers hold their contexts). Returns nil on shutdown.
-func (pe *parallelExecutor) acquireWorker() *exec.WorkerContext {
-	select {
-	case w := <-pe.runSem:
-		return w
-	case <-pe.workersCtx.Done():
-		return nil
-	default:
-	}
-	return pe.newExecWorker()
-}
-
-// releaseWorker returns a context to the pool for reuse. The pool buffer is sized
-// to the elastic peak, so this never blocks; excess is reclaimed at teardown.
-func (pe *parallelExecutor) releaseWorker(w *exec.WorkerContext) {
-	// Merge this run's reads into sd.metrics before the worker returns to the pool,
-	// so the slow-block emitter sees them. Off the critical path (the result is
-	// already sent) and safe: RunTxTask has returned, so readMetrics is quiescent.
-	w.PublishReadMetrics()
-	select {
-	case pe.runSem <- w:
-	default:
-	}
 }
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
@@ -1227,7 +1168,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
-				blockExecutor.releaseSelfLoop()
 
 				if terminal {
 					// The calculator drains commitResults on its own uncancelled ctx;
@@ -1318,7 +1258,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				if h := txTask.BlockHeader(); h != nil {
 					executor.coinbase = accounts.InternAddress(h.Coinbase)
 				}
-				go executor.selfLoopWatchdog(pe.workersCtx)
 			}
 		}
 
@@ -1636,7 +1575,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 	pe.workersCtx = workersCtx
-	pe.idleGo = make(chan func())
 
 	// The pool runs one worker beyond the configured count, except for a count
 	// of one (--exec.serial), which must run one transaction at a time.
@@ -1661,21 +1599,9 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return execLoopCtx, execLoopCtxCancel, chaosErr
 	}
 
-	pe.slotTxs = make(chan kv.TemporalTx, len(pe.execWorkers))
+	pe.pool = newTaskPool(pe, pe.execWorkers)
 	pe.execLoopGroup.Go(func() error {
 		pe.resetWorkers(pe.rs)
-		// Hand the reset worker contexts to the dispatcher as a semaphore. The buffer
-		// is oversized so the pool can grow elastically (acquireWorker mints extras
-		// when workers park mid-EVM) and return without blocking.
-		pe.runSem = make(chan *exec.WorkerContext, elasticWorkerCap)
-		for _, w := range pe.execWorkers {
-			pe.runSem <- w
-		}
-		slots := len(pe.execWorkers)
-		pe.execSem = make(chan struct{}, slots)
-		for range slots {
-			pe.execSem <- struct{}{}
-		}
 		pe.results = make(chan *exec.TxResult, len(pe.execWorkers)*8)
 		return pe.execLoop(execLoopCtx)
 	})
@@ -1687,25 +1613,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		// Join the scheduler before draining workers: it may still add to runWG.
 		_ = pe.wait()
 		pe.runWG.Wait()
-		for drained := false; !drained; {
-			select {
-			case tx := <-pe.slotTxs:
-				tx.Rollback()
-			default:
-				drained = true
-			}
-		}
-
 		pe.stopWorkers()
-
-		// Reclaim elastically-minted contexts (the base pool is torn down by
-		// stopWorkers); each may hold its own roTx.
-		pe.mintMu.Lock()
-		for _, w := range pe.mintedWorkers {
-			w.Close()
-		}
-		pe.mintedWorkers = nil
-		pe.mintMu.Unlock()
 	}, nil
 }
 
@@ -1785,331 +1693,8 @@ type balTx struct {
 // commit loop: flush the result's writes as complete, run the coinbase/finalize
 // sweep, broadcast the advanced frontier.
 //
-// Mid-flow dep-pause is the sole dependency mechanism: a read that observes an
-// in-flight estimate pauses (via the IBS waitCommit hook) until that writer commits,
-// then re-reads the committed value — execution continues in place instead of
-// aborting. A paused worker holds its context (mid-EVM), so the context pool grows
-// elastically (see acquireWorker) to avoid dependency starvation.
-
-// elasticWorkerCap bounds the runSem buffer so the context pool can grow past the
-// base worker count when workers park mid-EVM. A backstop, not a target: CPU
-// concurrency is bounded by execSem.
-const elasticWorkerCap = 4096
-
-// goReused runs f on an idle task goroutine when there is one, so f starts on an
-// already grown stack instead of growing a new one.
-func (pe *parallelExecutor) goReused(f func()) {
-	// If a goroutine is idle and waiting for a task, send f to it by this channel.
-	// If none is idle, start a new goroutine.
-	select {
-	case pe.idleGo <- f:
-		return
-	default:
-	}
-	idle, done := pe.idleGo, pe.workersCtx.Done()
-	pe.runWG.Go(func() {
-		for {
-			f()
-			f = nil
-			select {
-			case f = <-idle:
-			case <-done:
-				return
-			}
-		}
-	})
-}
-
-// dispatchRunSelfLoop runs one task on a worker context, looping until its result
-// is stable-valid: execute, flush its writes to the versionMap so downstream workers
-// read them speculatively, validate its own read-set, and — when valid but a
-// read-dependency has not yet committed — park on the commit frontier and
-// re-validate. Only a stable-valid result is sent to the exec loop, which commits it
-// in order. The context is released while parked so dependencies can run.
-func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
-	pe.goReused(func() {
-		// The roTx is bound to the execution slot, not the goroutine: opened on slot
-		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
-		// count rather than the far larger parked-goroutine count, so idle parked
-		// workers can't exhaust the MDBX read-tx limiter and deadlock the in-order task.
-		var goRoTx kv.TemporalTx
-		var w *exec.WorkerContext
-		acquire := func() bool {
-			w = pe.acquireWorker()
-			return w != nil
-		}
-		// Execution-slot gate: held only while executing, released while resting
-		// mid-EVM on a dependency, so a resting worker does not reduce concurrency.
-		slotHeld := false
-		// slotErr carries the last acquireSlot failure cause: nil means shutdown
-		// (workersCtx cancelled — return silently), non-nil means an infrastructure
-		// failure the caller must surface as an operational result.
-		var slotErr error
-		// Only a finished run pools its roTx: a paused EVM stays bound to it until
-		// the rebind, so pooling it would share one MDBX tx between two workers.
-		releaseSlot := func(pool bool) {
-			if !slotHeld {
-				return
-			}
-			if goRoTx != nil && pool {
-				select {
-				case pe.slotTxs <- goRoTx:
-					goRoTx = nil
-				default:
-				}
-			}
-			if goRoTx != nil {
-				goRoTx.Rollback()
-				goRoTx = nil
-			}
-			pe.execSem <- struct{}{}
-			slotHeld = false
-		}
-		// acquireSlot takes an execution slot and opens the slot's roTx. Binding the
-		// roTx to the worker is the caller's job because the lock discipline differs:
-		// the loop binds via ResetTx (lock-free), the mid-EVM waitCommit rebinds via
-		// BindTxHeld (RunTxTask already holds the worker lock).
-		acquireSlot := func() bool {
-			slotErr = nil
-			select {
-			case <-pe.execSem:
-				slotHeld = true
-			case <-pe.workersCtx.Done():
-				return false
-			}
-			select {
-			case goRoTx = <-pe.slotTxs:
-				return true
-			default:
-			}
-			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx) //nolint:gocritic // slot-tied rotx: rolled back on slot release (releaseSlot), not a defer here — it outlives this function
-			if err != nil {
-				pe.execSem <- struct{}{}
-				slotHeld = false
-				slotErr = err
-				return false
-			}
-			goRoTx = tx
-			return true
-		}
-		defer releaseSlot(false)
-		// aborted latches once a terminal result (fatal verdict or operational infra
-		// failure) is sent. A mid-EVM waitCommit failure sends its result but cannot
-		// stop RunTxTask from continuing to completion, so the worker would otherwise
-		// send a second result for the same task; the latch drops it. Ordinary
-		// self-loop results (send) are non-terminal and may legitimately be sent
-		// across incarnations until a terminal one latches.
-		aborted := false
-		rawSend := func(r *exec.TxResult) {
-			select {
-			case pe.results <- r:
-			case <-pe.workersCtx.Done():
-			}
-		}
-		send := func(r *exec.TxResult) {
-			if aborted {
-				return
-			}
-			rawSend(r)
-		}
-		// A worker must never vanish on a terminal condition — the exec loop would
-		// wait forever for a result that never arrives. sendOperational reports it as
-		// an infrastructure failure that fails the stage retryably (transient
-		// roTx/read error, worker panic, non-convergence) without a block verdict.
-		sendOperational := func(err error) {
-			if aborted {
-				return
-			}
-			aborted = true
-			rawSend(&exec.TxResult{Task: tv, Err: err, Operational: true})
-		}
-		// Mid-flow dep-pause hook: a read observing an in-flight (estimate) write
-		// releases this worker's slot, waits for that writer's task to commit,
-		// reacquires a slot, and retries the read against the final value.
-		tv.waitCommit = func(dep int) bool {
-			releaseSlot(false)
-			// dep is a versionMap TxIndex; translate to task-index frontier space.
-			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
-				return false
-			}
-			if !acquireSlot() {
-				if slotErr != nil {
-					sendOperational(fmt.Errorf("block %d tx %d: reopen roTx: %w", be.blockNum, tv.index, slotErr))
-				}
-				return false
-			}
-			// RunTxTask holds the worker lock across this mid-EVM rebind. A bind
-			// failure leaves the EVM reading through a dead roTx, so report it as an
-			// infrastructure failure rather than continuing.
-			if err := w.BindTxHeld(goRoTx); err != nil {
-				sendOperational(fmt.Errorf("block %d tx %d: rebind roTx: %w", be.blockNum, tv.index, err))
-				return false
-			}
-			return true
-		}
-		defer func() {
-			if rec := recover(); rec != nil {
-				sendOperational(fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
-					be.blockNum, tv.index, rec, dbg.Stack()))
-			}
-		}()
-		bumpInc := func() bool {
-			tv.version.Incarnation++
-			if int(tv.version.Incarnation) > len(be.tasks)+8 {
-				// Failing to converge is the executor giving up, not a block-validity
-				// verdict — route it operationally (like the panic handler above), never
-				// as ErrInvalidBlock, so a valid block is not reported INVALID to the CL.
-				sendOperational(fmt.Errorf("block %d tx %d exceeded the self-loop incarnation limit (%d) without a settled verdict",
-					be.blockNum, tv.index, len(be.tasks)+8))
-				return false
-			}
-			return true
-		}
-		// reExec is called holding NO context; it bumps the incarnation. Returns false on
-		// the incarnation limit.
-		reExec := bumpInc
-		// waitTo waits for the commit frontier to reach t. Returns false on shutdown.
-		waitTo := func(t int) bool {
-			return be.waitDep(tv.index, t)
-		}
-		var prevWrites *state.WriteSet
-		for {
-			// Whether this run executes against fully-committed state below it. Captured
-			// BEFORE execution: the frontier is monotonic and finalized tasks never
-			// un-commit, so if every lower task is committed now it stays so for the
-			// whole run and an error is authoritative. Capturing after would
-			// mis-classify a speculative error (frontier advanced mid-run) as genuine.
-			finalExec := be.frontier() >= tv.index-1
-			if !acquireSlot() {
-				if slotErr != nil {
-					sendOperational(fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, slotErr))
-				}
-				return
-			}
-			// The context is taken after the slot, so tasks queued for a slot do not
-			// grow the context pool.
-			if !acquire() {
-				return
-			}
-			if err := w.ResetTx(goRoTx); err != nil {
-				releaseSlot(false)
-				sendOperational(fmt.Errorf("block %d tx %d: reset roTx: %w", be.blockNum, tv.index, err))
-				return
-			}
-			// Invariant: each RUN of a tx uses a strictly ascending incarnation. Two
-			// runs sharing one incarnation is the scheduling bug behind stale-flush
-			// corruption.
-			for {
-				last := be.runInc[tv.index].Load()
-				if int64(tv.version.Incarnation) <= last {
-					panic(fmt.Sprintf("self-loop: tx %d run at incarnation %d <= last-run %d (two runs share an incarnation)",
-						tv.index, tv.version.Incarnation, last))
-				}
-				if be.runInc[tv.index].CompareAndSwap(last, int64(tv.version.Incarnation)) {
-					break
-				}
-			}
-			result := w.RunTxTask(tv)
-			releaseSlot(!aborted)
-			// A mid-EVM waitCommit failure already sent a terminal result and left the
-			// tx running against a dead roTx; its result is meaningless — stop here.
-			if aborted {
-				pe.releaseWorker(w)
-				return
-			}
-			// A run without the sender checks that failed or used the sender's account
-			// re-runs with the checks on: serial execution reports a sender error first.
-			if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
-				(result.Err != nil || touchedSenderAccount(txTask, result)) {
-				pe.releaseWorker(w)
-				if !waitTo(tv.index-1) || !reExec() {
-					return
-				}
-				continue
-			}
-			if result.Err != nil {
-				pe.releaseWorker(w)
-				if finalExec {
-					send(result)
-					return
-				}
-				if !waitTo(tv.index-1) || !reExec() {
-					return
-				}
-				continue
-			}
-			// Intra-tx read-consistency verdict: the tx read an in-flight or
-			// mid-execution-changed value, so it did not run against a settled
-			// snapshot. Re-execute once that predecessor commits.
-			if result.Dep >= 0 {
-				pe.releaseWorker(w)
-				if !waitTo(be.taskIndexOf(result.Dep)) || !reExec() {
-					return
-				}
-				continue
-			}
-			be.selfLoopFlush(tv.version, result, prevWrites)
-			prevWrites = result.TxOut
-			pe.releaseWorker(w)
-
-			valid, target, blocker := be.selfLoopEvaluate(tv, result)
-			if !valid {
-				if blocker > be.frontier() && !waitTo(blocker) {
-					return
-				}
-				if !reExec() {
-					return
-				}
-				continue
-			}
-			// Valid: wait for its dependencies to commit, then re-validate — a
-			// dependency may have re-executed to a new value, forcing a re-exec;
-			// otherwise the verdict is authoritative and we commit out of order.
-			// A BAL block does not wait, so nothing changed since the check above.
-			if !be.versionMap.HasBAL {
-				if !waitTo(target) {
-					return
-				}
-				valid, _, _ = be.selfLoopEvaluate(tv, result)
-			}
-			if valid {
-				send(result)
-				// Stay alive rather than exit: the committed-dependent re-check signals
-				// slReexec (via a sticky flag, so a dropped wake is recovered on the next
-				// one) if a later write invalidates us. slFin closes when we finalize
-				// (never un-committed again), slDone on shutdown.
-				reexec := false
-				for {
-					if be.slReexecFlag[tv.index].Swap(false) {
-						reexec = true
-						break
-					}
-					done := false
-					select {
-					case <-be.slReexec[tv.index]:
-					case <-be.slFin[tv.index]:
-						done = true
-					case <-be.slDone:
-						done = true
-					}
-					if done {
-						break
-					}
-				}
-				if !reexec {
-					return
-				}
-				if !reExec() {
-					return
-				}
-				continue
-			}
-			if !reExec() {
-				return
-			}
-		}
-	})
-}
+// A read that observes an in-flight estimate aborts the run (result.Dep); the task
+// is re-queued once the commit frontier reaches its predecessor.
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
 // the previous incarnation wrote that this one dropped.
@@ -2774,7 +2359,6 @@ type taskVersion struct {
 	stats        map[int]ExecutionStat
 	statsMutex   *sync.Mutex
 	execCpuNanos *atomic.Int64
-	waitCommit   func(depTxIndex int) bool
 }
 
 func (ev *taskVersion) Trace() bool {
@@ -2844,7 +2428,6 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 		r.SetBlock(ev.version.BlockNum)
 	}
 	ibs.SetVersion(ev.version.Incarnation)
-	ibs.SetWaitCommit(ev.waitCommit)
 	return nil
 }
 
@@ -2977,23 +2560,17 @@ type blockExecutor struct {
 	// committedFrontier is the highest contiguous finalized task (== coinbaseFlushedUpTo).
 	// Fan-out: each worker waits for its actual dependency target, not the linear
 	// predecessor. wakeAt maps a frontier value to its waiters; finalizing task F
-	// wakes exactly wakeAt[F] via their slWake channels (directed, no broadcast).
-	// slDone closes on shutdown to release all.
+	// re-queues exactly wakeAt[F] on the pool (directed, no broadcast).
 	committedFrontier atomic.Int64
-	slWake            []chan struct{}
 	wakeMu            sync.Mutex
-	wakeAt            map[int][]int
-	// After committing, a self-loop worker stays parked on slReexec rather than
-	// exiting: the committed-dependent re-check signals it to re-execute in place
-	// (own monotonic incarnation, no respawn); slFin closes when the task finalizes.
-	slReexec     []chan struct{}
-	slReexecFlag []atomic.Bool
+	wakeAt            map[int][]*poolTask
+	// poolTasks[i] is task i's pool state. After sending its result a task is parked
+	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
+	poolTasks []*poolTask
+	pool      *taskPool
 	// runInc[i] is the highest incarnation ever RUN for task i, enforcing that each
 	// execution uses a strictly ascending incarnation. Init -1.
-	runInc     []atomic.Int64
-	slFin      []chan struct{}
-	slDone     chan struct{}
-	slDoneOnce sync.Once
+	runInc []atomic.Int64
 	// selfLoopDispatched guards against re-dispatching a task the self-loop worker
 	// already owns: the worker owns all re-execution, so the scheduler dispatches
 	// each task exactly once. Touched only on the exec-loop goroutine.
@@ -3034,7 +2611,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
-		slDone:              make(chan struct{}),
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3365,21 +2941,42 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	waiters := be.wakeAt[tx]
 	delete(be.wakeAt, tx)
 	be.wakeMu.Unlock()
-	for _, t := range waiters {
-		select {
-		case be.slWake[t] <- struct{}{}:
-		default:
-		}
+	for _, pt := range waiters {
+		be.pool.push(pt)
 	}
 }
 
-// signalSelfLoopReexec wakes the parked worker of an already-sent tx to re-execute
-// in place (it owns its incarnation, so no re-dispatch).
+// signalSelfLoopReexec re-queues the parked task of an already-sent tx to
+// re-execute, or latches the request when the task is still running.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
-	be.slReexecFlag[tx].Store(true)
-	select {
-	case be.slReexec[tx] <- struct{}{}:
-	default:
+	pt := be.poolTasks[tx]
+	if pt == nil {
+		return
+	}
+	pt.mu.Lock()
+	if pt.fin {
+		pt.mu.Unlock()
+		return
+	}
+	if pt.parked {
+		pt.parked = false
+		pt.mu.Unlock()
+		pt.reruns++
+		if !be.requeueAt(tx, tx-1, pt) {
+			be.pool.push(pt)
+		}
+		return
+	}
+	pt.pending = true
+	pt.mu.Unlock()
+}
+
+func (be *blockExecutor) finishTask(tx int) {
+	if pt := be.poolTasks[tx]; pt != nil {
+		pt.mu.Lock()
+		pt.fin = true
+		pt.parked = false
+		pt.mu.Unlock()
 	}
 }
 
@@ -3387,16 +2984,15 @@ func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
 }
 
-// waitDep blocks until the commit frontier reaches target (every task tx read from
-// has committed), or shutdown. Registers tx under the wake lock so a concurrent
-// signalCommitted(target) can't be missed. Returns false on shutdown.
-func (be *blockExecutor) waitDep(tx, target int) bool {
+// requeueAt registers pt to be re-queued when the frontier reaches target. Returns
+// false when the frontier is already there; the caller then continues in place.
+func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
 	// A target beyond the last task can never be signalled — the worker would park
 	// forever. That means a versionMap (block-TxIndex) dependency reached here
 	// without a taskIndexOf translation; fail loud at the exact site.
 	if target >= len(be.tasks) {
 		panic(fmt.Sprintf("[self-loop] block %d: park target %d out of task range [-1,%d) for task %d — "+
-			"a dependency reached waitDep in versionMap space (missing taskIndexOf translation); "+
+			"a dependency reached requeueAt in versionMap space (missing taskIndexOf translation); "+
 			"block start TxIndex=%d", be.blockNum, target, len(be.tasks), tx, be.tasks[0].Version().TxIndex))
 	}
 	// Invariant: a task never waits for a HIGHER task — a forward dependency the
@@ -3405,40 +3001,13 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
 	}
-	for {
-		be.wakeMu.Lock()
-		if int(be.committedFrontier.Load()) >= target {
-			be.wakeMu.Unlock()
-			return true
-		}
-		be.wakeAt[target] = append(be.wakeAt[target], tx)
-		be.wakeMu.Unlock()
-		select {
-		case <-be.slWake[tx]:
-		case <-be.slDone:
-			return be.frontier() >= target
-		}
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target {
+		return false
 	}
-}
-
-// selfLoopWatchdog wakes every parked self-loop worker when the workers' context
-// is cancelled, so shutdown/error never strands one in waitFrontier.
-func (be *blockExecutor) selfLoopWatchdog(ctx context.Context) {
-	// Exit as soon as the block is done (releaseSelfLoop closed slDone) so the
-	// blockExecutor and its versionMap/IO/receipts can be collected, rather than
-	// pinning them for the whole batch on workersCtx.
-	select {
-	case <-ctx.Done():
-		be.slDoneOnce.Do(func() { close(be.slDone) })
-	case <-be.slDone:
-	}
-}
-
-// releaseSelfLoop closes slDone, waking any still-parked self-loop worker and
-// letting the watchdog return. Called once the block is published and dropped
-// from the executor map.
-func (be *blockExecutor) releaseSelfLoop() {
-	be.slDoneOnce.Do(func() { close(be.slDone) })
+	be.wakeAt[target] = append(be.wakeAt[target], pt)
+	return true
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
@@ -3740,8 +3309,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// Published: the re-check no longer considers tx, so its parked worker can
 			// never be re-signalled — release it. Closing earlier (at finalize) would
 			// let a re-check in the finalize→publish window signal an exited worker.
-			if tx >= 0 && tx < len(be.slFin) {
-				close(be.slFin[tx])
+			if tx >= 0 && tx < len(be.poolTasks) {
+				be.finishTask(tx)
 			}
 
 			// The final task's sets are recorded again at block end, so it is left to the block result.
@@ -3988,19 +3557,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
-	if be.slWake == nil && len(be.tasks) > 0 {
-		be.slWake = make([]chan struct{}, len(be.tasks))
-		be.slReexec = make([]chan struct{}, len(be.tasks))
-		be.slReexecFlag = make([]atomic.Bool, len(be.tasks))
-		be.slFin = make([]chan struct{}, len(be.tasks))
+	if be.poolTasks == nil && len(be.tasks) > 0 {
+		be.poolTasks = make([]*poolTask, len(be.tasks))
+		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
-		for i := range be.slWake {
-			be.slWake[i] = make(chan struct{}, 1)
-			be.slReexec[i] = make(chan struct{}, 1)
-			be.slFin[i] = make(chan struct{})
+		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
-		be.wakeAt = map[int][]int{}
+		be.wakeAt = map[int][]*poolTask{}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
@@ -4049,7 +3613,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			version := execTask.Version()
 			version.Incarnation = 0
 			tv.version = version
-			pe.dispatchRunSelfLoop(be, tv)
+			pe.dispatchPoolTask(be, tv)
 			budget--
 
 			if !isNextValidated {
