@@ -1589,6 +1589,10 @@ func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error {
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 
+func (t *testExecutionEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	return nil, nil
+}
+
 func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
@@ -1600,6 +1604,10 @@ func (t *testExecutionEngine) GetBodiesByRange(context.Context, uint64, uint64) 
 }
 
 func (t *testExecutionEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
+	return nil, nil
+}
+
+func (t *testExecutionEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
 	return nil, nil
 }
 

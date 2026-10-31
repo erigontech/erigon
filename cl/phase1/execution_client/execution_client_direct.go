@@ -258,6 +258,10 @@ func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Head
 	return cc.chainRW.CurrentHeader(ctx), nil
 }
 
+func (cc *ExecutionClientDirect) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return cc.chainRW.HeaderByHash(ctx, hash)
+}
+
 func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
 	return cc.chainRW.IsCanonicalHash(ctx, hash)
 }
@@ -274,6 +278,10 @@ func (cc *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, start, co
 // GetBodiesByHashes gets block bodies with given hashes
 func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
+}
+
+func (cc *ExecutionClientDirect) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	return cc.chainRW.GetPayloadBodiesByHash(ctx, hashes)
 }
 
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {

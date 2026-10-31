@@ -81,6 +81,10 @@ func (forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, e
 	return nil, nil
 }
 
+func (forkChoiceSpectestEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	return nil, nil
+}
+
 func (forkChoiceSpectestEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
@@ -92,6 +96,10 @@ func (forkChoiceSpectestEngine) GetBodiesByRange(context.Context, uint64, uint64
 }
 
 func (forkChoiceSpectestEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
+	return nil, nil
+}
+
+func (forkChoiceSpectestEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
 	return nil, nil
 }
 
