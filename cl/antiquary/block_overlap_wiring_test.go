@@ -155,3 +155,70 @@ func TestAntiquateMergesBeaconBlocksIntoTheNextTier(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(54_501), binary.BigEndian.Uint64(word))
 }
+
+func antiquaryWithBlockSegments(t *testing.T, to uint64) (*Antiquary, *recordingDownloader) {
+	t.Helper()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	for from := uint64(0); from < to; from += snaptype.CaplinMergeLimit {
+		writeStateFixture(t, dirs.Snap, "beaconblocks", from, from+snaptype.CaplinMergeLimit, logger)
+	}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteHighestFinalized(tx, to+safetyMargin)
+	}))
+
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	d := &recordingDownloader{}
+	return NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, d, db, nil, sn, nil, nil, logger, false, true, false, true, nil), d
+}
+
+func blockSegmentFiles(from, to uint64) []string {
+	var files []string
+	for ; from < to; from += snaptype.CaplinMergeLimit {
+		segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, from+snaptype.CaplinMergeLimit)
+		files = append(files, segName, strings.TrimSuffix(segName, ".seg")+".idx")
+	}
+	return files
+}
+
+func TestAntiquateMergesBeaconBlocksWithNothingToDump(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, tier)
+
+	require.NoError(t, a.antiquate())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	subFiles := blockSegmentFiles(0, tier)
+	require.ElementsMatch(t, subFiles, d.deletedNames())
+	for _, f := range subFiles {
+		require.NoFileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+}
+
+func TestAntiquateMergesOneBeaconBlocksTierPerCall(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, 2*tier)
+	lowerSubFiles, upperSubFiles := blockSegmentFiles(0, tier), blockSegmentFiles(tier, 2*tier)
+
+	require.NoError(t, a.antiquate())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path)
+	require.NoFileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, tier, 2*tier).Path)
+	require.ElementsMatch(t, lowerSubFiles, d.deletedNames())
+	for _, f := range upperSubFiles {
+		require.FileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+
+	require.NoError(t, a.antiquate())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, tier, 2*tier).Path)
+	require.ElementsMatch(t, append(lowerSubFiles, upperSubFiles...), d.deletedNames())
+	for _, f := range upperSubFiles {
+		require.NoFileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+}

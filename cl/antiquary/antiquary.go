@@ -431,7 +431,7 @@ func (s *Antiquary) antiquate() error {
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
-		return nil
+		return s.mergeBlocks()
 	}
 	// if s.snBuildSema != nil {
 	// 	if !s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
@@ -478,7 +478,7 @@ func (s *Antiquary) mergeBlocks() error {
 		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
 		onDelete = s.downloader.Delete
 	}
-	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges, s.sn.Dir(), true, onMerge, onDelete); err != nil {
+	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
 		return err
 	}
 	s.removeBlockOverlaps()
