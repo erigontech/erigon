@@ -4,6 +4,8 @@
 Reads every ``<client>-<label>-result.json`` under ``--results-dir`` and prints,
 per test label and QPS step, the p50, p95 and max latency of each client.
 p50 and p95 are the median over the repetitions, max is the worst one.
+HTTP is the share of requests answered with HTTP 200, RPC the share of requests
+answered with a result and no JSON-RPC error; both are the worst over the repetitions.
 """
 import argparse
 import glob
@@ -23,11 +25,13 @@ def load_results(root):
         label = os.path.basename(path)[len(client) + 1:-len("-result.json")]
         for step in report["results"]:
             reps = [r["vegetaReport"] for r in step["testRepetitions"]]
+            rpc = [r["rpcSuccessRatio"] for r in step["testRepetitions"] if "rpcSuccessRatio" in r]
             results.setdefault(label, {}).setdefault(client, {})[step["qps"]] = {
                 "p50": statistics.median(r["latencies"]["50th"] for r in reps) / 1e6,
                 "p95": statistics.median(r["latencies"]["95th"] for r in reps) / 1e6,
                 "max": max(r["latencies"]["max"] for r in reps) / 1e6,
                 "success": min(r["success"] for r in reps),
+                "rpc_success": min(rpc) if rpc else None,
             }
     return results
 
@@ -42,14 +46,15 @@ def render(results):
         clients = sorted(results[label], key=lambda c: (client_rank(c), c))
         steps = sorted({q for c in clients for q in results[label][c]}, key=float)
         lines += [f"### {label}", "",
-                  "| QPS | Client | p50 (ms) | p95 (ms) | max (ms) | Success |",
-                  "|---:|---|---:|---:|---:|---:|"]
+                  "| QPS | Client | p50 (ms) | p95 (ms) | max (ms) | HTTP | RPC |",
+                  "|---:|---|---:|---:|---:|---:|---:|"]
         for qps in steps:
             for client in clients:
                 s = results[label][client].get(qps)
                 if s:
+                    rpc = "n/a" if s["rpc_success"] is None else f"{s['rpc_success']:.2%}"
                     lines.append(f"| {qps} | {client} | {s['p50']:.2f} | {s['p95']:.2f} | {s['max']:.2f} "
-                                 f"| {s['success']:.2%} |")
+                                 f"| {s['success']:.2%} | {rpc} |")
         lines.append("")
     return "\n".join(lines)
 

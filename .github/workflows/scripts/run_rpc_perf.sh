@@ -25,11 +25,13 @@ rm -rf "./reports/$CHAIN/"*
 
 # Move to home dir of rpc-tests
 cd .. || exit 1
+# No HTTP compression: Nethermind and Reth never compress towards localhost, Erigon and Geth do.
 ./build/bin/rpc_perf --blockchain "$CHAIN" \
                      --test-type "$method" \
-                     --pattern-file perf/pattern/"$CHAIN"/"$pattern".tar \
+                     --pattern-file perf/pattern/"$CHAIN"/"$pattern".jsonl \
                      --test-sequence "$sequence" \
-                     --repetitions 4 \
+                     --repetitions 3 \
+                     --disable-http-compression \
                      --response-timeout 30s \
                      --client-build-dir "/" \
                      --test-report \
