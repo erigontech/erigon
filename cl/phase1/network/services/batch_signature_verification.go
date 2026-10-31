@@ -94,6 +94,10 @@ func (b *BatchSignatureVerifier) AsyncVerifySyncCommitteeMessage(data *Aggregate
 	b.syncCommitteeMessage <- data
 }
 
+func (b *BatchSignatureVerifier) VerifySyncCommitteeMessage(ctx context.Context, data *AggregateVerificationData) error {
+	return b.verifyAndWait(ctx, b.syncCommitteeMessage, data)
+}
+
 func (b *BatchSignatureVerifier) VerifyVoluntaryExit(ctx context.Context, data *AggregateVerificationData) error {
 	return b.verifyAndWait(ctx, b.voluntaryExitVerify, data)
 }

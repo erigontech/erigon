@@ -704,7 +704,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// invalidates at; read only cached scalars (stepSize) past this point until
 	// Phase 5's ReloadFiles republishes.
 	stepSize := at.StepSize()
-	at.a.closeDirtyFilesNoReopen()
+	at.a.CloseFilesNoReopen()
 
 	// Phase 3: backup originals.
 	movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, convertedFiles, stepSize)

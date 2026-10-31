@@ -177,7 +177,7 @@ func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
 		return nil
 	}
 	stateVersion := sd.baseStateVersion
-	_, txWritable := generationTx.(kv.TemporalRwTx)
+	txWritable := kv.UnderlyingTxIsWritable(generationTx)
 	// A write transaction's ViewID is the snapshot ID it will create. After
 	// commit, a new read transaction can have that ID but a newer state version.
 	useBaseStateVersion := generationTx.ViewID() == sd.baseViewID && txWritable == sd.baseTxWritable
@@ -344,14 +344,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	if err != nil {
 		return nil, fmt.Errorf("read base state version: %w", err)
 	}
-	_, baseTxWritable := generationTx.(kv.TemporalRwTx)
 	sd := &SharedDomains{
 		logger:           logger,
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		nonExecMetrics:   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
-		baseTxWritable:   baseTxWritable,
+		baseTxWritable:   kv.UnderlyingTxIsWritable(generationTx),
 		baseStateVersion: stateVersion,
 		localCacheUnwind: o.localCacheUnwind,
 	}
@@ -1488,6 +1487,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// A bounded read observes a staged unwind, not stable committed state.
 	if willFill {
 		readTxNum := step.LastTxNum(sd.StepSize())
+		if !kv.UnderlyingTxIsWritable(tx) {
+			readTxNum = cache.ClampFillTxNum(tx.Debug(), domain, readTxNum)
+		}
 		fillView := view
 		if fillView.NeedsFrontier() {
 			// Frontier-less views retry on the miss path, where binding cost is
