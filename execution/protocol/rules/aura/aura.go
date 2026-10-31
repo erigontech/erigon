@@ -241,9 +241,8 @@ type AuRa struct {
 	EmptyStepsSet *EmptyStepSet
 	EpochManager  *EpochManager // Mutex<EpochManager>,
 
-	certifier     *common.Address // certifies service transactions
-	certifierLock sync.Mutex
-	db            kv.RwDB
+	certifier atomic.Pointer[common.Address] // certifies service transactions
+	db        kv.RwDB
 }
 
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
@@ -673,11 +672,9 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
 	}
-	c.certifierLock.Lock()
-	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
-		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	if c.cfg.Registrar != nil && c.certifier.Load() == nil && config.IsLondon(blockNum) {
+		c.certifier.CompareAndSwap(nil, getCertifier(*c.cfg.Registrar, syscall))
 	}
-	c.certifierLock.Unlock()
 
 	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
@@ -1041,26 +1038,25 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 }
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
-// This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
+// It holds no lock across the syscall: under parallel execution the syscall can wait on another tx that also checks.
 func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
-	c.certifierLock.Lock()
-	defer c.certifierLock.Unlock()
-	if c.certifier == nil && c.cfg.Registrar != nil {
-		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	if c.certifier.Load() == nil && c.cfg.Registrar != nil {
+		c.certifier.CompareAndSwap(nil, getCertifier(*c.cfg.Registrar, syscall))
 	}
-	if c.certifier == nil {
+	certifier := c.certifier.Load()
+	if certifier == nil {
 		return false
 	}
 	packed, err := certifierAbi().Pack("certified", sender.Value())
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(accounts.InternAddress(*c.certifier), packed)
+	out, err := syscall(accounts.InternAddress(*certifier), packed)
 	if err != nil {
 		// Failing closed (treat as non-service tx) is safer than crashing the RPC handler.
 		// One way to hit this: an eth_call against a block whose chain rules don't include
 		// opcodes used by the certifier contract bytecode (e.g. SHR pre-Constantinople).
-		log.Warn("[aura] failed to call certifier", "certifier", *c.certifier, "err", err)
+		log.Warn("[aura] failed to call certifier", "certifier", *certifier, "err", err)
 		return false
 	}
 	res, err := certifierAbi().Unpack("certified", out)
