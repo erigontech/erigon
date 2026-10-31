@@ -171,8 +171,23 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 	c.put(key, value, txNum, false)
 }
 
+// fillMissed is a doorkeeper for read fills: a key read once is not worth an insert.
+var fillMissed = new([64 * 1024]atomic.Uint64)
+
+func admitFill(h uint64) bool {
+	slot := &fillMissed[h&(uint64(len(fillMissed))-1)]
+	if slot.Load() == h {
+		return true
+	}
+	slot.Store(h)
+	return false
+}
+
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
+	if !overwrite && !admitFill(h) {
+		return
+	}
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
