@@ -869,8 +869,10 @@ func (st *TxnExecutor) recipientCreditedAtValidation(coinbase accounts.Address) 
 	if st.value.IsZero() || to == coinbase || to == st.msg.From() || st.evm.Config().Tracer.HasEnterHook() || slices.Contains(vm.ActivePrecompiles(st.evm.ChainRules()), to) {
 		return false
 	}
-	codeHash, err := st.state.GetCodeHash(to)
-	return err == nil && codeHash.IsEmpty()
+	// A recorded read of the recipient would conflict with every lower credit; validation
+	// re-checks the code against the state after the lower txs.
+	acc, err := st.state.StateReader().ReadAccountData(to)
+	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
 }
 
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {

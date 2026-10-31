@@ -2711,7 +2711,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			if err != nil {
 				return nil, nil, err
 			}
-			if recipient == nil {
+			if recipient == nil || !recipient.CodeHash.IsEmpty() {
 				return nil, nil, nil
 			}
 			state.SeedOrigin(vm, to, recipient)
