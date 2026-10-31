@@ -389,7 +389,8 @@ jobs:
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
-            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo no-version)
+            # The client checkouts are owned by another user than the runner, which git refuses without safe.directory
+            commit=$(git -c safe.directory="$CLIENT_INSTALL_DIR" -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD || echo no-version)
           fi
 
           # a) Save text results to a directory with timestamp and commit hash
