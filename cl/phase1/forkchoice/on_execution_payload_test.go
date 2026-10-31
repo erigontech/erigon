@@ -231,6 +231,11 @@ type failOnceEnvelopeForkGraph struct {
 	failed atomic.Bool
 }
 
+type prunedAfterDumpEnvelopeForkGraph struct {
+	*persistingEnvelopeForkGraph
+	dumped bool
+}
+
 type persistingEnvelopeForkGraph struct {
 	dataAvailabilityForkGraph
 	mu       sync.RWMutex
@@ -433,6 +438,18 @@ func (g *failOnceEnvelopeForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelop
 		return g.err
 	}
 	return g.persistingEnvelopeForkGraph.DumpEnvelopeOnDisk(root, envelope)
+}
+
+func (g *prunedAfterDumpEnvelopeForkGraph) HasEnvelope(root common.Hash) bool {
+	return !g.dumped && g.persistingEnvelopeForkGraph.HasEnvelope(root)
+}
+
+func (g *prunedAfterDumpEnvelopeForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if err := g.persistingEnvelopeForkGraph.DumpEnvelopeOnDisk(root, envelope); err != nil {
+		return err
+	}
+	g.dumped = true
+	return nil
 }
 
 func (g *persistingEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
@@ -1939,6 +1956,31 @@ func TestIndexRepairSurvivesIndexWritePanic(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 		require.Equal(t, signature, storedSignature)
+		return nil
+	}))
+}
+
+func TestOnExecutionPayloadIndexesEnvelopePrunedBeforeIndexWrite(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+	f.forkGraph = &prunedAfterDumpEnvelopeForkGraph{persistingEnvelopeForkGraph: graph}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	f.db = db
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
+	require.Empty(t, f.envelopeIndexRepairs.repairs())
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, envelope.Message.BeaconBlockRoot)
+		require.NoError(t, err)
+		require.NotNil(t, blockNumber)
+		require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
+		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, envelope.Message.BeaconBlockRoot)
+		require.NoError(t, err)
+		require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
+		storedSignature, found, err := beacon_indicies.ReadExecutionPayloadEnvelopeSignature(tx, block.Block.Slot, envelope.Message.BeaconBlockRoot)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, envelope.Signature, storedSignature)
 		return nil
 	}))
 }
