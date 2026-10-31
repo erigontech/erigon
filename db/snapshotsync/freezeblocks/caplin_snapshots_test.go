@@ -227,6 +227,60 @@ func TestCaplinSegmentsMaxIgnoresBlobSidecars(t *testing.T) {
 	}
 }
 
+// Visibility skips an unindexed segment and anchors at the first indexed one above it, but the
+// archive backfill still cannot read the slots below. SegmentsMax stays 0 until the visible set
+// starts at the lowest segment on disk.
+func TestCaplinSegmentsMaxAnchorsAtLowestSegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	for _, tc := range []struct {
+		name      string
+		indexed   [][2]uint64
+		unindexed [][2]uint64
+		want      uint64
+	}{
+		{
+			name:      "unindexed segment below a gap",
+			indexed:   [][2]uint64{{2 * limit, 3 * limit}},
+			unindexed: [][2]uint64{{0, limit}},
+			want:      0,
+		},
+		{
+			name:      "unindexed segment directly below",
+			indexed:   [][2]uint64{{limit, 2 * limit}},
+			unindexed: [][2]uint64{{0, limit}},
+			want:      0,
+		},
+		{
+			name:      "unindexed segment covered by an indexed one of the same start",
+			indexed:   [][2]uint64{{0, 2 * limit}},
+			unindexed: [][2]uint64{{0, limit}},
+			want:      2*limit - 1,
+		},
+		{
+			name:    "lowest segment above slot zero",
+			indexed: [][2]uint64{{limit, 2 * limit}},
+			want:    2*limit - 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for _, r := range tc.indexed {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], true)
+			}
+			for _, r := range tc.unindexed {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], false)
+			}
+
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			require.Equal(t, tc.want, sn.SegmentsMax())
+		})
+	}
+}
+
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
 // reports 0 even with blobs on disk.
 func TestFrozenBlobsZeroBeforeDenebWithVisibleSegments(t *testing.T) {
