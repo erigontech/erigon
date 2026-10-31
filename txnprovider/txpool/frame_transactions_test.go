@@ -288,10 +288,6 @@ func TestFramePoolSharesOrdinaryBalance(t *testing.T) {
 						txns.Append(ordinary, payer[:], true)
 						want[1] = txpoolcfg.Success
 						wantOrdinaryPool = QueuedSubPool
-						if tc.batch {
-							want[0] = txpoolcfg.InsufficientFunds
-							wantOrdinaryPool = PendingSubPool
-						}
 					} else {
 						txns.Append(frame, sender[:], true)
 					}
@@ -339,14 +335,10 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 			ordinary.Txn.GetValue().SetUint64(common.Ether - 84_000)
 			var txns TxnSlots
 			txns.Append(frame, sender[:], true)
+			txns.Append(ordinary, payer[:], true)
 			reasons, err := pool.AddLocalTxns(ctx, txns)
 			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-			txns = TxnSlots{}
-			txns.Append(ordinary, payer[:], true)
-			reasons, err = pool.AddLocalTxns(ctx, txns)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 			require.Equal(t, QueuedSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
 
 			change := newBlockChangeForAccounts(common.Hash{1}, 0)
@@ -523,32 +515,6 @@ func TestFramePoolValidationErrorIsolated(t *testing.T) {
 			require.Empty(t, pool.frameReservations)
 		})
 	}
-}
-
-func TestFramePoolAdmitsOrdinaryBeforeSimulation(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
-	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
-	ordinary.IDHash[0] = 2
-	backend := pool.ethBackend.(*frameValidationBackend)
-	backend.valid = false
-	backend.onValidate = func() {
-		pool.lock.Lock()
-		_, admitted := pool.byHash[string(ordinary.IDHash[:])]
-		pool.lock.Unlock()
-		require.True(t, admitted, "ordinary transactions must be admitted before frame simulation")
-		select {
-		case announcement := <-pool.newPendingTxns:
-			require.Equal(t, ordinary.IDHash[:], []byte(announcement.Hashes()))
-		default:
-			t.Fatal("ordinary transaction announcement is waiting for frame simulation")
-		}
-	}
-	var txns TxnSlots
-	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
-	txns.Append(ordinary, sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame, txpoolcfg.Success}, reasons)
 }
 
 func TestFramePoolRejectionCache(t *testing.T) {

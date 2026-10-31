@@ -1614,34 +1614,7 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	if err := newTxns.Valid(); err != nil {
-		return nil, err
-	}
-	var batches [2]TxnSlots
-	var indices [2][]int
-	for i, txn := range newTxns.Txns {
-		group := 0
-		if txn.TxType() == FrameTxnType {
-			group = 1
-		}
-		batches[group].Append(txn, newTxns.Senders.At(i), newTxns.IsLocal[i])
-		indices[group] = append(indices[group], i)
-	}
-
-	reasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
-	for group, batch := range batches {
-		if len(batch.Txns) == 0 {
-			continue
-		}
-		batchReasons, err := p.addNewTxns(ctx, batch, nil)
-		if err != nil {
-			return nil, err
-		}
-		for i, reason := range batchReasons {
-			reasons[indices[group][i]] = reason
-		}
-	}
-	return reasons, nil
+	return p.addNewTxns(ctx, newTxns, nil)
 }
 
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
