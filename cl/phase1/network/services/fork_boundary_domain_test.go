@@ -198,7 +198,7 @@ func TestDataColumnSidecarProposerSignatureUsesHeaderEpochForkVersion(t *testing
 	require.NoError(t, syncedData.OnHeadState(headState))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	service := NewDataColumnSidecarService(ctx, &cfg, nil, nil, syncedData, nil, nil).(*dataColumnSidecarService)
+	service := NewDataColumnSidecarService(ctx, &cfg, nil, nil, syncedData, nil, nil, nil).(*dataColumnSidecarService)
 
 	valid, err := service.verifyProposerSignature(0, signedHeaderAtFork(t, &cfg, clparams.FuluVersion, key, common.Hash{}))
 	require.NoError(t, err)

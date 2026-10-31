@@ -126,6 +126,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
+	RecoveredAuthorities() *types.RecoveredAuthorities
 	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -879,12 +880,19 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		recovered, err := auth.RecoverSigner()
+		var signer common.Address
+		var err error
+		// The pre-pass may start this list mid-loop: each auth checks again and waits for it from then on.
+		if r := st.msg.RecoveredAuthorities(); r != nil {
+			signer, err = r.Signers[i], r.Errs[i]
+		} else {
+			signer, err = auth.RecoverSigner()
+		}
 		if err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
-		authority := accounts.InternAddress(recovered)
+		authority := accounts.InternAddress(signer)
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)
