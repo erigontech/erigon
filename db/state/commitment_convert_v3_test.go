@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -204,7 +205,14 @@ func keyWithHashPrefix(size int, prefix []byte, next *uint64) []byte {
 }
 
 func convertTestDomains(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
+	return convertTestDomainsWithParallel(t, stepSize, true)
+}
+
+func convertTestDomainsWithParallel(t *testing.T, stepSize uint64, parallel bool) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalParallelCommitment = parallel
+	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = previousParallel })
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	rwTx, err := db.BeginTemporalRw(t.Context())
@@ -245,8 +253,12 @@ func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 }
 
 func buildRecreatedOwnerFiles(t *testing.T, stepSize, steps uint64, accounts int, laterSlot bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
+	return buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, accounts, laterSlot, true)
+}
+
+func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, accounts int, laterSlot, parallel bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
 	t.Helper()
-	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	db, agg, rwTx, domains := convertTestDomainsWithParallel(t, stepSize, parallel)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
 

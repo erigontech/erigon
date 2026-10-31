@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	datadir2 "github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -1049,6 +1050,24 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	}
 	require.Equal(t, []string{"key1", "value1_step1"}, words1,
 		"step 1 collation must contain only step 1 values")
+}
+
+func TestDomain_CollateETLClosesValuesCompressorOnError(t *testing.T) {
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	wal := etl.NewCollector(t.Name(), d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.New())
+	defer wal.Close()
+	for i := range 1025 {
+		require.NoError(t, wal.Collect(fmt.Appendf(nil, "key-%d", i), make([]byte, 8)))
+	}
+	require.NoError(t, wal.Flush())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := d.collateETL(ctx, 0, 1, wal, nil, "")
+	wal.Close()
+	require.Error(t, err)
+	files, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Empty(t, files)
 }
 
 func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {

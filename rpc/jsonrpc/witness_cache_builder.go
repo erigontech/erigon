@@ -277,7 +277,7 @@ func RunWitnessCacheBuilder(ctx context.Context, dbg *DebugAPIImpl, headerCh <-c
 		return
 	}
 	headCapture := dbg.witnessCache.HeadCapture()
-	if headCapture {
+	if headCapture && execctx.PickTrieVariant() == commitment.VariantCommitmentV3 {
 		commitmentdb.WantParentReads(true)
 		defer commitmentdb.WantParentReads(false)
 	}

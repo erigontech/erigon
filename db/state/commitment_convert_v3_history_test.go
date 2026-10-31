@@ -66,8 +66,13 @@ func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
 func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps int) (kv.TemporalRwDB, *state.Aggregator, map[uint64][]byte) {
 	t.Helper()
 	previousSchema := statecfg.Schema
+	previousParallel := statecfg.ExperimentalParallelCommitment
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	statecfg.ExperimentalParallelCommitment = true
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+		statecfg.ExperimentalParallelCommitment = previousParallel
+	})
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -310,6 +315,48 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 		_, err := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
 	}
+}
+
+func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap(t *testing.T) {
+	previousSchema := statecfg.Schema
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.EnableHistoricalCommitment()
+	statecfg.ExperimentalParallelCommitment = false
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+		statecfg.ExperimentalParallelCommitment = previousParallel
+	})
+
+	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, 4, 3, 4, true, false)
+	beforeDomain := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain)
+	beforeHistory := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory)
+	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
+	_, err := os.Stat(backupDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.ErrorContains(t, err, "[commitment_convert] phase 1 history:")
+
+	require.Equal(t, beforeDomain, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain))
+	require.Equal(t, beforeHistory, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory))
+	_, err = os.Stat(backupDir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func snapshotCommitmentFilesV3History(t *testing.T, snapDir string) map[string][]byte {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(snapDir, "*-commitment.*"))
+	require.NoError(t, err)
+	content := make(map[string][]byte, len(files))
+	for _, path := range files {
+		content[filepath.Base(path)], err = os.ReadFile(path)
+		require.NoError(t, err)
+	}
+	return content
 }
 
 func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {

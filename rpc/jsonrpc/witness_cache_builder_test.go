@@ -468,6 +468,47 @@ func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 	t.Run("v3", func(t *testing.T) { headCaptureReadsParentRecords(t, true) })
 }
 
+func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{
+		{name: "legacy"},
+		{name: "v3", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statecfg.Schema = previousSchema
+			statecfg.ExperimentalCommitmentV3 = tc.v3
+			if tc.v3 {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			}
+			commitmentdb.WantParentReads(false)
+			cache := newWitnessResultCache(1, 0, true, true)
+			header, hash := encodeSyntheticHeader(t, 1)
+			cache.Add(hash, &ExecutionWitnessResult{})
+			dbg := &DebugAPIImpl{witnessCache: cache}
+			headerCh := make(chan [][]byte, 1)
+			headerCh <- [][]byte{header}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() {
+				RunWitnessCacheBuilder(ctx, dbg, headerCh)
+				close(done)
+			}()
+			require.Eventually(t, func() bool { return len(headerCh) == 0 }, time.Second, time.Millisecond)
+			require.Equal(t, tc.v3, commitmentdb.ParentReadsWanted())
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("builder did not stop")
+			}
+		})
+	}
+}
+
 func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
 	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })

@@ -1010,7 +1010,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		err = write(lastK, lastV)
 	}
 	if err != nil {
-		return Collation{}, err
+		return coll, err
 	}
 
 	closeCollation = false
