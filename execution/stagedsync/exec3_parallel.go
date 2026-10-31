@@ -504,7 +504,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					return fmt.Errorf("[%s] commitment shadow root: %w", pe.logPrefix, err)
 				}
 			}
-			if err := recordStoppedCommitmentDomains(rwTx, cr.stopped, cr.blockNum, cr.txNum); err != nil {
+			if err := recordStoppedCommitmentDomains(rwTx, cr.stopped); err != nil {
 				return fmt.Errorf("[%s] commitment shadow stop: %w", pe.logPrefix, err)
 			}
 			pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)

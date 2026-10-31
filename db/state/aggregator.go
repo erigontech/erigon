@@ -83,6 +83,8 @@ type Aggregator struct {
 	commitmentRefsMu            sync.RWMutex
 	canonicalCommitment         atomic.Uint32
 	stoppedCommitment           [kv.DomainLen]atomic.Bool
+	commitmentStopFileMu        sync.Mutex
+	commitmentStopFileWritten   [kv.DomainLen]bool
 	commitmentLifecycleRestored atomic.Bool
 	trieVariant                 string
 	frozenMu                    sync.RWMutex

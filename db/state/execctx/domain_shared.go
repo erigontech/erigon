@@ -1347,9 +1347,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return nil
 	}
 	var stopCommitted func(kv.Domain)
+	var writeStopFile func(kv.Domain) error
 	if temporalTx, ok := tx.(kv.TemporalTx); ok {
 		if scheduler, ok := temporalTx.AggTx().(interface{ CommitmentStopper() func(kv.Domain) }); ok {
 			stopCommitted = scheduler.CommitmentStopper()
+		}
+		if writer, ok := temporalTx.AggTx().(interface{ CommitmentStopFileWriter() func(kv.Domain) error }); ok {
+			writeStopFile = writer.CommitmentStopFileWriter()
 		}
 	}
 	stopped := make([]kv.Domain, 0, 2)
@@ -1373,6 +1377,16 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			stopCommitted(domain)
 		}
 	}
+	writeStopped := func() {
+		if writeStopFile == nil {
+			return
+		}
+		for _, domain := range stopped {
+			if err := writeStopFile(domain); err != nil {
+				sd.logger.Error("failed to write commitment stop marker", "domain", domain, "err", err)
+			}
+		}
+	}
 
 	if sd.branchCache == nil && sd.stateCache == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
@@ -1391,6 +1405,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			return err
 		}
 		applyStopped()
+		writeStopped()
 		return nil
 	}
 
@@ -1489,6 +1504,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return err
 	}
 	applyStopped()
+	writeStopped()
 	// Reads opened before the commit still see the replaced or unwound branches and may fill them.
 	if sd.branchCache != nil {
 		if sd.cacheUnwind.pending {

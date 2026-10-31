@@ -223,26 +223,38 @@ func TestAutomaticHexStopRecordsMarkerInCommitmentTransaction(t *testing.T) {
 	cc.recordBlockTarget(commitTarget{blockNum: 5, blockTime: activationTime})
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 5, blockTime: activationTime})
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
-	require.NoError(t, recordStoppedCommitmentDomains(tx, cc.shadowStopped, 0, 0))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, cc.shadowStopped))
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.True(t, stopped, "the automatic stop marker must share the commitment transaction")
 }
 
 func TestRecordedHexStopWritesStopFileOnce(t *testing.T) {
-	_, tx, _ := dualCalculatorTest(t)
-	path := filepath.Join(tx.Debug().Dirs().DataDir, dbstate.COMMITMENT_STOP_FILE)
+	_, tx, doms := dualCalculatorTest(t)
+	path := filepath.Join(tx.Debug().Dirs().Snap, dbstate.COMMITMENT_STOP_FILE)
 	require.NoFileExists(t, path)
 	stopped := map[kv.Domain]bool{kv.CommitmentDomain: true}
-	require.NoError(t, recordStoppedCommitmentDomains(tx, stopped, 7, 31))
-	require.NoError(t, recordStoppedCommitmentDomains(tx, stopped, 8, 40))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, stopped))
+	require.NoFileExists(t, path)
+	require.NoError(t, doms.Commit(t.Context(), tx))
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, "[commitment]\nblock = 7\ntxnum = 31\n", string(data), "the stop point of the block that recorded the stop must be kept")
+	require.JSONEq(t, `{"commitment":true}`, string(data))
+}
+
+func TestRecordedStopRollbackLeavesNoStopFile(t *testing.T) {
+	_, tx, _ := dualCalculatorTest(t)
+	dirs := tx.Debug().Dirs()
+	path := filepath.Join(dirs.Snap, dbstate.COMMITMENT_STOP_FILE)
+	require.NoError(t, recordStoppedCommitmentDomains(tx, map[kv.Domain]bool{kv.CommitmentDomain: true}))
+	tx.Rollback()
+	require.NoFileExists(t, path)
+	require.NoFileExists(t, filepath.Join(dirs.DataDir, dbstate.COMMITMENT_STOP_FILE))
 }
 
 func TestCommittedHexStopUpdatesLiveAggregator(t *testing.T) {
 	_, tx, doms := dualCalculatorTest(t)
+	dirs := tx.Debug().Dirs()
 	agg, ok := tx.AggTx().(interface{ Agg() *dbstate.Aggregator })
 	require.True(t, ok)
 	live := agg.Agg()
@@ -250,10 +262,12 @@ func TestCommittedHexStopUpdatesLiveAggregator(t *testing.T) {
 	require.False(t, live.CommitmentDomainStopped(kv.CommitmentDomain))
 	require.NoError(t, doms.Commit(t.Context(), tx))
 	require.True(t, live.CommitmentDomainStopped(kv.CommitmentDomain), "a committed stop must update the live aggregator")
+	require.FileExists(t, filepath.Join(dirs.Snap, dbstate.COMMITMENT_STOP_FILE))
 }
 
 func TestForkMergeSeeksCommitmentAfterForkLocalHexStop(t *testing.T) {
 	db, tx, canonical := dualCalculatorTest(t)
+	dirs := tx.Debug().Dirs()
 	const head = uint64(5)
 	for blockNum := uint64(0); blockNum <= head+1; blockNum++ {
 		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
@@ -288,7 +302,9 @@ func TestForkMergeSeeksCommitmentAfterForkLocalHexStop(t *testing.T) {
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
 	_, err = fork.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).ComputeCommitment(t.Context(), tx, true, head+1, head+1, "", nil)
 	require.NoError(t, err)
-	require.NoError(t, recordStoppedCommitmentDomains(fork.BlockOverlay(), cc.shadowStopped, 0, 0))
+	require.NoError(t, recordStoppedCommitmentDomains(fork.BlockOverlay(), cc.shadowStopped))
+	require.NoFileExists(t, filepath.Join(dirs.Snap, dbstate.COMMITMENT_STOP_FILE))
+	require.NoFileExists(t, filepath.Join(dirs.DataDir, dbstate.COMMITMENT_STOP_FILE))
 
 	current, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
@@ -308,6 +324,7 @@ func TestForkMergeSeeksCommitmentAfterForkLocalHexStop(t *testing.T) {
 	require.NoError(t, current.Merge(t.Context(), currentTxNum, fork, forkTxNum))
 	require.NoError(t, current.Commit(t.Context(), tx))
 	require.True(t, live.CommitmentDomainStopped(kv.CommitmentDomain), "the merged fork's hex stop must reach the live aggregator on commit")
+	require.FileExists(t, filepath.Join(dirs.Snap, dbstate.COMMITMENT_STOP_FILE))
 }
 
 func TestStoppedHexShadowUnwindRefusesAcrossActivation(t *testing.T) {
@@ -318,6 +335,16 @@ func TestStoppedHexShadowUnwindRefusesAcrossActivation(t *testing.T) {
 	require.Error(t, err, "an unwind below activation must be refused after the hex shadow stops")
 	require.ErrorIs(t, err, ErrTooDeepUnwind, "the stopped-shadow refusal must be a too-deep unwind")
 	require.NoError(t, checkStoppedHexShadowUnwind(t.Context(), tx, hexStopHeaderReader{}, &chain.Config{BinaryTrieTime: &activationTime}, 13, 5))
+}
+
+func TestStoppedHexShadowUnwindReadsAggregatorFlag(t *testing.T) {
+	_, tx, _ := dualCalculatorTest(t)
+	stopper, ok := tx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) })
+	require.True(t, ok)
+	stopper.StopCommitmentDomain(kv.CommitmentDomain)
+	activationTime := uint64(10)
+	err := checkStoppedHexShadowUnwind(t.Context(), tx, hexStopHeaderReader{}, &chain.Config{BinaryTrieTime: &activationTime}, 13, 4)
+	require.ErrorIs(t, err, ErrTooDeepUnwind)
 }
 
 func TestUnwindExecutionStageRejectsStoppedHexShadowAcrossActivation(t *testing.T) {

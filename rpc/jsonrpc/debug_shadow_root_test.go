@@ -144,3 +144,31 @@ func TestDebugMigrationProgress(t *testing.T) {
 		})
 	}
 }
+
+func TestDebugMigrationProgressReadsRestoredShadowStop(t *testing.T) {
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalCommitmentV3 = true
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newDebugApiForTest(m)
+	api._genesis.Store(m.Genesis)
+
+	mode := dbstate.TrieVariantHexBin
+	require.NoError(t, dbstate.WriteErigonDBSettings(m.Dirs, &dbstate.ErigonDBSettings{TrieVariant: &mode}))
+	config := m.ChainConfig.Copy()
+	activation := ^uint64(0)
+	config.BinaryTrieTime = &activation
+	api._chainConfig.Store(config)
+	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.StopCommitmentDomain(kv.CommitmentBinDomain)
+	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	provider, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
+	require.True(t, ok)
+	require.True(t, provider.CommitmentDomainStopped(kv.CommitmentBinDomain))
+
+	progress, err := api.MigrationProgress(t.Context())
+	require.NoError(t, err)
+	require.True(t, progress.ShadowStopped)
+}

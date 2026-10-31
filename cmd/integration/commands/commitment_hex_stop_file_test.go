@@ -16,7 +16,6 @@
 package commands
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -37,10 +37,9 @@ import (
 	execchain "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 )
-
-const hexStopFileName = "commitment-stop.toml"
 
 type hexStopFixture struct {
 	dirs     datadir.Dirs
@@ -50,7 +49,7 @@ type hexStopFixture struct {
 	config   *execchain.Config
 }
 
-func newHexStopFixture(t *testing.T, hexStops bool) hexStopFixture {
+func newHexStopFixture(t *testing.T, hexStops bool, stopDomains ...kv.Domain) hexStopFixture {
 	t.Helper()
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 4, 4)
@@ -75,6 +74,9 @@ func newHexStopFixture(t *testing.T, hexStops bool) hexStopFixture {
 	if hexStops {
 		agg.StopCommitmentDomain(kv.CommitmentDomain)
 	}
+	for _, domain := range stopDomains {
+		agg.StopCommitmentDomain(domain)
+	}
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTx/settings.StepSize+1), finality, true))
 	agg.WaitForFiles()
 	db.Close()
@@ -83,15 +85,18 @@ func newHexStopFixture(t *testing.T, hexStops bool) hexStopFixture {
 	return hexStopFixture{dirs: dirs, stopTx: stopTx, lastTx: lastTx, settings: settings, config: node.Genesis.Config}
 }
 
-func (f hexStopFixture) writeStopFile(t *testing.T, txNum uint64) {
+func (f hexStopFixture) stopFilePath() string {
+	return filepath.Join(f.dirs.Snap, dbstate.COMMITMENT_STOP_FILE)
+}
+
+func (f hexStopFixture) writeStopFile(t *testing.T) {
 	t.Helper()
-	body := fmt.Sprintf("[commitment]\nblock = 1\ntxnum = %d\n", txNum)
-	require.NoError(t, os.WriteFile(filepath.Join(f.dirs.DataDir, hexStopFileName), []byte(body), 0o644))
+	require.NoError(t, os.WriteFile(f.stopFilePath(), []byte(`{"commitment":true}`), 0o644))
 }
 
 func (f hexStopFixture) freshChaindata(t *testing.T) kv.RwDB {
 	t.Helper()
-	require.NoError(t, os.RemoveAll(f.dirs.Chaindata))
+	require.NoError(t, dir.RemoveAll(f.dirs.Chaindata))
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(f.dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDB.Close)
 	preActivation := f.config.Copy()
@@ -133,7 +138,7 @@ func (f hexStopFixture) seek(t *testing.T, db kv.TemporalRwDB) (txNum, blockNum 
 
 func TestHexStopFileSurvivesChaindataDrop(t *testing.T) {
 	f := newHexStopFixture(t, true)
-	f.writeStopFile(t, f.stopTx)
+	f.writeStopFile(t)
 	db, agg := f.openAgg(t, f.freshChaindata(t))
 
 	txNum, _, err := f.seek(t, db)
@@ -146,7 +151,7 @@ func TestHexStopFileSurvivesChaindataDrop(t *testing.T) {
 
 func TestHexStopFileSurvivesResetExec(t *testing.T) {
 	f := newHexStopFixture(t, true)
-	f.writeStopFile(t, f.stopTx)
+	f.writeStopFile(t)
 	rawDB := dbCfg(dbcfg.ChainDB, f.dirs.Chaindata).MustOpen()
 	db, agg := f.openAgg(t, rawDB)
 	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
@@ -167,19 +172,19 @@ func TestHexStopFileSurvivesResetExec(t *testing.T) {
 
 func TestHexStopFileDroppedWhenDomainsInLockstep(t *testing.T) {
 	f := newHexStopFixture(t, false)
-	f.writeStopFile(t, f.lastTx+1)
+	f.writeStopFile(t)
 	db, agg := f.openAgg(t, f.freshChaindata(t))
 
 	txNum, _, err := f.seek(t, db)
 	require.NoError(t, err)
 	require.Equal(t, f.lastTx, txNum)
 	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
-	require.NoFileExists(t, filepath.Join(f.dirs.DataDir, hexStopFileName))
+	require.NoFileExists(t, f.stopFilePath())
 }
 
 func TestHexStopFileWithDBKeyLeavesFileInPlace(t *testing.T) {
 	f := newHexStopFixture(t, true)
-	f.writeStopFile(t, f.stopTx)
+	f.writeStopFile(t)
 	rawDB := dbCfg(dbcfg.ChainDB, f.dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDB.Close)
 	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
@@ -191,12 +196,12 @@ func TestHexStopFileWithDBKeyLeavesFileInPlace(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, f.lastTx, txNum)
 	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
-	require.FileExists(t, filepath.Join(f.dirs.DataDir, hexStopFileName))
+	require.FileExists(t, f.stopFilePath())
 }
 
 func TestHexStopFileAppliesWhenStopPointIsPastBinEnd(t *testing.T) {
 	f := newHexStopFixture(t, true)
-	f.writeStopFile(t, f.lastTx+1)
+	f.writeStopFile(t)
 	db, agg := f.openAgg(t, f.freshChaindata(t))
 
 	txNum, _, err := f.seek(t, db)
@@ -208,8 +213,8 @@ func TestHexStopFileAppliesWhenStopPointIsPastBinEnd(t *testing.T) {
 
 func TestHexStopFileUntouchedWithoutDB(t *testing.T) {
 	f := newHexStopFixture(t, true)
-	f.writeStopFile(t, f.stopTx)
-	path := filepath.Join(f.dirs.DataDir, hexStopFileName)
+	f.writeStopFile(t)
+	path := f.stopFilePath()
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 	agg := dbstate.New(f.dirs).WithErigonDBSettings(f.settings).Logger(log.New()).MustOpen(t.Context())
@@ -223,11 +228,25 @@ func TestHexStopFileUntouchedWithoutDB(t *testing.T) {
 
 func TestHexStopFileCorruptNamesFile(t *testing.T) {
 	f := newHexStopFixture(t, true)
-	path := filepath.Join(f.dirs.DataDir, hexStopFileName)
-	require.NoError(t, os.WriteFile(path, []byte("[commitment\nblock = "), 0o644))
+	path := f.stopFilePath()
+	require.NoError(t, os.WriteFile(path, []byte("{"), 0o644))
 	rawDB := f.freshChaindata(t)
 	agg := dbstate.New(f.dirs).WithErigonDBSettings(f.settings).Logger(log.New()).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	err := agg.OpenFolder(rawDB)
-	require.ErrorContains(t, err, hexStopFileName)
+	require.ErrorContains(t, err, dbstate.COMMITMENT_STOP_FILE)
+}
+
+func TestRestoredBinStopRefusesScheduledFork(t *testing.T) {
+	f := newHexStopFixture(t, false, kv.CommitmentBinDomain)
+	require.NoError(t, os.WriteFile(filepath.Join(f.dirs.Snap, dbstate.COMMITMENT_STOP_FILE), []byte(`{"commitment-bin":true}`), 0o644))
+	db, agg := f.openAgg(t, f.freshChaindata(t))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	activation := uint64(1)
+	config := f.config.Copy()
+	config.BinaryTrieTime = &activation
+	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentBinDomain))
+	require.ErrorContains(t, stagedsync.CheckBinaryShadowRunning(tx, config, log.New()), "attach-pbt")
 }

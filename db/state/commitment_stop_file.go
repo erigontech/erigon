@@ -17,70 +17,63 @@
 package state
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/pelletier/go-toml/v2"
-
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
 
-const COMMITMENT_STOP_FILE = "commitment-stop.toml"
-
-type CommitmentStopPoint struct {
-	Block uint64 `toml:"block"`
-	TxNum uint64 `toml:"txnum"`
-}
+const COMMITMENT_STOP_FILE = "commitment-stop.json"
 
 func commitmentStopFilePath(dirs datadir.Dirs) string {
-	return filepath.Join(dirs.DataDir, COMMITMENT_STOP_FILE)
+	return filepath.Join(dirs.Snap, COMMITMENT_STOP_FILE)
 }
 
-func readCommitmentStopFile(dirs datadir.Dirs) (map[string]CommitmentStopPoint, error) {
+func readCommitmentStopFile(dirs datadir.Dirs) (map[string]bool, error) {
 	path := commitmentStopFilePath(dirs)
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	var domains map[string]bool
+	found, err := readPBTMarker(path, &domains)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if !found {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	var points map[string]CommitmentStopPoint
-	if err := toml.Unmarshal(data, &points); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return points, nil
+	return domains, nil
 }
 
-func writeCommitmentStopFile(dirs datadir.Dirs, points map[string]CommitmentStopPoint) error {
+func writeCommitmentStopFile(dirs datadir.Dirs, domains map[string]bool) error {
 	path := commitmentStopFilePath(dirs)
-	if len(points) == 0 {
-		return dir.RemoveFile(path)
+	if len(domains) == 0 {
+		return removePBTMarker(path)
 	}
-	data, err := toml.Marshal(points)
-	if err != nil {
-		return err
-	}
-	return dir.WriteFileAtomic(path, data, 0o644)
+	return writePBTMarker(path, domains)
 }
 
-func WriteCommitmentStopPoint(dirs datadir.Dirs, domain kv.Domain, block, txNum uint64) error {
-	points, err := readCommitmentStopFile(dirs)
-	if err != nil {
-		return err
-	}
-	if _, ok := points[domain.String()]; ok {
+func (a *Aggregator) writeCommitmentStopFile(domain kv.Domain) error {
+	a.commitmentStopFileMu.Lock()
+	defer a.commitmentStopFileMu.Unlock()
+	if a.commitmentStopFileWritten[domain] {
 		return nil
 	}
-	if points == nil {
-		points = make(map[string]CommitmentStopPoint, 1)
+	domains, err := readCommitmentStopFile(a.dirs)
+	if err != nil {
+		return err
 	}
-	points[domain.String()] = CommitmentStopPoint{Block: block, TxNum: txNum}
-	return writeCommitmentStopFile(dirs, points)
+	if domains == nil {
+		domains = make(map[string]bool, 1)
+	}
+	if domains[domain.String()] {
+		a.commitmentStopFileWritten[domain] = true
+		return nil
+	}
+	domains[domain.String()] = true
+	if err := writeCommitmentStopFile(a.dirs, domains); err != nil {
+		return err
+	}
+	a.commitmentStopFileWritten[domain] = true
+	return nil
 }
 
 func (a *Aggregator) restoreCommitmentStopFile() error {
@@ -93,7 +86,7 @@ func (a *Aggregator) restoreCommitmentStopFile() error {
 	}
 	var applied, dropped bool
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if _, ok := points[domain.String()]; !ok || a.CommitmentDomainStopped(domain) {
+		if !points[domain.String()] || a.CommitmentDomainStopped(domain) {
 			continue
 		}
 		other := kv.CommitmentDomain
@@ -118,4 +111,9 @@ func (a *Aggregator) restoreCommitmentStopFile() error {
 		return writeCommitmentStopFile(a.dirs, points)
 	}
 	return nil
+}
+
+func (at *AggregatorRoTx) CommitmentStopFileWriter() func(kv.Domain) error {
+	a := at.a
+	return a.writeCommitmentStopFile
 }
