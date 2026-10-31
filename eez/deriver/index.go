@@ -82,12 +82,27 @@ func (x *Index) contains(txHash common.Hash) bool {
 	return false
 }
 
-// Seed indexes r as the first settlement, one that may follow others.
+// Seed indexes r as the only settlement, one that may follow others.
 func (x *Index) Seed(r Record) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	x.records = append(x.records, r)
-	x.from = max(x.from, r.LastL2Block+1)
+	x.records = append(x.records[:0], r)
+	x.from = r.LastL2Block + 1
+}
+
+// Lost reports whether every settlement from the seed on was dropped, so
+// that the block the earlier ones ended at is unknown.
+func (x *Index) Lost() bool {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return len(x.records) == 0 && x.from > 0
+}
+
+// Reset drops every settlement and the seed's bound.
+func (x *Index) Reset() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.records, x.from = nil, 0
 }
 
 // Append indexes r unless its batch is indexed already.

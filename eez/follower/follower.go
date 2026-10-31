@@ -449,6 +449,11 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 func (f *Follower) Sync(ctx context.Context) error {
 	defer f.publish()
 	defer loadMetrics().sync.ObserveDuration(time.Now())
+	if !f.resumed {
+		if err := f.resumeAgain(ctx); err != nil {
+			return err
+		}
+	}
 	if err := f.revalidate(ctx); err != nil {
 		return err
 	}
@@ -498,7 +503,31 @@ func (f *Follower) rewind(ctx context.Context, ancestor uint64) error {
 	defer f.publish()
 	loadMetrics().reorgs.Inc()
 	f.scanned = min(f.scanned, ancestor)
-	return f.deriver.OnReorg(ctx, ancestor)
+	err := f.deriver.OnReorg(ctx, ancestor)
+	if !errors.Is(err, deriver.ErrResumeReorged) {
+		return err
+	}
+	f.logger.Info("[eez] L1 reorg dropped the resume point, resuming again", "ancestor", ancestor)
+	f.resumed = false
+	return f.resumeAgain(ctx)
+}
+
+// resumeAgain seeds derivation again after a reorg dropped its resume point,
+// and moves the head back to the new one.
+func (f *Follower) resumeAgain(ctx context.Context) error {
+	head, err := f.reader.Head(ctx)
+	if err != nil {
+		return err
+	}
+	from, err := f.resume(ctx, head.Number)
+	if err != nil {
+		return err
+	}
+	if err := f.deriver.Retreat(ctx); err != nil {
+		return err
+	}
+	f.scanned, f.resumed = from-1, true
+	return nil
 }
 
 // recover turns a divergence found on an L1 block that is no longer

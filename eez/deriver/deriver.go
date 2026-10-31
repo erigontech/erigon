@@ -36,6 +36,11 @@ import (
 // follower finalized.
 var ErrFinalizedReorged = errors.New("L1 reorg drops a finalized settlement")
 
+// ErrResumeReorged reports an L1 reorg that drops the settlement derivation
+// resumed after: the block the settlements before it ended at is unknown
+// until a resume point is found again.
+var ErrResumeReorged = errors.New("L1 reorg drops the resume point")
+
 // Deriver rebuilds the L2 chain from the batches L1 settled.
 type Deriver struct {
 	chain  Chain
@@ -218,22 +223,39 @@ func (d *Deriver) OnFinalized(ctx context.Context, l1Finalized uint64) error {
 }
 
 // OnReorg drops the settlements of L1 blocks above ancestor and moves the
-// head and safe block back to the block the remaining ones settled.
+// head and safe block back to the block the remaining ones settled. It
+// returns ErrResumeReorged, with no settlement left, when the reorg drops
+// the resume point.
 func (d *Deriver) OnReorg(ctx context.Context, ancestor uint64) error {
 	if d.index.RetreatOnReorg(ancestor) == 0 {
 		d.logger.Debug("[eez] L1 reorg above the settlements", "event", "eez.deriver.l1.reorg.noop", "ancestor", ancestor)
 		return nil
 	}
+	if d.index.Lost() {
+		d.index.Reset()
+		d.seed, d.safe = nil, d.finalized
+		if err := d.saveCheckpoint(ctx); err != nil {
+			return err
+		}
+		return ErrResumeReorged
+	}
 	cursor := d.index.Cursor()
 	if cursor < d.finalized {
 		return fmt.Errorf("%w: L1 ancestor %d leaves L2 block %d settled, %d is finalized", ErrFinalizedReorged, ancestor, cursor, d.finalized)
 	}
+	d.logger.Info("[eez] L1 reorg dropped settlements", "event", "eez.deriver.l1.reorg.retreated", "ancestor", ancestor, "cursor", cursor)
+	return d.Retreat(ctx)
+}
+
+// Retreat moves the head and the safe block back to the block the latest
+// settlement ended at.
+func (d *Deriver) Retreat(ctx context.Context) error {
+	cursor := d.index.Cursor()
 	head, err := d.canonicalHash(ctx, cursor)
 	if err != nil {
 		return err
 	}
 	d.safe = min(d.safe, cursor)
-	d.logger.Info("[eez] L1 reorg dropped settlements", "event", "eez.deriver.l1.reorg.retreated", "ancestor", ancestor, "cursor", cursor)
 	if err := d.forkChoiceTo(ctx, head); err != nil {
 		return err
 	}

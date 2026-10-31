@@ -421,6 +421,38 @@ func TestResume(t *testing.T) {
 	})
 }
 
+// TestReorgDropsResumePoint: an L1 reorg that drops the settlement a
+// restart resumed after seeds derivation again, keeping the finalized block.
+func TestReorgDropsResumePoint(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	l1First := c.Post(derivertest.Posting{Batch: first}).Header.Number
+	second := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}})
+	c.Post(derivertest.Posting{Batch: second})
+	n := newNode(t, c.L1)
+	require.NoError(t, n.follower.Boot(t.Context()))
+	n.requireBlocks(t, append(first.Blocks, second.Blocks...)...)
+	require.NoError(t, n.follower.Handle(t.Context(), l1.Finalized{Head: l1.Header{Number: l1First}}))
+	require.Equal(t, uint64(1), n.follower.Status().Finalized)
+
+	again := n.restart(t, c.L1, n.chain.Chain)
+	require.NoError(t, again.follower.Boot(t.Context()))
+	require.Equal(t, uint64(1), again.follower.Status().Finalized)
+
+	c.ReorgL1(l1First)
+	c.Rewind(first.Blocks[0].Header())
+	replacement := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(alice, 2)}})
+	head := c.Post(derivertest.Posting{Batch: replacement}).Header
+	require.NoError(t, again.follower.Handle(t.Context(), l1.Reorg{Ancestor: l1.Header{Number: l1First}}))
+	require.NoError(t, again.follower.Handle(t.Context(), l1.NewHead{Head: head}))
+	again.requireBlocks(t, append(first.Blocks, replacement.Blocks...)...)
+	s := again.follower.Status()
+	require.Equal(t, uint64(2), s.Safe)
+	require.Equal(t, uint64(1), s.Finalized)
+	require.Contains(t, again.logs.String(), `msg="[eez] L1 reorg dropped the resume point, resuming again"`)
+	require.Contains(t, again.logs.String(), `msg="[eez] resuming from local settled block"`)
+}
+
 // TestWrongL1 refuses an L1 source on another chain.
 func TestWrongL1(t *testing.T) {
 	other, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Number: 12, Hash: common.Hash{1}}})
