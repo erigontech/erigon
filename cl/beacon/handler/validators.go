@@ -445,10 +445,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 			err  error
 		)
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			if s.ValidatorLength() <= int(validatorIndex) {
-				resp = newBeaconResponse([]int{}).WithFinalized(false)
-				return nil
-			}
 			resp, err = responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
 			return nil // return err later
 		}); err != nil {
@@ -670,9 +666,6 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {
 	var b strings.Builder
 	var err error
-	if validators.Length() <= int(idx) {
-		return newBeaconResponse([]int{}).WithFinalized(finalized), nil
-	}
 	if idx >= uint64(validators.Length()) {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator not found"))
 	}
