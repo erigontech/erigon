@@ -2162,3 +2162,21 @@ func TestVersionedStateReader_UnrecordedAddressReadsDomain(t *testing.T) {
 	require.Equal(t, uint64(9), got.Nonce)
 	require.Equal(t, 1, reader.accountReads)
 }
+
+// The BAL builder keeps an account's read and written balances by value, so tracking them
+// does not allocate per account.
+func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
+	states := make([]accountState, 16)
+	balance := *uint256.NewInt(7)
+	allocs := testing.AllocsPerRun(10, func() {
+		for i := range states {
+			s := &states[i]
+			*s = accountState{}
+			s.updateReadBalance(balance)
+			s.applyWriteBalance(balance, 1)
+			*s = accountState{}
+			s.applyWriteBalance(*uint256.NewInt(0), 1)
+		}
+	})
+	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
+}
