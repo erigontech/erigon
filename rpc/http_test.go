@@ -668,6 +668,27 @@ func TestBatchNotificationGetsNoReply(t *testing.T) {
 	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"y"}]`, rec.Body.String())
 }
 
+func TestBatchResponseLimit(t *testing.T) {
+	srv := newTestServer(log.Root())
+	defer srv.Stop()
+	srv.batchConcurrency = 1
+	srv.batchResponseLimit = 50
+
+	body := `[{"jsonrpc":"2.0","id":1,"method":"test_streamEcho","params":["aaaaaaaaaa"]},` +
+		`{"jsonrpc":"2.0","id":2,"method":"test_streamEcho","params":["bbbbbbbbbb"]},` +
+		`{"jsonrpc":"2.0","id":3,"method":"test_streamEcho","params":["cccccccccc"]},` +
+		`{"jsonrpc":"2.0","id":4,"method":"test_streamEcho","params":["dddddddddd"]}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"aaaaaaaaaa"},`+
+		`{"jsonrpc":"2.0","id":2,"result":"bbbbbbbbbb"},`+
+		`{"jsonrpc":"2.0","id":3,"error":{"code":-32003,"message":"response too large"}},`+
+		`{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"response too large"}}]`, rec.Body.String())
+}
+
 // echoRequest returns a test_echo call padded to exactly size bytes.
 func echoRequest(size int) string {
 	const head, tail = `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["`, `",3]}`
