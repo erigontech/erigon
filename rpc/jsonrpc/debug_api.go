@@ -90,6 +90,9 @@ type DebugAPIImpl struct {
 	// witnessCache serves recent legacy-mode debug_executionWitness results from
 	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
 	witnessCache *witnessResultCache
+	// removalClosure adds the removal closure to the witnesses it builds;
+	// only HeadWitnesses sets it.
+	removalClosure bool
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
