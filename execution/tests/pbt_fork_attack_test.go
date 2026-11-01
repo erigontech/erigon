@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"crypto/ecdsa"
+	"maps"
 	"math/big"
 	"testing"
 
@@ -102,9 +103,7 @@ func newPBTForkChainWithAlloc(t *testing.T, extra types.GenesisAlloc, options ..
 		GasLimit: 30_000_000,
 		BaseFee:  uint256.NewInt(0),
 	}
-	for address, account := range extra {
-		c.genesis.Alloc[address] = account
-	}
+	maps.Copy(c.genesis.Alloc, extra)
 	c.m = execmoduletester.New(t, append([]execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(c.genesis),
 		execmoduletester.WithKey(key),
