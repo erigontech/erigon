@@ -207,6 +207,25 @@ func TestQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
 	require.Equal(t, 1, started)
 }
 
+// A block above the blob limit, e.g. queued on an unknown parent before gossip validation checked its blob count, does
+// not take the import of its proposer and slot from a valid block.
+func TestBlockAboveBlobLimitDoesNotTakeTheELColumnsImport(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	maxBlobs := b.beaconCfg.GetBlobParameters(100 / b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	oversized, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, int(maxBlobs)+1)
+	valid, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	require.Equal(t, blockGossipKey(oversized), blockGossipKey(valid))
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	b.startELColumnsImportOnce(t.Context(), oversized)
+	b.startELColumnsImportOnce(t.Context(), valid)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{valid}, started)
+}
+
 func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
 	service, _, _, root, job := parkUnknownParentBlockForRetry(t, false)
 	started := 0
