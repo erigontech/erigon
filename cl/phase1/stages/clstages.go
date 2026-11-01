@@ -89,10 +89,12 @@ type Cfg struct {
 	sleepForSlotHeadChanged      bool
 	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
-	executionHead      common.Hash
-	forkChoiceRerunAt  time.Time
-	chainTipRejections *chainTipRejections
-	pendingBlockWrite  *pendingBlockWrite
+	executionHead               common.Hash
+	forkChoiceRerunAt           time.Time
+	forkChoiceWaitingForIndices bool
+	forkChoiceIndicesChanged    <-chan struct{}
+	chainTipRejections          *chainTipRejections
+	pendingBlockWrite           *pendingBlockWrite
 }
 
 type pendingBlockWrite struct {
@@ -234,29 +236,36 @@ func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBloc
 		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, true, false); err != nil {
 			return err
 		}
-		// OnBlock can return nil for old blocks it ignores. Require acceptance before
-		// writing indices: an unvalidated state root can overwrite another block's mapping.
 		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
 			return nil
 		}
 	}
 
-	if err := persistAcceptedBlock(ctx, cfg, block); err != nil {
+	// Block roots exclude signatures. Persist the copy accepted by fork choice.
+	acceptedBlock, ok := cfg.forkChoice.GetBlock(blockRoot)
+	if !ok {
+		return nil
+	}
+	if err := persistAcceptedBlock(ctx, cfg, acceptedBlock); err != nil {
 		// Fork choice advances before persistence. Keep the accepted block across stage
 		// transitions and finish its write before importing more blocks or reporting success.
-		cfg.pendingBlockWrite = &pendingBlockWrite{block: block}
+		cfg.pendingBlockWrite = &pendingBlockWrite{block: acceptedBlock}
 		return err
 	}
 	return nil
 }
 
 func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
-	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+	if err := cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
-	})
+	}); err != nil {
+		return err
+	}
+	cfg.emitter.NotifyBlockIndicesChanged()
+	return nil
 }
 
 func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
@@ -454,6 +463,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				Description: `fork choice stage. We will send all fork choise things here
 				also, we will wait up to delay seconds to deal with attestations + side forks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.forkChoiceWaitingForIndices {
+						return CleanupAndPruning
+					}
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
@@ -464,6 +476,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			CleanupAndPruning: {
 				Description: `cleanup and pruning is done here`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.forkChoiceWaitingForIndices {
+						return SleepForSlot
+					}
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
@@ -498,6 +513,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.forkChoiceWaitingForIndices {
+						return ForkChoice
+					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
@@ -507,6 +525,17 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					if cfg.forkChoiceWaitingForIndices {
+						timer := time.NewTimer(sleepForSlotRewakeInterval)
+						defer timer.Stop()
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-cfg.forkChoiceIndicesChanged:
+						case <-timer.C:
+						}
+						return nil
+					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
 						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,
