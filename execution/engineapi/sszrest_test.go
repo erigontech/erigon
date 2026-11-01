@@ -721,7 +721,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
 	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
 	require.Equal(t, []string{"payloads", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
-	require.Equal(t, []string{"v1", "v2", "v3"}, caps.IndependentlyVersioned["blobs"])
+	require.Equal(t, []string{"v1", "v2", "v3", "v4"}, caps.IndependentlyVersioned["blobs"])
 	require.Equal(t, []string{"capabilities", "identity", "inclusion-list"}, caps.UnscopedEndpoints)
 	// pin the spec's MAX_* values: MAX_BODIES_REQUEST, MAX_VERSIONED_HASHES_PER_REQUEST,
 	// MAX_REQUEST_BODY_SIZE (2**26 = 64 MiB).
@@ -1082,6 +1082,7 @@ func TestSSZRESTRejectsOversizedContentLengthBeforeRead(t *testing.T) {
 		{"forkchoice", "/engine/v1/forkchoice", "amsterdam", 1 << 10},
 		{"bodies", "/engine/v1/bodies/hash", "cancun", 4 + sszMaxBodiesRequest*32},
 		{"blobs", "/engine/v1/blobs/v1", "", 4 + sszMaxGetBlobHashes*32},
+		{"blob cells", "/engine/v1/blobs/v4", "", 4 + 16 + sszMaxGetBlobHashes*32},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, iotest.ErrReader(errors.New("body must not be read")))

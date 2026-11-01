@@ -436,6 +436,10 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 }
 
 func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request, revision string) {
+	if revision == "v4" {
+		e.handleSSZGetBlobsV4(w, r)
+		return
+	}
 	if revision != "v1" && revision != "v2" && revision != "v3" {
 		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 		return
@@ -497,6 +501,36 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 	writeSSZBytes(w, out)
 }
 
+func (e *EngineServer) handleSSZGetBlobsV4(w http.ResponseWriter, r *http.Request) {
+	if !checkSSZContentType(w, r) {
+		return
+	}
+	body, ok := readSSZBody(w, r, sszMaxBlobsRequestBody+sszCustodyBitvectorBytes)
+	if !ok {
+		return
+	}
+	hashes, indices, err := decodeBlobsV4Request(body)
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		return
+	}
+	resp, err := e.GetBlobsV4(r.Context(), hashes, indices[:])
+	if err != nil {
+		writeBlobsProblem(w, err)
+		return
+	}
+	if resp == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	out, err := encodeBlobsV4Response(resp, indices)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
+	writeSSZBytes(w, out)
+}
+
 func writeBlobsProblem(w http.ResponseWriter, err error) {
 	if errors.Is(err, txpool.ErrPoolDisabled) {
 		w.WriteHeader(http.StatusNoContent)
@@ -517,7 +551,7 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 	writeJSON(w, sszRestCapabilities{
 		SupportedForks:         supportedForkNames(e.config),
 		ForkScopedEndpoints:    []string{"payloads", "forkchoice", "bodies"},
-		IndependentlyVersioned: map[string][]string{"blobs": {"v1", "v2", "v3"}},
+		IndependentlyVersioned: map[string][]string{"blobs": {"v1", "v2", "v3", "v4"}},
 		UnscopedEndpoints:      []string{"capabilities", "identity", "inclusion-list"},
 		Limits: map[string]uint64{
 			"bodies.max_count":           sszMaxBodiesRequest,

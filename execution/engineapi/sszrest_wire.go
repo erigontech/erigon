@@ -13,6 +13,7 @@ package engineapi
 
 import (
 	"fmt"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
@@ -39,6 +41,7 @@ const (
 	sszMaxBodiesRequestBody        = sszContainerOffsetBytes + sszMaxBodiesRequest*sszHashBytes
 	sszMaxBlobsRequestBody         = sszContainerOffsetBytes + sszMaxGetBlobHashes*sszHashBytes
 	sszBlobBytes                   = 0x20000
+	sszCellBytes                   = 2048
 	sszKZGBytes                    = 48
 	sszCellsPerExtBlob             = 128
 	sszCustodyBitvectorBytes       = sszCellsPerExtBlob / 8
@@ -653,6 +656,81 @@ func decodeBlobsV2Response(buf []byte) ([]*engine_types.BlobAndProofV2, error) {
 		return true
 	})
 	return out, nil
+}
+
+func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCustodyBitvectorBytes]byte, error) {
+	hashes := solid.NewHashList(sszMaxGetBlobHashes)
+	var indices [sszCustodyBitvectorBytes]byte
+	if err := ssz2.UnmarshalSSZStrict(buf, 0, hashes, indices[:]); err != nil {
+		return nil, indices, err
+	}
+	if hashes.Length() > sszMaxGetBlobHashes {
+		return nil, indices, fmt.Errorf("too many blob hashes: %d", hashes.Length())
+	}
+	return hashListValues(hashes), indices, nil
+}
+
+type sszBlobV4Entry struct {
+	available bool
+	cells     [][]byte
+	proofs    [][]byte
+}
+
+func (e sszBlobV4Entry) EncodeSSZ(dst []byte) ([]byte, error) {
+	// The outer container is a boolean and one offset; contents has two list offsets.
+	// Optional fixed-size values are empty bytes or the value itself, which lets
+	// TransactionsSSZ encode the cell and proof lists without an extra wrapper.
+	dst, err := ssz2.MarshalSSZ(dst, e.available, ssz.OffsetSSZ(5))
+	if err != nil {
+		return nil, err
+	}
+	return ssz2.MarshalSSZ(dst, solid.NewTransactionsSSZFromTransactions(e.cells), solid.NewTransactionsSSZFromTransactions(e.proofs))
+}
+
+func (e sszBlobV4Entry) EncodingSizeSSZ() int {
+	return 1 + 4 + 8 + solid.NewTransactionsSSZFromTransactions(e.cells).EncodingSizeSSZ() + solid.NewTransactionsSSZFromTransactions(e.proofs).EncodingSizeSSZ()
+}
+
+func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, indices [sszCustodyBitvectorBytes]byte) ([]byte, error) {
+	if len(blobs) > sszMaxGetBlobHashes {
+		return nil, fmt.Errorf("too many blob entries: %d", len(blobs))
+	}
+	selected := 0
+	for _, b := range indices {
+		selected += bits.OnesCount8(b)
+	}
+	entries := make([]sszBlobV4Entry, len(blobs))
+	for i, blob := range blobs {
+		if blob == nil {
+			continue
+		}
+		if len(blob.BlobCells) != selected || len(blob.Proofs) != selected {
+			return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), selected)
+		}
+		entry := &entries[i]
+		entry.available = true
+		entry.cells = make([][]byte, sszCellsPerExtBlob)
+		entry.proofs = make([][]byte, sszCellsPerExtBlob)
+		// JSON-RPC returns only requested indices, in ascending order. SSZ preserves
+		// all 128 positions; unrequested or missing cells and their proofs stay empty.
+		j := 0
+		for index := range sszCellsPerExtBlob {
+			if indices[index/8]&(1<<(index%8)) == 0 {
+				continue
+			}
+			cell, proof := blob.BlobCells[j], blob.Proofs[j]
+			j++
+			if cell == nil && proof == nil {
+				continue
+			}
+			if cell == nil || proof == nil || len(*cell) != sszCellBytes || len(*proof) != sszKZGBytes {
+				return nil, fmt.Errorf("invalid cell or proof at index %d", index)
+			}
+			entry.cells[index] = *cell
+			entry.proofs[index] = *proof
+		}
+	}
+	return ssz.EncodeDynamicList(ssz.OffsetSSZ(4), entries)
 }
 
 func encodeGetInclusionListResponse(txs []hexutil.Bytes) ([]byte, error) {
