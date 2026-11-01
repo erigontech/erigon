@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,9 +98,29 @@ func runPoolReplay(t *testing.T, ctx context.Context, fx *blockreplay.Fixture, w
 	return r.exec(tx, doms)
 }
 
-func resetPoolCounters() {
-	poolRoTxOpens.Store(0)
-	poolMaxRuns.Store(0)
+type poolCounts struct {
+	opens   atomic.Int64
+	mu      sync.Mutex
+	maxRuns int
+}
+
+func (c *poolCounts) runs() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.maxRuns
+}
+
+func countPool(t *testing.T) *poolCounts {
+	t.Helper()
+	c := &poolCounts{}
+	poolOnRoTxOpen = func() { c.opens.Add(1) }
+	poolOnRun = func(runs int) {
+		c.mu.Lock()
+		c.maxRuns = max(c.maxRuns, runs)
+		c.mu.Unlock()
+	}
+	t.Cleanup(func() { poolOnRoTxOpen, poolOnRun = nil, nil })
+	return c
 }
 
 func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
@@ -111,9 +130,9 @@ func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, len(b.Transactions()), 10*workers)
 
-	resetPoolCounters()
+	c := countPool(t)
 	require.NoError(t, runPoolReplay(t, context.Background(), fx, "4"))
-	opens := poolRoTxOpens.Load()
+	opens := c.opens.Load()
 	require.Positive(t, opens, "no pool worker opened a read tx: the run measured nothing")
 	require.LessOrEqual(t, opens, int64(workers+1), "pool opened more read txs than it has workers (%d txs in the block)", len(b.Transactions()))
 }
@@ -125,10 +144,10 @@ func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
 func TestPoolDependencyChainRunsBoundedByNamedReruns(t *testing.T) {
 	fx := counterChainFixture(t, poolTestTxs)
 	for _, workers := range []string{"4", "16"} {
-		resetPoolCounters()
+		c := countPool(t)
 		require.NoError(t, runPoolReplay(t, context.Background(), fx, workers))
-		require.Positive(t, poolRoTxOpens.Load(), "no pool worker ran: the run measured nothing")
-		require.LessOrEqual(t, poolMaxRuns.Load(), int64(poolNamedReruns+2), "a tx in a %d-call chain ran more than %d times with %s workers", poolTestTxs, poolNamedReruns+2, workers)
+		require.Positive(t, c.opens.Load(), "no pool worker ran: the run measured nothing")
+		require.LessOrEqual(t, c.runs(), poolNamedReruns+2, "a tx in a %d-call chain ran more than %d times with %s workers", poolTestTxs, poolNamedReruns+2, workers)
 	}
 }
 
@@ -159,7 +178,6 @@ func TestPoolReexecSignalRequeuesParkedTask(t *testing.T) {
 
 func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 	fx := loadPoolFixture(t)
-	resetPoolCounters()
 	t.Setenv("EPHEMERAL_WORKERS", "4")
 	r, closeFn := setupEphemeralReplay(t, fx)
 	t.Cleanup(closeFn)
@@ -169,21 +187,19 @@ func TestPoolShutdownMidBlockDoesNotHang(t *testing.T) {
 	tx, doms := r.newDomains(t, fx)
 	t.Cleanup(tx.Rollback)
 	t.Cleanup(doms.Close)
-	go func() {
-		for poolRoTxOpens.Load() == 0 {
-			time.Sleep(50 * time.Microsecond)
-		}
+	c := countPool(t)
+	poolOnRoTxOpen = func() {
+		c.opens.Add(1)
 		cancel()
-	}()
+	}
 	done := make(chan error, 1)
 	go func() { done <- r.exec(tx, doms) }()
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
-		fmt.Fprintln(os.Stderr, "FAIL: ExecV3 did not return within 30s after workersCtx was cancelled mid-block")
-		os.Exit(1)
+		t.Fatal("ExecV3 did not return within 30s after workersCtx was cancelled mid-block")
 	}
-	require.Positive(t, poolRoTxOpens.Load(), "no pool worker ran before the cancel: the run measured nothing")
+	require.Positive(t, c.opens.Load(), "no pool worker ran before the cancel: the run measured nothing")
 }
 
 func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
@@ -272,7 +288,18 @@ func TestPoolIncarnationLimitIsOperational(t *testing.T) {
 
 	require.False(t, pt.bumpInc(pe.pool), "incarnation %d is past the limit %d", limit+1, limit)
 	requireOperational(t, pe, "exceeded the self-loop incarnation limit")
-	require.True(t, pt.aborted)
+}
+
+func TestPoolRerunAfterWaitsForPredecessorAfterNamedReruns(t *testing.T) {
+	for _, tc := range []struct{ reruns, target int }{{0, 0}, {poolNamedReruns - 1, 0}, {poolNamedReruns, 1}} {
+		_, be := newPoolUnit(t, 3)
+		pt := newPoolUnitTask(be, 2)
+		pt.reruns = tc.reruns
+
+		require.False(t, pt.rerunAfter(0), "the task must wait, not re-run in place")
+		require.Equal(t, []*poolTask{pt}, be.wakeAt[tc.target], "after %d named re-runs", tc.reruns)
+		require.Equal(t, psReexec, pt.next)
+	}
 }
 
 type failingRoDB struct {
@@ -333,16 +360,16 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 		be.versionMap.HasBAL = hasBAL
 		pt := newPoolUnitTask(be, 2)
 
-		proceed := pt.settle(&exec.TxResult{}, 0)
+		require.False(t, pt.settle(pe.pool, &exec.TxResult{}, 0))
 
-		require.Equal(t, psRecheck, pt.next)
-		require.Empty(t, pe.results)
 		if hasBAL {
-			require.True(t, proceed, "a BAL block must re-check at once, not wait for the read target")
+			require.Len(t, pe.results, 1, "a BAL block must send the validated result at once, without a second validation")
+			require.True(t, pt.parked)
 			require.Empty(t, be.wakeAt)
 		} else {
-			require.False(t, proceed, "a non-BAL block must wait for the read target to commit")
-			require.Equal(t, []*poolTask{pt}, be.wakeAt[0])
+			require.Equal(t, psRecheck, pt.next)
+			require.Empty(t, pe.results)
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[0], "a non-BAL block must wait for the read target to commit")
 		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -25,8 +24,6 @@ type poolTask struct {
 	next       int
 	prevWrites *state.WriteSet
 	result     *exec.TxResult
-	finalExec  bool
-	aborted    bool
 	reruns     int
 
 	mu      sync.Mutex
@@ -69,9 +66,10 @@ type taskPool struct {
 	closed bool
 }
 
+// Test hooks; nil in production.
 var (
-	poolRoTxOpens atomic.Int64
-	poolMaxRuns   atomic.Int64
+	poolOnRoTxOpen func()
+	poolOnRun      func(runs int)
 )
 
 func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
@@ -131,7 +129,9 @@ func (wk *poolWorker) ensureTx(p *taskPool) error {
 	if err != nil {
 		return err
 	}
-	poolRoTxOpens.Add(1)
+	if poolOnRoTxOpen != nil {
+		poolOnRoTxOpen()
+	}
 	if err := wk.w.ResetTx(tx); err != nil {
 		tx.Rollback()
 		return err
@@ -146,26 +146,15 @@ func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion)
 	pe.pool.push(pt)
 }
 
-func (pt *poolTask) rawSend(p *taskPool, r *exec.TxResult) {
+func (pt *poolTask) send(p *taskPool, r *exec.TxResult) {
 	select {
 	case p.pe.results <- r:
 	case <-p.pe.workersCtx.Done():
 	}
 }
 
-func (pt *poolTask) send(p *taskPool, r *exec.TxResult) {
-	if pt.aborted {
-		return
-	}
-	pt.rawSend(p, r)
-}
-
 func (pt *poolTask) sendOperational(p *taskPool, err error) {
-	if pt.aborted {
-		return
-	}
-	pt.aborted = true
-	pt.rawSend(p, &exec.TxResult{Task: pt.tv, Err: err, Operational: true})
+	pt.send(p, &exec.TxResult{Task: pt.tv, Err: err, Operational: true})
 }
 
 func (pt *poolTask) bumpInc(p *taskPool) bool {
@@ -218,21 +207,9 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 				}
 				continue
 			}
-			pt.send(p, pt.result)
-			pt.result = nil
-			pt.next = psReexec
-			pt.mu.Lock()
-			if pt.pending {
-				pt.pending = false
-				pt.mu.Unlock()
-				if !pt.rerunAfter(tv.index - 1) {
-					return
-				}
-				continue
+			if !pt.publish(p) {
+				return
 			}
-			pt.parked = true
-			pt.mu.Unlock()
-			return
 		case psRun:
 			if !pt.run(p, wk) {
 				return
@@ -243,7 +220,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 
 func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	be, tv := pt.be, pt.tv
-	pt.finalExec = be.frontier() >= tv.index-1
+	finalExec := be.frontier() >= tv.index-1
 	if err := wk.ensureTx(p); err != nil {
 		pt.sendOperational(p, fmt.Errorf("block %d tx %d: open roTx: %w", be.blockNum, tv.index, err))
 		return false
@@ -258,22 +235,16 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 			break
 		}
 	}
-	for runs := int64(tv.version.Incarnation) + 1; ; {
-		m := poolMaxRuns.Load()
-		if runs <= m || poolMaxRuns.CompareAndSwap(m, runs) {
-			break
-		}
+	if poolOnRun != nil {
+		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
 	result := wk.w.RunTxTask(tv)
-	if pt.aborted {
-		return false
-	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Err != nil {
-		if pt.finalExec {
+		if finalExec {
 			pt.send(p, result)
 			return false
 		}
@@ -289,14 +260,28 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if !valid {
 		return pt.rerunAfter(blocker)
 	}
-	return pt.settle(result, target)
+	return pt.settle(p, result, target)
 }
 
-func (pt *poolTask) settle(result *exec.TxResult, target int) bool {
+func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool {
 	pt.result = result
 	if !pt.be.versionMap.HasBAL {
 		return pt.waitThen(target, psRecheck)
 	}
-	pt.next = psRecheck
-	return true
+	return pt.publish(p)
+}
+
+func (pt *poolTask) publish(p *taskPool) bool {
+	pt.send(p, pt.result)
+	pt.result = nil
+	pt.next = psReexec
+	pt.mu.Lock()
+	if pt.pending {
+		pt.pending = false
+		pt.mu.Unlock()
+		return pt.rerunAfter(pt.tv.index - 1)
+	}
+	pt.parked = true
+	pt.mu.Unlock()
+	return false
 }
