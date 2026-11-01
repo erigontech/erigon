@@ -325,8 +325,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 // startELColumnsImportOnce starts the EL column import for the first block of a proposer and slot only, so equivocating
 // blocks and retries of a queued block do not repeat the getBlobs call and the column work.
 func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *cltypes.SignedBeaconBlock) {
-	// A queued block can get here before gossip validation checked its blob count; it must not take the import.
-	if b.aboveBlobLimit(block) {
+	// Equivocating blocks share the fork, so only the blob count can make the importer skip one and not another. A
+	// queued block gets here before gossip validation checked that count.
+	if v := block.Version(); v >= clparams.FuluVersion && v < clparams.GloasVersion && b.blobCountOutOfRange(block) {
 		return
 	}
 	if started, _ := b.elImportsStarted.ContainsOrAdd(blockGossipKey(block), struct{}{}); !started {
@@ -334,18 +335,16 @@ func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *clty
 	}
 }
 
-func (b *blockService) aboveBlobLimit(block *cltypes.SignedBeaconBlock) bool {
-	commitments := block.Block.Body.BlobKzgCommitments
-	return commitments != nil && uint64(commitments.Len()) > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+// blobCountOutOfRange reports whether a Fulu block has no blobs or more than the blob limit of its epoch.
+func (b *blockService) blobCountOutOfRange(block *cltypes.SignedBeaconBlock) bool {
+	blobs := uint64(block.Block.Body.BlobKzgCommitments.Len())
+	return blobs == 0 || blobs > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
 }
 
 // importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
 // (engine_getBlobsV2), so the block need not wait for them on gossip.
 func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
-	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments.Len() == 0 || b.engine == nil {
-		return
-	}
-	if b.aboveBlobLimit(block) {
+	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || b.engine == nil || b.blobCountOutOfRange(block) {
 		return
 	}
 	peerDas := b.forkchoiceStore.GetPeerDas()
