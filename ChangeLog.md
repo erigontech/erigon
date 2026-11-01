@@ -6,6 +6,7 @@
   JSON-RPC error when execution lags the payload by more than one state step can run (the parallel
   executor's `--batchSize` cut or `--sync.loop.block.limit`), and `latestValidHash` is null unless
   the status is `VALID` or `INVALID` (#25382) — by @awskii
+- caplin: historical backfill now bans peers that serve invalid Gloas envelopes and retries other peers, even with fewer than 32 peers connected (#25528).
 
 ---
 

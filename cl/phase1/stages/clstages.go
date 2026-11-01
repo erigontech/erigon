@@ -348,6 +348,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
 					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
 					downloader.SetGloasSuccessorValidator(network2.NewGloasSuccessorValidator(cfg.state, startingRoot))
+					downloader.SetGloasEnvelopeSignatureValidator(cfg.state)
 					if checkpoint_sync.RemoteCheckpointSyncEnabled(cfg.caplinConfig) {
 						if urls := clparams.GetAllCheckpointSyncEndpoints(cfg.caplinConfig.NetworkId); len(urls) > 0 {
 							downloader.SetHTTPFallbackURL(urls[0])
