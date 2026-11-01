@@ -200,14 +200,16 @@ func TestRunNextEpochPrecomputeTriggersInLastSlotOfEpoch(t *testing.T) {
 		defer close(done)
 		test.store.RunNextEpochPrecompute(ctx)
 	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
 	select {
 	case next := <-test.graph.published:
 		require.Equal(t, test.nextEpochStart, next.Slot())
 	case <-time.After(30 * time.Second):
 		t.Fatal("no precomputed state published")
 	}
-	cancel()
-	<-done
 }
 
 func TestNextEpochToPrecompute(t *testing.T) {
