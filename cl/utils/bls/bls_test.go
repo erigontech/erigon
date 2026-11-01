@@ -171,10 +171,12 @@ func TestSignatureVerifyAggregateBatchInputs(t *testing.T) {
 	negativePublicKey := bls.PublicKey(new(blst.P1).Sub((*blst.P1Affine)(publicKeys[0])).ToAffine())
 	negatedSignature := negativeSignature(t, signatures[0])
 
-	duplicateKeys := append([]bls.PublicKey{publicKeys[0], publicKeys[0]}, publicKeys[1:16]...)
-	duplicateSignatures := append([][]byte{signatures[0], signatures[0]}, signatures[1:16]...)
+	duplicateKeys := append([]bls.PublicKey{publicKeys[0], publicKeys[0]}, publicKeys[1:17]...)
+	duplicateSignatures := append([][]byte{signatures[0], signatures[0]}, signatures[1:17]...)
 	adjacentCancellingKeys := append([]bls.PublicKey{publicKeys[0], negativePublicKey}, publicKeys[1:17]...)
 	adjacentCancellingSignatures := append([][]byte{signatures[0], negatedSignature}, signatures[1:17]...)
+	infinityInputKeys := append([]bls.PublicKey{publicKeys[0], negativePublicKey}, publicKeys[1:31]...)
+	infinityInputSignatures := append([][]byte{signatures[0], negatedSignature}, signatures[1:31]...)
 	boundaryCancellingKeys := append([]bls.PublicKey(nil), publicKeys[1:512]...)
 	boundaryCancellingKeys = append(boundaryCancellingKeys, publicKeys[0], negativePublicKey)
 	boundaryCancellingSignatures := append([][]byte(nil), signatures[1:512]...)
@@ -187,6 +189,7 @@ func TestSignatureVerifyAggregateBatchInputs(t *testing.T) {
 	}{
 		{name: "adjacent duplicate", publicKeys: duplicateKeys, signatures: duplicateSignatures},
 		{name: "adjacent cancelling pair", publicKeys: adjacentCancellingKeys, signatures: adjacentCancellingSignatures},
+		{name: "cancelled pair feeds the next batch round", publicKeys: infinityInputKeys, signatures: infinityInputSignatures},
 		{name: "cancelling pair across chunk boundary", publicKeys: boundaryCancellingKeys, signatures: boundaryCancellingSignatures},
 	}
 	for _, test := range tests {
