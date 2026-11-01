@@ -1514,6 +1514,10 @@ func (ibs *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason
 // does not depend on the prior value, so prev is read WITHOUT recording an OCC
 // read. Absent/destroyed accounts still materialize (account creation).
 func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
+	// This tx's live object already holds the account, so the base record is not rebuilt.
+	if so, ok := ibs.stateObjects[addr]; ok && !so.deleted && !ibs.accountLifecycle(addr) {
+		return ibs.writeNonceOnLiveAccount(addr, so.data.Nonce, nonce, wasCommited, reason)
+	}
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return err
@@ -1533,10 +1537,18 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		return nil
 	}
 	prev := base.Nonce
+	if so, ok := ibs.stateObjects[addr]; ok {
+		prev = so.data.Nonce
+	}
+	return ibs.writeNonceOnLiveAccount(addr, prev, nonce, wasCommited, reason)
+}
+
+// writeNonceOnLiveAccount writes the nonce of an account that exists for this tx; prev is its
+// nonce before this tx's own nonce writes.
+func (ibs *IntraBlockState) writeNonceOnLiveAccount(addr accounts.Address, prev, nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) error {
 	// Keep an already-materialized stateObject's so.data in step so the
 	// so.data-based commit paths (genesis FinalizeTx, RPC) stay correct.
 	if so, ok := ibs.stateObjects[addr]; ok {
-		prev = so.data.Nonce
 		so.setNonce(nonce)
 	}
 	// The tx's own nonce cell is authoritative for the journal prev: so.data can
