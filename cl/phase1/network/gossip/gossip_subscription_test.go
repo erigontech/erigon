@@ -486,8 +486,6 @@ func (s *TopicSubscriptionsTestSuite) TestConcurrentAccess() {
 	for range numGoroutines {
 		<-done
 	}
-
-	s.True(true) // If we get here without data races, test passes
 }
 
 func TestTopicSubscriptions(t *testing.T) {

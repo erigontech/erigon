@@ -32,6 +32,7 @@ linters:
     - gocheckcompilerdirectives
     - gosec
     - usetesting
+    - loggercheck
   disable:
     - contextcheck
     - err113
@@ -47,16 +48,56 @@ linters:
     - zerologlint # not don't use Zerolog
     - wastedassign # `ineffassign` linter is enabled by default
     - spancheck # we don't use OpenTelemetry
-    - loggercheck # we don't use Zap
     - unconvert # not enough profit from always enabling
   settings:
+    loggercheck:
+      rules:
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Trace
+        - github.com/erigontech/erigon/common/log/v3.Trace
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Debug
+        - github.com/erigontech/erigon/common/log/v3.Debug
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Info
+        - github.com/erigontech/erigon/common/log/v3.Info
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Warn
+        - github.com/erigontech/erigon/common/log/v3.Warn
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Error
+        - github.com/erigontech/erigon/common/log/v3.Error
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Crit
+        - github.com/erigontech/erigon/common/log/v3.Crit
+        - (github.com/erigontech/erigon/common/log/v3.Logger).Log
+        - github.com/erigontech/erigon/common/log/v3.Log
+        - (github.com/erigontech/erigon/common/log/v3.Logger).New
+        - github.com/erigontech/erigon/common/log/v3.New
     gosec:
       includes:
+        - G106
+        - G108
         - G109
         - G110
+        - G111
         - G112
+        - G113
         - G114
+        - G117
+        - G119
+        - G120
+        - G121
+        - G123
+        - G124
+        - G203
+        - G303
+        - G305
         - G402
+        - G403
+        - G405
+        - G408
+        - G502
+        - G503
+        - G504
+        - G506
+        - G704
+        - G709
+        - G710
     usetesting:
       os-mkdir-temp: false
     goconst:
@@ -86,6 +127,11 @@ linters:
       enable:
         - error-is-as
         - go-require
+        - formatter
+        - useless-assert
+        - suite-broken-parallel
+        - suite-method-signature
+        - suite-subtest-run
     modernize:
       # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
       disable:
@@ -142,11 +188,11 @@ linters:
           - errcheck
         text: "^Error return value is not checked"
         source: "^\\s*(case\\s+)?<-"
-      # shadow runs under db/ only for now; the rest of the tree is not swept yet.
+      # shadow runs under db/ and common/ only for now; the rest of the tree is not swept yet.
       - linters:
           - govet
         text: "^shadow:"
-        path-except: "^db/"
+        path-except: "^(db|common)/"
       # Bootstrap exclusion: files with baseline shadow findings, migrated one
       # file per PR. Remove a file from the list once it is clean; a file that is
       # not listed is gated, so a fixed file cannot silently regress.
