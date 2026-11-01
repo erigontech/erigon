@@ -125,7 +125,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	if blockRoot == f.lastDumpedRoot && slot == f.lastDumpedSlot {
 		return nil
 	}
-	f.lastDumpedRoot = common.Hash{}
+	f.lastDumpedRoot, f.lastDumpedSlot = common.Hash{}, 0
 	done := false
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
