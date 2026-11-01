@@ -887,6 +887,9 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		return nil, err
 	}
 
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	envelope, slot, fromForkGraph, err := a.executionPayloadEnvelopeForRoot(r.Context(), blockRoot)
 	if err != nil {
 		return nil, err
@@ -896,9 +899,6 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
 	}
 
-	if a.beaconChainCfg.SlotsPerEpoch == 0 {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
-	}
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	var isFinalized bool
 	if fromForkGraph {
@@ -943,27 +943,26 @@ func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockR
 	}
 	var prepared *envelope_history.PreparedRebuild
 	var slot uint64
+	found := blockFromForkGraph
+	if found {
+		slot = block.Block.Slot
+	}
 	err = a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		if !blockFromForkGraph {
-			block, err = a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
-			if err != nil {
+		if !found {
+			header, err := a.blockReader.ReadHeaderByRoot(ctx, tx, blockRoot)
+			if err != nil || header == nil || header.Header == nil {
 				return err
 			}
+			slot, found = header.Header.Slot, true
 		}
-		if block == nil || block.Block == nil {
+		if envelope != nil || slot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
 			return nil
 		}
-		slot = block.Block.Slot
-		if envelope == nil {
-			prepared, err = a.envelopeRebuilder.Prepare(ctx, tx, slot, blockRoot)
-		}
+		prepared, err = a.envelopeRebuilder.Prepare(ctx, tx, slot, blockRoot)
 		return err
 	})
-	if err != nil {
+	if err != nil || !found {
 		return nil, 0, false, err
-	}
-	if block == nil || block.Block == nil {
-		return nil, 0, false, nil
 	}
 	if prepared != nil {
 		rebuildCtx, cancel := context.WithTimeout(ctx, handlers.StreamDeadline)

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/handlers"
@@ -46,8 +47,17 @@ import (
 )
 
 type apiEnvelopeRebuilder struct {
-	envelope *cltypes.SignedExecutionPayloadEnvelope
-	rebuild  func(context.Context) error
+	envelope     *cltypes.SignedExecutionPayloadEnvelope
+	rebuild      func(context.Context) error
+	prepareCalls int
+}
+
+type executionBodyPrunedBlockReader struct {
+	*tests.MockBlockReader
+}
+
+func (executionBodyPrunedBlockReader) ReadBlockByRoot(context.Context, kv.Tx, common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	return nil, snapshot_format.ErrExecutionBodyNotFound
 }
 
 type failingBeginRoDB struct {
@@ -92,6 +102,7 @@ func (tx *readTrackingTx) Rollback() {
 }
 
 func (r *apiEnvelopeRebuilder) Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error) {
+	r.prepareCalls++
 	return new(envelope_history.PreparedRebuild), nil
 }
 
@@ -169,6 +180,19 @@ func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T)
 	require.Nil(t, response)
 	endpointErr := beaconhttp.WrapEndpointError(err)
 	require.Equal(t, http.StatusNotFound, endpointErr.Code)
+}
+
+func TestGetExecutionPayloadEnvelopeReturnsNotFoundForPreGloasBlockWithPrunedExecutionBody(t *testing.T) {
+	handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+	handler.beaconChainCfg.GloasForkEpoch = 3
+	handler.blockReader = executionBodyPrunedBlockReader{MockBlockReader: handler.blockReader.(*tests.MockBlockReader)}
+	rebuilder := &apiEnvelopeRebuilder{}
+	handler.envelopeRebuilder = rebuilder
+
+	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+	require.Nil(t, response)
+	require.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
+	require.Zero(t, rebuilder.prepareCalls)
 }
 
 func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
