@@ -19,9 +19,11 @@ package forkchoice
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -39,12 +41,16 @@ import (
 
 type recordingNextEpochForkGraph struct {
 	fork_graph.ForkGraph
-	state *state.CachingBeaconState
+	state     *state.CachingBeaconState
+	published chan *state.CachingBeaconState
 }
 
 func (g *recordingNextEpochForkGraph) SetNextEpochState(parentRoot common.Hash, next *state.CachingBeaconState) {
 	g.ForkGraph.SetNextEpochState(parentRoot, next)
 	g.state = next
+	if g.published != nil {
+		g.published <- next
+	}
 }
 
 func forkChoiceEpochBoundaryBlock(t *testing.T) (*state.CachingBeaconState, *state.CachingBeaconState, []*cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock) {
@@ -157,6 +163,51 @@ func TestPrecomputeNextEpochStateDoesNotPublishAfterCancellation(t *testing.T) {
 	importedBytes, err := imported.EncodeSSZ(nil)
 	require.NoError(t, err)
 	require.Equal(t, normalBytes, importedBytes)
+}
+
+func TestPrecomputeNextEpochStateSkipsHeadOutsideEndingEpoch(t *testing.T) {
+	test := newEpochPrecomputeTest(t)
+	require.NoError(t, test.manager.OnHeadStateWithBlockRoot(test.parent, test.block.Block.ParentRoot))
+
+	require.NoError(t, test.store.precomputeNextEpochState(t.Context(), test.nextEpochStart+test.parent.BeaconConfig().SlotsPerEpoch))
+	require.Nil(t, test.graph.state)
+}
+
+func TestPrecomputeNextEpochStateSkipsWhenNotSynced(t *testing.T) {
+	test := newEpochPrecomputeTest(t)
+	require.NoError(t, test.manager.OnHeadStateWithBlockRoot(test.parent, test.block.Block.ParentRoot))
+	test.store.SetSynced(false)
+
+	require.NoError(t, test.store.precomputeNextEpochState(t.Context(), test.nextEpochStart))
+	require.Nil(t, test.graph.state)
+}
+
+func TestRunNextEpochPrecomputeTriggersInLastSlotOfEpoch(t *testing.T) {
+	test := newEpochPrecomputeTest(t)
+	require.NoError(t, test.manager.OnHeadStateWithBlockRoot(test.parent, test.block.Block.ParentRoot))
+	cfg := test.parent.BeaconConfig()
+	slotDuration := time.Duration(cfg.SecondsPerSlot) * time.Second
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(test.parent.Slot()).AnyTimes()
+	clock.EXPECT().GetSlotTime(test.nextEpochStart - 1).Return(time.Now().Add(-slotDuration))
+	clock.EXPECT().GetSlotTime(test.nextEpochStart + cfg.SlotsPerEpoch - 1).Return(time.Now().Add(time.Hour))
+	test.store.ethClock = clock
+	test.graph.published = make(chan *state.CachingBeaconState, 1)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		test.store.RunNextEpochPrecompute(ctx)
+	}()
+	select {
+	case next := <-test.graph.published:
+		require.Equal(t, test.nextEpochStart, next.Slot())
+	case <-time.After(30 * time.Second):
+		t.Fatal("no precomputed state published")
+	}
+	cancel()
+	<-done
 }
 
 func TestNextEpochToPrecompute(t *testing.T) {
