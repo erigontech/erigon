@@ -79,12 +79,8 @@ func aggregatePublicKeys(publicKeys []PublicKey) *blst.P1 {
 		addChunks(0)
 	} else {
 		var workers sync.WaitGroup
-		workers.Add(workerCount)
 		for worker := range workerCount {
-			go func() {
-				defer workers.Done()
-				addChunks(worker)
-			}()
+			workers.Go(func() { addChunks(worker) })
 		}
 		workers.Wait()
 	}
