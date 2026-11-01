@@ -265,6 +265,12 @@ type L2Config interface {
 	ResolveRules(l2Version, blockNum, blockTime uint64, rules *Rules)
 }
 
+// L2BlockTime is an L2Config whose blocks follow a block time of their own,
+// in seconds, which SecondsPerSlot reports; zero keeps the default.
+type L2BlockTime interface {
+	BlockTime() uint64
+}
+
 func timestampToTime(unixSec uint64) *time.Time {
 	t := time.Unix(int64(unixSec), 0).UTC()
 	return &t
@@ -516,6 +522,9 @@ func (c *Config) GetMaxRlpBlockSize(time uint64) int {
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
+	if l2, ok := c.L2.(L2BlockTime); ok && l2.BlockTime() > 0 {
+		return l2.BlockTime()
+	}
 	if c.Aura != nil {
 		return 5 // Gnosis
 	}
