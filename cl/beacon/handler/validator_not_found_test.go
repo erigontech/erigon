@@ -38,15 +38,20 @@ func TestGetStateValidatorUnknownIndexIsNotFound(t *testing.T) {
 
 	server := httptest.NewServer(h.mux)
 	defer server.Close()
-	unknown := strconv.Itoa(postState.ValidatorLength() + 10)
+	get := func(t *testing.T, stateID string, idx int) int {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/eth/v1/beacon/states/"+stateID+"/validators/"+strconv.Itoa(idx), nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	n := postState.ValidatorLength()
 	for _, stateID := range []string{"head", strconv.FormatUint(fcu.HeadSlotVal, 10)} {
 		t.Run(stateID, func(t *testing.T) {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/eth/v1/beacon/states/"+stateID+"/validators/"+unknown, nil)
-			require.NoError(t, err)
-			resp, err := server.Client().Do(req)
-			require.NoError(t, err)
-			defer resp.Body.Close()
-			require.Equal(t, http.StatusNotFound, resp.StatusCode)
+			require.Equal(t, http.StatusOK, get(t, stateID, n-1))
+			require.Equal(t, http.StatusNotFound, get(t, stateID, n))
+			require.Equal(t, http.StatusNotFound, get(t, stateID, n+10))
 		})
 	}
 }
