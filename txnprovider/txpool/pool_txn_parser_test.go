@@ -887,7 +887,7 @@ func TestWrappedBlobTxnDoesNotAliasPayload(t *testing.T) {
 	wrapper := types.MakeWrappedBlobTxn(chainID)
 	wrapperBuf := &bytes.Buffer{}
 	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
-	wire := bytes.Clone(wrapperBuf.Bytes())
+	wire := wrapperBuf.Bytes()
 	packet := EncodeTransactions([][]byte{wire}, nil)
 
 	ctx := NewTxnParseContext(*chainID)
@@ -903,4 +903,19 @@ func TestWrappedBlobTxnDoesNotAliasPayload(t *testing.T) {
 		require.True(t, bytes.Equal(wrapper.Blobs[i][:], bundle.Blob), "blob %d aliases the payload", i)
 	}
 	require.True(t, bytes.Equal(wire, slot.Rlp), "rlp aliases the payload")
+}
+
+// A known blob txn is rejected before its blobs are copied.
+func TestKnownWrappedBlobTxnRejectedBeforeBlobs(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slot TxnSlot
+	_, err := ctx.ParseTransaction(wrapperBuf.Bytes(), 0, &slot, nil, false, true, func([]byte) error { return ErrRejected })
+	require.ErrorIs(t, err, ErrRejected)
+	require.Empty(t, slot.BlobBundles)
 }

@@ -221,8 +221,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
 	if !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs {
-		// Blobs outlive the payload (often a whole p2p message), so they must not alias it.
-		txBytes = bytes.Clone(txBytes)
 		// Structure: type_byte || rlp([ rlp(tx_body), [wrapper_version], blobs, commitments, proofs ])
 		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
 		if err != nil {
@@ -252,6 +250,15 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
+		// The hash covers only the inner tx, so a known txn is rejected before its blobs are copied.
+		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
+		if validateHash != nil {
+			if err := validateHash(slot.IDHash[:]); err != nil {
+				return p, err
+			}
+		}
+		// Blobs outlive the payload (often a whole p2p message), so they must not alias it.
+		txBytes = bytes.Clone(txBytes)
 
 		// Now parse the remaining wrapper elements: [wrapper_version], blobs, commitments, proofs.
 		wp := innerBodyPos + innerBodyLen // position after inner tx body
@@ -371,18 +378,15 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 5: Store the decoded transaction and compute hash.
 	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
-	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
+	// Wrapped blob txns were hashed in step 3, over the inner tx_payload_body.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
-	hashInput := txBytes
-	if innerTxBytes != nil {
-		hashInput = innerTxBytes
-	}
-	slot.IDHash = crypto.Keccak256Hash(hashInput)
-
-	if validateHash != nil {
-		if err := validateHash(slot.IDHash[:]); err != nil {
-			return p, err
+	if innerTxBytes == nil {
+		slot.IDHash = crypto.Keccak256Hash(txBytes)
+		if validateHash != nil {
+			if err := validateHash(slot.IDHash[:]); err != nil {
+				return p, err
+			}
 		}
 	}
 
