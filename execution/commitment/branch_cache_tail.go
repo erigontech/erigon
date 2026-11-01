@@ -30,6 +30,7 @@ const (
 	tailStartCapacity = 512
 	tailGrowFactor    = 4
 	tailEntryBytes    = 512
+	tailLenCheckEvery = 256
 )
 
 // Writes racing a resize may be dropped (benign cache miss; re-read from DB).
@@ -39,6 +40,7 @@ type tailLRU struct {
 
 	resizeMu sync.Mutex
 	curCap   atomic.Uint32
+	adds     atomic.Uint32
 	reserved int64
 }
 
@@ -68,8 +70,8 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
-	// Avoid lru.Len() locks once fully grown.
-	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {
+	// lru.Len() read-locks every shard: check it once per tailLenCheckEvery adds.
+	if curCap := t.curCap.Load(); curCap < t.maxCap && t.adds.Add(1)%tailLenCheckEvery == 0 && lru.Len() >= int(curCap) {
 		t.maybeGrow()
 		lru = t.cur.Load()
 	}
