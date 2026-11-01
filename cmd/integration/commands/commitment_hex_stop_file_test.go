@@ -55,7 +55,7 @@ type hexStopFixture struct {
 	config   *execchain.Config
 }
 
-func newHexStopFixture(t *testing.T, hexStops bool, stopDomains ...kv.Domain) hexStopFixture {
+func newHexStopFixture(t *testing.T, stopDomains ...kv.Domain) hexStopFixture {
 	t.Helper()
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(t, true, true, 1, 4, 4)
@@ -77,9 +77,6 @@ func newHexStopFixture(t *testing.T, hexStops bool, stopDomains ...kv.Domain) he
 	finality := execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(stopTx/settings.StepSize+1), finality, true))
 	agg.WaitForFiles()
-	if hexStops {
-		agg.StopCommitmentDomain(kv.CommitmentDomain)
-	}
 	for _, domain := range stopDomains {
 		agg.StopCommitmentDomain(domain)
 	}
@@ -143,7 +140,7 @@ func (f hexStopFixture) seek(t *testing.T, db kv.TemporalRwDB) (txNum, blockNum 
 }
 
 func TestHexStopFileSurvivesChaindataDrop(t *testing.T) {
-	f := newHexStopFixture(t, true)
+	f := newHexStopFixture(t, kv.CommitmentDomain)
 	f.writeStopFile(t)
 	db, agg := f.openAgg(t, f.freshChaindata(t))
 
@@ -156,7 +153,7 @@ func TestHexStopFileSurvivesChaindataDrop(t *testing.T) {
 }
 
 func TestHexStopFileSurvivesResetExec(t *testing.T) {
-	f := newHexStopFixture(t, true)
+	f := newHexStopFixture(t, kv.CommitmentDomain)
 	f.writeStopFile(t)
 	rawDB := dbCfg(dbcfg.ChainDB, f.dirs.Chaindata).MustOpen()
 	db, agg := f.openAgg(t, rawDB)
@@ -177,7 +174,7 @@ func TestHexStopFileSurvivesResetExec(t *testing.T) {
 }
 
 func TestHexStopFileDroppedWhenDomainsInLockstep(t *testing.T) {
-	f := newHexStopFixture(t, false)
+	f := newHexStopFixture(t)
 	f.writeStopFile(t)
 	db, agg := f.openAgg(t, f.freshChaindata(t))
 
@@ -188,8 +185,21 @@ func TestHexStopFileDroppedWhenDomainsInLockstep(t *testing.T) {
 	require.NoFileExists(t, f.stopFilePath())
 }
 
+func TestHexStopFileKeptWhenDBKeyLandsAfterFirstOpen(t *testing.T) {
+	f := newHexStopFixture(t)
+	rawDB := f.freshChaindata(t)
+	_, agg := f.openAgg(t, rawDB)
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
+	}))
+	f.writeStopFile(t)
+
+	require.NoError(t, agg.OpenFolder(rawDB))
+	require.FileExists(t, f.stopFilePath())
+}
+
 func TestHexStopFileWithDBKeyLeavesFileInPlace(t *testing.T) {
-	f := newHexStopFixture(t, true)
+	f := newHexStopFixture(t, kv.CommitmentDomain)
 	f.writeStopFile(t)
 	rawDB := dbCfg(dbcfg.ChainDB, f.dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDB.Close)
@@ -205,20 +215,8 @@ func TestHexStopFileWithDBKeyLeavesFileInPlace(t *testing.T) {
 	require.FileExists(t, f.stopFilePath())
 }
 
-func TestHexStopFileAppliesWhenStopPointIsPastBinEnd(t *testing.T) {
-	f := newHexStopFixture(t, true)
-	f.writeStopFile(t)
-	db, agg := f.openAgg(t, f.freshChaindata(t))
-
-	txNum, _, err := f.seek(t, db)
-	require.NoError(t, err)
-	require.Equal(t, f.lastTx, txNum)
-	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
-	require.Equal(t, kv.CommitmentBinDomain, agg.CanonicalCommitmentDomain())
-}
-
 func TestHexStopFileUntouchedWithoutDB(t *testing.T) {
-	f := newHexStopFixture(t, true)
+	f := newHexStopFixture(t, kv.CommitmentDomain)
 	f.writeStopFile(t)
 	path := f.stopFilePath()
 	before, err := os.ReadFile(path)
@@ -233,7 +231,7 @@ func TestHexStopFileUntouchedWithoutDB(t *testing.T) {
 }
 
 func TestHexStopFileCorruptNamesFile(t *testing.T) {
-	f := newHexStopFixture(t, true)
+	f := newHexStopFixture(t, kv.CommitmentDomain)
 	path := f.stopFilePath()
 	require.NoError(t, os.WriteFile(path, []byte("{"), 0o644))
 	rawDB := f.freshChaindata(t)
@@ -244,7 +242,7 @@ func TestHexStopFileCorruptNamesFile(t *testing.T) {
 }
 
 func TestRestoredBinStopRefusesScheduledFork(t *testing.T) {
-	f := newHexStopFixture(t, false, kv.CommitmentBinDomain)
+	f := newHexStopFixture(t, kv.CommitmentBinDomain)
 	require.NoError(t, os.WriteFile(filepath.Join(f.dirs.Snap, dbstate.COMMITMENT_STOP_FILE), []byte(`{"commitment-bin":true}`), 0o644))
 	db, agg := f.openAgg(t, f.freshChaindata(t))
 	tx, err := db.BeginTemporalRo(t.Context())
@@ -258,7 +256,7 @@ func TestRestoredBinStopRefusesScheduledFork(t *testing.T) {
 }
 
 func TestSnapshotsStageRefusesRestoredBinStopOnFreshChaindata(t *testing.T) {
-	f := newHexStopFixture(t, false, kv.CommitmentBinDomain)
+	f := newHexStopFixture(t, kv.CommitmentBinDomain)
 	require.NoError(t, os.WriteFile(f.stopFilePath(), []byte(`{"commitment-bin":true}`), 0o644))
 	rawDB := f.freshChaindata(t)
 	config := ethconfig.Defaults

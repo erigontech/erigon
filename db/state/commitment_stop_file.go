@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 )
 
 const COMMITMENT_STOP_FILE = "commitment-stop.json"
@@ -76,7 +77,22 @@ func (a *Aggregator) writeCommitmentStopFile(domain kv.Domain) error {
 	return nil
 }
 
-func (a *Aggregator) restoreCommitmentStopFile() error {
+func (a *Aggregator) readCommitmentStopKeys(db kv.RoDB) (stopped [kv.DomainLen]bool, err error) {
+	if a.trieVariant != TrieVariantHexBin || db == nil {
+		return stopped, nil
+	}
+	err = db.View(a.ctx, func(tx kv.Tx) error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			if stopped[domain], err = rawdb.ReadCommitmentDomainStopped(tx, domain); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return stopped, err
+}
+
+func (a *Aggregator) restoreCommitmentStopFile(stoppedInDB [kv.DomainLen]bool) error {
 	if a.trieVariant != TrieVariantHexBin {
 		return nil
 	}
@@ -94,6 +110,9 @@ func (a *Aggregator) restoreCommitmentStopFile() error {
 			other = kv.CommitmentBinDomain
 		}
 		if a.d[domain] == nil || a.d[other] == nil || a.d[other].dirtyFiles.EndTxNumMax() <= a.d[domain].dirtyFiles.EndTxNumMax() {
+			if stoppedInDB[domain] {
+				continue
+			}
 			delete(points, domain.String())
 			dropped = true
 			continue
@@ -111,9 +130,4 @@ func (a *Aggregator) restoreCommitmentStopFile() error {
 		return writeCommitmentStopFile(a.dirs, points)
 	}
 	return nil
-}
-
-func (at *AggregatorRoTx) CommitmentStopFileWriter() func(kv.Domain) error {
-	a := at.a
-	return a.writeCommitmentStopFile
 }

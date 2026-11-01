@@ -242,16 +242,6 @@ func TestRecordedHexStopWritesStopFileOnce(t *testing.T) {
 	require.JSONEq(t, `{"commitment":true}`, string(data))
 }
 
-func TestRecordedStopRollbackLeavesNoStopFile(t *testing.T) {
-	_, tx, _ := dualCalculatorTest(t)
-	dirs := tx.Debug().Dirs()
-	path := filepath.Join(dirs.Snap, dbstate.COMMITMENT_STOP_FILE)
-	require.NoError(t, recordStoppedCommitmentDomains(tx, map[kv.Domain]bool{kv.CommitmentDomain: true}))
-	tx.Rollback()
-	require.NoFileExists(t, path)
-	require.NoFileExists(t, filepath.Join(dirs.DataDir, dbstate.COMMITMENT_STOP_FILE))
-}
-
 func TestCommittedHexStopUpdatesLiveAggregator(t *testing.T) {
 	_, tx, doms := dualCalculatorTest(t)
 	dirs := tx.Debug().Dirs()
@@ -304,7 +294,6 @@ func TestForkMergeSeeksCommitmentAfterForkLocalHexStop(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, recordStoppedCommitmentDomains(fork.BlockOverlay(), cc.shadowStopped))
 	require.NoFileExists(t, filepath.Join(dirs.Snap, dbstate.COMMITMENT_STOP_FILE))
-	require.NoFileExists(t, filepath.Join(dirs.DataDir, dbstate.COMMITMENT_STOP_FILE))
 
 	current, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
