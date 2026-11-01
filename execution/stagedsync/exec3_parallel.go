@@ -3553,9 +3553,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		// Dispatch at most window tasks past the commit frontier, so results arrive
 		// close to block order and the per-result reader scans stay short.
 		lastTx := len(be.tasks) - 1
-		if be.versionMap.HasBAL {
-			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
-		}
+		lastTx = min(lastTx, be.frontier()+balDispatchWindow)
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {
