@@ -1458,12 +1458,14 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	}
 	// Later txns from a KZG offender are skipped here and by validateTxns, so none skip verification.
 	var kzgOffenders [][64]byte
+	skipAllRemote := false
 	for _, i := range indices {
 		if txns.Txns[i].TxType() != BlobTxnType || reasons[i] != txpoolcfg.NotSet {
 			continue
 		}
-		remotePeer := !txns.IsLocal[i] && i < len(sources) && sources[i].peerID != nil
-		if remotePeer && slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID)) {
+		remote := !txns.IsLocal[i]
+		remotePeer := remote && i < len(sources) && sources[i].peerID != nil
+		if remote && (skipAllRemote || remotePeer && slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))) {
 			continue
 		}
 		reasons[i] = p.validateBlobSidecar(txns.Txns[i])
@@ -1471,6 +1473,8 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 			reasons[i] = txpoolcfg.NotSet
 		} else if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && remotePeer {
 			kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+		} else if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && remote {
+			skipAllRemote = true
 		}
 	}
 	return reasons, nil

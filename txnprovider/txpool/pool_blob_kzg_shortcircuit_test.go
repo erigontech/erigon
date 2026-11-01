@@ -118,6 +118,20 @@ func TestPrepareTxnsBlobKZGShortCircuit(t *testing.T) {
 			"txn[1] should not have been verified")
 	})
 
+	t.Run("remote without sources short-circuits after first KZG failure", func(t *testing.T) {
+		var slots TxnSlots
+		s0 := makeBlobSlot(0x30, true)
+		s1 := makeBlobSlot(0x31, true)
+		a0, a1 := [20]byte{1}, [20]byte{2}
+		slots.Append(&s0, a0[:], false)
+		slots.Append(&s1, a1[:], false)
+
+		reasons, err := pool.prepareTxns(ctx, slots, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NotSet}, reasons,
+			"txn[1] should not have been verified")
+	})
+
 	t.Run("local keeps per-tx semantics", func(t *testing.T) {
 		var slots TxnSlots
 		s0 := makeBlobSlot(0x20, true)
