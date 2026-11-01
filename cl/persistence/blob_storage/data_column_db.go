@@ -82,6 +82,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		return err
 	}
 	if created {
+		s.emitters.NotifyDataColumnStored(blockRoot)
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 		log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	}

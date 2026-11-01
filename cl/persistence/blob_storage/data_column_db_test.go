@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -127,9 +128,43 @@ func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
 	event := <-events
 	require.Equal(t, beaconevents.OpDataColumnSidecar, event.Event)
+	select {
+	case notifiedRoot := <-emitters.DataColumnStored():
+		require.Equal(t, root, notifiedRoot)
+	default:
+		t.Fatal("new column write did not notify its block root")
+	}
 
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
 	require.Len(t, events, 0)
+	select {
+	case <-emitters.DataColumnStored():
+		t.Fatal("duplicate column write emitted another notification")
+	default:
+	}
+}
+
+func TestColumnWriteNotifiesBeforeOperationFeedDelivers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		emitters := beaconevents.NewEventEmitter()
+		events := make(chan *beaconevents.EventStream)
+		subscription := emitters.Operation().Subscribe(events)
+		defer subscription.Unsubscribe()
+		storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+		root := common.HexToHash("0x1234567890abcdef")
+
+		go func() {
+			assert.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1)))
+		}()
+		synctest.Wait()
+		select {
+		case notifiedRoot := <-emitters.DataColumnStored():
+			require.Equal(t, root, notifiedRoot)
+		default:
+			t.Fatal("a blocked operation feed delayed the stored-column notification")
+		}
+		<-events
+	})
 }
 
 func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {

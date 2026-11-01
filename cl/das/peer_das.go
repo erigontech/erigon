@@ -426,21 +426,21 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	if err != nil {
 		return false, err
 	}
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
-	if err != nil {
-		return false, err
-	}
 	if len(expectedCustodies) == 0 {
 		// this case is not reasonable due to empty node ID
+		existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
+		if err != nil {
+			return false, err
+		}
 		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
 	}
-	nowCustodies := map[cltypes.CustodyIndex]bool{}
-	for _, column := range existingColumns {
-		if _, ok := expectedCustodies[column]; ok {
-			nowCustodies[column] = true
+	for column := range expectedCustodies {
+		exists, err := d.columnStorage.ColumnSidecarExists(context.Background(), slot, blockRoot, int64(column))
+		if err != nil || !exists {
+			return false, err
 		}
 	}
-	return len(nowCustodies) == len(expectedCustodies), nil
+	return true, nil
 }
 
 func (d *peerdas) resubscribeGossip() {
