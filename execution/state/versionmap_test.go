@@ -1519,7 +1519,7 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 
 	// The entry is published, as a creator does, but the latch is not yet set.
-	m.s.LoadOrStore(addr, &AddressEntry{})
+	lazyMap(&m.s).LoadOrStore(addr, &AddressEntry{})
 	require.Nil(t, m.load(addr), "the latch is what load keys on")
 
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
