@@ -3,6 +3,11 @@ package vm
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"maps"
+	"slices"
+	"strings"
+	"testing"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -12,10 +17,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tendermint/tendermint/crypto/merkle"
 	cmn "github.com/tendermint/tendermint/libs/common"
-	"maps"
-	"slices"
-	"strings"
-	"testing"
 
 	"github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/require"
@@ -492,8 +493,10 @@ const cometBFTLightBlockInput = "00000000000000000000000000000000000000000000000
 
 func TestPasteurPrecompileSet(t *testing.T) {
 	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
-	osaka := chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true, IsPlato: true, IsHertz: true,
-		IsBerlin: true, IsLondon: true, IsFeynman: true, IsShanghai: true, IsCancun: true, IsHaber: true, IsPrague: true, IsOsaka: true}
+	osaka := chain.Rules{
+		IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true, IsPlato: true, IsHertz: true,
+		IsBerlin: true, IsLondon: true, IsFeynman: true, IsShanghai: true, IsCancun: true, IsHaber: true, IsPrague: true, IsOsaka: true,
+	}
 	pasteur := osaka
 	pasteur.IsPasteur = true
 

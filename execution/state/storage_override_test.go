@@ -192,5 +192,4 @@ func TestSetTxContextInstallsAttachedOverrides(t *testing.T) {
 	ibs.Reset()
 	ibs.SetTxContext(35547779, 196)
 	require.Equal(t, value, committed(ibs), "the overrider survives Reset")
-
 }
