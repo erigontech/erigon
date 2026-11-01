@@ -153,8 +153,8 @@ func (pe *parallelExecutor) buildBlockVersionMap(blockNum, firstTxNum, lastTxNum
 	vm := state.NewVersionMap(bal)
 	vm.SetBaseTxNum(firstTxNum)
 	if len(bal) > 0 {
+		vm.SeedAddresses(bal)
 		base := state.PrevBlockBase(committedBase, pe.prevBlocks, blockNum)
-		vm.SeedAddresses(bal, []state.AccountBaseReader{base})
 		vm.SeedEmptyRemovals(bal,
 			blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(blockNum),
 			pe.cfg.chainConfig.Aura != nil,

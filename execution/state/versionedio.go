@@ -72,6 +72,9 @@ type ReadHeader struct {
 	Source   ReadSource
 	Version  Version
 	internal bool // conflict-detection only; excluded from the block access list
+	// accSource AccountFromBAL: the read resolved an existence-only AddressPath marker (BAL
+	// seed), so the account exists but its value must come from the committed base.
+	accSource AccountSource
 }
 
 // VersionedRead is a single versioned read.  The per-path map it lives in fixes
@@ -2003,7 +2006,7 @@ func (vr *versionedStateReader) TracePrefix() string {
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
 		account := r.Val.Account()
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -2083,6 +2086,12 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
+		// An existence-only AddressPath marks that the account is present but its value
+		// lives in the field cells / committed base, not here. Report no account so the
+		// caller composes over the base instead of this cell.
+		if res.AccountSource() == AccountFromBAL {
+			return nil, false
+		}
 		return val, true
 	}
 	return nil, false
@@ -2157,7 +2166,7 @@ func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, a
 }
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
 		account := r.Val.Account()
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -2259,7 +2268,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 }
 
 func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
 		return r.Val.Account().Incarnation, nil
 	}
 

@@ -49,6 +49,18 @@ const (
 	ValueDeleted                      // prior value removed
 )
 
+// AccountSource records where an AddressPath cell's record came from. AccountFromBase
+// (the zero value) is the authoritative committed/exec record. AccountFromBAL is a
+// partial existence record the BAL seed wrote: the account exists, but the BAL carries
+// no whole-account record, so its field values are not here and must be read through to
+// the committed base.
+type AccountSource uint8
+
+const (
+	AccountFromBase AccountSource = iota
+	AccountFromBAL
+)
+
 type AccountPath int8
 
 func (p AccountPath) String() string {
@@ -459,6 +471,20 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, ValueChanged, getCellAccount)
 }
 
+// WriteAddressExists stamps an AddressPath cell that records only that the account
+// exists at v — its value is not authoritative (ValueUnknown), so field reads fall
+// back to the committed base. Used to seed existence for a BAL-created account
+// (whose field cells, not an AddressPath, are the real record) without a base lookup.
+func (vm *VersionMap) WriteAddressExists(addr accounts.Address, v Version, value *accounts.Account) {
+	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(true), value, ValueChanged, getCellAccount)
+	if cell, ok := e.Address.Get(v.TxIndex); ok {
+		cell.accSource = AccountFromBAL
+	}
+}
+
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
@@ -581,6 +607,7 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
+	res.accSource = fv.accSource
 	switch fv.flag {
 	case FlagDone:
 		res.incarnation = fv.incarnation
@@ -687,6 +714,7 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
+	res.accSource = fv.accSource
 	switch fv.flag {
 	case FlagDone:
 		res.incarnation = fv.incarnation
@@ -1974,6 +2002,10 @@ type WriteCell[T any] struct {
 	valStatus   valueStatus
 	incarnation Incarnation
 	Value       T
+	// accSource marks where an AddressPath cell's record came from. AccountFromBAL is an
+	// existence-only record the BAL seed wrote — its Value is not authoritative, so value
+	// reads fall back to the committed base. Independent of valStatus.
+	accSource AccountSource
 }
 
 // Per-T pools for *WriteCell[T], spanning VersionMap lifetimes: a cell freed by
@@ -2076,6 +2108,10 @@ type ReadResult struct {
 	// no-op (ValueUnchanged) write as not invalidating a reader without re-reading
 	// and comparing the live value.
 	valStatus valueStatus
+	// accSource mirrors the floor cell's AccountSource: AccountFromBAL means the read
+	// resolved an existence-only marker, so the account exists but its value comes from
+	// the committed base.
+	accSource AccountSource
 }
 
 func (res *ReadResult) DepString() string {
@@ -2087,6 +2123,13 @@ func (res *ReadResult) DepString() string {
 
 func (res *ReadResult) DepIdx() int {
 	return res.depIdx
+}
+
+// AccountSource reports where the floor cell's record came from. AccountFromBAL means
+// it records existence only — the account is present, but value reads must fall back to
+// the committed base.
+func (res *ReadResult) AccountSource() AccountSource {
+	return res.accSource
 }
 
 func (res *ReadResult) Incarnation() Incarnation {

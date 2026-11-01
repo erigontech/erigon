@@ -63,12 +63,12 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	require.Equal(t, uint64(5), acc.Nonce)
 }
 
-// TestSeedAddresses pins the AddressPath seeding. The BAL carries no address record, so a
-// block-created account (absent in the committed base) is seeded with field cells only;
-// the address read resolves existence from the AddressPath cell plus the base — not the
-// field cells — so without seeding it reads the created account as absent, which makes the
-// EIP-161 withhold path stamp a spurious removal. SeedAddresses seeds the AddressPath (from
-// the base when present, created otherwise) so the read resolves present.
+// TestSeedAddresses pins the DB-free existence seed. The BAL carries no address record, so
+// a block-created account (absent in the committed base) has only field cells; the address
+// existence read consults the AddressPath (not the field cells), so unseeded it reads absent
+// and the EIP-161 withhold path stamps a spurious removal. SeedAddresses marks existence
+// straight from the BAL — no base reader — stamping a ValueUnknown AddressPath so the
+// authoritative value still defers to the committed base.
 func TestSeedAddresses(t *testing.T) {
 	t.Parallel()
 
@@ -96,20 +96,61 @@ func TestSeedAddresses(t *testing.T) {
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(baseTxNum)
 
-	// Without seeding the BAL leaves only field cells, so the created account's address
+	// Before seeding the BAL leaves only field cells, so the created account's address
 	// read is absent even though it exists — the bug SeedAddresses fixes.
 	if _, _, ok := vm.ReadAddress(created, 5); ok {
-		t.Fatal("precondition: a BAL-created account's AddressPath read should be absent before SeedAddresses")
+		t.Fatal("precondition: a BAL-created account's address read should be absent before SeedAddresses")
 	}
 
-	vm.SeedAddresses(bal, []AccountBaseReader{reader})
+	vm.SeedAddresses(bal) // no base reader: existence comes from the BAL alone
 
-	acc, _, ok := vm.ReadAddress(created, 5)
-	require.True(t, ok, "SeedAddresses seeds the AddressPath so a BAL-created account reads present")
-	require.NotNil(t, acc)
-	require.Equal(t, uint64(1), acc.Nonce)
+	if _, _, ok := vm.ReadAddress(created, 5); !ok {
+		t.Fatal("SeedAddresses marks a BAL-created account present with no base lookup")
+	}
+	if _, _, ok := vm.ReadAddress(existing, 5); !ok {
+		t.Fatal("a touched base-present account also reads present")
+	}
 
-	ex, _, ok := vm.ReadAddress(existing, 5)
-	require.True(t, ok, "a base-present account is published as its origin and reads present")
-	require.Equal(t, uint64(9), ex.Nonce)
+	// The marker is ValueUnknown, so the authoritative value defers to the base: a
+	// base-present account keeps its untouched base nonce, not the seed's zeroed marker.
+	ex, ok := vm.GetAccount(existing, 6, reader)
+	require.True(t, ok)
+	require.Equal(t, uint64(9), ex.Nonce, "a base-present account's untouched nonce resolves from the base")
+
+	cr, ok := vm.GetAccount(created, 6, reader)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), cr.Nonce, "a created account composes from its field cells")
+}
+
+// TestSeedAddressesDoesNotLeakLaterCode pins the CREATE2-onto-funded fix: an account funded
+// (balance) at an early tx and given code at a later tx must, before the deploying tx,
+// compose with empty code. Seeding existence must not drag the later CodeHash into earlier
+// reads — the collision that made the proposer and validator disagree.
+func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
+	t.Parallel()
+
+	proxy := accounts.InternAddress(common.HexToAddress("0xc0ffee")) // funded early, CREATE2'd later
+	const baseTxNum = 0
+
+	bal := types.BlockAccessList{
+		{
+			Address:        proxy.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(256_000)}},
+			NonceChanges:   []*types.NonceChange{{Index: 5, Value: 1}},
+			CodeChanges:    []*types.CodeChange{{Index: 5, Bytecode: []byte{0x60, 0x00}}},
+		},
+	}
+
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}} // proxy absent in base
+
+	vm := NewVersionMap(bal)
+	vm.SetBaseTxNum(baseTxNum)
+	vm.SeedAddresses(bal)
+
+	// Compose after funding (BAL index 2 → TxIndex 1) but before the code deploy (index 5
+	// → TxIndex 4): the funded, still-codeless account the CREATE2 collision check must see.
+	acc, ok := vm.GetAccount(proxy, 3, reader)
+	require.True(t, ok, "the funded proxy exists before the deploying tx")
+	require.Equal(t, *uint256.NewInt(256_000), acc.Balance)
+	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "reads before the deploy must not see the later CREATE2 code")
 }

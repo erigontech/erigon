@@ -17,8 +17,6 @@
 package state
 
 import (
-	"sync"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -143,63 +141,32 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 	}
 }
 
-// SeedAddresses establishes each BAL account's AddressPath at construction so the
-// existence read resolves without a first-access base lookup in exec. An account present
-// in the committed base publishes that base as its origin; one absent from the base is
-// created this block, so its composed record is seeded as an AddressPath cell at its first
-// change index — without it the address read (which resolves existence from AddressPath +
-// base, not the field cells the BAL seeds) reads the created account as absent and the
-// EIP-161 withhold path stamps a spurious removal.
-// The base lookups are independent per account, so with more than one base reader
-// (each bound to its own tx) they fan out across goroutines; the version-map writes
-// they drive are per-account and so stay concurrency-safe.
-func (vm *VersionMap) SeedAddresses(bal types.BlockAccessList, bases []AccountBaseReader) {
-	if len(bal) == 0 || len(bases) == 0 {
-		return
-	}
-	if len(bases) == 1 {
-		for i := range bal {
-			vm.seedOneAddress(&bal[i], bases[0])
-		}
-		return
-	}
-	idx := make(chan int, len(bases))
-	var wg sync.WaitGroup
-	for _, b := range bases {
-		wg.Add(1)
-		go func(base AccountBaseReader) {
-			defer wg.Done()
-			for i := range idx {
-				vm.seedOneAddress(&bal[i], base)
-			}
-		}(b)
-	}
+// SeedAddresses marks each BAL account as existing at its creating tx, so the address
+// existence read resolves present without a first-access base lookup in exec. The BAL
+// writes only field cells (not an AddressPath), so a block-created account would
+// otherwise read absent — the EIP-161 withhold path then stamps a spurious removal. The
+// existence is taken straight from the BAL (the account's first change index), with no
+// base read: the AddressPath is stamped ValueUnknown, so field reads still fall back to
+// the committed base for a base-present account's untouched fields.
+func (vm *VersionMap) SeedAddresses(bal types.BlockAccessList) {
 	for i := range bal {
-		idx <- i
+		vm.seedOneAddress(&bal[i])
 	}
-	close(idx)
-	wg.Wait()
 }
 
-func (vm *VersionMap) seedOneAddress(ac *types.AccountChanges, base AccountBaseReader) {
-	addr := accounts.InternAddress(ac.Address)
-	baseAcc, err := base.ReadAccountData(addr)
-	if err != nil {
-		return
-	}
-	if baseAcc != nil {
-		SeedOrigin(vm, addr, baseAcc)
-		return
-	}
+func (vm *VersionMap) seedOneAddress(ac *types.AccountChanges) {
 	minIdx := balMinChangeIndex(ac)
 	if minIdx == 0 {
 		return // only reads, nothing created
 	}
-	acc, ok := NewVersionedAccountView(addr, int(balMaxChangeIndex(ac)), vm, base).GetAccount()
+	addr := accounts.InternAddress(ac.Address)
+	// Compose the existence marker from the BAL field cells alone (nil base → no DB
+	// read); a touched-empty account composes to nil and is left for the withhold.
+	acc, ok := NewVersionedAccountView(addr, int(minIdx), vm, nil).GetAccount()
 	if !ok {
 		return
 	}
-	vm.WriteAddress(addr, Version{TxIndex: int(minIdx) - 1}, &acc, true)
+	vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, &acc)
 }
 
 // balMinChangeIndex is the lowest 1-based change index across an account's BAL entries,

@@ -447,7 +447,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
-	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}}
+	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.AccountSource()}
 
 	if !commited {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
@@ -872,6 +872,19 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// cross-check against the destruct's Incarnation cell and invalidate the tx forever.
 		if r.version.TxIndex == originIndex && !gateOriginAccount(s, addr, acc) {
 			return nil, r.source, r.version, nil
+		}
+		// An AccountFromBAL AddressPath is an existence-only marker — the account exists but
+		// its value lives in the committed base. Read the base through for the data
+		// (field reads resolve their value off this account); a block-created account has
+		// no base record, so its value is the marker itself (its field cells). The read
+		// stays recorded at the marker's version, so it does not add a second AddressPath
+		// origin that would trip OCC against the marker cell.
+		if r.hdr.accSource == AccountFromBAL {
+			if base, err := s.committedAccount(addr); err != nil {
+				return nil, r.source, r.version, err
+			} else if base != nil {
+				acc = base
+			}
 		}
 		if r.recordVR {
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
