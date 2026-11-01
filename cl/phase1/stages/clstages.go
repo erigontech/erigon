@@ -89,9 +89,17 @@ type Cfg struct {
 	sleepForSlotHeadChanged      bool
 	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
-	executionHead      common.Hash
-	forkChoiceRerunAt  time.Time
-	chainTipRejections *chainTipRejections
+	executionHead               common.Hash
+	forkChoiceRerunAt           time.Time
+	forkChoiceWaitingForIndices bool
+	forkChoiceIndicesChanged    <-chan struct{}
+	chainTipRejections          *chainTipRejections
+	pendingBlockWrite           *pendingBlockWrite
+}
+
+type pendingBlockWrite struct {
+	block            *cltypes.SignedBeaconBlock
+	collectExecution bool
 }
 
 type Args struct {
@@ -214,8 +222,41 @@ func catchUpPublishingHead(args Args) StageName {
 	return next
 }
 
-func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+func processBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, newPayload bool) error {
+	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
+		return err
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	_, hasHeaderInFCU := cfg.forkChoice.GetHeader(blockRoot)
+	if !hasHeaderInFCU {
+		if err := cfg.forkChoice.OnBlock(ctx, block, newPayload, true, false); err != nil {
+			return err
+		}
+		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
+			return nil
+		}
+	}
+
+	// Block roots exclude signatures. Persist the copy accepted by fork choice.
+	acceptedBlock, ok := cfg.forkChoice.GetBlock(blockRoot)
+	if !ok {
+		return nil
+	}
+	if err := persistAcceptedBlock(ctx, cfg, acceptedBlock); err != nil {
+		// Fork choice advances before persistence. Keep the accepted block across stage
+		// transitions and finish its write before importing more blocks or reporting success.
+		cfg.pendingBlockWrite = &pendingBlockWrite{block: acceptedBlock}
+		return err
+	}
+	return nil
+}
+
+func persistAcceptedBlock(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
+	if err := cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
@@ -223,18 +264,37 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 	}); err != nil {
 		return err
 	}
+	cfg.emitter.NotifyBlockIndicesChanged()
+	return nil
+}
 
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
-	}
-
-	_, hasHeaderInFCU := cfg.forkChoice.GetHeader(blockRoot)
-	if !checkDataAvaiability && hasHeaderInFCU {
+func retryPendingBlockWrite(ctx context.Context, cfg *Cfg) error {
+	pending := cfg.pendingBlockWrite
+	if pending == nil {
 		return nil
 	}
-
-	return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
+	block := pending.block
+	for {
+		err := persistAcceptedBlock(ctx, cfg, block)
+		if err == nil && pending.collectExecution {
+			if err = cfg.blockCollector.AddBlock(block.Block); err != nil {
+				err = fmt.Errorf("failed to add block to collector: %w", err)
+			}
+		}
+		if err == nil {
+			cfg.pendingBlockWrite = nil
+			if cfg.peerDas != nil {
+				cfg.peerDas.BackfillCustodyColumns(block.Block.Slot, block.Block.Slot)
+			}
+			return nil
+		}
+		log.Warn("[Caplin] failed to persist accepted block, retrying", "slot", block.Block.Slot, "err", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 /*
@@ -350,6 +410,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
 					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
 					downloader.SetGloasSuccessorValidator(network2.NewGloasSuccessorValidator(cfg.state, startingRoot))
+					downloader.SetGloasEnvelopeSignatureValidator(cfg.state)
 					if checkpoint_sync.RemoteCheckpointSyncEnabled(cfg.caplinConfig) {
 						if urls := clparams.GetAllCheckpointSyncEndpoints(cfg.caplinConfig.NetworkId); len(urls) > 0 {
 							downloader.SetHTTPFallbackURL(urls[0])
@@ -367,6 +428,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ForwardSync: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.pendingBlockWrite != nil {
+						return ChainTipSync
+					}
 					// If forward sync is stale (no progress), go directly to ChainTipSync
 					// so gossip can deliver blocks that range requests cannot.
 					if errors.Is(err, ErrForwardSyncStale) {
@@ -385,6 +449,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.pendingBlockWrite != nil {
+						return ChainTipSync
+					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
@@ -396,6 +463,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				Description: `fork choice stage. We will send all fork choise things here
 				also, we will wait up to delay seconds to deal with attestations + side forks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.forkChoiceWaitingForIndices {
+						return CleanupAndPruning
+					}
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
@@ -406,6 +476,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			CleanupAndPruning: {
 				Description: `cleanup and pruning is done here`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.forkChoiceWaitingForIndices {
+						return SleepForSlot
+					}
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
@@ -440,6 +513,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.forkChoiceWaitingForIndices {
+						return ForkChoice
+					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
@@ -449,6 +525,17 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					if cfg.forkChoiceWaitingForIndices {
+						timer := time.NewTimer(sleepForSlotRewakeInterval)
+						defer timer.Stop()
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-cfg.forkChoiceIndicesChanged:
+						case <-timer.C:
+						}
+						return nil
+					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
 						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,

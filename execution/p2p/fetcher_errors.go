@@ -30,6 +30,7 @@ var (
 	ErrInvalidFetchBlocksAmount  = errors.New("invalid fetch blocks amount")
 	ErrInvalidFetchHeadersAmount = errors.New("invalid fetch headers amount")
 	ErrInvalidBodyRLP            = errors.New("invalid block body RLP")
+	ErrBodyDoesNotMatchHeader    = errors.New("body does not match header")
 )
 
 type ErrInvalidFetchHeadersRange struct {

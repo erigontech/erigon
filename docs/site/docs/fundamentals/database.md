@@ -137,7 +137,7 @@ free space for a second copy of itself on the volume it already lives on, and a
 big `chaindata/` can take hours.
 
 Erigon also compacts at startup, before the node opens its databases: any
-database whose free pages are at least 10 GB **and** more than four times its live
+database whose free pages are at least 5 GB **and** more than three times its live
 data is rewritten the same way (`[compact] auto-compact` in the log). It needs the
 same free space for a second copy, delays startup while it runs, and cannot be
 turned off. A database that fails to compact is left as it was, and startup

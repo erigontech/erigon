@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -1001,7 +1002,13 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
-	l = append(append(l, l1...), l2...)
+	l = append(l, l1...)
+	for _, fPath := range l2 {
+		if v, err := version.ParseVersion(filepath.Base(fPath)); err == nil && v.GreaterOrEqual(version.V2_0) {
+			continue // positional accessor, not recsplit
+		}
+		l = append(l, fPath)
+	}
 
 	for _, fPath := range l {
 		index, err := recsplit.OpenIndex(fPath)

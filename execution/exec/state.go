@@ -136,6 +136,7 @@ type WorkerContext struct {
 	// collectorAcc keeps this worker's reads for the process-level collector until
 	// a non-blocking TrySend hands them off; Close flushes the rest.
 	collectorAcc *kvmetrics.DomainMetrics
+	codeBuf      []byte
 }
 
 // installWorkerGetHash points the EVM's BLOCKHASH lookup at the worker's own
@@ -223,6 +224,10 @@ func (rw *WorkerContext) Close() {
 	}
 }
 
+func (rw *WorkerContext) getter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return rw.rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics).WithCodeBuf(&rw.codeBuf))
+}
+
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -273,7 +278,7 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 	type historic interface{ SetTx(kv.TemporalTx) }
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.getter(chainTx))
 	case historic:
 		typedReader.SetTx(chainTx)
 	default:
@@ -360,7 +365,7 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.getter(rw.chainTx))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -401,7 +406,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		// from the current batch.
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics)))
+		rw.SetReader(state.NewReaderV3(rw.getter(rw.chainTx)))
 	}
 
 	if rw.background && rw.chainTx == nil {
