@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"fmt"
+	"maps"
 	"math/big"
 	"strings"
 	"testing"
@@ -337,9 +338,7 @@ func edgeExtraAlloc(tc pbtEdgeCase) types.GenesisAlloc {
 	genesis.Config.AmsterdamTime = &amsterdam
 	execmoduletester.AddPBTRequestContracts(genesis)
 	if tc.alloc != nil {
-		for address, account := range tc.alloc() {
-			genesis.Alloc[address] = account
-		}
+		maps.Copy(genesis.Alloc, tc.alloc())
 	}
 	return genesis.Alloc
 }
@@ -349,9 +348,7 @@ func edgeGenesis(config *chain.Config, env *pbtEdgeEnv, tc pbtEdgeCase) *types.G
 		env.from:               {Balance: new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))},
 		pbtForkContractAddress: {Balance: big.NewInt(0), Nonce: 1, Code: common.FromHex("0x60003560005500")},
 	}
-	for address, account := range edgeExtraAlloc(tc) {
-		alloc[address] = account
-	}
+	maps.Copy(alloc, edgeExtraAlloc(tc))
 	return &types.Genesis{Config: config, Alloc: alloc, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
 }
 
