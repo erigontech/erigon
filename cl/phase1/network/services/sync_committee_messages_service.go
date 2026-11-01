@@ -124,10 +124,58 @@ func (s *syncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []b
 
 // ProcessMessage processes a sync committee message
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SyncCommitteeMessageForGossip) error {
+	aggregateVerificationData, err := s.checkMessage(subnet, msg)
+	if err != nil || aggregateVerificationData == nil {
+		return err
+	}
+	// The verdict is awaited without the service or head-state lock, so a gossip message is accepted, and forwarded,
+	// only once its signature is verified, while other messages and head-state writes go on.
+	if msg.ImmediateVerification {
+		err = s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	} else {
+		err = s.batchSignatureVerifier.VerifySyncCommitteeMessage(ctx, aggregateVerificationData)
+	}
+	if err != nil {
+		return err
+	}
+	return s.storeVerifiedMessage(*subnet, msg.SyncCommitteeMessage)
+}
+
+// storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
+// if another message for them was verified at the same time and recorded first.
+func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
+	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok {
+		v := verified.(verifiedSyncCommitteeMessage)
+		if v.beaconBlockRoot != msg.BeaconBlockRoot || v.signature != msg.Signature {
+			return ErrIgnore
+		}
+		return nil
+	}
+	s.seenSyncCommitteeMessages.Store(key, verifiedSyncCommitteeMessage{
+		beaconBlockRoot: msg.BeaconBlockRoot,
+		signature:       msg.Signature,
+	})
+	s.cleanupOldSyncCommitteeMessages()
+	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
+	}); err != nil {
+		log.Debug("failed to add sync committee message to pool", "err", err)
+	}
+	return nil
+}
+
+// checkMessage runs the gossip checks that need no signature and returns the signature to verify, or nil for a
+// duplicate of an already verified message that has not been published yet.
+func (s *syncCommitteeMessagesService) checkMessage(subnet *uint64, msg *SyncCommitteeMessageForGossip) (*AggregateVerificationData, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var aggregateVerificationData *AggregateVerificationData
+	err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
 		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot) {
 			return ErrIgnore
@@ -173,46 +221,16 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		if !s.test && err != nil {
 			return err
 		}
-		aggregateVerificationData := &AggregateVerificationData{
+		aggregateVerificationData = &AggregateVerificationData{
 			Signatures:  [][]byte{signature},
 			SignRoots:   [][]byte{signingRoot},
 			Pks:         [][]byte{pubKey},
 			SendingPeer: msg.Receiver,
-			F: func() {
-				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, verifiedSyncCommitteeMessage{
-					beaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
-					signature:       msg.SyncCommitteeMessage.Signature,
-				})
-				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-				// ImmediateVerification is sequential so using the headState directly is safe
-				if msg.ImmediateVerification {
-					if err := s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage); err != nil {
-						log.Debug("failed to add sync committee message to pool", "err", err)
-					}
-				} else {
-					// ImmediateVerification=false is parallel so using the headState directly is unsafe
-					if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-						return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
-					}); err != nil {
-						log.Debug("failed to add sync committee message to pool", "err", err)
-					}
-				}
-			},
+			F:           func() {},
 		}
-
-		if msg.ImmediateVerification {
-			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-		} else {
-			// push the signatures to verify asynchronously and run final functions after that.
-			s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
-		}
-
-		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-		// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-		// gossip ourselves or ban the peer which sent that particular invalid signature.
 		return nil
 	})
+	return aggregateVerificationData, err
 }
 
 // MarkPublished records that content ProcessMessage already verified for

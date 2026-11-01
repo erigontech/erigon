@@ -63,11 +63,15 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
+		previousWrite := cfg.pendingBlockWrite
 		if err = processBlock(ctx, cfg, block, false); err != nil {
-			// Forward sync skips NewPayload, so a pending write must also retain the
-			// collector insertion that would otherwise be lost on a stage transition.
-			if collectExecution && cfg.pendingBlockWrite != nil && cfg.pendingBlockWrite.block == block {
-				cfg.pendingBlockWrite.collectExecution = true
+			if cfg.pendingBlockWrite != nil {
+				// Forward sync skips NewPayload, so a new pending write must retain its
+				// collector insertion. A failed retry must keep the earlier write unchanged.
+				if collectExecution && cfg.pendingBlockWrite != previousWrite {
+					cfg.pendingBlockWrite.collectExecution = true
+				}
+				return newHighestBlockProcessed, fmt.Errorf("%w: persist accepted block: %w", network2.ErrUnattributableProcess, err)
 			}
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
