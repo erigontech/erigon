@@ -267,9 +267,12 @@ func headPayloadStatus(head forkchoice.ForkChoiceNode, isGloas bool) string {
 
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
 func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
-	stateRoot, err := headState.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("failed to hash ssz: %w", err)
+	stateRoot := headState.PeekPreviousStateRoot()
+	if stateRoot == (common.Hash{}) {
+		var err error
+		if stateRoot, err = headState.HashSSZ(); err != nil {
+			return fmt.Errorf("failed to hash ssz: %w", err)
+		}
 	}
 	head, current, executionOptimistic, err := headEventSnapshot(store, headSlot, headRoot)
 	if err != nil || !current {

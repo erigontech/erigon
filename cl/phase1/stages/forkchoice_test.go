@@ -1240,6 +1240,52 @@ func TestEmitHeadEventKeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
 	}
 }
 
+func TestEmitHeadEventReportsBlockStateRoot(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.GloasForkEpoch = 0
+	newHeadState := func(t *testing.T) *state.CachingBeaconState {
+		headState := state.New(&beaconCfg)
+		headState.SetVersion(clparams.GloasVersion)
+		require.NoError(t, headState.SetSlot(1))
+		return headState
+	}
+	requireEventStateRoot := func(t *testing.T, headState *state.CachingBeaconState, want common.Hash) {
+		store := &mock_services.ForkChoiceStorageMock{HeadVal: common.Hash{2}, HeadSlotVal: 1}
+		emitter := beaconevents.NewEventEmitter()
+		events := make(chan *beaconevents.EventStream, 2)
+		subscription := emitter.State().Subscribe(events)
+		defer subscription.Unsubscribe()
+
+		require.NoError(t, emitHeadEvent(&beaconCfg, store, emitter, store.HeadSlotVal, store.HeadVal, headState))
+
+		require.Equal(t, want, receiveStateEvent(t, events).Data.(*beaconevents.HeadData).State)
+		require.Equal(t, want, receiveStateEvent(t, events).Data.(*beaconevents.HeadV2Data).Data.State)
+	}
+	t.Run("state changed by the envelope after the block", func(t *testing.T) {
+		headState := newHeadState(t)
+		blockStateRoot, err := headState.HashSSZ()
+		require.NoError(t, err)
+		headState.SetPreviousStateRoot(blockStateRoot)
+		headState.SetLatestBlockHash(common.Hash{0xbb})
+		postEnvelopeRoot, err := headState.HashSSZ()
+		require.NoError(t, err)
+		require.NotEqual(t, blockStateRoot, postEnvelopeRoot)
+		requireEventStateRoot(t, headState, blockStateRoot)
+	})
+	t.Run("no saved state root", func(t *testing.T) {
+		headState := newHeadState(t)
+		stateRoot, err := headState.HashSSZ()
+		require.NoError(t, err)
+		requireEventStateRoot(t, headState, stateRoot)
+	})
+}
+
 func TestEmitHeadEventsDropsStaleSnapshot(t *testing.T) {
 	emitter := beaconevents.NewEventEmitter()
 	ch := make(chan *beaconevents.EventStream, 2)
