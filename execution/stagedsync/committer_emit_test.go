@@ -127,7 +127,7 @@ func (b *testStorageBase) ReadAccountData(addr accounts.Address) (*accounts.Acco
 	return b.accounts[addr], nil
 }
 
-func (b *testStorageBase) ReadStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+func (b *testStorageBase) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	av, kv := addr.Value(), key.Value()
 	v, ok := b.storage[string(av[:])+string(kv[:])]
 	return v, ok, nil
@@ -229,7 +229,7 @@ func (b *errStorageBase) ReadAccountData(accounts.Address) (*accounts.Account, e
 	return nil, b.accErr
 }
 
-func (b *errStorageBase) ReadStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+func (b *errStorageBase) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, b.storErr
 }
 

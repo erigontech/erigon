@@ -1683,11 +1683,6 @@ type blockResult struct {
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
 
-	// VersionMap is the block's shared version map (also the calculator's GetAccount
-	// source). Carried on the result so the block-end commitment fold reads it while
-	// it is still alive in prevBlocks.
-	VersionMap *state.VersionMap
-
 	// Exec window for newPayload wall attribution; the calculator pairs these with
 	// its own commit-window timestamps to measure exec/commit overlap.
 	execStartedAt time.Time
@@ -2085,10 +2080,6 @@ func (result *execResult) calcFees(
 		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT. The self-destruct
-	// marker rides the removal only for a real destruct (a contract); an EIP-161
-	// touched-empty EOA carries none, so its delayed tip is credited and re-creates the
-	// account, matching serial.
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	// A contract coinbase self-destructed with no same-tx re-create is net-absent:
@@ -3567,7 +3558,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			complete:         true,
 			isPartial:        isPartial,
 			ApplyCount:       be.applyCount,
-			VersionMap:       be.versionMap,
 			TxIO:             be.blockIO,
 			Receipts:         blockReceipts,
 			receiptsComplete: receiptsComplete,

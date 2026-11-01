@@ -18,7 +18,12 @@ type AccountBaseReader interface {
 // cell for — the storage counterpart of AccountBaseReader, used by VersionMapView's
 // cross-block fallback where the touched union spans earlier blocks' writes.
 type StorageBaseReader interface {
-	ReadStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error)
+	ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error)
+}
+
+type BaseReader interface {
+	AccountBaseReader
+	StorageBaseReader
 }
 
 // VersionedAccountView is an accounts.AccountView composing each account field on

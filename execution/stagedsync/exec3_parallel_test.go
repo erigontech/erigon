@@ -1898,7 +1898,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},
 		}
-		pe.scheduleNextPending(t.Context())
+		require.NoError(t, pe.scheduleNextPending(t.Context()))
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())

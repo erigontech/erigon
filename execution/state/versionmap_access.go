@@ -31,22 +31,6 @@ import (
 func (vm *VersionMap) SetBaseTxNum(baseTxNum uint64) { vm.baseTxNum.Store(baseTxNum) }
 func (vm *VersionMap) BaseTxNum() uint64             { return vm.baseTxNum.Load() }
 
-// blockTxIndex maps a global txNum to the block-relative TxIndex, using the map's base.
-func (vm *VersionMap) blockTxIndex(txNum uint64) int {
-	return int(txNum-vm.baseTxNum.Load()) - 1
-}
-
-// GetAccount returns addr's account composed at the given global txNum — including
-// the writes of the tx at that txNum — and whether it exists there, in comma-ok form.
-// It is the post-seal projection accessor commitment uses instead of folding per-field
-// cells and re-deriving existence: a false ok means the account is deleted/absent.
-// Reading one past the tx's TxIndex (txNum - baseTxNum, since txNum = baseTxNum +
-// TxIndex + 1) includes that tx's own writes.
-func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base AccountBaseReader) (accounts.Account, bool) {
-	txIdx := int(txNum - vm.baseTxNum.Load())
-	return NewVersionedAccountView(addr, txIdx, vm, base).GetAccount()
-}
-
 // VersionMapView is a post-seal, data-only read over the version map pinned at a
 // global txNum. It composes each account/slot from the map cells, falling back to base
 // for fields no cell covers, and carries no lifecycle or EIP reasoning — the add/remove
@@ -56,7 +40,7 @@ func (vm *VersionMap) GetAccount(addr accounts.Address, txNum uint64, base Accou
 type VersionMapView struct {
 	vm    *VersionMap
 	txNum uint64
-	base  AccountBaseReader
+	base  BaseReader
 	err   error
 }
 
@@ -66,7 +50,7 @@ func (view *VersionMapView) Err() error { return view.err }
 
 // View pins a read of vm at the given global txNum. base is the cascade tail —
 // predecessor version maps then the shared domain — supplying fields no cell covers.
-func (vm *VersionMap) View(txNum uint64, base AccountBaseReader) *VersionMapView {
+func (vm *VersionMap) View(txNum uint64, base BaseReader) *VersionMapView {
 	return &VersionMapView{vm: vm, txNum: txNum, base: base}
 }
 
@@ -108,8 +92,8 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 	if val, res, ok := liveStorageValue(view.vm, addr, key, view.txIdx()); ok && res.Status() != MVReadResultNone {
 		return val, true
 	}
-	if sr, ok := view.base.(StorageBaseReader); ok && sr != nil {
-		val, ok, err := sr.ReadStorage(addr, key)
+	if view.base != nil {
+		val, ok, err := view.base.ReadAccountStorage(addr, key)
 		if err != nil {
 			view.err = cmp.Or(view.err, err)
 			return uint256.Int{}, false
@@ -156,7 +140,7 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 			if err := av.Err(); err != nil {
 				return err
 			}
-			if !ok || !isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) {
+			if !ok || !acc.Balance.IsZero() || acc.Nonce != 0 || !acc.CodeHash.IsEmpty() {
 				continue
 			}
 			if idx == maxIdx {
@@ -250,10 +234,4 @@ func balMaxChangeIndex(ac *types.AccountChanges) uint32 {
 		}
 	}
 	return m
-}
-
-// isEmptyForEIP161 reports whether an account is empty per EIP-161: zero balance,
-// zero nonce, and empty (or nil) code hash.
-func isEmptyForEIP161(balance uint256.Int, nonce uint64, codeHash accounts.CodeHash) bool {
-	return balance.IsZero() && nonce == 0 && (codeHash == accounts.EmptyCodeHash || codeHash == accounts.CodeHash{})
 }

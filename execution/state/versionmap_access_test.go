@@ -116,13 +116,3 @@ func TestVersionMapWriteView_StorageChangesFiltersNetZero(t *testing.T) {
 	}
 	require.Equal(t, 2, allCount, "unfiltered Storages keeps both writes")
 }
-
-// TestVersionMap_BlockTxIndex pins the global-txNum ⇄ block-relative-TxIndex mapping
-// (txNum = baseTxNum + TxIndex + 1).
-func TestVersionMap_BlockTxIndex(t *testing.T) {
-	vm := NewVersionMap(nil)
-	vm.SetBaseTxNum(100)
-	require.Equal(t, -1, vm.blockTxIndex(100)) // block-start system tx
-	require.Equal(t, 0, vm.blockTxIndex(101))  // first regular tx
-	require.Equal(t, 5, vm.blockTxIndex(106))
-}

@@ -36,7 +36,7 @@ import (
 // version map from the BAL, stamp the EIP-161 removals into it as data, then emit each
 // touched key via GetAccount. base supplies untouched fields; a high fold txNum reads the
 // block-end floor. Returns the emitted leaf updates keyed by plain key.
-func balFoldUpdates(t *testing.T, blockBAL types.BlockAccessList, eip161Enabled, isAura bool, base state.AccountBaseReader) map[string]commitment.Update {
+func balFoldUpdates(t *testing.T, blockBAL types.BlockAccessList, eip161Enabled, isAura bool, base state.StateReader) map[string]commitment.Update {
 	t.Helper()
 	const foldTxNum = 1 << 20 // above every BAL change index → GetAccount reads the block-end floor
 	vm := state.NewVersionMap(blockBAL)

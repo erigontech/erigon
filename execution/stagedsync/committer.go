@@ -371,20 +371,11 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
-		// Pin asOfReader at this tx's txNum before ApplyWrites so a first-touch
-		// lazy-load reads the canonical pre-tx state via GetAsOf(r.txNum).
-		// Otherwise the initial txNum=0 leaks into the first lazy-load and crashes
-		// with seekInFiles(txNum=0) on datadirs whose history window starts past
-		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
-		// it only affects the lazy-load path, never the trie fold.
-		// r.writes enumerates the tx's key-set and reads each value from the version
-		// map's cells — it is a view over the map, not a retained write-set copy.
 		writes := r.writes
 		if r.versionMap != nil {
 			cc.curVersionMap = r.versionMap
 		}
 		if writes != nil && !writes.IsEmpty() {
-			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.accumulateTouched(writes)
 		}
@@ -617,11 +608,10 @@ func (cc *commitmentCalculator) balVersionMap(req *blockRequest) (*state.Version
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
 	vm.SeedAddresses(req.bal)
-	base := &committedAccountReader{&asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: req.firstTxNum, dr: cc.asOfReader.dr}}
 	err := vm.SeedEmptyRemovals(req.bal,
 		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
 		cc.chainConfig.Aura != nil,
-		base)
+		cc.asOfReader.dr.StateReaderAt(req.firstTxNum))
 	return vm, err
 }
 
@@ -667,7 +657,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	balUpdates := cc.balUpdates
 	cc.clearTouched()
 	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex))
-	err := cc.emitTouched(vm.View(t.lastTxNum, &committedAccountReader{reader}), balUpdates)
+	err := cc.emitTouched(vm.View(t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
 	cc.clearTouched()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
@@ -701,7 +691,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	// Recompute block r the raw-view way (emitTouched over the version map) to
 	// cross-check against the BAL-driven root.
 	cc.asOfReader.txNum = r.lastTxNum + 1
-	err := cc.emitTouched(cc.curVersionMap.View(r.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
+	err := cc.emitTouched(cc.curVersionMap.View(r.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	cc.clearTouched()
 	incUpdates := cc.handOffUpdates()
 	if err != nil {
@@ -809,7 +799,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
-	emitErr := cc.emitTouched(cc.curVersionMap.View(t.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
+	emitErr := cc.emitTouched(cc.curVersionMap.View(t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	if !m.midBlock {
 		cc.clearTouched()
 	}

@@ -114,11 +114,11 @@ func TestSeedAddresses(t *testing.T) {
 
 	// The marker is ValueUnknown, so the authoritative value defers to the base: a
 	// base-present account keeps its untouched base nonce, not the seed's zeroed marker.
-	ex, ok := vm.GetAccount(existing, 6, reader)
+	ex, ok := NewVersionedAccountView(existing, 6, vm, reader).GetAccount()
 	require.True(t, ok)
 	require.Equal(t, uint64(9), ex.Nonce, "a base-present account's untouched nonce resolves from the base")
 
-	cr, ok := vm.GetAccount(created, 6, reader)
+	cr, ok := NewVersionedAccountView(created, 6, vm, reader).GetAccount()
 	require.True(t, ok)
 	require.Equal(t, uint64(1), cr.Nonce, "a created account composes from its field cells")
 }
@@ -150,7 +150,7 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 
 	// Compose after funding (BAL index 2 → TxIndex 1) but before the code deploy (index 5
 	// → TxIndex 4): the funded, still-codeless account the CREATE2 collision check must see.
-	acc, ok := vm.GetAccount(proxy, 3, reader)
+	acc, ok := NewVersionedAccountView(proxy, 3, vm, reader).GetAccount()
 	require.True(t, ok, "the funded proxy exists before the deploying tx")
 	require.Equal(t, *uint256.NewInt(256_000), acc.Balance)
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "reads before the deploy must not see the later CREATE2 code")

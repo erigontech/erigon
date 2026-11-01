@@ -1351,13 +1351,6 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 	return out
 }
 
-// SetEmptyRemoval clears addr's whole footprint and stamps the account-removal signal: a
-// balance write marked ValueDeleted, which commitment and the domain apply read to drop
-// the leaf with no lifecycle re-derivation. A self-destruct marker is preserved across the
-// clear: a self-destructed account's removal is unconditional (calcFees burns its delayed
-// fee, the read path pins the absence), whereas an EIP-161 touched-empty EOA carries none
-// and must not gain one. deleteAddr still clears the AddressPath so neither is mistaken for
-// a same-tx SD+CREATE2 recreate.
 func (ws *WriteSet) SetEmptyRemoval(addr accounts.Address, version Version) {
 	ws.deleteAddr(addr)
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
@@ -1719,7 +1712,7 @@ func (ws *WriteSet) StorageChanges() iter.Seq2[accounts.Address, map[accounts.St
 	return ws.Storages()
 }
 
-func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws) }
+func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws, ws) }
 
 func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if ws == nil {

@@ -39,48 +39,40 @@ var _ WriteSetView = (*WriteSet)(nil)
 // accountChangeAddrs is the shared AccountChanges implementation over any view: it reads
 // each field's value status, so a net-zero (ValueUnchanged) balance/nonce/codeHash write
 // never marks the account changed, while the put-only fields always do.
-func accountChangeAddrs(v WriteSetView) iter.Seq[accounts.Address] {
+func accountChangeAddrs(v, structural WriteSetView) iter.Seq[accounts.Address] {
 	return func(yield func(accounts.Address) bool) {
-		seen := make(map[accounts.Address]struct{})
-		emit := func(a accounts.Address) bool {
-			if _, ok := seen[a]; ok {
-				return true
-			}
-			seen[a] = struct{}{}
-			return yield(a)
-		}
 		for a, vw := range v.Balances() {
-			if vw.valStatus != ValueUnchanged && !emit(a) {
+			if vw.valStatus != ValueUnchanged && !yield(a) {
 				return
 			}
 		}
 		for a, vw := range v.Nonces() {
-			if vw.valStatus != ValueUnchanged && !emit(a) {
+			if vw.valStatus != ValueUnchanged && !yield(a) {
 				return
 			}
 		}
 		for a, vw := range v.CodeHashes() {
-			if vw.valStatus != ValueUnchanged && !emit(a) {
+			if vw.valStatus != ValueUnchanged && !yield(a) {
 				return
 			}
 		}
-		for a := range v.Incarnations() {
-			if !emit(a) {
+		for a := range structural.Incarnations() {
+			if !yield(a) {
 				return
 			}
 		}
-		for a := range v.Codes() {
-			if !emit(a) {
+		for a := range structural.Codes() {
+			if !yield(a) {
 				return
 			}
 		}
-		for a := range v.CreateContracts() {
-			if !emit(a) {
+		for a := range structural.CreateContracts() {
+			if !yield(a) {
 				return
 			}
 		}
-		for a := range v.SelfDestructs() {
-			if !emit(a) {
+		for a := range structural.SelfDestructs() {
+			if !yield(a) {
 				return
 			}
 		}

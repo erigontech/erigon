@@ -22,17 +22,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
@@ -113,75 +108,6 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"stale block 0 result while we've already computed block 5 — skip")
-}
-
-// TestHandleMessage_TxResultPinsAsOfReaderTxNum is the regression test for
-// the snapshot-loaded read crash: cc.asOfReader is constructed with txNum=0,
-// and only the compute methods (which run on blockResult / mid-block step
-// edges) overwrite that field. A mid-block step-boundary compute reads the
-// committed base through this reader, so if txNum were left at 0 on a
-// snapshot-loaded chain whose visible window starts well past genesis it
-// fails hard with `seekInFiles(txNum=0) but data before txNum=N not
-// available` and FCU fails on every block.
-//
-// The fix in handleMessage's *txResult branch pins asOfReader.txNum to the
-// current tx's txNum before processing its writes; the compute methods
-// overwrite it to lastTxNum+1 right before ComputeCommitment.
-//
-// We test the post-condition (asOfReader.txNum == r.txNum after each
-// non-empty txResult) — the simplest invariant that catches the absence of
-// the fix; an empty-writes txResult leaves the prior pin in place.
-func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
-	asOfReader := &asOfStateReader{txNum: 0}
-	cc := &commitmentCalculator{
-		asOfReader: asOfReader,
-		// Non-nil doms with stepSize 0 so the step-boundary hook short-circuits;
-		// this test pins asOfReader.txNum, not the checkpoint path.
-		doms: &execctx.SharedDomains{},
-	}
-
-	// A txResult must carry at least one write to enter the fix's
-	// `if len(r.writes) > 0` branch — empty writes have no lazy-loads
-	// to seed and therefore intentionally don't update txNum.
-	// Path/value content irrelevant — domainReader is nil so the lazy-load
-	// path skips the real read. We only need a non-empty write set.
-	someWrites := &state.WriteSet{}
-	someWrites.SetBalance(accounts.NilAddress, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: accounts.NilAddress, Path: state.BalancePath}})
-
-	// First txResult: txNum jumps from 0 to 12345.
-	cc.handleMessage(context.Background(), &txResult{
-		rules:  &chain.Rules{},
-		txNum:  12345,
-		writes: someWrites,
-	})
-	require.Equal(t, uint64(12345), cc.asOfReader.txNum,
-		"asOfReader.txNum must be pinned to the current tx's txNum before "+
-			"ApplyWrites; otherwise lazy-loads triggered by the writes use "+
-			"the stale value (initially 0) and fail on snapshot-loaded chains.")
-
-	// Subsequent txResult: txNum advances to 12346. Verifies the field
-	// is updated on every txResult, not just the first one.
-	cc.handleMessage(context.Background(), &txResult{
-		rules:  &chain.Rules{},
-		txNum:  12346,
-		writes: someWrites,
-	})
-	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
-		"asOfReader.txNum must advance on every txResult (each tx's "+
-			"first-touch lazy-loads need the matching pre-tx baseline).")
-
-	// Empty-writes txResult: the fix's len(writes)>0 guard skips the
-	// pin. asOfReader stays where the prior tx left it. This is the
-	// intended behavior — an empty writeset has no lazy-loads to seed,
-	// so updating txNum would be wasted work and could mask real
-	// regressions in producers that drop writes.
-	cc.handleMessage(context.Background(), &txResult{
-		rules:  &chain.Rules{},
-		txNum:  12347,
-		writes: nil,
-	})
-	require.Equal(t, uint64(12346), cc.asOfReader.txNum,
-		"empty writes → no lazy-load → don't bump txNum; the prior pin stands.")
 }
 
 // TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
