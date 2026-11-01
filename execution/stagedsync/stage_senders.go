@@ -268,10 +268,11 @@ Loop:
 		// Skip blocks with no transactions
 		if len(body.Transactions) == 0 {
 			// Write empty senders for blocks with no transactions
-			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil); err != nil {
+			err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil)
+			pendingMu.Unlock()
+			if err != nil {
 				return err
 			}
-			pendingMu.Unlock()
 			continue
 		}
 		pendingBlocks[blockIndex] = &pendingBlock{
