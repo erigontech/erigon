@@ -163,6 +163,7 @@ func (s *Antiquary) Loop() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
@@ -451,6 +452,7 @@ func (s *Antiquary) antiquate() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(from, to)
 	if s.downloader != nil {
@@ -461,6 +463,16 @@ func (s *Antiquary) antiquate() error {
 	}
 
 	return nil
+}
+
+func (s *Antiquary) removeBlockOverlaps() {
+	var onDelete func(l []string) error
+	if s.downloader != nil {
+		onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
+	}
+	if err := s.sn.RemoveOverlaps(onDelete); err != nil {
+		s.logger.Warn("[Antiquary] Failed to remove block overlaps", "err", err)
+	}
 }
 
 func (s *Antiquary) NotifyBackfilled() {
@@ -564,6 +576,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(currentBlobsProgress, to)
 	if s.downloader != nil {
