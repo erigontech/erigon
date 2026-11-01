@@ -148,7 +148,7 @@ func (s *TopicSubscriptionsTestSuite) TestAdd_Success() {
 	}
 
 	err = s.ts.Add(topic, topicHandle, validator)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result := s.ts.Get(topic)
 	s.NotNil(result)
@@ -189,12 +189,12 @@ func (s *TopicSubscriptionsTestSuite) TestAdd_WithPendingSubscription() {
 	// Try to subscribe before adding the topic
 	futureExpiry := time.Now().Add(1 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, futureExpiry)
-	s.Require().Error(err)
+	s.Error(err)
 	s.Contains(err.Error(), "topic not found")
 
 	// Now add the topic - it should automatically subscribe with the pending expiry
 	err = s.ts.Add(topic, topicHandle, validator)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result := s.ts.Get(topic)
 	s.NotNil(result)
@@ -221,7 +221,7 @@ func (s *TopicSubscriptionsTestSuite) TestRemove_Success() {
 
 	// Remove the topic
 	err = s.ts.Remove(topic)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	// Verify it's removed
 	result := s.ts.Get(topic)
@@ -230,7 +230,7 @@ func (s *TopicSubscriptionsTestSuite) TestRemove_Success() {
 
 func (s *TopicSubscriptionsTestSuite) TestRemove_NotFound() {
 	err := s.ts.Remove("non_existent_topic")
-	s.Require().Error(err)
+	s.Error(err)
 	s.Contains(err.Error(), "topic not found")
 }
 
@@ -256,7 +256,7 @@ func (s *TopicSubscriptionsTestSuite) TestUnsubscribe_Success() {
 
 	// Unsubscribe
 	err = s.ts.Unsubscribe(topic)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result = s.ts.Get(topic)
 	s.NotNil(result)                        // Topic still exists
@@ -266,7 +266,7 @@ func (s *TopicSubscriptionsTestSuite) TestUnsubscribe_Success() {
 
 func (s *TopicSubscriptionsTestSuite) TestUnsubscribe_NotFound() {
 	err := s.ts.Unsubscribe("non_existent_topic")
-	s.Require().Error(err)
+	s.Error(err)
 	s.Contains(err.Error(), "topic not found")
 }
 
@@ -302,7 +302,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_Success() {
 	// Subscribe with future expiry
 	futureExpiry := time.Now().Add(1 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, futureExpiry)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result := s.ts.Get(topic)
 	s.NotNil(result)
@@ -313,7 +313,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_Success() {
 func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_TopicNotFound() {
 	futureExpiry := time.Now().Add(1 * time.Hour)
 	err := s.ts.SubscribeWithExpiry("non_existent_topic", futureExpiry)
-	s.Require().Error(err)
+	s.Error(err)
 	s.Contains(err.Error(), "topic not found")
 
 	// Verify it's added to toSubscribes
@@ -329,11 +329,11 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_TopicNotFound_Keep
 	shortExpiry := time.Now().Add(1 * time.Hour)
 
 	err := s.ts.SubscribeWithExpiry(topic, longExpiry)
-	s.Require().Error(err)
+	s.Error(err)
 	s.Contains(err.Error(), "topic not found")
 
 	err = s.ts.SubscribeWithExpiry(topic, shortExpiry)
-	s.Require().Error(err)
+	s.Error(err)
 	s.Contains(err.Error(), "topic not found")
 
 	s.ts.mutex.RLock()
@@ -358,7 +358,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_ExpiryInPast() {
 	// Subscribe with past expiry
 	pastExpiry := time.Now().Add(-1 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, pastExpiry)
-	s.Require().Error(err)
+	s.Error(err)
 	s.Equal(ErrExpiryInThePast, err)
 }
 
@@ -385,7 +385,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_UpdateExpiry() {
 	// Update with second expiry
 	secondExpiry := time.Now().Add(2 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, secondExpiry)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result = s.ts.Get(topic)
 	s.Equal(secondExpiry.Unix(), result.expiry.Unix())
@@ -410,7 +410,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_DoesNotShortenExpi
 
 	shortExpiry := time.Now().Add(1 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, shortExpiry)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result := s.ts.Get(topic)
 	s.NotNil(result.sub)
@@ -431,7 +431,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_BeaconAttestation(
 
 	futureExpiry := time.Now().Add(1 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, futureExpiry)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	result := s.ts.Get(topic)
 	s.NotNil(result)
@@ -452,7 +452,7 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_SyncCommittee() {
 
 	futureExpiry := time.Now().Add(1 * time.Hour)
 	err = s.ts.SubscribeWithExpiry(topic, futureExpiry)
-	s.Require().NoError(err)
+	s.NoError(err)
 
 	// Verify ENR update was called (via the mock set up in SetupTest with AnyTimes())
 	result := s.ts.Get(topic)

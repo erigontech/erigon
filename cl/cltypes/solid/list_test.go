@@ -125,11 +125,11 @@ func TestHashListEncodeDecodeSSZ(t *testing.T) {
 	h.Append(hash)
 
 	encoded, err := h.EncodeSSZ([]byte{})
-	require.NoError(t, err, "EncodeSSZ should not return an error")
+	assert.NoError(t, err, "EncodeSSZ should not return an error")
 
 	hDecoded := NewHashList(10)
 	err = hDecoded.DecodeSSZ(encoded, 0)
-	require.NoError(t, err, "DecodeSSZ should not return an error")
+	assert.NoError(t, err, "DecodeSSZ should not return an error")
 
 	assert.Equal(t, h.Length(), hDecoded.Length(), "Lengths should match after decoding")
 	assert.Equal(t, h.Get(0), hDecoded.Get(0), "Values should match after decoding")
@@ -166,11 +166,11 @@ func TestUint64ListSSZEncodeDecodeSSZ(t *testing.T) {
 	h.Append(123)
 
 	encoded, err := h.EncodeSSZ([]byte{})
-	require.NoError(t, err, "EncodeSSZ should not return an error")
+	assert.NoError(t, err, "EncodeSSZ should not return an error")
 
 	hDecoded := NewUint64ListSSZ(10)
 	err = hDecoded.DecodeSSZ(encoded, 0)
-	require.NoError(t, err, "DecodeSSZ should not return an error")
+	assert.NoError(t, err, "DecodeSSZ should not return an error")
 
 	assert.Equal(t, h.Length(), hDecoded.Length(), "Lengths should match after decoding")
 	assert.Equal(t, h.Get(0), hDecoded.Get(0), "Values should match after decoding")

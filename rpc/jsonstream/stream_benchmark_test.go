@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
 )
@@ -40,7 +39,7 @@ func benchmarkSimpleObject(b *testing.B, s *Stream) {
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		err = s.Flush()
 		assert.NoError(b, err)
 	}
@@ -72,7 +71,7 @@ func benchmarkNestedStructure(b *testing.B, s *Stream) {
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		err = s.Flush()
 		assert.NoError(b, err)
 	}
@@ -93,7 +92,7 @@ func benchmarkLargeArray(b *testing.B, s *Stream) {
 		s.WriteArrayEnd()
 
 		err := s.ClosePending(0)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		err = s.Flush()
 		assert.NoError(b, err)
 	}
@@ -121,7 +120,7 @@ func benchmarkMixedTypes(b *testing.B, s *Stream) {
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		err = s.Flush()
 		assert.NoError(b, err)
 	}
@@ -145,7 +144,7 @@ func benchmarkWriteToBuffer(b *testing.B, s *Stream) {
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		err = s.Flush()
 		assert.NoError(b, err)
 	}

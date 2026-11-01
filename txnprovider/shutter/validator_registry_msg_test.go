@@ -52,7 +52,7 @@ func TestRegistrationMessageInvalidUnmarshal(t *testing.T) {
 		make([]byte, 92),
 	} {
 		err := new(LegacyRegistrationMessage).Unmarshal(b)
-		require.ErrorContains(t, err, "invalid registration message length")
+		assert.ErrorContains(t, err, "invalid registration message length")
 	}
 
 	for _, isRegistrationByte := range []byte{2, 3, 255} {

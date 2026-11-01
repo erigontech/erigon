@@ -522,40 +522,40 @@ func TestStateMethods_OmittedBlockDefaultsToLatest(t *testing.T) {
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 	balNil, err := api.GetBalance(ctx, addr, nil)
-	require.NoError(t, err)
+	a.NoError(err)
 	balLatest, err := api.GetBalance(ctx, addr, &latest)
-	require.NoError(t, err)
+	a.NoError(err)
 	a.Equal(balLatest, balNil)
 
 	codeNil, err := api.GetCode(ctx, addr, nil)
-	require.NoError(t, err)
+	a.NoError(err)
 	codeLatest, err := api.GetCode(ctx, addr, &latest)
-	require.NoError(t, err)
+	a.NoError(err)
 	a.Equal(codeLatest, codeNil)
 
 	nonceNil, err := api.GetTransactionCount(ctx, addr, nil)
-	require.NoError(t, err)
+	a.NoError(err)
 	nonceLatest, err := api.GetTransactionCount(ctx, addr, &latest)
-	require.NoError(t, err)
+	a.NoError(err)
 	a.Equal(nonceLatest, nonceNil)
 
 	storageNil, err := api.GetStorageAt(ctx, addr, "0x0", nil)
-	require.NoError(t, err)
+	a.NoError(err)
 	storageLatest, err := api.GetStorageAt(ctx, addr, "0x0", &latest)
-	require.NoError(t, err)
+	a.NoError(err)
 	a.Equal(storageLatest, storageNil)
 
 	proofNil, err := api.GetProof(ctx, addr, nil, nil)
-	require.NoError(t, err)
+	a.NoError(err)
 	proofLatest, err := api.GetProof(ctx, addr, nil, &latest)
-	require.NoError(t, err)
+	a.NoError(err)
 	a.Equal(proofLatest, proofNil)
 
 	req := map[common.Address][]common.Hash{addr: {{}}}
 	svNil, err := api.GetStorageValues(ctx, req, nil)
-	require.NoError(t, err)
+	a.NoError(err)
 	svLatest, err := api.GetStorageValues(ctx, req, &latest)
-	require.NoError(t, err)
+	a.NoError(err)
 	a.Equal(svLatest, svNil)
 }
 

@@ -226,7 +226,7 @@ func (t *dataColumnSidecarTestSuite) assertProcessMessageIgnoredBeforeStorage(si
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
 
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.ErrorIs(err, ErrIgnore)
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Zero(service.pendingGloasSidecars.count.Load())
 }
@@ -260,7 +260,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	// First call should succeed
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
-	t.Require().NoError(err)
+	t.NoError(err)
 
 	// Second call with same sidecar should return ErrIgnore
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -281,7 +281,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidDataColumnSid
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid data column sidecar")
 }
 
@@ -296,7 +296,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_Retu
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), &incorrectSubnet, sidecar)
 
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "incorrect subnet")
 }
 
@@ -390,7 +390,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid inclusion proof")
 }
 
@@ -409,7 +409,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEp
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// The sidecar gets past the finality check and fails on the forced inclusion proof error.
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid inclusion proof")
 }
 
@@ -430,7 +430,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAnchorAfterFinalized
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// The sidecar gets past the ancestor check and fails on the forced inclusion proof error.
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid inclusion proof")
 }
 
@@ -459,8 +459,8 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenFinalizedCheckpointI
 
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
 
-	t.Require().Error(err)
-	t.Require().NotErrorIs(err, ErrIgnore)
+	t.Error(err)
+	t.NotErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "finalized checkpoint is not an ancestor")
 }
 
@@ -495,7 +495,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidKZGProofs_Ret
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid kzg proofs")
 }
 
@@ -592,8 +592,8 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_Returns
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
-	t.Require().Error(err)
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.Error(err)
+	t.ErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "failed to write data column sidecar")
 	// The sidecar was not stored, so a later valid copy must not be ignored as a duplicate.
 	header := sidecar.SignedBlockHeader.Header
@@ -685,7 +685,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_IgnoresGloasSchemaA
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
 
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.ErrorIs(err, ErrIgnore)
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Zero(service.pendingGloasSidecars.count.Load())
 }
@@ -711,7 +711,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenAlreadySeen_Ret
 	// First call should succeed
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
-	t.Require().NoError(err)
+	t.NoError(err)
 
 	// Second call with same sidecar should return ErrIgnore
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -743,7 +743,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenIncorrectSubnet
 	sidecar := createMockGloasDataColumnSidecar(testSlot+100, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), &incorrectSubnet, sidecar)
 
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "incorrect subnet")
 }
 
@@ -770,11 +770,11 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockNotFound_S
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.ErrorIs(err, ErrIgnore)
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	root, keyErr := sidecar.HashSSZ()
-	t.Require().NoError(keyErr)
+	t.NoError(keyErr)
 	_, exists := service.pendingGloasSidecars.jobs.Load(common.Hash(root))
 	t.True(exists)
 }
@@ -809,7 +809,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenOversizedAndBlo
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
 
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.ErrorIs(err, ErrIgnore)
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Zero(service.pendingGloasSidecars.count.Load())
 }
@@ -833,7 +833,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenProofCountMisma
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
 
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.ErrorIs(err, ErrIgnore)
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Zero(service.pendingGloasSidecars.count.Load())
 }
@@ -930,7 +930,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesSidecarAtBlob
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	sidecar.Column.Append(&cltypes.Cell{})
 	sidecar.KzgProofs.Append(&cltypes.KZGProof{})
-	t.Require().ErrorIs(service.ProcessMessage(t.T().Context(), nil, sidecar), ErrIgnore)
+	t.ErrorIs(service.ProcessMessage(t.T().Context(), nil, sidecar), ErrIgnore)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 
 	block := createMockGloasBlock(testSlot)
@@ -959,7 +959,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSlotMismatch_Re
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "does not match block slot")
 }
 
@@ -978,7 +978,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecar_
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid data column sidecar")
 }
 
@@ -994,7 +994,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenIncorrectSubnet
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), &incorrectSubnet, sidecar)
 
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "incorrect subnet")
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Zero(service.pendingGloasSidecars.count.Load())
@@ -1017,7 +1017,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidKZGProof
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
-	t.Require().Error(err)
+	t.Error(err)
 	t.Contains(err.Error(), "invalid kzg proofs")
 }
 
@@ -1063,8 +1063,8 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStorageFails_Re
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
-	t.Require().Error(err)
-	t.Require().ErrorIs(err, ErrIgnore)
+	t.Error(err)
+	t.ErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "failed to write data column sidecar")
 }
 

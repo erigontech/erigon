@@ -572,7 +572,7 @@ func TestGetMaxStepRangeInSnapshots(t *testing.T) {
 			},
 		}
 		maxTo, err := getMaxStepRangeInSnapshots(preverified)
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, uint64(50), maxTo)
 	})
 
@@ -584,7 +584,7 @@ func TestGetMaxStepRangeInSnapshots(t *testing.T) {
 			},
 		}
 		_, err := getMaxStepRangeInSnapshots(preverified)
-		require.Error(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid domain snapshot filename")
 	})
 }

@@ -21,7 +21,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -64,35 +63,35 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		reply := goodReply
 		reply.NetworkID = 0
 		err := compatStatusPacket(reply, &status, version, version)
-		require.Error(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "network")
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH68 - 1
 		err := compatStatusPacket(reply, &status, version, version)
-		require.Error(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
 		reply.ProtocolVersion = direct.ETH68 + 1
 		err := compatStatusPacket(reply, &status, version, version)
-		require.Error(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "version is more")
 	})
 	t.Run("genesis mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.Genesis = common.Hash{}
 		err := compatStatusPacket(reply, &status, version, version)
-		require.Error(t, err)
+		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "genesis")
 	})
 	t.Run("fork mismatch", func(t *testing.T) {
 		reply := goodReply
 		reply.ForkID = forkid.ID{}
 		err := compatStatusPacket(reply, &status, version, version)
-		require.Error(t, err)
+		assert.Error(t, err)
 		assert.ErrorIs(t, err, forkid.ErrLocalIncompatibleOrStale)
 	})
 }

@@ -53,7 +53,7 @@ func TestReadBufferReset(t *testing.T) {
 
 	s6, err := b.read(reader, 2)
 
-	require.EqualError(t, err, "EOF")
+	assert.EqualError(t, err, "EOF")
 	assert.Nil(t, s6)
 }
 
@@ -66,7 +66,7 @@ func TestReadBufferTruncated(t *testing.T) {
 			if size == 0 {
 				wantErr = io.EOF
 			}
-			require.ErrorIs(t, err, wantErr)
+			assert.ErrorIs(t, err, wantErr)
 			assert.Nil(t, data)
 		})
 	}
@@ -81,7 +81,7 @@ func TestReadBufferGrowsWithInput(t *testing.T) {
 		require.LessOrEqual(t, cap(b.data), 4*max(4096, received))
 		return r.Read(p[:min(len(p), 127)])
 	}), len(input))
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, input, data)
 }
 

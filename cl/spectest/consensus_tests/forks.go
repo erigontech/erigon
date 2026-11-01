@@ -57,7 +57,7 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}
 	if expectedError {
-		require.Error(t, err)
+		assert.Error(t, err)
 	}
 
 	haveRoot, err := preState.HashSSZ()

@@ -189,24 +189,24 @@ func TestNewFilters(t *testing.T) {
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
 
 	ptf, err := api.NewPendingTransactionFilter(ctx)
-	require.NoError(t, err)
+	assert.NoError(err)
 
 	nf, err := api.NewFilter(ctx, filters.FilterCriteria{})
-	require.NoError(t, err)
+	assert.NoError(err)
 
 	bf, err := api.NewBlockFilter(ctx)
-	require.NoError(t, err)
+	assert.NoError(err)
 
 	ok, err := api.UninstallFilter(ctx, nf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 
 	ok, err = api.UninstallFilter(ctx, bf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 
 	ok, err = api.UninstallFilter(ctx, ptf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 }
 
@@ -456,16 +456,16 @@ func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {
 
 	// Create a new block filter
 	bf, err := api.NewBlockFilter(ctx)
-	require.NoError(t, err)
+	assert.NoError(err)
 
 	// Immediately query changes; should be empty slice and no error
 	changes, err := api.GetFilterChanges(ctx, bf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.Len(changes, 0)
 
 	// Cleanup
 	ok, err := api.UninstallFilter(ctx, bf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 }
 
@@ -484,34 +484,34 @@ func TestCompositeFiltersGetFilterChangesInitiallyEmpty(t *testing.T) {
 
 	// Create all three filter types
 	ptf, err := api.NewPendingTransactionFilter(ctx)
-	require.NoError(t, err)
+	assert.NoError(err)
 	lf, err := api.NewFilter(ctx, filters.FilterCriteria{})
-	require.NoError(t, err)
+	assert.NoError(err)
 	bf, err := api.NewBlockFilter(ctx)
-	require.NoError(t, err)
+	assert.NoError(err)
 
 	// Immediately query changes on each; expect empty and no error
 	changes, err := api.GetFilterChanges(ctx, ptf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.Len(changes, 0)
 
 	changes, err = api.GetFilterChanges(ctx, lf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.Len(changes, 0)
 
 	changes, err = api.GetFilterChanges(ctx, bf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.Len(changes, 0)
 
 	// Cleanup
 	ok, err := api.UninstallFilter(ctx, ptf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 	ok, err = api.UninstallFilter(ctx, lf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 	ok, err = api.UninstallFilter(ctx, bf)
-	require.NoError(t, err)
+	assert.NoError(err)
 	assert.True(ok)
 }
 

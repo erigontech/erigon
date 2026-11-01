@@ -206,7 +206,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 		log.Printf("test case: %s", tc.name)
 		tc.mock()
 		req, err := http.NewRequestWithContext(t.T().Context(), tc.method, tc.url, nil)
-		t.Require().NoError(err)
+		t.NoError(err)
 		rr := httptest.NewRecorder()
 		t.apiHandler.ServeHTTP(rr, req)
 		t.Equal(tc.expCode, rr.Code)
@@ -214,7 +214,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 		// check body by comparing map
 		jsonResp := map[string]any{}
 		err = json.Unmarshal(rr.Body.Bytes(), &jsonResp)
-		t.Require().NoError(err)
+		t.NoError(err)
 		t.Equal(tc.expBody, jsonResp)
 
 		t.True(t.gomockCtrl.Satisfied(), "mock expectations were not met")

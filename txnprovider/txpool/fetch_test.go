@@ -300,7 +300,7 @@ func TestOnNewBlock(t *testing.T) {
 
 	fetch := NewFetch(ctx, nil, pool, stateChanges, db, u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
-	require.ErrorIs(t, io.EOF, err)
+	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)
 }
 
