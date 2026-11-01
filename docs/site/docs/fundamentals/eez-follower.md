@@ -155,7 +155,7 @@ Peers mode stops the node when the root's chain leaves the local finalized block
 | `peers` | Connected L2 devp2p peers, counted every 5 seconds. |
 | `overlayPeers` | Connected overlay peers; null without the overlay. |
 | `signedHeads` | The latest head of each signing source, highest version first: `signer`, `epochMs`, `counter`, `number`, `hash`. Null without the overlay. |
-| `headSource` | What moved the head last: `derivation`, `history_sync`, `signed_head` or `sequencer_rpc`. Null while nothing has since boot. |
+| `headSource` | What moved the head last: `derivation`, `history_sync`, `signed_head`, `sequencer_rpc` or `sequencer`, the node's own sequencer. Null while nothing has since boot. |
 
 ## Flags
 

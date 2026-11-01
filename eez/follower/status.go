@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // SyncMode is where boot takes the history below L1 finality from.
@@ -70,6 +71,9 @@ const (
 	HeadSignedHead HeadSource = "signed_head"
 	// HeadSequencerRPC: the sequencer's latest block over JSON-RPC.
 	HeadSequencerRPC HeadSource = "sequencer_rpc"
+	// HeadSequencer: blocks this node's sequencer produces or inserts, and
+	// its moves of the head back.
+	HeadSequencer HeadSource = "sequencer"
 )
 
 // Anchor is L1's finalized block F and the root H_F the registry holds for
@@ -207,6 +211,14 @@ func (w *headWatch) ForkChoice(ctx context.Context, head, safe, finalized common
 
 func (w *headWatch) Extend(ctx context.Context, parent *types.Header, in deriver.HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
 	b, err := w.Chain.Extend(ctx, parent, in, txs, safe, finalized)
+	if err == nil {
+		w.moved(b.Block.Hash())
+	}
+	return b, err
+}
+
+func (w *headWatch) Build(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
+	b, err := w.Chain.Build(ctx, in, txs, safe, finalized)
 	if err == nil {
 		w.moved(b.Block.Hash())
 	}

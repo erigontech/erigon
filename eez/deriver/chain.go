@@ -77,6 +77,10 @@ type Chain interface {
 	// inserts it and makes it the head; safe and finalized must not be above
 	// parent.
 	Extend(ctx context.Context, parent *types.Header, in HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error)
+	// Build builds a block on the head with header inputs in and the
+	// transactions of txs that fit, inserts it and makes it the head; safe
+	// and finalized must not be above the head.
+	Build(ctx context.Context, in HeaderInputs, txs txnprovider.TxnProvider, safe, finalized common.Hash) (*types.BlockWithReceipts, error)
 	// Insert stores blocks for a later fork choice to execute.
 	Insert(ctx context.Context, blocks []*types.Block) error
 	// ForkChoice sets the head, safe and finalized blocks.
@@ -231,6 +235,39 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 			return nil, err
 		}
 	}
+	// Assembly binds a native transaction's gas limit to its position.
+	built, err := c.assemble(ctx, in.Number, c.parameters(in, &staticTxns{txs: txs}, true))
+	if err != nil {
+		return nil, err
+	}
+	if err := c.commit(ctx, in, built.Block, safe, finalized); err != nil {
+		return nil, err
+	}
+	return built, nil
+}
+
+func (c *ExecChain) Build(ctx context.Context, in HeaderInputs, txs txnprovider.TxnProvider, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
+	head, err := c.Head(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if head.Hash() != in.ParentHash {
+		return nil, fmt.Errorf("build block %d on %x: the head is %x", in.Number, in.ParentHash, head.Hash())
+	}
+	// Collected at once, the builder still adds what the provider yields
+	// first.
+	built, err := c.assemble(ctx, in.Number, c.parameters(in, txs, false))
+	if err != nil {
+		return nil, err
+	}
+	if err := c.commit(ctx, in, built.Block, safe, finalized); err != nil {
+		return nil, err
+	}
+	return built, nil
+}
+
+// parameters returns the build of the block of inputs in from txs.
+func (c *ExecChain) parameters(in HeaderInputs, txs txnprovider.TxnProvider, strict bool) *builder.Parameters {
 	extra := in.Extra
 	if extra == nil {
 		// nil selects the builder's own extra data.
@@ -238,14 +275,14 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	}
 	gasLimit := in.GasLimit
 	params := &builder.Parameters{
-		ParentHash:             parent.Hash(),
+		ParentHash:             in.ParentHash,
 		Timestamp:              in.Time,
 		SuggestedFeeRecipient:  in.Coinbase,
 		PrevRandao:             in.MixDigest,
 		TargetGasLimit:         &gasLimit,
 		ExtraData:              extra,
-		CustomTxnProvider:      &staticTxns{txs: txs},
-		RequireAllTransactions: true,
+		CustomTxnProvider:      txs,
+		RequireAllTransactions: strict,
 	}
 	if c.config.IsShanghai(in.Time) {
 		params.Withdrawals = []*types.Withdrawal{}
@@ -253,24 +290,24 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	if c.config.IsCancun(in.Time) {
 		params.ParentBeaconBlockRoot = &common.Hash{}
 	}
-	// Assembly binds a native transaction's gas limit to its position.
-	built, err := c.assemble(ctx, in.Number, params)
-	if err != nil {
-		return nil, err
-	}
-	block := built.Block
+	return params
+}
+
+// commit inserts block, built from inputs in, validates it and makes it the
+// head.
+func (c *ExecChain) commit(ctx context.Context, in HeaderInputs, block *types.Block, safe, finalized common.Hash) error {
 	if !in.Matches(block.Header()) {
-		return nil, fmt.Errorf("%w: block %d: built header differs from its inputs", ErrRejected, in.Number)
+		return fmt.Errorf("%w: block %d: built header differs from its inputs", ErrRejected, in.Number)
 	}
 	status, err := retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
 		s, err := c.exec.InsertBlocks(ctx, []*types.Block{block})
 		return s, s == execmodule.ExecutionStatusBusy, err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("insert block %d: %w", in.Number, err)
+		return fmt.Errorf("insert block %d: %w", in.Number, err)
 	}
 	if status != execmodule.ExecutionStatusSuccess {
-		return nil, fmt.Errorf("insert block %d: %s", in.Number, status)
+		return fmt.Errorf("insert block %d: %s", in.Number, status)
 	}
 	v, err := retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
 		v, err := c.exec.ValidateChain(ctx, block)
@@ -278,16 +315,13 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	})
 	switch {
 	case err != nil:
-		return nil, fmt.Errorf("validate block %d: %w", in.Number, err)
+		return fmt.Errorf("validate block %d: %w", in.Number, err)
 	case v.ValidationStatus == execmodule.ExecutionStatusBadBlock:
-		return nil, fmt.Errorf("%w: block %d: %s", ErrRejected, in.Number, v.ValidationError)
+		return fmt.Errorf("%w: block %d: %s", ErrRejected, in.Number, v.ValidationError)
 	case v.ValidationStatus != execmodule.ExecutionStatusSuccess:
-		return nil, fmt.Errorf("validate block %d: %s", in.Number, v.ValidationStatus)
+		return fmt.Errorf("validate block %d: %s", in.Number, v.ValidationStatus)
 	}
-	if err := c.ForkChoice(ctx, block.Hash(), safe, finalized); err != nil {
-		return nil, err
-	}
-	return built, nil
+	return c.ForkChoice(ctx, block.Hash(), safe, finalized)
 }
 
 func (c *ExecChain) assemble(ctx context.Context, number uint64, params *builder.Parameters) (*types.BlockWithReceipts, error) {

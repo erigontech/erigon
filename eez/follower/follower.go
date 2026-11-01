@@ -138,6 +138,8 @@ type Follower struct {
 	heads   *signedHeads
 	peers   *peerCount
 	logger  log.Logger
+	// commands are the other writers' work, which Run performs.
+	commands chan command
 	// scanned is the last L1 block whose batches were reconciled, target
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
@@ -252,16 +254,17 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		scanner.SetChunk(c.LogChunk)
 	}
 	f := &Follower{
-		cfg:     c,
-		l2:      l2,
-		reader:  reader,
-		scanner: scanner,
-		watcher: l1.NewWatcher(reader, c.ReorgDepth, logger),
-		chain:   chain,
-		watch:   watch,
-		deriver: d,
-		logger:  logger,
-		status:  Status{Mode: mode, Phase: PhaseBooting},
+		cfg:      c,
+		l2:       l2,
+		reader:   reader,
+		scanner:  scanner,
+		watcher:  l1.NewWatcher(reader, c.ReorgDepth, logger),
+		chain:    chain,
+		watch:    watch,
+		deriver:  d,
+		logger:   logger,
+		commands: make(chan command),
+		status:   Status{Mode: mode, Phase: PhaseBooting},
 	}
 	watch.f = f
 	publishPhase(PhaseBooting)
@@ -347,7 +350,8 @@ func (f *Follower) Deriver() *deriver.Deriver { return f.deriver }
 
 // Run boots and follows L1 until ctx ends or the follower must halt: on a
 // divergence from canonical L1, an L1 reorg it cannot follow, or a boot
-// that exhausts BootAttempts.
+// that exhausts BootAttempts. Once booted it also performs the commands of
+// the chain's other writers, between its own steps.
 func (f *Follower) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -410,6 +414,9 @@ func (f *Follower) Run(ctx context.Context) error {
 			continue
 		case <-unsafeTick:
 			f.stepUnsafe(ctx)
+			continue
+		case c := <-f.commands:
+			f.perform(ctx, c)
 			continue
 		}
 		if err = f.recover(ctx, err); err != nil {
