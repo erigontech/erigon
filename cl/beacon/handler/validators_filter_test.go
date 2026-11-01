@@ -17,25 +17,15 @@
 package handler
 
 import (
-	"net/http/httptest"
+	"math"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkResponseValidatorsFiltered(b *testing.B) {
-	const registry = 200_000
-	validators := solid.NewValidatorSetWithLength(registry, registry)
-	balances := solid.NewUint64ListSSZ(registry)
-	for range registry {
-		balances.Append(32_000_000_000)
-	}
-	filter := make([]uint64, 20_000)
-	for i := range filter {
-		filter[i] = uint64(registry + i)
-	}
-	b.ResetTimer()
-	for range b.N {
-		responseValidators(httptest.NewRecorder(), filter, nil, 0, balances, validators, false, false)
-	}
+func TestSortedIndicesBelow(t *testing.T) {
+	in := []uint64{7, 3, math.MaxUint64, 3, 0, 10, 9}
+	require.Equal(t, []uint64{0, 3, 7, 9}, sortedIndicesBelow(in, 10))
+	require.Equal(t, []uint64{7, 3, math.MaxUint64, 3, 0, 10, 9}, in, "input must not be reordered")
+	require.Empty(t, sortedIndicesBelow([]uint64{10, math.MaxUint64}, 10))
 }
