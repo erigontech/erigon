@@ -104,10 +104,25 @@ func TestConfigFromCLI(t *testing.T) {
 		require.ErrorIs(t, err, ErrConfig, "%v", args)
 	}
 
+	cfg, err = parse(t, "--eez.enabled", "--eez.chain=eez-devnet")
+	require.NoError(t, err)
+	require.Equal(t, "eez-devnet", cfg.Chain)
+	require.Equal(t, 8645, cfg.HTTPPort)
+	require.Equal(t, []string{"eth", "debug", "eez"}, cfg.HTTPAPI)
+	require.True(t, cfg.AllInOne())
+	require.NoError(t, cfg.CheckNode())
+	cfg, err = parse(t, "--eez.enabled", "--eez.chain=eez-devnet", "--eez.http.port=9645", "--eez.http.api=eth,eez")
+	require.NoError(t, err)
+	require.Equal(t, 9645, cfg.HTTPPort)
+	require.Equal(t, []string{"eth", "eez"}, cfg.HTTPAPI)
+	_, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.http.port=9645")
+	require.ErrorIs(t, err, ErrConfig, "--eez.http.port without --eez.chain")
+
 	// init needs no L1 source; a running node needs exactly one.
 	for _, args := range [][]string{
 		{"--eez.enabled"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
+		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.chain=eez-devnet"},
 	} {
 		cfg, err := parse(t, args...)
 		require.NoError(t, err, "%v", args)

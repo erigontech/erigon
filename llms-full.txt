@@ -3493,6 +3493,20 @@ Next to an Erigon L1 node, read its database over the private API instead of JSO
   --datadir=/data/eez-devnet --eez.l1.kv=127.0.0.1:9090
 ```
 
+### Running beside its L1 in one process
+
+With `--eez.chain` one Erigon process runs both chains: the L1 of `--chain`, as any Erigon node runs it, and beside it the EEZ network of `--eez.chain`, which must settle on that L1. The follower reads the L1 chain's database in place and derives each L1 block as soon as it is executed; it needs no L1 endpoint. Batches posted as blobs still come from `--eez.l1.beacon` or `--eez.l1.blobs`; the beacon API of the L1's own consensus layer, enabled with `--beacon.api=beacon`, serves the blobs it still holds.
+
+```bash
+./build/bin/erigon --chain=<l1-network> --datadir=/data/node \
+  --eez.enabled --eez.chain=<eez-network> \
+  --eez.http.port=8645
+```
+
+The L1 keeps the datadir's usual layout and every component of a node: P2P, snapshot downloader, consensus layer, transaction pool, engine API, private API and the JSON-RPC of `--http.*`. The EEZ chain keeps the layout above and adds its own lock, temporary files and migration records under `<datadir>/eez`; it serves JSON-RPC on `--eez.http.port` with the namespaces of `--eez.http.api`, and none of the L1's components. Its log lines carry `chain=<eez-network>`. Stopping the node stops the EEZ chain before the L1, and a follower that halts stops both.
+
+Erigon's execution, staged-sync and database metrics are process-wide: in this mode they mix both chains. The `eez_*` metrics below are the EEZ chain's own.
+
 ### Following the sequencer
 
 With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block as its head, ahead of settlement, as long as the sequencer's chain descends from the safe block. The sequencer must serve `debug_getRawBlock`. Settlement later confirms these blocks without rebuilding them.
@@ -3502,10 +3516,13 @@ With `--eez.sequencer.rpc` the follower also takes the sequencer's latest block 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--eez.enabled` | | Run an EEZ chain, derived from L1 by the follower: the EEZ networks for `--chain`, the `l2` config section, transaction type `0x76` and the EEZ rules. Every other `--eez.*` flag requires it. |
-| `--eez.l1.rpc` | | JSON-RPC endpoint of the L1 node. A running node needs this or `--eez.l1.kv`. |
+| `--eez.l1.rpc` | | JSON-RPC endpoint of the L1 node. A running node needs this, `--eez.l1.kv` or `--eez.chain`. |
 | `--eez.l1.kv` | | Private API address of an Erigon L1 node. |
 | `--eez.l1.beacon` | | Beacon API of the L1, which serves the blobs of rollupX batches. |
 | `--eez.l1.blobs` | | Directory of blobs named by versioned hash, read before the beacon API; blobs the beacon API serves are stored in it. |
+| `--eez.chain` | | EEZ network to run in the same process as the L1 of `--chain`. |
+| `--eez.http.port` | `8645` | JSON-RPC port of the EEZ chain of `--eez.chain`. |
+| `--eez.http.api` | `eth,debug,eez` | JSON-RPC namespaces of the EEZ chain of `--eez.chain`. |
 | `--eez.l1.poll` | `2s` | Interval between reads of the L1 head. |
 | `--eez.l1.logchunk` | `100000` | Widest block range of one L1 log query; halved when the node refuses it. |
 | `--eez.l1.reorgdepth` | `62` | Deepest L1 reorg the follower survives. |

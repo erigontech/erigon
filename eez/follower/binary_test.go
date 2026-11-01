@@ -36,8 +36,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/l1/l1test"
+	"github.com/erigontech/erigon/eez/networks"
 )
 
 func freePort(t *testing.T) string {
@@ -174,5 +176,99 @@ func TestFollowerBinary(t *testing.T) {
 		require.Equal(t, 3, exit.ExitCode())
 	case <-time.After(2 * time.Minute):
 		t.Fatal("erigon did not halt")
+	}
+}
+
+// TestAllInOneBinary runs the erigon binary named by EEZ_ERIGON as an
+// all-in-one node: the dev chain as L1 and beside it an EEZ chain settling
+// on it, under <datadir>/eez with its own lock and HTTP-RPC port, whose
+// follower takes the L1 heads in-process. An interrupt stops both chains.
+func TestAllInOneBinary(t *testing.T) {
+	bin := os.Getenv("EEZ_ERIGON")
+	if bin == "" {
+		t.Skip("EEZ_ERIGON names no erigon binary")
+	}
+	dir := t.TempDir()
+
+	// eez-devnet settling on the dev chain, with the timestamp rewritten
+	// as a deployment does, so the stored l2 section stands.
+	raw, err := os.ReadFile(filepath.Join("..", "networks", "devnet-genesis.json"))
+	require.NoError(t, err)
+	var genesis map[string]any
+	require.NoError(t, json.Unmarshal(raw, &genesis))
+	genesis["timestamp"] = "0x1"
+	raw, err = json.Marshal(genesis)
+	require.NoError(t, err)
+	genesisFile := filepath.Join(t.TempDir(), "genesis.json")
+	require.NoError(t, os.WriteFile(genesisFile, raw, 0o644))
+	out, err := exec.CommandContext(t.Context(), bin, "init", "--eez.enabled", "--datadir", dir, "--eez.l1.chainid=1337",
+		"--eez.registry=0x5fbdb2315678afecb367f032d93f642f64180aa3", "--eez.registry.deployblock=0", "--eez.rollupid=1",
+		"--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s", genesisFile).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+
+	l1Port, l2Port := freePort(t), freePort(t)
+	cmd := exec.CommandContext(t.Context(), bin, "--chain=dev", "--datadir", dir, "--eez.enabled", "--eez.chain=eez-devnet",
+		"--eez.http.port", l2Port, "--http.port", l1Port, "--http.api=eth", "--authrpc.port", freePort(t),
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--port", freePort(t), "--torrent.port", freePort(t),
+		"--beacon.api.port", freePort(t), "--caplin.discovery.port", freePort(t), "--caplin.discovery.tcpport", freePort(t),
+		"--sentinel.port", freePort(t), "--mcp.disable")
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	require.NoError(t, cmd.Start())
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		if t.Failed() {
+			t.Log(output.String())
+		}
+	})
+
+	l1URL, l2URL := "http://127.0.0.1:"+l1Port, "http://127.0.0.1:"+l2Port
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Minute)
+		for !ok() {
+			select {
+			case err := <-exited:
+				t.Fatalf("erigon exited: %v", err)
+			case <-time.After(500 * time.Millisecond):
+			}
+			require.True(t, time.Now().Before(deadline), what)
+		}
+	}
+	chainID := func(url string) uint64 {
+		var id hexutil.Uint64
+		_ = call(t.Context(), url, "eth_chainId", &id)
+		return uint64(id)
+	}
+	waitFor("L1 chain id", func() bool { return chainID(l1URL) == 1337 })
+	waitFor("EEZ chain id", func() bool { return chainID(l2URL) == networks.Devnet.Config.ChainID.Uint64() })
+	var status struct {
+		L1Scanned hexutil.Uint64 `json:"l1Scanned"`
+		Safe      hexutil.Uint64 `json:"safe"`
+	}
+	waitFor("the follower scans the L1 blocks", func() bool {
+		return call(t.Context(), l2URL, "eez_followerStatus", &status) == nil && status.L1Scanned >= 2
+	})
+	require.Zero(t, status.Safe, "the dev chain settles nothing")
+	require.FileExists(t, filepath.Join(dir, "chaindata", "mdbx.dat"))
+	require.FileExists(t, filepath.Join(dir, "eez", "chaindata", "mdbx.dat"))
+	require.FileExists(t, filepath.Join(dir, "eez", "LOCK"))
+	require.DirExists(t, filepath.Join(dir, "eez", "temp"))
+	require.Error(t, call(t.Context(), l1URL, "eez_followerStatus", &status), "the L1 serves no eez API")
+
+	require.NoError(t, cmd.Process.Signal(os.Interrupt))
+	select {
+	case err := <-exited:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Minute):
+		t.Fatal("erigon did not stop")
+	}
+	for _, d := range []string{dir, filepath.Join(dir, "eez")} {
+		l, ok, err := datadir.TryFlock(datadir.Open(d))
+		require.NoError(t, err)
+		require.True(t, ok, "%s unlocked", d)
+		require.NoError(t, l.Unlock())
 	}
 }

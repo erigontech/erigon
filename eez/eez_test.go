@@ -64,3 +64,29 @@ func TestDirs(t *testing.T) {
 	require.DirExists(t, got.Chaindata)
 	require.DirExists(t, got.SnapAccessors)
 }
+
+// TestAllInOneDirs: the EEZ chain of an all-in-one node keeps the standalone
+// layout of its database and snapshots, and shares no lock, temporary files
+// or migration records with the L1 chain.
+func TestAllInOneDirs(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	got := AllInOneDirs(dirs)
+	standalone := Dirs(dirs)
+	require.Equal(t, standalone.Chaindata, got.Chaindata)
+	require.Equal(t, standalone.Snap, got.Snap)
+	require.Equal(t, standalone.SnapDomain, got.SnapDomain)
+	require.Equal(t, Dir(dirs), got.DataDir)
+	require.Equal(t, filepath.Join(Dir(dirs), "temp"), got.Tmp)
+	require.Equal(t, filepath.Join(Dir(dirs), "migrations"), got.Migrations)
+	require.DirExists(t, got.Tmp)
+	require.DirExists(t, got.Migrations)
+
+	l1, ok, err := datadir.TryFlock(dirs)
+	require.NoError(t, err)
+	require.True(t, ok)
+	defer func() { require.NoError(t, l1.Unlock()) }()
+	l2, ok, err := datadir.TryFlock(got)
+	require.NoError(t, err)
+	require.True(t, ok, "the EEZ chain locks its own directory")
+	require.NoError(t, l2.Unlock())
+}

@@ -70,6 +70,20 @@ var (
 		Name:  "eez.sequencer.rpc",
 		Usage: "JSON-RPC endpoint of the sequencer, whose blocks the follower takes as its unsafe head",
 	}
+	ChainFlag = cli.StringFlag{
+		Name:  "eez.chain",
+		Usage: "EEZ network to run in the same process as the L1 chain of --chain, whose database the follower reads",
+	}
+	HTTPPortFlag = cli.IntFlag{
+		Name:  "eez.http.port",
+		Usage: "HTTP-RPC port of the EEZ chain of --eez.chain",
+		Value: 8645,
+	}
+	HTTPAPIFlag = cli.StringFlag{
+		Name:  "eez.http.api",
+		Usage: "API namespaces the HTTP-RPC of the EEZ chain of --eez.chain serves",
+		Value: "eth,debug,eez",
+	}
 
 	// The l2 section of the chain config; init writes them into the
 	// section, a running node checks them against it.
@@ -102,7 +116,7 @@ var (
 // Flags lists the EEZ command-line flags.
 var Flags = []cli.Flag{
 	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag,
-	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
+	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
 // Config is a node's EEZ configuration.
@@ -115,6 +129,11 @@ type Config struct {
 	L1LogChunk   uint64
 	L1ReorgDepth int
 	SequencerRPC string
+	// Chain is the EEZ network an all-in-one node runs beside its L1 chain,
+	// served on HTTPPort with the namespaces HTTPAPI.
+	Chain    string
+	HTTPPort int
+	HTTPAPI  []string
 	// L2 holds the l2 section fields the flags set.
 	L2 L2Flags
 }
@@ -148,6 +167,17 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 		L1LogChunk:   cmd.Uint64(L1LogChunkFlag.Name),
 		L1ReorgDepth: int(cmd.Int(L1ReorgDepthFlag.Name)),
 		SequencerRPC: cmd.String(SequencerRPCFlag.Name),
+		Chain:        cmd.String(ChainFlag.Name),
+	}
+	if c.Chain != "" {
+		c.HTTPPort = int(cmd.Int(HTTPPortFlag.Name))
+		c.HTTPAPI = strings.Split(cmd.String(HTTPAPIFlag.Name), ",")
+	} else {
+		for _, f := range []cli.Flag{&HTTPPortFlag, &HTTPAPIFlag} {
+			if name := f.Names()[0]; cmd.IsSet(name) {
+				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, name, ChainFlag.Name)
+			}
+		}
 	}
 	uintFlag := func(f *cli.Uint64Flag) *uint64 {
 		if !cmd.IsSet(f.Name) {
@@ -207,13 +237,22 @@ func InitGenesis(cmd *cli.Command, genesis *types.Genesis) error {
 }
 
 // CheckNode reports what a running node lacks: its follower reads exactly
-// one L1 source.
+// one L1 source, an L1 node or the L1 chain of the same process.
 func (c *Config) CheckNode() error {
-	if (c.L1RPC == "") == (c.L1KV == "") {
-		return fmt.Errorf("%w: the follower needs one L1 source, --%s or --%s", ErrConfig, L1RPCFlag.Name, L1KVFlag.Name)
+	sources := 0
+	for _, s := range []string{c.L1RPC, c.L1KV, c.Chain} {
+		if s != "" {
+			sources++
+		}
+	}
+	if sources != 1 {
+		return fmt.Errorf("%w: the follower needs one L1 source, --%s, --%s or --%s", ErrConfig, L1RPCFlag.Name, L1KVFlag.Name, ChainFlag.Name)
 	}
 	return nil
 }
+
+// AllInOne reports whether the node runs its L1 chain in the same process.
+func (c *Config) AllInOne() bool { return c.Chain != "" }
 
 // fields pairs each flag-set field with its l2 section field.
 func (f *L2Flags) fields(l2 *config.L2Config) []struct {
