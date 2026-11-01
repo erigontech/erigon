@@ -302,12 +302,27 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+		var (
+			epoch      uint64
+			balances   solid.Uint64ListSSZ
+			validators *solid.ValidatorSet
+			optimistic bool
+		)
+		// Copy out under the head-state lock and encode after it is released, so a slow client cannot stall head-state publishing.
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
-			return nil
+			epoch = state.Epoch(s)
+			optimistic = a.forkchoiceStore.IsRootOptimistic(root)
+			balances = solid.NewUint64ListSSZ(s.Balances().Cap())
+			if err := balances.DecodeSSZ(s.Balances().Bytes(), 0); err != nil {
+				return err
+			}
+			validators = solid.NewValidatorSet(s.Validators().Cap())
+			return validators.DecodeSSZ(s.Validators().Bytes(), 0)
 		}); err != nil {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced")).WriteTo(w)
+			return
 		}
+		responseValidators(w, filterIndicies, statusFilters, epoch, balances, validators, false, optimistic)
 		return
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
