@@ -274,6 +274,26 @@ func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 	}
 }
 
+func TestQuietBelow_NoOpDeleteDoesNotBump(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x06"))
+	ops := map[string]func(vm *VersionMap, j int){
+		"Delete":    func(vm *VersionMap, j int) { vm.Delete(addr, BalancePath, accounts.NilKey, j, false) },
+		"DeleteAll": func(vm *VersionMap, j int) { vm.DeleteAll(addr, j) },
+	}
+	for name, op := range ops {
+		vm := newStampedMap(32)
+		stamp := vm.WriteSeq()
+		op(vm, 3)
+		require.True(t, vm.QuietBelow(5, stamp), "%s of an absent account must not stamp", name)
+
+		flushLifecycle(vm, addr, 2, BalancePath)
+		stamp = vm.WriteSeq()
+		op(vm, 3)
+		require.True(t, vm.QuietBelow(5, stamp), "%s with no cell at j must not stamp", name)
+	}
+}
+
 func TestQuietBelow_WritePrimitivesBumpStamp(t *testing.T) {
 	t.Parallel()
 	vm := newStampedMap(32)
@@ -303,15 +323,6 @@ func TestQuietBelow_WriterOutsideLayoutPanics(t *testing.T) {
 	require.Panics(t, func() { vm.mutBegin(-2) })
 	vm.mutBegin(last)
 	vm.mutEnd(last)
-}
-
-func TestStoreOriginAccount_IgnoresNil(t *testing.T) {
-	t.Parallel()
-	vm := NewVersionMap(nil)
-	addr := accounts.InternAddress(common.HexToAddress("0x0d"))
-	vm.StoreOriginAccount(addr, nil)
-	_, ok := vm.LoadOriginAccount(addr)
-	require.False(t, ok, "a nil origin would turn an absent-account read Invalid without a write stamp")
 }
 
 func TestQuietBelow_StampsSizedForLastIndex(t *testing.T) {

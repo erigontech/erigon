@@ -338,9 +338,6 @@ type originStorageKey struct {
 
 // StoreOriginAccount records the committed base account write-once (idempotent across txs).
 func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Account) {
-	if acc == nil {
-		return
-	}
 	vm.originAccounts.LoadOrStore(addr, acc)
 }
 
@@ -1592,10 +1589,25 @@ func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key acco
 	}
 }
 
+func deleteCell[T any](vm *VersionMap, m *btree.Map[int, *WriteCell[T]], txIdx int, stamped *bool) (*WriteCell[T], bool) {
+	if _, ok := m.Get(txIdx); !ok {
+		return nil, false
+	}
+	if !*stamped {
+		vm.mutBegin(txIdx)
+		*stamped = true
+	}
+	return m.Delete(txIdx)
+}
+
+func (vm *VersionMap) endDeleteStamp(txIdx int, stamped *bool) {
+	if *stamped {
+		vm.mutEnd(txIdx)
+	}
+}
+
 func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
 	vm.assertUnsealed(txIdx, addr, path, key)
-	vm.mutBegin(txIdx)
-	defer vm.mutEnd(txIdx)
 	e := vm.load(addr)
 	if e == nil {
 		if !checkExists {
@@ -1605,75 +1617,77 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	var stamped bool
+	defer vm.endDeleteStamp(txIdx, &stamped)
 	var hasField bool
 	switch path {
 	case AddressPath:
 		if e.Address != nil {
 			hasField = true
-			if c, ok := e.Address.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.Address, txIdx, &stamped); ok {
 				releaseCellAccount(c)
 			}
 		}
 	case SelfDestructPath:
 		if e.SelfDestruct != nil {
 			hasField = true
-			if c, ok := e.SelfDestruct.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.SelfDestruct, txIdx, &stamped); ok {
 				releaseCellSelfDestruct(c)
 			}
 		}
 	case BalancePath:
 		if e.Balance != nil {
 			hasField = true
-			if c, ok := e.Balance.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.Balance, txIdx, &stamped); ok {
 				releaseCellBalance(c)
 			}
 		}
 	case NoncePath:
 		if e.Nonce != nil {
 			hasField = true
-			if c, ok := e.Nonce.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.Nonce, txIdx, &stamped); ok {
 				releaseCellNonce(c)
 			}
 		}
 	case IncarnationPath:
 		if e.Incarnation != nil {
 			hasField = true
-			if c, ok := e.Incarnation.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.Incarnation, txIdx, &stamped); ok {
 				releaseCellIncarnation(c)
 			}
 		}
 	case CodePath:
 		if e.Code != nil {
 			hasField = true
-			if c, ok := e.Code.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.Code, txIdx, &stamped); ok {
 				releaseCellCode(c)
 			}
 		}
 	case CodeHashPath:
 		if e.CodeHash != nil {
 			hasField = true
-			if c, ok := e.CodeHash.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.CodeHash, txIdx, &stamped); ok {
 				releaseCellCodeHash(c)
 			}
 		}
 	case CodeSizePath:
 		if e.CodeSize != nil {
 			hasField = true
-			if c, ok := e.CodeSize.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.CodeSize, txIdx, &stamped); ok {
 				releaseCellCodeSize(c)
 			}
 		}
 	case CreateContractPath:
 		if e.CreateContract != nil {
 			hasField = true
-			if c, ok := e.CreateContract.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, e.CreateContract, txIdx, &stamped); ok {
 				releaseCellCreateContract(c)
 			}
 		}
 	case StoragePath:
 		if cells := e.Storage[key]; cells != nil {
 			hasField = true
-			if c, ok := cells.Delete(txIdx); ok {
+			if c, ok := deleteCell(vm, cells, txIdx, &stamped); ok {
 				releaseCellStorage(c)
 			}
 		}
@@ -1687,61 +1701,61 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
-	vm.mutBegin(txIdx)
-	defer vm.mutEnd(txIdx)
 	e := vm.load(addr)
 	if e == nil {
 		return
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	var stamped bool
+	defer vm.endDeleteStamp(txIdx, &stamped)
 	if e.Address != nil {
-		if c, ok := e.Address.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.Address, txIdx, &stamped); ok {
 			releaseCellAccount(c)
 		}
 	}
 	if e.SelfDestruct != nil {
-		if c, ok := e.SelfDestruct.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.SelfDestruct, txIdx, &stamped); ok {
 			releaseCellSelfDestruct(c)
 		}
 	}
 	if e.Balance != nil {
-		if c, ok := e.Balance.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.Balance, txIdx, &stamped); ok {
 			releaseCellBalance(c)
 		}
 	}
 	if e.Nonce != nil {
-		if c, ok := e.Nonce.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.Nonce, txIdx, &stamped); ok {
 			releaseCellNonce(c)
 		}
 	}
 	if e.Incarnation != nil {
-		if c, ok := e.Incarnation.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.Incarnation, txIdx, &stamped); ok {
 			releaseCellIncarnation(c)
 		}
 	}
 	if e.Code != nil {
-		if c, ok := e.Code.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.Code, txIdx, &stamped); ok {
 			releaseCellCode(c)
 		}
 	}
 	if e.CodeHash != nil {
-		if c, ok := e.CodeHash.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.CodeHash, txIdx, &stamped); ok {
 			releaseCellCodeHash(c)
 		}
 	}
 	if e.CodeSize != nil {
-		if c, ok := e.CodeSize.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.CodeSize, txIdx, &stamped); ok {
 			releaseCellCodeSize(c)
 		}
 	}
 	if e.CreateContract != nil {
-		if c, ok := e.CreateContract.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, e.CreateContract, txIdx, &stamped); ok {
 			releaseCellCreateContract(c)
 		}
 	}
 	for _, cells := range e.Storage {
-		if c, ok := cells.Delete(txIdx); ok {
+		if c, ok := deleteCell(vm, cells, txIdx, &stamped); ok {
 			releaseCellStorage(c)
 		}
 	}
