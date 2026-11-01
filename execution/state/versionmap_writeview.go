@@ -157,9 +157,8 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			}
 			scratch = scratch[:len(inner)]
 			i := 0
-			for key := range inner {
-				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+			for key, kw := range inner {
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -191,8 +190,7 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 				if kw.valStatus == ValueUnchanged {
 					continue
 				}
-				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
