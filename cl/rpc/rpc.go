@@ -111,7 +111,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 			return nil, pid, err
 		}
 		if !b.beaconConfig.ForkSchemaMatchesSlot(responseChunk.Block.Slot, responseChunk.Version()) {
-			b.BanPeer(pid)
+			b.BanPeerForInvalidData(ctx, pid)
 			return nil, pid, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
 		responsePacket = append(responsePacket, responseChunk)
@@ -175,7 +175,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 		b.columnDataPeers.coolDown(pid)
 	}
 	if uint64(len(responsePacket)) > requestedColumnCount {
-		b.BanPeer(pid)
+		b.BanPeerForInvalidData(ctx, pid)
 		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
 	}
 
@@ -190,7 +190,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 			slot = columnSidecar.Slot
 		} else {
 			if columnSidecar.SignedBlockHeader == nil || columnSidecar.SignedBlockHeader.Header == nil {
-				b.BanPeer(pid)
+				b.BanPeerForInvalidData(ctx, pid)
 				return nil, pid, filteredReq, errors.New("column sidecar is missing its signed block header")
 			}
 			slot = columnSidecar.SignedBlockHeader.Header.Slot
@@ -200,7 +200,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 			return nil, pid, filteredReq, err
 		}
 		if data.forkDigest != expectedForkDigest {
-			b.BanPeer(pid)
+			b.BanPeerForInvalidData(ctx, pid)
 			return nil, pid, filteredReq, fmt.Errorf("column sidecar fork digest %x disagrees with slot %d fork digest %x", data.forkDigest, slot, expectedForkDigest)
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
