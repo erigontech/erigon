@@ -1359,7 +1359,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 }
 
 func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
-	if len(be.accessList) > 0 {
+	if be.execStarted.IsZero() && len(be.accessList) > 0 {
 		base := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx)), be.blockNum)
 		if err := be.versionMap.SeedEmptyRemovals(be.accessList,
 			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),

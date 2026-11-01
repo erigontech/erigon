@@ -1904,3 +1904,23 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
 }
+
+func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+	be := pe.blockExecutors[1]
+	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
+	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
+
+	be.versionMap = state.NewVersionMap(bal)
+	require.NoError(t, pe.startBlock(t.Context(), be))
+	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
+	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
+}
