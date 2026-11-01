@@ -19,9 +19,18 @@ const (
 	signatureLength = 96
 	scalarBytes     = 32
 	randBitsEntropy = 64
-	// blst allocates bulk-add scratch on the C stack; this fits musl's 128 KiB thread stack.
+)
+
+// blst_p1s_add puts min(n, 1024) points of scratch, 144 bytes each, on the C stack, and cgo threads
+// get the libc default stack, 128 KiB on musl (https://github.com/supranational/blst/issues/142).
+// One batch of 512 keys needs 72 KiB.
+const (
+	blstP1ScratchBytes    = 144
+	muslThreadStackBytes  = 128 << 10
 	maxPublicKeysPerBatch = 512
 )
+
+const _ = uint(muslThreadStackBytes - maxPublicKeysPerBatch*blstP1ScratchBytes)
 
 // ETH2 uses BLS12381-G2 Curve
 var eth2Curve = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
