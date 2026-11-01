@@ -62,11 +62,11 @@ type TemporalMemBatch struct {
 
 	latestStateLocks [kv.DomainLen]paddedRWMutex
 	domains          [kv.DomainLen]map[string][]dataWithTxNum
-	// pendingAccounts holds the accounts writes of the block being folded. Only the
-	// writer reads it; readers see the block through the executor's prevBlocks until
+	// pending holds the account, storage and code writes of the block being folded. Only
+	// the writer reads it; readers see the block through the executor's prevBlocks until
 	// MergePendingAccounts.
-	pendingAccounts map[string][]dataWithTxNum
-	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	pending [kv.DomainLen]map[string][]dataWithTxNum
+	storage *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
@@ -197,8 +197,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
 	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
-	if domain == kv.AccountsDomain && sd.pendingAccounts != nil {
-		return sd.putPendingAccount(key, valWithStep)
+	if p := sd.pending[domain]; p != nil {
+		return sd.putPending(p, key, valWithStep)
 	}
 	sameTxNumUpdate, putKeySize, putValueSize := sd.putLatestLocked(domain, key, valWithStep)
 	sd.updatePutMetrics(domain, putKeySize, putValueSize)
@@ -259,62 +259,78 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	return sameTxNumUpdate, putKeySize, putValueSize
 }
 
-func (sd *TemporalMemBatch) putPendingAccount(key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool) {
-	old, ok := sd.pendingAccounts[key]
+func (sd *TemporalMemBatch) putPending(p map[string][]dataWithTxNum, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool) {
+	old, ok := p[key]
 	switch {
 	case !ok:
-		sd.pendingAccounts[key] = []dataWithTxNum{valWithStep}
+		p[key] = []dataWithTxNum{valWithStep}
 	case old[len(old)-1].txNum == valWithStep.txNum:
 		old[len(old)-1] = valWithStep
 		return true
 	case sd.inMemHistoryReads:
-		sd.pendingAccounts[key] = append(old, valWithStep)
+		p[key] = append(old, valWithStep)
 	default:
 		old[0] = valWithStep
-		sd.pendingAccounts[key] = old[:1]
+		p[key] = old[:1]
 	}
 	return false
 }
 
-// DeferAccounts makes accounts writes go to the writer-only buffer (on) or straight
-// to the shared map (off). Must be called by the writer.
+var deferredDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+
+// DeferAccounts makes account, storage and code writes go to the writer-only buffer (on)
+// or straight to the shared maps (off). Must be called by the writer.
 func (sd *TemporalMemBatch) DeferAccounts(on bool) {
 	sd.MergePendingAccounts()
-	if on {
-		sd.pendingAccounts = map[string][]dataWithTxNum{}
-	} else {
-		sd.pendingAccounts = nil
+	for _, d := range deferredDomains {
+		if on {
+			sd.pending[d] = map[string][]dataWithTxNum{}
+		} else {
+			sd.pending[d] = nil
+		}
 	}
 }
 
-// MergePendingAccounts publishes the buffered accounts writes under one lock.
+// MergePendingAccounts publishes the buffered writes under one lock per domain.
 func (sd *TemporalMemBatch) MergePendingAccounts() {
-	if len(sd.pendingAccounts) == 0 {
-		return
-	}
-	sd.latestStateLocks[kv.AccountsDomain].Lock()
-	defer sd.latestStateLocks[kv.AccountsDomain].Unlock()
-	m := sd.domains[kv.AccountsDomain]
-	for k, vs := range sd.pendingAccounts {
-		old, ok := m[k]
-		switch {
-		case !ok:
-			m[k] = vs
-		case sd.inMemHistoryReads:
-			m[k] = append(old, vs...)
-		default:
-			m[k] = vs[len(vs)-1:]
+	for _, d := range deferredDomains {
+		if len(sd.pending[d]) > 0 {
+			sd.mergePending(d)
 		}
 	}
-	clear(sd.pendingAccounts)
+}
+
+func (sd *TemporalMemBatch) mergePending(d kv.Domain) {
+	sd.latestStateLocks[d].Lock()
+	defer sd.latestStateLocks[d].Unlock()
+	merge := func(old, vs []dataWithTxNum, ok bool) []dataWithTxNum {
+		switch {
+		case !ok:
+			return vs
+		case sd.inMemHistoryReads:
+			return append(old, vs...)
+		default:
+			return vs[len(vs)-1:]
+		}
+	}
+	if d == kv.StorageDomain {
+		for k, vs := range sd.pending[d] {
+			old, ok := sd.storage.Get(k)
+			sd.storage.Set(k, merge(old, vs, ok))
+		}
+	} else {
+		m := sd.domains[d]
+		for k, vs := range sd.pending[d] {
+			old, ok := m[k]
+			m[k] = merge(old, vs, ok)
+		}
+	}
+	clear(sd.pending[d])
 }
 
 // PendingLatest reads the writer-only buffer. Only the writer may call it.
 func (sd *TemporalMemBatch) PendingLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	if domain != kv.AccountsDomain || sd.pendingAccounts == nil {
-		return nil, 0, false
-	}
-	vs, ok := sd.pendingAccounts[common.ToStringZeroCopy(key)]
+	vs, ok := sd.pending[domain][common.ToStringZeroCopy(key)]
 	if !ok {
 		return nil, 0, false
 	}

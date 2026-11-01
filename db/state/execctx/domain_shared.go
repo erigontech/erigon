@@ -1964,6 +1964,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		return errors.New("DomainDelPrefix: not supported")
 	}
 
+	sd.MergePendingAccounts()
 	type tuple struct {
 		k, v []byte
 	}
