@@ -2503,6 +2503,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		tx := p.queued.PopWorst()
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
+	p.evictParkedFrames(pendingBaseFee)
 }
 
 // Run - does:

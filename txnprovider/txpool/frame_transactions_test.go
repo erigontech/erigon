@@ -948,6 +948,48 @@ func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
 	require.Equal(t, 2, pool.pending.Len())
 }
 
+func TestFramePoolParkedCapacity(t *testing.T) {
+	ctx, pool, payer := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 1, 1
+	capacity := pool.pending.limit + pool.baseFee.limit + pool.queued.limit
+	var frames []*TxnSlot
+	for i := byte(1); i <= 8; i++ {
+		backend.err = nil
+		sender := common.Address{100, i}
+		frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+		frames = append(frames, frame)
+		var txns TxnSlots
+		txns.Append(frame, sender[:], false)
+		reasons, err := pool.addNewTxns(ctx, txns, nil)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+		require.Equal(t, 1, pool.pending.Len())
+		require.LessOrEqual(t, len(pool.byHash), capacity)
+
+		backend.err = context.DeadlineExceeded
+		change := newBlockChangeForAccounts(common.Hash{i}, 0, payer)
+		change.ChangeBatch[0].BlockHeight = uint64(i)
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.Zero(t, pool.pending.Len()+pool.baseFee.Len()+pool.queued.Len())
+		require.LessOrEqual(t, len(pool.byHash), capacity)
+	}
+
+	var reserved uint256.Int
+	for _, frame := range frames {
+		if _, retained := pool.byHash[string(frame.IDHash[:])]; retained {
+			require.Contains(t, pool.all.senderIDFrameTxn, frame.SenderID)
+			reserved.Add(&reserved, &frame.frameValidation.MaxCost)
+		} else {
+			require.NotContains(t, pool.all.senderIDFrameTxn, frame.SenderID)
+			require.Zero(t, pool.all.count(frame.SenderID))
+		}
+	}
+	require.Len(t, pool.byHash, capacity)
+	require.Len(t, pool.all.senderIDFrameTxn, capacity)
+	require.Equal(t, reserved, pool.frameReservations[payer].cost)
+}
+
 func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 	for _, failure := range []string{"invalid prefix", "payer balance"} {
 		t.Run(failure, func(t *testing.T) {

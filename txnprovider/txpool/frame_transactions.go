@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -301,6 +302,26 @@ func (p *TxPool) checkFrameReservation(v *protocol.FrameValidation, previous *me
 		return txpoolcfg.InsufficientFunds
 	}
 	return txpoolcfg.NotSet
+}
+
+// After subpool eviction, any excess over the total capacity fits within the
+// parked set. Evict these frames first because their validation is stale.
+func (p *TxPool) evictParkedFrames(pendingBaseFee uint64) {
+	excess := len(p.byHash) - p.pending.limit - p.baseFee.limit - p.queued.limit
+	if excess <= 0 {
+		return
+	}
+	var parked []*metaTxn
+	for _, mt := range p.all.senderIDFrameTxn {
+		if mt.currentSubPool == 0 {
+			parked = append(parked, mt)
+		}
+	}
+	fee := *uint256.NewInt(pendingBaseFee)
+	sort.Slice(parked, func(i, j int) bool { return parked[i].worse(parked[j], fee) })
+	for _, mt := range parked[:excess] {
+		p.discardLocked(mt, txpoolcfg.QueuedPoolOverflow)
+	}
 }
 
 func (p *TxPool) reserveFrame(v *protocol.FrameValidation) {
