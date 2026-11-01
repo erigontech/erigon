@@ -423,9 +423,15 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		return err
 	}
 
+	const (
+		maxBatchBytes    = 4 * 1024 * 1024
+		maxBatchMessages = 256
+	)
 	var (
-		batch     = make([]*sentryproto.InboundMessage, 0, 256)
-		batchLock sync.Mutex
+		batch      = make([]*sentryproto.InboundMessage, 0, maxBatchMessages)
+		batchBytes int
+		batchLock  sync.Mutex
+		flushLock  sync.Mutex
 	)
 	seenBodies := newBodyCache()
 	isBody := func(req *sentryproto.InboundMessage) bool {
@@ -433,13 +439,19 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 	}
 
 	flushBatch := func() {
+		flushLock.Lock()
+		defer flushLock.Unlock()
+		if streamCtx.Err() != nil {
+			return
+		}
 		batchLock.Lock()
 		if len(batch) == 0 {
 			batchLock.Unlock()
 			return
 		}
 		toProcess := batch
-		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batch = make([]*sentryproto.InboundMessage, 0, maxBatchMessages)
+		batchBytes = 0
 		batchLock.Unlock()
 
 		if !f.pool.Started() {
@@ -537,7 +549,14 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		batchLock.Lock()
+		full := len(batch) >= maxBatchMessages || batchBytes+len(req.Data) > maxBatchBytes
+		batchLock.Unlock()
+		if full {
+			flushBatch()
+		}
+		batchLock.Lock()
 		batch = append(batch, req)
+		batchBytes += len(req.Data)
 		batchLock.Unlock()
 	}
 }

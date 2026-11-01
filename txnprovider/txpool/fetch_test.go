@@ -23,6 +23,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -864,13 +866,6 @@ func TestFetchRepeatedHashesShareAdmissionAttempt(t *testing.T) {
 	}
 }
 
-type fetchTestStream struct {
-	grpc.ClientStream
-	recv func() (*sentryproto.InboundMessage, error)
-}
-
-func (s *fetchTestStream) Recv() (*sentryproto.InboundMessage, error) { return s.recv() }
-
 func newFetchTestClient(t *testing.T) (*sentryproto.MockSentryClient, <-chan *sentryproto.SendMessageByIdRequest, <-chan *sentryproto.PenalizePeerRequest) {
 	t.Helper()
 	// One extra slot preserves duplicate calls without blocking the fetcher.
@@ -899,7 +894,7 @@ func newFetchTestClient(t *testing.T) (*sentryproto.MockSentryClient, <-chan *se
 func receiveFetchTestMessages(t *testing.T, fetch *Fetch, client *sentryproto.MockSentryClient, steps ...func() *sentryproto.InboundMessage) {
 	t.Helper()
 	i := 0
-	stream := &fetchTestStream{recv: func() (*sentryproto.InboundMessage, error) {
+	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 		fetch.wg.Wait()
 		if i == len(steps) {
 			return nil, nil
@@ -1069,7 +1064,7 @@ func addFetchTestLocalTransactions(t *testing.T, pool *TxPool, signed ...types.T
 
 func receiveFetchTestBatch(t *testing.T, fetch *Fetch, client *sentryproto.MockSentryClient, next func() *sentryproto.InboundMessage) {
 	t.Helper()
-	stream := &fetchTestStream{recv: func() (*sentryproto.InboundMessage, error) {
+	stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
 		message := next()
 		if message != nil {
 			fetch.wg.Add(1)
@@ -2005,4 +2000,124 @@ func TestFetchRetriesDiscardedBodyAfterDatabaseDeletion(t *testing.T) {
 			require.Empty(t, penalties)
 		})
 	}
+}
+
+type boundedBatchStream struct {
+	grpc.ClientStream
+	recv func() (*sentryproto.InboundMessage, error)
+}
+
+func (s *boundedBatchStream) Recv() (*sentryproto.InboundMessage, error) { return s.recv() }
+
+func TestFetchBoundsQueuedBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		bytes, messages int
+		wantFlushes     int32
+	}{
+		{"bytes", 1024 * 1024, 5, 1},
+		{"messages", 1, 257, 1},
+		{"bytes_before_append", 3 * 1024 * 1024, 3, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				pool := NewMockPool(ctrl)
+				var flushes atomic.Int32
+				pool.EXPECT().Started().DoAndReturn(func() bool { flushes.Add(1); return true }).AnyTimes()
+				client := sentryproto.NewMockSentryClient(ctrl)
+				var wg sync.WaitGroup
+				fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
+				received := 0
+				stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+					if received == tc.messages {
+						require.Equal(t, tc.wantFlushes, flushes.Load(), "unexpected flush count before stream closure")
+						return nil, nil
+					}
+					received++
+					wg.Add(1)
+					return &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: make([]byte, tc.bytes)}, nil
+				}}
+				client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+				require.NoError(t, fetch.receiveMessage(t.Context(), client))
+				wg.Wait()
+				require.Equal(t, tc.messages, received)
+			})
+		})
+	}
+}
+
+func TestFetchSerializesBatchFlushes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		started := make(chan struct{}, 3)
+		release := make(chan struct{})
+		releaseFirst := sync.OnceFunc(func() { close(release) })
+		defer releaseFirst()
+		pool.EXPECT().Started().DoAndReturn(func() bool {
+			started <- struct{}{}
+			<-release
+			return true
+		}).Times(3)
+		messages := make(chan *sentryproto.InboundMessage)
+		defer close(messages)
+		stream := &boundedBatchStream{recv: func() (*sentryproto.InboundMessage, error) {
+			return <-messages, nil
+		}}
+		client := sentryproto.NewMockSentryClient(ctrl)
+		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).Return(stream, nil)
+		fetch := NewFetch(t.Context(), nil, pool, nil, nil, u256.N1, log.New())
+		done := make(chan error, 1)
+		go func() { done <- fetch.receiveMessage(t.Context(), client) }()
+
+		message := &sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66}
+		messages <- message
+		<-started
+		for range 257 {
+			messages <- message
+		}
+
+		// Mutex waits do not quiesce synctest, so observe the blocked receiver directly.
+		stacks := make([]runtime.StackRecord, 16)
+	waitForThreshold:
+		for {
+			select {
+			case <-started:
+				t.Fatal("threshold flush started before the timer flush was released")
+			default:
+			}
+			n, ok := runtime.GoroutineProfile(stacks)
+			if !ok {
+				stacks = make([]runtime.StackRecord, n)
+				continue
+			}
+			for _, stack := range stacks[:n] {
+				frames := runtime.CallersFrames(stack.Stack())
+				var previous string
+				var waiting, flushLocked, receiver bool
+				for {
+					frame, more := frames.Next()
+					waiting = waiting || strings.HasSuffix(frame.Function, ".runtime_SemacquireMutex")
+					if waiting && previous == "sync.(*Mutex).Lock" && strings.Contains(frame.Function, ".(*Fetch).receiveMessage.func") {
+						flushLocked = true
+					}
+					receiver = receiver || strings.Contains(frame.Function, ".TestFetchSerializesBatchFlushes.")
+					previous = frame.Function
+					if !more {
+						break
+					}
+				}
+				if flushLocked && receiver {
+					break waitForThreshold
+				}
+			}
+			runtime.Gosched()
+		}
+
+		releaseFirst()
+		<-started
+		messages <- nil
+		require.NoError(t, <-done)
+	})
 }
