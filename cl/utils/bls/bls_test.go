@@ -157,7 +157,7 @@ func TestSignatureVerifyAggregate(t *testing.T) {
 	}
 }
 
-func TestSignatureVerifyAggregateWorkerBufferReuse(t *testing.T) {
+func TestSignatureVerifyAggregateMultipleChunksPerWorker(t *testing.T) {
 	previousMaxProcs := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previousMaxProcs) })
 

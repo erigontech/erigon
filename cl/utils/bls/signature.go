@@ -69,15 +69,15 @@ func aggregatePublicKeys(publicKeys []PublicKey) *blst.P1 {
 	chunkCount := (len(publicKeys) + maxPublicKeysPerBatch - 1) / maxPublicKeysPerBatch
 	partials := make([]*blst.P1, chunkCount)
 	workerCount := min(runtime.GOMAXPROCS(0), chunkCount)
+	affines := make([]*blst.P1Affine, len(publicKeys))
+	for i, publicKey := range publicKeys {
+		affines[i] = publicKey
+	}
 	addChunks := func(worker int) {
-		affines := make(blst.P1Affines, min(maxPublicKeysPerBatch, len(publicKeys)-worker*maxPublicKeysPerBatch))
 		for chunk := worker; chunk < chunkCount; chunk += workerCount {
 			start := chunk * maxPublicKeysPerBatch
 			end := min(start+maxPublicKeysPerBatch, len(publicKeys))
-			for i, publicKey := range publicKeys[start:end] {
-				affines[i] = *publicKey
-			}
-			partials[chunk] = affines[:end-start].Add()
+			partials[chunk] = blst.P1AffinesAdd(affines[start:end])
 		}
 	}
 	if workerCount == 1 {
