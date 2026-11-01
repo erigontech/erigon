@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -165,6 +166,7 @@ func TestChainTipSyncRetriesWriteFromForwardSync(t *testing.T) {
 
 	progress, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true, []*cltypes.SignedBeaconBlock{block}, nil)
 	require.ErrorIs(t, err, db.err)
+	require.ErrorIs(t, err, network2.ErrUnattributableProcess, "a local write failure must not ban the serving peer")
 	require.Equal(t, block.Block.Slot-1, progress)
 	require.Zero(t, collector.calls)
 	args := Args{seenSlot: cfg.forkChoice.HighestSeen(), targetSlot: block.Block.Slot}
@@ -188,6 +190,31 @@ func TestChainTipSyncRetriesWriteFromForwardSync(t *testing.T) {
 	require.Zero(t, engine.newPayloadCalls, "forward sync leaves execution insertion to the collector")
 	require.Equal(t, 1, collector.calls, "the handoff must preserve execution insertion along with the database write")
 	require.Equal(t, 1, collector.flushCalls)
+}
+
+func TestForwardSyncRetainsAcceptedCopyForExecutionInsertion(t *testing.T) {
+	cfg, _, block, _ := newForwardSyncPersistenceFixture(t)
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), block, false, true, false))
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	db := &blockWriteErrorDB{RwDB: cfg.indiciesDB, err: errors.New("database write failed"), failures: 1}
+	cfg.indiciesDB = db
+	received := *block
+	received.Signature[0] ^= 1
+
+	_, err := processDownloadedBlockBatches(t.Context(), log.Root(), cfg, block.Block.Slot-1, true, []*cltypes.SignedBeaconBlock{&received}, nil)
+	require.ErrorIs(t, err, db.err)
+	require.NoError(t, retryPendingBlockWrite(t.Context(), cfg))
+	require.Equal(t, 1, collector.calls)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, header)
+		require.Equal(t, block.Signature, header.Signature)
+		return nil
+	}))
 }
 
 type cancelingBlockCollector struct {

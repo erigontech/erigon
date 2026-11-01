@@ -148,6 +148,10 @@ type ForkChoiceStorageWriter interface {
 	BeginPendingPayloadEnvelope(common.Hash) func()
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
+	// OnBlock and OnBlockWithEquivocationCheck can return nil for old blocks they ignore.
+	// Confirm initial acceptance through GetHeader before writing indices: an unvalidated
+	// state root can overwrite another block's mapping. GetBlock can expose blocks before
+	// validation finishes, so it does not prove acceptance.
 	OnBlock(
 		ctx context.Context,
 		block *cltypes.SignedBeaconBlock,

@@ -602,6 +602,38 @@ func TestValStatus_RevertRestamps(t *testing.T) {
 	require.Equal(t, ValueCreated, vw.valStatus)
 }
 
+// TestValStatus_AccountPathsNeverUnchanged pins the structural reason storage-read
+// validation stands on version without a value compare: storageValueStatus stamps
+// ValueUnchanged on a net-zero storage write, but balance and nonce writes never carry it,
+// so there is no account-path exemption for validation to lean on — a version-equal account
+// read is value-equal by construction.
+func TestValStatus_AccountPathsNeverUnchanged(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
+	s.txIndex = 1
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+
+	// Balance 0→100→0 nets to the committed origin — the storage analog is ValueUnchanged.
+	require.NoError(t, s.SetBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified))
+	require.NoError(t, s.SetBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
+	bw, ok := s.VersionedWrites().GetBalance(addr)
+	require.True(t, ok)
+	require.NotEqual(t, ValueUnchanged, bw.valStatus, "a net-zero balance write is never ValueUnchanged")
+
+	// Nonce 0→1→0 likewise nets to the origin and is never ValueUnchanged.
+	require.NoError(t, s.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, s.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
+	nw, ok := s.VersionedWrites().GetNonce(addr)
+	require.True(t, ok)
+	require.NotEqual(t, ValueUnchanged, nw.valStatus, "a net-zero nonce write is never ValueUnchanged")
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
