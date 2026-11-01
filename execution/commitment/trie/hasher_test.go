@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 func TestValue(t *testing.T) {
@@ -34,5 +35,19 @@ func TestValue(t *testing.T) {
 	expected := "8584424c4148"
 	if actual := fmt.Sprintf("%x", hn[:n]); actual != expected {
 		t.Errorf("expected %s, got %s", expected, actual)
+	}
+}
+
+func TestLeafHashIgnoresOverridesOfAnEarlierBuild(t *testing.T) {
+	key := []byte{1, 2, 3, 16}
+	val := rlp.RlpEncodedBytes(make([]byte, 100))
+	want, hashed, err := NewHashBuilder(false).LeafHash(key, val)
+	if err != nil || !hashed {
+		t.Fatalf("reference leaf: hashed=%t err=%v", hashed, err)
+	}
+	hb := NewHashBuilder(false)
+	hb.SetLeafHashes(make([][32]byte, 1), []bool{true})
+	if got, _, err := hb.LeafHash(key, val); err != nil || got != want {
+		t.Fatalf("got %x, want %x (err %v)", got, want, err)
 	}
 }

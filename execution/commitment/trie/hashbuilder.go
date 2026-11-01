@@ -105,6 +105,7 @@ func (hb *HashBuilder) Reset() {
 		hb.nodeStack = hb.nodeStack[:0]
 	}
 	hb.topHashesCopy = hb.topHashesCopy[:0]
+	hb.leafHashes, hb.leafHashSet, hb.leafKeys, hb.leafN = nil, nil, nil, 0
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) error {
