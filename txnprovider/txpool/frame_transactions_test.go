@@ -776,6 +776,46 @@ func TestFramePoolUnwindPreservesLocalFlag(t *testing.T) {
 	}
 }
 
+func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	frame := framePoolSlot(t, sender, 1, 2)
+	blob := &TxnSlot{}
+	encoded := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
+	parser := NewTxnParseContext(*uint256.NewInt(1))
+	parser.WithSender(false)
+	_, err := parser.ParseTransaction(encoded, 0, blob, nil, false, true, nil)
+	require.NoError(t, err)
+	blob.Nonce = 1
+	blob.Txn.(*types.BlobTx).Nonce = 1
+
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	txns.Append(blob, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	mined := newBlockChangeForAccounts(common.Hash{1}, 2, sender)
+	mined.ChangeBatch[0].BlockHeight = 1
+	require.NoError(t, pool.OnNewBlock(ctx, mined, TxnSlots{}, TxnSlots{}, txns))
+	require.Empty(t, pool.byHash)
+
+	var unwind, unwindBlobs TxnSlots
+	unwind.Append(frame, sender[:], false)
+	unwindBlobs.Append(&TxnSlot{Txn: blob.Txn, Nonce: blob.Nonce, IDHash: blob.IDHash}, sender[:], false)
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, unwindBlobs, TxnSlots{}))
+
+	for _, txn := range txns.Txns {
+		restored := pool.byHash[string(txn.IDHash[:])]
+		require.NotNil(t, restored, "transaction type %d with nonce %d was not restored", txn.TxType(), txn.Nonce)
+		require.NotZero(t, restored.subPool&IsLocal)
+		require.Equal(t, PendingSubPool, restored.currentSubPool)
+	}
+}
+
 func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 	for _, mode := range []string{"unwind", "reload"} {
 		t.Run(mode, func(t *testing.T) {

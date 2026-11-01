@@ -368,7 +368,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 }
 
 // applyBlockUpdate applies the announced state under the pool lock and returns
-// frame transactions that need backend validation after the lock is released.
+// admission and revalidation work that needs frame simulation after releasing it.
 func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots,
 	cacheView kvcache.CacheView, poolTx kv.Tx,
 ) (frames frameBlockUpdate, err error) {
@@ -432,13 +432,20 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			}
 		}
 	}
-	// A reorg can invalidate frame approvals and payer reservations. Frame
-	// transactions therefore go through normal admission against the new head,
-	// after releasing the pool lock so backend EVM simulation does not block the pool.
+	// A reorg can invalidate frame approvals and payer reservations, so frames
+	// need fresh simulation outside the pool lock. Keep their account-nonce chains
+	// together so nonce-gap checks do not discard ordinary successors too early.
+	legacyFrameSenders := make(map[common.Address]struct{})
+	for i, txn := range unwindTxns.Txns {
+		if txn.TxType() == FrameTxnType && !txn.hasKeyedNonce() {
+			legacyFrameSenders[unwindTxns.Senders.AddressAt(i)] = struct{}{}
+		}
+	}
 	var ordinaryUnwind TxnSlots
 	for i, txn := range unwindTxns.Txns {
 		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
-		if txn.TxType() == FrameTxnType {
+		_, sharesNonceChain := legacyFrameSenders[unwindTxns.Senders.AddressAt(i)]
+		if txn.TxType() == FrameTxnType || sharesNonceChain {
 			frames.unwound.Append(txn, unwindTxns.Senders.At(i), isLocal)
 		} else {
 			ordinaryUnwind.Append(txn, unwindTxns.Senders.At(i), isLocal)
