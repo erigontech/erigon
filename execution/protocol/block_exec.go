@@ -42,9 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var (
-	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-)
+var blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 
 type SyncMode string
 
@@ -54,8 +52,8 @@ const (
 )
 
 type RejectedTx struct {
-	Index int    `json:"index"    gencodec:"required"`
-	Err   string `json:"error"    gencodec:"required"`
+	Index int    `json:"index"`
+	Err   string `json:"error"`
 }
 
 type RejectedTxs []*RejectedTx
@@ -65,10 +63,10 @@ type EphemeralExecResult struct {
 	TxRoot      common.Hash           `json:"txRoot"`
 	ReceiptRoot common.Hash           `json:"receiptsRoot"`
 	LogsHash    common.Hash           `json:"logsHash"`
-	Bloom       types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Bloom       types.Bloom           `json:"logsBloom"`
 	Receipts    types.Receipts        `json:"receipts"`
 	Rejected    RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
 	GasUsed     math.HexOrDecimal64   `json:"gasUsed"`
 }
 
@@ -179,7 +177,7 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -208,19 +206,17 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
-// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. Only
-// chainConfig survives a call, so there is nothing else to seed.
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse.
 func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
 	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
 }
 
-// SysCallContractWithEVM runs a system call on an EVM the caller owns instead of
-// building one per call. The EVM must belong to the calling goroutine, and the
-// call overwrites its block context, tx context, IntraBlockState and vm.Config,
-// so the caller must not need any of those to survive. A nil EVM, or one built
-// for a different chainConfig, falls back to allocating one.
+// SysCallContractWithEVM runs a system call on an EVM owned by the caller.
+// Reuse preserves cancellation but replaces the block and transaction contexts,
+// intra-block state and VM configuration. The EVM must not execute other calls concurrently.
+// A nil EVM or one with a different chainConfig is replaced for this call.
 func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, params.SystemAddress, chainConfig)
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
@@ -240,7 +236,6 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
@@ -248,7 +243,7 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 	if evm == nil || evm.ChainConfig() != chainConfig {
 		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
-		evm.ResetBetweenBlocks(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
+		evm.ResetForSystemCall(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
 	}
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
@@ -286,12 +281,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // state gas reservoir will consume from execution gas for sys calls
@@ -307,14 +301,13 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 }
 
 func FinalizeBlockExecution(
-	engine rules.Engine, stateReader state.StateReader,
+	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
 	logger log.Logger,
-	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})
@@ -335,7 +328,7 @@ func FinalizeBlockExecution(
 	}
 
 	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
-	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// write-set — the caller applies ba.BalIO() via ApplyWrites after
 	// assembly, so so.data must not also be flushed here. versionMap==nil callers
 	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
 	if !ibs.IsVersioned() {

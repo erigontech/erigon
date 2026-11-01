@@ -103,7 +103,7 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.I
 	adjust.Rsh(adjust, difficultyBoundDivisor) // adjust: pDiff / 2048
 
 	x := (time - parentTime) / 10 // (time - ptime) / 10)
-	var neg = true
+	neg := true
 	switch {
 	case x == 0:
 		x = 1
@@ -165,7 +165,7 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 		}
 		// parent_diff + (parent_diff / 2048 * max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99))
 		y := pDiff.Clone()
-		z := new(uint256.Int).SetUint64(x) //z : +-adj_factor (either pos or negative)
+		z := new(uint256.Int).SetUint64(x) // z : +-adj_factor (either pos or negative)
 		y.Rsh(y, difficultyBoundDivisor)   // y: p__diff / 2048
 		z.Mul(y, z)                        // z: (p_diff / 2048 ) * (+- adj_factor)
 

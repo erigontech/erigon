@@ -18,10 +18,11 @@ package lru
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
@@ -57,29 +58,112 @@ func (c *Cache[K, V]) Get(k K) (V, bool) {
 	return v, ok
 }
 
-type CacheWithTTL[K comparable, V any] struct {
-	*expirable.LRU[K, V]
-	metric string
-	// metrics
-	metricTTLHit, metricTTLMiss metrics.Counter
+// ttlEntry is what the cache stores: the value and its deadline, zero when the cache has no ttl.
+type ttlEntry[V any] struct {
+	value     V
+	expiresAt time.Time
 }
 
+func (e ttlEntry[V]) expired(now time.Time) bool {
+	return !e.expiresAt.IsZero() && now.After(e.expiresAt)
+}
+
+// expiredTailDrops is how many expired entries an Add reclaims from the least recently used end.
+// Two per Add keeps ahead of the one entry an Add inserts, so a backlog of expired entries drains
+// while the cache is written to.
+const expiredTailDrops = 2
+
+// CacheWithTTL is a size-bounded cache with lazy expiry. For a positive ttl, Add sets a fresh
+// deadline and Get treats an entry past its deadline as a miss and removes it. An entry that is
+// never read again reaches the least recently used end in deadline order, where an Add reclaims
+// it, so a cache that is written to holds roughly a ttl's worth of entries rather than filling to
+// its size cap. An entry a Get promoted is reclaimed once everything less recently used than it
+// has gone, and the size cap bounds it until then. A ttl of zero or less disables expiry. The
+// cache starts no goroutine.
+type CacheWithTTL[K comparable, V any] struct {
+	ttl time.Duration
+	// metrics
+	metricTTLHit, metricTTLMiss metrics.Counter
+
+	mu sync.Mutex
+	// cache is not goroutine-safe on its own; every access is under mu.
+	cache *simplelru.LRU[K, ttlEntry[V]]
+}
+
+// NewWithTTL builds a cache of at most size entries that each live for ttl after their last Add. A
+// ttl of zero or less disables expiry. size must be positive, as for New; an invalid size panics.
 func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Duration) *CacheWithTTL[K, V] {
-	cache := expirable.NewLRU[K, V](size, nil, ttl)
+	cache, err := simplelru.NewLRU[K, ttlEntry[V]](size, nil)
+	if err != nil {
+		panic(fmt.Sprintf("lru: NewWithTTL(%q, %d, %v): %v", metricName, size, ttl, err))
+	}
 	return &CacheWithTTL[K, V]{
-		LRU:           cache,
-		metric:        metricName,
+		ttl:           ttl,
+		cache:         cache,
 		metricTTLHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s=%q}`, "cache", metricName)),
 		metricTTLMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s=%q}`, "cache", metricName)),
 	}
 }
 
-func (c *CacheWithTTL[K, V]) Get(k K) (V, bool) {
-	v, ok := c.LRU.Get(k)
-	if ok {
-		c.metricTTLHit.Inc()
-	} else {
-		c.metricTTLMiss.Inc()
+// Add stores v under k with a fresh deadline, replacing any entry k had, expired or not, and
+// reclaims expired entries from the least recently used end.
+func (c *CacheWithTTL[K, V]) Add(k K, v V) (evicted bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := ttlEntry[V]{value: v}
+	if c.ttl > 0 {
+		// The deadline is taken under the lock: time spent waiting for it would otherwise be
+		// charged to the entry's ttl, and a long enough wait would store a value that is already
+		// expired.
+		now := time.Now()
+		e.expiresAt = now.Add(c.ttl)
+		c.dropExpiredTail(now)
 	}
-	return v, ok
+	return c.cache.Add(k, e)
+}
+
+// dropExpiredTail removes up to expiredTailDrops expired entries from the least recently used end,
+// stopping at the first live one. c.mu is held.
+func (c *CacheWithTTL[K, V]) dropExpiredTail(now time.Time) {
+	for range expiredTailDrops {
+		k, e, ok := c.cache.GetOldest()
+		if !ok || !e.expired(now) {
+			return
+		}
+		c.cache.Remove(k)
+	}
+}
+
+// Get returns k's value if it is present and not past its deadline. An expired entry is a miss and
+// is removed. A hit does not extend the deadline.
+func (c *CacheWithTTL[K, V]) Get(k K) (V, bool) {
+	c.mu.Lock()
+	e, ok := c.cache.Get(k)
+	if ok && e.expired(time.Now()) {
+		c.cache.Remove(k)
+		ok = false
+	}
+	c.mu.Unlock()
+
+	if !ok {
+		c.metricTTLMiss.Inc()
+		var zero V
+		return zero, false
+	}
+	c.metricTTLHit.Inc()
+	return e.value, true
+}
+
+func (c *CacheWithTTL[K, V]) Remove(k K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cache.Remove(k)
+}
+
+// Len counts the resident entries, including any past their deadline that no Get or Add has
+// reclaimed yet.
+func (c *CacheWithTTL[K, V]) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cache.Len()
 }

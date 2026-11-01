@@ -16,7 +16,7 @@
 ##
 ##   5. DOCKER_BINARIES='erigon downloader rpcdaemon' make docker
 
-ARG BUILDER_IMAGE="golang:1.26-trixie" \
+ARG BUILDER_IMAGE="golang:1.27-trixie" \
     TARGET_BASE_IMAGE="debian:13-slim" \
     BINARIES="erigon" \
     BUILD_DBTOOLS="false" \
@@ -63,11 +63,8 @@ RUN xx-apt-get install -y libc6-dev g++ && \
 COPY . /erigon/
 
 RUN echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
-    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
-        echo "DEBUG: detected architecture AMD64v1"; \
-        export CPU_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
-    elif [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "xv2" ]; then \
-        echo "DEBUG: detected architecture AMD64v2"; \
+    if [ "x${TARGETARCH}" == "xamd64" ]; then \
+        echo "DEBUG: detected architecture AMD64, building for x86-64-v2"; \
         export CPU_FLAGS="GOAMD64_VERSION=v2 GOARCH=amd64"; \
     elif [ "x${TARGETARCH}" == "xarm64" ]; then \
         echo "DEBUG: detected architecture ARM64"; \
@@ -110,12 +107,21 @@ STOPSIGNAL 2
 
 SHELL ["/bin/bash", "-c"]
 
+# CA certificates the image must not trust while the base image still ships them, as listed in
+# /etc/ca-certificates.conf. eMudhra intermediate key compromise and the roots removed after it:
+# https://bugzilla.mozilla.org/show_bug.cgi?id=2083449, https://bugzilla.mozilla.org/show_bug.cgi?id=2083709,
+# https://bugs.debian.org/1151413
+ARG CA_DISTRUST="mozilla/emSign_ECC_Root_CA_-_G3.crt mozilla/Comodo_AAA_Services_root.crt mozilla/emSign_Root_CA_-_C1.crt mozilla/emSign_ECC_Root_CA_-_C3.crt"
+
 RUN --mount=type=bind,from=builder,source=/build,target=/tmp/build \
     echo Installing on ${TARGETARCH} with variant ${TARGETVARIANT} && \
     groupadd --gid ${GID_ERIGON} ${GROUP} && \
     useradd --system --uid ${UID_ERIGON} -g ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
     apt update -y && \
     apt install -y --no-install-recommends ca-certificates && \
+    for ca in ${CA_DISTRUST}; do sed -i "s|^${ca}\$|!${ca}|" /etc/ca-certificates.conf; done && \
+    update-ca-certificates --fresh && \
+    for ca in ${CA_DISTRUST}; do [ ! -e "/etc/ssl/certs/$(basename "${ca%.crt}").pem" ] || { echo "still trusted: ${ca}"; exit 1; }; done && \
     apt clean && \
     rm -rf /var/lib/apt/lists/* && \
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \

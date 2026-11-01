@@ -242,9 +242,7 @@ func addSszTests() {
 			cltypes.NewPartialDataColumnSidecar, runAfterVersion(clparams.FuluVersion),
 		)).
 		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
-				return cltypes.NewPartialDataColumnPartsMetadata()
-			}, runAfterVersion(clparams.FuluVersion),
+			cltypes.NewPartialDataColumnPartsMetadata, runAfterVersion(clparams.FuluVersion),
 		)).
 		// [New in Gloas:EIP7732] GLOAS SSZ types
 		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).
@@ -292,7 +290,8 @@ func addSszTests() {
 		With("DepositMessage", sszStaticTestByEmptyObject(&depositMessage{})).
 		With("Eth1Block", sszStaticTestByEmptyObject(&validatorEth1Block{})).
 		With("ForkData", sszStaticTestByEmptyObject(&forkData{})).
-		With("HistoricalBatch", spectest.UnimplementedHandler).
+		With("HistoricalBatch", sszStaticTestByEmptyObject(newHistoricalBatch(int(clparams.MainnetBeaconConfig.SlotsPerHistoricalRoot)))).
+		With("NewPayloadRequest", sszStaticTestNewObjectByFunc(newNewPayloadRequest)).
 		With("PartialDataColumnGroupID", sszStaticTestByEmptyObject(&partialDataColumnGroupID{})).
 		With("PowBlock", sszStaticTestByEmptyObject(&powBlock{})).
 		With("SigningData", sszStaticTestByEmptyObject(&signingData{}))

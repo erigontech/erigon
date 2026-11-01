@@ -34,6 +34,7 @@ func (k ConfigKey) Enabled(tx kv.Tx) (bool, error) { return kv.GetBool(tx, kv.Da
 func (k ConfigKey) EnsureNotChanged(tx kv.RwTx, value bool) (notChanged, enabled bool, err error) {
 	return kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, k, value)
 }
+
 func (k ConfigKey) ForceWrite(tx kv.RwTx, enabled bool) error {
 	if enabled {
 		if err := tx.Put(kv.DatabaseInfo, k, []byte{1}); err != nil {
@@ -46,6 +47,7 @@ func (k ConfigKey) ForceWrite(tx kv.RwTx, enabled bool) error {
 	}
 	return nil
 }
+
 func (k ConfigKey) MustBeEnabled(tx kv.Tx, msg string) error {
 	enabled, err := k.Enabled(tx)
 	if err != nil {

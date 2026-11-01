@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
-func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][]bool) []uint64 {
+func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][]bool) ([]uint64, error) {
 	beaconConfig := s.BeaconConfig()
 	weights := beaconConfig.ParticipationWeights()
 	flagsTotalBalances := make([]uint64, len(weights))
@@ -55,7 +55,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 				}
 				effectiveBalance, err := s.ValidatorEffectiveBalance(validatorIndex)
 				if err != nil {
-					panic(fmt.Sprintf("failed to get validator effective balance: %v", err))
+					return fmt.Errorf("failed to get validator effective balance: %w", err)
 				}
 				for weight := range weights {
 					if flagsUnslashedIndiciesSet[weight][validatorIndex] {
@@ -70,14 +70,16 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 		}
 	}
 
-	wp.Execute()
+	if err := wp.Execute(); err != nil {
+		return nil, err
+	}
 
 	for i := range weights {
 		for j := range numWorkers {
 			flagsTotalBalances[i] += flagsTotalBalancesShards[i][j]
 		}
 	}
-	return flagsTotalBalances
+	return flagsTotalBalances, nil
 }
 
 func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValidators []uint64, flagsUnslashedIndiciesSet [][]bool) (err error) {
@@ -89,7 +91,10 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	// Inactivity penalties denominator.
 	inactivityPenaltyDenominator := beaconConfig.InactivityScoreBias * beaconConfig.GetPenaltyQuotient(s.Version())
 	// Make buffer for flag indexes total balances.
-	flagsTotalBalances := getFlagsTotalBalances(s, flagsUnslashedIndiciesSet)
+	flagsTotalBalances, err := getFlagsTotalBalances(s, flagsUnslashedIndiciesSet)
+	if err != nil {
+		return err
+	}
 	// precomputed multiplier for reward.
 	rewardMultipliers := make([]uint64, len(weights))
 	for i := range weights {
@@ -97,21 +102,27 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 	}
 	rewardDenominator := (totalActiveBalance / beaconConfig.EffectiveBalanceIncrement) * beaconConfig.WeightDenominator
 	inactivityLeaking := state.InactivityLeaking(s)
+	balances := make([]uint64, len(eligibleValidators))
 
-	return threading.ParallellForLoop(1, 0, len(eligibleValidators), func(i int) error {
+	// Each penalty is clamped at zero before the next reward, as in the spec,
+	// so a single net delta would differ once a penalty exceeds the balance.
+	if err := threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidators), func(i int) error {
 		index := eligibleValidators[i]
 		baseReward, err := s.BaseReward(index)
 		if err != nil {
 			return err
 		}
-		delta := int64(0)
+		balance, err := s.ValidatorBalance(int(index))
+		if err != nil {
+			return err
+		}
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				if !inactivityLeaking {
-					delta += int64((baseReward * rewardMultipliers[flagIdx]) / rewardDenominator)
+					balance += (baseReward * rewardMultipliers[flagIdx]) / rewardDenominator
 				}
 			} else if flagIdx != int(beaconConfig.TimelyHeadFlagIndex) {
-				delta -= int64(baseReward * weights[flagIdx] / beaconConfig.WeightDenominator)
+				balance -= min(balance, baseReward*weights[flagIdx]/beaconConfig.WeightDenominator)
 			}
 		}
 		if !flagsUnslashedIndiciesSet[beaconConfig.TimelyTargetFlagIndex][index] {
@@ -124,17 +135,20 @@ func processRewardsAndPenaltiesPostAltair(s abstract.BeaconState, eligibleValida
 			if err != nil {
 				return err
 			}
-			delta -= int64((effectiveBalance * inactivityScore) / inactivityPenaltyDenominator)
+			balance -= min(balance, (effectiveBalance*inactivityScore)/inactivityPenaltyDenominator)
 		}
-		if delta > 0 {
-			if err := state.IncreaseBalance(s, index, uint64(delta)); err != nil {
-				return err
-			}
-		} else if err := state.DecreaseBalance(s, index, uint64(-delta)); err != nil {
+		balances[i] = balance
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for i, index := range eligibleValidators {
+		if err := s.SetValidatorBalance(int(index), balances[i]); err != nil {
 			return err
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.

@@ -38,7 +38,7 @@ func benchCapturedSuperset(b *testing.B, accts, slots, touch int) (full, provedK
 	defer toWitness.Close()
 	touchAccountsSlots(toWitness, addrs[:touch], slots)
 	var err error
-	full, provedKeys, root, err = hph.Witnesses(ctx, toWitness, true, "")
+	full, provedKeys, root, err = hph.Witnesses(ctx, toWitness, true)
 	require.NoError(b, err)
 	return full, provedKeys, root
 }
@@ -75,7 +75,7 @@ func BenchmarkBranchWitnessTotal(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 		touchAccountsSlots(toWitness, addrs[:32], 8)
-		full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, true, "")
+		full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, true)
 		toWitness.Close()
 		require.NoError(b, err)
 		if _, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys); err != nil {
@@ -110,7 +110,7 @@ func BenchmarkWitnessCapture(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
 		touchAccountsSlots(toWitness, addrs[:32], 0)
-		_, _, _, err := hph.Witnesses(ctx, toWitness, true, "")
+		_, _, _, err := hph.Witnesses(ctx, toWitness, true)
 		toWitness.Close()
 		require.NoError(b, err)
 	}

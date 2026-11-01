@@ -339,6 +339,7 @@ type ReadHeap struct {
 
 func (rh ReadHeap) Len() int           { return len(rh.items) }
 func (rh ReadHeap) Less(i, j int) bool { return rh.items[i].GetSequence() < rh.items[j].GetSequence() }
+
 func (rh ReadHeap) Swap(i, j int) {
 	// Swap queue positions in the B-tree leaves too
 	rh.items[i].SetQueuePos(j)
@@ -570,7 +571,6 @@ func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnatio
 		return nil, true
 	}
 	return nil, false
-
 }
 
 // SetAccountRead adds given account address to the cache, marking it as a absent
@@ -772,57 +772,6 @@ func (sc *StateCache) PrepareWrites() [5]*btree.BTree {
 	return writes
 }
 
-func WalkWrites(
-	writes [5]*btree.BTree,
-	accountWrite func(address []byte, account *accounts.Account) error,
-	accountDelete func(address []byte, original *accounts.Account) error,
-	storageWrite func(address []byte, incarnation uint64, location []byte, value []byte) error,
-	storageDelete func(address []byte, incarnation uint64, location []byte) error,
-	codeWrite func(address []byte, incarnation uint64, code []byte) error,
-	codeDelete func(address []byte, incarnation uint64) error,
-) error {
-	var err error
-	for i := range len(writes) {
-		writes[i].Ascend(func(i btree.Item) bool {
-			switch it := i.(type) {
-			case *AccountWriteItem:
-				if it.ai.flags&AbsentFlag != 0 {
-					if err = accountDelete(it.address[:], &it.ai.account); err != nil {
-						return false
-					}
-				} else {
-					if err = accountWrite(it.address[:], &it.ai.account); err != nil {
-						return false
-					}
-				}
-			case *StorageWriteItem:
-				if it.si.flags&AbsentFlag != 0 {
-					if err = storageDelete(it.address[:], it.si.incarnation, it.location[:]); err != nil {
-						return false
-					}
-				} else {
-					if err = storageWrite(it.address[:], it.si.incarnation, it.location[:], it.si.value.Bytes()); err != nil {
-						return false
-					}
-				}
-			case *CodeWriteItem:
-				if it.ci.flags&AbsentFlag != 0 {
-					if err = codeDelete(it.address[:], it.ci.incarnation); err != nil {
-						return false
-					}
-				} else {
-					if err = codeWrite(it.address[:], it.ci.incarnation, it.ci.code); err != nil {
-						return false
-					}
-				}
-			}
-			return true
-		})
-	}
-
-	return err
-}
-
 func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
 	for i := range len(writes) {
 		readQueue := &sc.readQueue[i]
@@ -844,6 +793,7 @@ func (sc *StateCache) TotalCount() (res int) {
 	}
 	return
 }
+
 func (sc *StateCache) WriteCount() (res int) {
 	for i := range len(sc.readWrites) {
 		res += sc.writes[i].Len()

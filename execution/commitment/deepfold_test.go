@@ -64,96 +64,6 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	return pk, upds, k2, u2
 }
 
-// setAccountStorageRoot must shed a reused cell's stale storage identity.
-func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
-	t.Parallel()
-	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-
-	staleAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
-	staleLoc := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
-	addStorageToCell(&hph.root, staleAddr, staleLoc, []byte{0xAA, 0xBB, 0xCC, 0xDD})
-	require.NotZero(t, hph.root.storageAddrLen, "precondition: root holds a stale storage addr")
-	require.True(t, hph.root.loaded.storage(), "precondition: root is flagged storage-loaded")
-
-	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), cell{hash: common.HexToHash("0x1234"), hashLen: 32})
-
-	require.Zerof(t, hph.root.storageAddrLen,
-		"injecting a storage root must clear the stale storage plain key (got len=%d)", hph.root.storageAddrLen)
-	require.Falsef(t, hph.root.loaded.storage(),
-		"injecting a storage root must clear the stale storage-loaded flag")
-}
-
-func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
-	t.Parallel()
-
-	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	accHashed := KeyToHexNibbleHash(acct[:])
-	accUpd := Update{Flags: BalanceUpdate | NonceUpdate}
-	accUpd.Balance.SetUint64(1_000_000)
-	accUpd.Nonce = 3
-
-	injectedSR := common.HexToHash("0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
-
-	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	clean.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(clean, accHashed, cell{hash: injectedSR, hashLen: 32})
-	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
-	require.NoError(t, err)
-
-	staleAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
-	staleLoc := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
-	stale := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	addStorageToCell(&stale.root, staleAddr, staleLoc, []byte{0xAA, 0xBB, 0xCC, 0xDD})
-	stale.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(stale, accHashed, cell{hash: injectedSR, hashLen: 32})
-	staleHash, err := stale.computeCellHash(&stale.root, 0, nil)
-	require.NoError(t, err)
-
-	require.Equal(t, cleanHash, staleHash,
-		"account hash must be driven by the injected storage root, not a stale storage slot")
-}
-
-// A hash-only storage-root injection must clear a stale single-child extension.
-func TestDeepFold_HashOnlyRootClearsStaleExtension(t *testing.T) {
-	t.Parallel()
-
-	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	accHashed := KeyToHexNibbleHash(acct[:])
-	accUpd := Update{Flags: BalanceUpdate | NonceUpdate}
-	accUpd.Balance.SetUint64(1_000_000)
-	accUpd.Nonce = 3
-
-	var singleChildSR cell
-	singleChildSR.hash = common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
-	singleChildSR.hashLen = 32
-	singleChildSR.extLen = 3
-	singleChildSR.extension[0], singleChildSR.extension[1], singleChildSR.extension[2] = 0x0a, 0x0b, 0x0c
-
-	var multiSR cell
-	multiSR.hash = common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
-	multiSR.hashLen = 32
-
-	reused := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	reused.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(reused, accHashed, singleChildSR)
-	require.NotZero(t, reused.root.extLen, "single-child collapse must set the storage extension")
-	setAccountStorageRoot(reused, accHashed, multiSR)
-	require.Zerof(t, reused.root.extLen,
-		"a hash-only storage root must clear the prior single-child extension (got len=%d)", reused.root.extLen)
-	reusedHash, err := reused.computeCellHash(&reused.root, 0, nil)
-	require.NoError(t, err)
-
-	clean := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
-	clean.updateCell(acct[:], accHashed, &accUpd)
-	setAccountStorageRoot(clean, accHashed, multiSR)
-	cleanHash, err := clean.computeCellHash(&clean.root, 0, nil)
-	require.NoError(t, err)
-
-	require.Equal(t, cleanHash, reusedHash,
-		"a reused cell's stale storage extension must not change the account hash")
-}
-
 type engineBatch struct {
 	keys [][]byte
 	upds []Update
@@ -289,6 +199,158 @@ func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
 	require.Equal(t, want, got, "account-only re-touch dropped the singleton's storage slot")
 }
 
+// The same trie carried across blocks, as a running node holds it. A sole-account root folds via
+// propagate and writes no root branch record, so its state travels only in the carried trie or
+// the state blob — a fresh trie per batch is not a lifecycle this shape has.
+func lifecycleRoots(t *testing.T, batches ...*UpdateBuilder) (carried, restored []byte) {
+	t.Helper()
+	ms, msr := NewMockState(t), NewMockState(t)
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	var blob []byte
+	for _, ub := range batches {
+		k, u := ub.Build()
+		carried = processBatch(t, ms, tr, k, u)
+		restored, blob = processModeBatchState(t, msr, modeSeq, 0, k, u, blob)
+	}
+	return carried, restored
+}
+
+// A trie whose only leaf is one account reaches it through a root extension down to depth 64.
+// Bumping the account and deleting a subset of its slots must keep the untouched survivors under
+// both production lifecycles, matching a fresh trie built from the final state.
+func TestSoleAccount_StorageCollapseIncremental(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		survivors int
+	}{
+		{"leaf_survivor", 1},
+		{"branch_survivor", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := addrHex(findAddressForNibble(3, 4242))
+			surv := storageLocsForNibble(0x2, tc.survivors, 1)
+			gone := append(storageLocsForNibble(0x8, 6, 1000), storageLocsForNibble(0xd, 6, 1000000)...)
+
+			ub1 := NewUpdateBuilder().Balance(a, 1)
+			ubf := NewUpdateBuilder().Balance(a, 2)
+			for _, loc := range surv {
+				ub1.Storage(a, loc, loc)
+				ubf.Storage(a, loc, loc)
+			}
+			ub2 := NewUpdateBuilder().Balance(a, 2)
+			for _, loc := range gone {
+				ub1.Storage(a, loc, loc)
+				ub2.DeleteStorage(a, loc)
+			}
+			kf, uf := ubf.Build()
+
+			want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+			carried, restored := lifecycleRoots(t, ub1, ub2)
+			require.Equal(t, want, carried, "carried trie lost the untouched surviving slots")
+			require.Equal(t, want, restored, "state-restored trie lost the untouched surviving slots")
+		})
+	}
+}
+
+// Delete-driven endgames of the same shape: wiping all storage must leave a bare account, and
+// deleting the account with its slots must collapse the trie to the empty root.
+func TestSoleAccount_DeleteIncremental(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4243))
+	all := append(append(storageLocsForNibble(0x2, 2, 2), storageLocsForNibble(0x8, 6, 2000)...), storageLocsForNibble(0xd, 6, 2000000)...)
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	for _, loc := range all {
+		ub1.Storage(a, loc, loc)
+	}
+
+	t.Run("delete_storage_keeps_account", func(t *testing.T) {
+		t.Parallel()
+		ub2 := NewUpdateBuilder().Balance(a, 2)
+		for _, loc := range all {
+			ub2.DeleteStorage(a, loc)
+		}
+
+		kf, uf := NewUpdateBuilder().Balance(a, 2).Build()
+		want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+		carried, restored := lifecycleRoots(t, ub1, ub2)
+		require.Equal(t, want, carried, "carried trie: deleting all storage must leave the bare account")
+		require.Equal(t, want, restored, "state-restored trie: deleting all storage must leave the bare account")
+	})
+
+	t.Run("delete_account_empties_trie", func(t *testing.T) {
+		t.Parallel()
+		ub2 := NewUpdateBuilder().Delete(a)
+		for _, loc := range all {
+			ub2.DeleteStorage(a, loc)
+		}
+
+		carried, restored := lifecycleRoots(t, ub1, ub2)
+		require.Equal(t, empty.RootHash[:], carried, "carried trie: deleting the sole account must empty the trie")
+		require.Equal(t, empty.RootHash[:], restored, "state-restored trie: deleting the sole account must empty the trie")
+	})
+}
+
+// The same shape re-expanding: a sole account whose storage collapses to one slot and then grows
+// back must re-insert the survivor under its own first storage nibble. The root cell's derived
+// navigation path has to hash the slot alone, not the whole account-plus-slot plain key.
+func TestSoleAccount_CollapseThenReexpand(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 7777))
+	surv := storageLocsForNibble(0x2, 1, 11)
+	gone := storageLocsForNibble(0x8, 1, 3000)
+	fresh := storageLocsForNibble(0x5, 1, 5000)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ubf := NewUpdateBuilder().Balance(a, 3)
+	for _, loc := range surv {
+		ub1.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	ub2 := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range gone {
+		ub1.Storage(a, loc, loc)
+		ub2.DeleteStorage(a, loc)
+	}
+	ub3 := NewUpdateBuilder().Balance(a, 3)
+	for _, loc := range fresh {
+		ub3.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub1, ub2, ub3)
+	require.Equal(t, want, carried, "carried trie re-expanded the survivor under the wrong nibble")
+	require.Equal(t, want, restored, "state-restored trie re-expanded the survivor under the wrong nibble")
+}
+
+func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4244))
+	under := storageLocsForNibble(0x6, 2, 17)
+	fresh := storageLocsForNibble(0x0, 1, 4711)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ubf := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range under {
+		ub1.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	ub2 := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range fresh {
+		ub2.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub1, ub2)
+	require.Equal(t, want, carried, "carried trie lost the storage extension below the sole account")
+	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
+}
+
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
 func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
 	rnd := rand.New(rand.NewSource(seed))
@@ -347,8 +409,6 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
 }
 
-// Single-nibble on-disk storage has no branch record at the account prefix; unfoldStorageBase
-// must still recover it rather than seeding an empty base.
 func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 	onDisk := nibs(0)
 	touch := nibs(3, 7)
@@ -359,8 +419,8 @@ func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
 }
 
-// A fresh whale has nothing on disk beneath its prefix, so the fold must run concurrently.
-func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
+// A fresh whale has nothing on disk beneath its prefix; its storage split point must still fork.
+func TestDeepFold_FreshWhaleForksOnStorage(t *testing.T) {
 	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
 	fk, fu := buildMixedCorpus(555, 200)
 	keys := append(append([][]byte{}, fk...), k1...)
@@ -370,12 +430,12 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
-	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+	parRoot, _, forks := parallelBatchForks(t, ms, 4, 0, keys, upds, nil)
 	require.Equal(t, seqRoot, parRoot)
-	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
+	require.Greater(t, forks, uint64(1), "a fresh whale must fork below the root, not only at it")
 }
 
-func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
+func TestDeepFold_ExistingWhaleForksOnStorage(t *testing.T) {
 	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260708, nibs(0), nibs(3, 7), 1, 700)
 	fk, fu := buildMixedCorpus(556, 200)
 	k1 = append(append([][]byte{}, fk...), k1...)
@@ -385,15 +445,12 @@ func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
-	_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
-	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+	_, blob, _ := parallelBatchForks(t, ms, 4, 0, k1, u1, nil)
+	parRoot, _, forks := parallelBatchForks(t, ms, 4, 0, k2, u2, blob)
 	require.Equal(t, seqRoot, parRoot)
-	require.Zero(t, deepFolds, "an account present in the pre-state must keep the serial demotion")
+	require.Greater(t, forks, uint64(1), "an account already in the pre-state must fork on its storage too")
 }
 
-// A streaming collapse leaves an afterMap==0 tombstone at the account prefix, distinct from
-// the deep fold's outright branch-key delete; unfoldStorageBase must not seed an empty base
-// from it, or a later re-expansion drops the untouched survivor.
 func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	t.Parallel()
 
@@ -432,12 +489,12 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 		}
 	}
 	require.True(t, kept, "need a survivor slot")
-	require.LessOrEqual(t, deleted, int(deepStorageThreshold), "collapse must stream, not deep-fold")
+	require.LessOrEqual(t, deleted, int(minForkGrain), "the collapse round must stay under the fork grain")
 
 	b3 := NewUpdateBuilder()
 	b3.Balance(a, 200)
 	added := 0
-	for nib := 0; nib < 16 && added <= int(deepStorageThreshold)+200; nib++ {
+	for nib := 0; nib < 16 && added <= int(minForkGrain)+200; nib++ {
 		if nib == survNib {
 			continue
 		}
@@ -446,7 +503,7 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 			added++
 		}
 	}
-	require.Greater(t, added, int(deepStorageThreshold), "re-expansion must cross the deep-fold threshold")
+	require.Greater(t, added, int(minForkGrain), "re-expansion must cross the fork grain")
 	wk3, wu3 := b3.Build()
 
 	batches := []engineBatch{{k1, u1}, {wk2, wu2}, {wk3, wu3}}
@@ -589,12 +646,29 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 }
 
 func storageLocsForNibble(nibble byte, n, seed int) []string {
+	return slotLocsForHexPrefix([]byte{nibble}, n, seed)
+}
+
+func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
 	out := make([]string, 0, n)
 	var s [32]byte
 	for i := seed; len(out) < n; i++ {
 		binary.BigEndian.PutUint64(s[24:], uint64(i))
 		h := keccak.Sum256(s[:])
-		if (h[0]>>4)&0xf == nibble {
+		match := true
+		for j, nb := range nibblePrefix {
+			var hn byte
+			if j%2 == 0 {
+				hn = h[j/2] >> 4
+			} else {
+				hn = h[j/2] & 0xf
+			}
+			if hn != nb {
+				match = false
+				break
+			}
+		}
+		if match {
 			out = append(out, common.Bytes2Hex(s[:]))
 		}
 	}
@@ -840,6 +914,32 @@ func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
 		branchCell.hashedExtLen)
 }
 
+func TestFillFromLowerCell_KeyedCellKeepsForeignPlaneExtension(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		depth int16
+		low   cell
+	}{
+		{"accountWithStorageRoot", 3, cell{accountAddrLen: length.Addr, hashLen: 32, extLen: 2}},
+		{"storageWithOwnRoot", 70, cell{storageAddrLen: length.Addr + length.Hash, hashLen: 32, extLen: 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			low := tc.low
+			low.extension[0] = 0xa
+			low.extension[1] = 0xb
+
+			var up cell
+			up.fillFromLowerCell(&low, tc.depth, []byte{0x1}, 0x2)
+
+			require.Equalf(t, []byte{0xa, 0xb}, up.extension[:up.extLen],
+				"a keyed cell's extension belongs to the other plane, so the fold must copy it as is, "+
+					"not prepend the %x nibble; got extLen=%d", 0x2, up.extLen)
+		})
+	}
+}
+
 // The sync skip is keyed on the plain key, not on depth.
 func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 	t.Parallel()
@@ -852,80 +952,4 @@ func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 
 	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
 		"a keyless cell deep in storage still navigates by its extension")
-}
-
-func TestKeyArena_PointerStability(t *testing.T) {
-	var arena keyArena
-
-	inputs := make([][]byte, 0, 4096)
-	got := make([][]byte, 0, 4096)
-	for i := range 4096 {
-		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32)
-		inputs = append(inputs, in)
-		got = append(got, arena.copy(in))
-	}
-	big := bytes.Repeat([]byte{0xAB}, keyArenaChunk+128)
-	inputs = append(inputs, big)
-	got = append(got, arena.copy(big))
-
-	for i, in := range inputs {
-		require.True(t, bytes.Equal(in, got[i]),
-			"key %d corrupted: returned slice does not equal its input", i)
-		require.Equal(t, len(got[i]), cap(got[i]),
-			"key %d not full-cap: a caller append could overwrite the next key", i)
-	}
-
-	for i := range got {
-		for j := range got[i] {
-			got[i][j] = byte(i)
-		}
-	}
-	for i := range got {
-		for j := range got[i] {
-			require.Equal(t, byte(i), got[i][j],
-				"key %d overlaps another arena slice (overwritten at byte %d)", i, j)
-		}
-	}
-}
-
-func TestKeyArena_ChunkSizedFromRemaining(t *testing.T) {
-	const keyLen = 144
-
-	t.Run("small subtree does not burn a full chunk", func(t *testing.T) {
-		const keys = 32
-		arena := keyArena{remaining: keys}
-		for range keys {
-			arena.copy(make([]byte, keyLen))
-		}
-		require.Equal(t, keys*keyLen, cap(arena.buf))
-	})
-
-	t.Run("large subtree still caps at one chunk", func(t *testing.T) {
-		arena := keyArena{remaining: 10 * keyArenaChunk / keyLen}
-		arena.copy(make([]byte, keyLen))
-		require.Equal(t, keyArenaChunk, cap(arena.buf))
-	})
-
-	t.Run("oversized key gets its own backing", func(t *testing.T) {
-		arena := keyArena{remaining: 4}
-		got := arena.copy(make([]byte, 2*keyArenaChunk))
-		require.Len(t, got, 2*keyArenaChunk)
-		require.Equal(t, 2*keyArenaChunk, cap(arena.buf))
-	})
-
-	t.Run("copies stay stable across a chunk swap", func(t *testing.T) {
-		arena := keyArena{remaining: 2}
-		first := arena.copy(bytes.Repeat([]byte{0xAA}, keyLen))
-		for i := range 8 {
-			arena.copy(bytes.Repeat([]byte{byte(i)}, keyLen))
-		}
-		require.Equal(t, bytes.Repeat([]byte{0xAA}, keyLen), first)
-	})
-
-	t.Run("unhinted arena falls back to one key per chunk growth", func(t *testing.T) {
-		var arena keyArena
-		got := arena.copy(make([]byte, keyLen))
-		require.Len(t, got, keyLen)
-		require.Equal(t, keyLen, cap(arena.buf))
-	})
 }

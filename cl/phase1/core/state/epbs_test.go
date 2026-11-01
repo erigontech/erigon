@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -45,27 +46,42 @@ func TestGetProposerDependentRoot(t *testing.T) {
 	cfg.SlotsPerHistoricalRoot = 8192
 	cfg.MinSeedLookahead = 1
 	s := state2.New(&cfg)
-	s.SetSlot(100)
+	require.NoError(t, s.SetSlot(100))
 	want := common.Hash{0x42}
-	s.SetBlockRootAt(63, want)
+	require.NoError(t, s.SetBlockRootAt(63, want))
 
 	got, err := state2.GetProposerDependentRoot(s, 3)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
 
-func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
+func TestGetProposerDependentRootUsesGenesisRoot(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.SlotsPerEpoch = 32
 	cfg.MinSeedLookahead = 1
-	s := state2.New(&cfg)
-	s.SetSlot(100)
 
-	_, err := state2.GetProposerDependentRoot(s, 0)
-	require.Error(t, err)
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			s := state2.New(&cfg)
+			s.SetVersion(version)
+			var genesisRoots [2]common.Hash
+			for epoch := range genesisRoots {
+				root, err := state2.GetProposerDependentRoot(s, uint64(epoch))
+				require.NoError(t, err, "epoch %d", epoch)
+				genesisRoots[epoch] = root
+			}
 
-	_, err = state2.GetProposerDependentRoot(s, 1)
-	require.Error(t, err)
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(s, 1))
+			want, err := s.GetBlockRootAtSlot(0)
+			require.NoError(t, err)
+			for epoch, root := range genesisRoots {
+				require.Equal(t, want, root, "epoch %d before slot processing", epoch)
+				got, err := state2.GetProposerDependentRoot(s, uint64(epoch))
+				require.NoError(t, err, "epoch %d", epoch)
+				require.Equal(t, want, got, "epoch %d after slot processing", epoch)
+			}
+		})
+	}
 }
 
 func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
@@ -241,7 +257,7 @@ func TestAddBuilderToRegistryRejectsFullRegistry(t *testing.T) {
 func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
-	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	require.NoError(t, s.SetSlot(cfg.SlotsPerEpoch*10))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	pubkey := common.Bytes48{0x11}
 	builders.Append(&cltypes.Builder{
@@ -266,7 +282,7 @@ func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoc
 func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderKeepsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
-	s.SetSlot(cfg.SlotsPerEpoch * 10)
+	require.NoError(t, s.SetSlot(cfg.SlotsPerEpoch*10))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	pubkey := common.Bytes48{0x11}
 	builders.Append(&cltypes.Builder{
@@ -326,21 +342,55 @@ func TestApplyBuilderDepositRequestDoesNotOverflowBalance(t *testing.T) {
 	require.Equal(t, uint64(math.MaxUint64), s.GetBuilders().Get(0).Balance)
 }
 
-func TestCanBuilderCoverBidRejectsPendingBalanceOverflow(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	s := state2.New(&cfg)
-	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
-	builders.Append(&cltypes.Builder{
-		Balance:           math.MaxUint64,
-		WithdrawableEpoch: cfg.FarFutureEpoch,
-	})
-	s.SetBuilders(builders)
-	withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](64, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
-	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: math.MaxUint64})
-	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 1})
-	s.SetBuilderPendingWithdrawals(withdrawals)
+func TestBuilderBidCapacity(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		balance            uint64
+		minDepositAmount   uint64
+		pendingWithdrawals uint64
+		wantCapacity       uint64
+		wantOK             bool
+	}{
+		{name: "exact minimum", balance: 10, minDepositAmount: 10, wantOK: true},
+		{name: "below minimum", balance: 9, minDepositAmount: 10},
+		{name: "available balance", balance: 30, minDepositAmount: 10, pendingWithdrawals: 5, wantCapacity: 15, wantOK: true},
+		{name: "exact max", balance: math.MaxUint64, minDepositAmount: 1, wantCapacity: math.MaxUint64 - 1, wantOK: true},
+		{name: "minimum and pending overflow", balance: math.MaxUint64, minDepositAmount: 2, pendingWithdrawals: math.MaxUint64 - 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capacity, ok := state2.BuilderBidCapacity(test.balance, test.minDepositAmount, test.pendingWithdrawals)
+			require.Equal(t, test.wantCapacity, capacity)
+			require.Equal(t, test.wantOK, ok)
+		})
+	}
+}
 
-	require.False(t, state2.CanBuilderCoverBid(s, 0, 1))
+func TestCanBuilderCoverBidZeroCapacity(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		balance            uint64
+		pendingWithdrawals []uint64
+		want               bool
+	}{
+		{name: "exact minimum", balance: clparams.MainnetBeaconConfig.MinDepositAmount, want: true},
+		{name: "below minimum deposit", balance: 1},
+		{name: "minimum plus pending overflows", balance: math.MaxUint64, pendingWithdrawals: []uint64{math.MaxUint64, 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			s := state2.New(&cfg)
+			builders := solid.NewStaticListSSZ[*cltypes.Builder](1, new(cltypes.Builder).EncodingSizeSSZ())
+			builders.Append(&cltypes.Builder{Balance: test.balance})
+			s.SetBuilders(builders)
+			withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](len(test.pendingWithdrawals), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+			for _, amount := range test.pendingWithdrawals {
+				withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: amount})
+			}
+			s.SetBuilderPendingWithdrawals(withdrawals)
+
+			require.Equal(t, test.want, state2.CanBuilderCoverBid(s, 0, 0))
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

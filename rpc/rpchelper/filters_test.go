@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -204,6 +205,35 @@ func TestFilters_SingleSubscription_WildcardOnlyTopicRowMatches(t *testing.T) {
 	}
 }
 
+func TestFilters_WildcardOnlyTopicsRequestAllTopicsFromRemote(t *testing.T) {
+	t.Parallel()
+	var lastFilterRequest *remoteproto.LogsFilterRequest
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	f.logsRequestor.Store(func(r *remoteproto.LogsFilterRequest) error {
+		lastFilterRequest = r
+		return nil
+	})
+
+	outChan, _, err := f.SubscribeLogs(10, filters.FilterCriteria{
+		Addresses: []common.Address{address1},
+		Topics:    [][]common.Hash{nil, {}},
+	}, "")
+	require.NoError(t, err)
+
+	require.True(t, lastFilterRequest.AllTopics, "a filter with only wildcard topic positions must not narrow the remote topic set to nothing")
+
+	withTwoTopics := createLog()
+	withTwoTopics.Address = address1H160
+	withTwoTopics.Topics = append(withTwoTopics.Topics, gointerfaces.ConvertHashToH256(topic1))
+	f.OnNewLogs(withTwoTopics)
+	require.Len(t, outChan, 1)
+
+	withOneTopic := createLog()
+	withOneTopic.Address = address1H160
+	f.OnNewLogs(withOneTopic)
+	require.Len(t, outChan, 1, "two topic positions still require at least two topics")
+}
+
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
@@ -312,7 +342,6 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	if len(chan3) != 1 {
 		t.Error("expected the third channel to still have 1 as the address didn't match in the third log")
 	}
-
 }
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
@@ -484,7 +513,7 @@ func TestFilters_AddPendingBlocks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxHeaders: tt.maxHeaders}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
-			_, blockID := f.SubscribeNewHeads(8, "")
+			_, blockID, _ := f.SubscribeNewHeads(8, "")
 			header := &types.Header{}
 
 			for i := 0; i < tt.numToAdd; i++ {
@@ -519,7 +548,7 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxTxs: tt.maxTxs}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
-			_, txID := f.SubscribePendingTxs(8, "")
+			_, txID, _ := f.SubscribePendingTxs(8, "")
 			var txn types.Transaction = types.NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
 			txn, _ = txn.WithSignature(*types.LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 

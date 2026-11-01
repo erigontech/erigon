@@ -38,14 +38,18 @@ import (
 
 type EventType string
 
-const EventTypeNewBlock EventType = "new-block"
-const EventTypeNewBlockBatch EventType = "new-block-batch"
-const EventTypeNewBlockHashes EventType = "new-block-hashes"
+const (
+	EventTypeNewBlock       EventType = "new-block"
+	EventTypeNewBlockBatch  EventType = "new-block-batch"
+	EventTypeNewBlockHashes EventType = "new-block-hashes"
+)
 
 type EventSource string
 
-const EventSourceP2PNewBlockHashes EventSource = "p2p-new-block-hashes-source"
-const EventSourceP2PNewBlock EventSource = "p2p-new-block-source"
+const (
+	EventSourceP2PNewBlockHashes EventSource = "p2p-new-block-hashes-source"
+	EventSourceP2PNewBlock       EventSource = "p2p-new-block-source"
+)
 
 type EventNewBlock struct {
 	NewBlock *types.Block

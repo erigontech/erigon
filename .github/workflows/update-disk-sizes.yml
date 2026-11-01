@@ -104,7 +104,7 @@ jobs:
 
       - name: Generate GitHub App token
         id: app_token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  ## v3.3.0
         with:
           client-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
@@ -128,6 +128,11 @@ jobs:
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
             git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
+            # The long-lived auto branch carries only pending disk-sizes.json
+            # edits; everything else in docs/site comes from base, unstaged so
+            # the commit below stays limited to the two data files.
+            git checkout "origin/$BASE_BRANCH" -- docs/site ':!docs/site/src/data/disk-sizes.json'
+            git reset -q
           else
             git checkout -B "$BRANCH"
           fi

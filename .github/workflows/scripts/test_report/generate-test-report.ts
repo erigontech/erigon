@@ -6,6 +6,7 @@ const acceptedWorkflows = [
     '.github/workflows/qa-clean-exit-block-downloading.yml',
     '.github/workflows/qa-clean-exit-snapshot-downloading.yml',
     '.github/workflows/qa-constrained-tip-tracking.yml',
+    '.github/workflows/qa-exec-from-zero.yml',
     '.github/workflows/qa-rpc-integration-tests-gnosis.yml',
     '.github/workflows/qa-rpc-integration-tests-latest.yml',
     '.github/workflows/qa-rpc-integration-tests-remote.yml',

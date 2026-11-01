@@ -218,14 +218,14 @@ func init() {
 		&transactionTestCommand,
 		&difficultyTestCommand,
 		&stateTransitionCommand,
+		&fixtureCommand,
 	}
 }
 
 func main() {
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		code := 1
-		var ec *t8ntool.NumberedError
-		if errors.As(err, &ec) {
+		if ec, ok := errors.AsType[*t8ntool.NumberedError](err); ok {
 			code = ec.ExitCode()
 		}
 		_, printErr := fmt.Fprintln(os.Stderr, err)

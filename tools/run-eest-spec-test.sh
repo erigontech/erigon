@@ -38,7 +38,7 @@
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-sequential
 #                                              race-detector variant of
 #                                              blocktests-stable-sequential, split by
 #                                              fork via the manifest `run` regex so
@@ -205,6 +205,11 @@ evm_bin="${EVM_BIN:-build/bin/evm}"
 # instead of growing the process into the CI runner's OOM range.
 if [[ "$shard" == *-race* ]]; then
 	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
+
+# 150M-gas blocks peak near 18GB RSS and get OOM-killed on a 16GB runner.
+if [[ "$shard" == *-benchmark-150m-* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-12GiB}"
 fi
 
 if [[ ! -x "$evm_bin" ]]; then

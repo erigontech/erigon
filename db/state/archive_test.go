@@ -140,5 +140,4 @@ func TestArchiveWriter(t *testing.T) {
 		r := seg.NewReader(decomp.MakeGetter(), seg.CompressVals)
 		checkLatest(t, r, td)
 	})
-
 }

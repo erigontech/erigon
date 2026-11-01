@@ -33,11 +33,13 @@ type metaTxn struct {
 	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
 	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
 	minTip                    uint64
+	followsRemote             bool // a lower-nonce txn of the same sender is remote
 	bestIndex                 int
 	worstIndex                int
 	timestamp                 uint64 // when it was added to pool
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
+	announced                 bool // has entered pending once; a later return is not announced
 	minedBlockNum             uint64
 }
 
@@ -69,6 +71,12 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	}
 	if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
 		thanSubPool |= EnoughFeeCapBlock
+	}
+	if mt.followsRemote {
+		subPool &^= IsLocal
+	}
+	if than.followsRemote {
+		thanSubPool &^= IsLocal
 	}
 	if subPool != thanSubPool {
 		return subPool > thanSubPool

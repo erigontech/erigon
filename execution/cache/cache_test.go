@@ -19,9 +19,7 @@ package cache
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,9 +27,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Test helpers
@@ -52,7 +50,7 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 }
 
 func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
-	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum})
+	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum}, nil)
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
@@ -85,12 +83,6 @@ func (c *blockingPutCache) Clear()                             {}
 func (c *blockingPutCache) Unwind(uint64)                      {}
 func (c *blockingPutCache) Close()                             {}
 func (c *blockingPutCache) Len() int                           { return 0 }
-
-func makeHash(i int) common.Hash {
-	var h common.Hash
-	h[31] = byte(i)
-	return h
-}
 
 func makeCode(i int) []byte {
 	return []byte{0x60, 0x00, byte(i)} // PUSH1 0x00 + unique byte
@@ -274,7 +266,7 @@ func TestCodeCache_NewDefaultCodeCache(t *testing.T) {
 }
 
 func TestCodeCache_GetPut(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -294,7 +286,7 @@ func TestCodeCache_GetPut(t *testing.T) {
 }
 
 func TestCodeCache_PutEmptyCode(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	c.Put(addr, []byte{}, 0)
@@ -305,7 +297,7 @@ func TestCodeCache_PutEmptyCode(t *testing.T) {
 }
 
 func TestCodeCache_CodeDeduplication(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	code := makeCode(1)
 	addr1 := makeAddr(1)
@@ -331,8 +323,8 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 }
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
-	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full so fresh-address workloads warm up.
+	// addrToHash is keyed by 20-byte address. Verify a full cache stays bounded
+	// and keeps serving, rather than going no-op-when-full.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -350,56 +342,65 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
 
-	// Len should be exactly the LRU cap (1024), not silently truncated to 0.
-	assert.Equal(t, 1024, c.Len())
+	// Residency stays bounded: the cache neither holds all 1100 nor collapses
+	// to nothing. Which addresses survive is W-TinyLFU's choice, not recency,
+	// so the identity of the evicted entries is not asserted.
+	assert.Positive(t, c.Len())
+	assert.Less(t, c.Len(), 1100)
 
-	// Oldest entries (addrs 0..75) must have been evicted.
-	_, ok := c.Get(wideAddr(0))
-	assert.False(t, ok, "oldest entry should be evicted by LRU")
-	_, ok = c.Get(wideAddr(50))
-	assert.False(t, ok, "second-oldest range should be evicted by LRU")
+	// Whatever is admitted answers with its own code, never another address's.
+	admitted := 0
+	for i := range 1100 {
+		v, ok := c.Get(wideAddr(i))
+		if !ok {
+			continue
+		}
+		admitted++
+		assert.Equal(t, wideCode(i), v, "addr %d served the wrong code", i)
+	}
+	assert.Positive(t, admitted, "a full cache must still serve some addresses")
 
-	// Most recent entry must be present.
-	v, ok := c.Get(wideAddr(1099))
-	assert.True(t, ok, "most recent entry should remain")
-	assert.Equal(t, wideCode(1099), v)
+	// The code layer is bounded by bytes, which 1100 small codes are nowhere
+	// near — they all stay resident.
+	assert.Equal(t, 1100, c.CodeLen())
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024))
 
-	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
-	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
-	// rather than growing unbounded.
-	assert.Less(t, c.CodeLen(), 1100)
-
-	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
+	// Updating an addr re-writes its entry.
 	c.Put(wideAddr(1099), wideCode(4242), 0)
-	v, ok = c.Get(wideAddr(1099))
+	v, ok := c.Get(wideAddr(1099))
 	assert.True(t, ok)
 	assert.Equal(t, wideCode(4242), v)
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
-	// LRU-evict the coldest rather than freezing the layer.
-	c := closeOnCleanup(t, NewCodeCache(25, 1024*1024)) // 25 bytes code, 1MB addr
+	// A budget with room for one entry. Successive distinct codes evict rather
+	// than freezing the layer, and residency never exceeds the budget.
+	const codeCap = codeEntryBytes + 8
+	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeCap), 1024*1024))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
 	c.Put(makeAddr(3), makeCode(3), 0)
 
-	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
-	// most-recent code(s) after eviction.
+	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
-	assert.LessOrEqual(t, c.CodeLen(), 1)
+	assert.Equal(t, 1, c.CodeLen())
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap))
 
-	// Newest code is retrievable; the coldest was evicted from the code layer.
-	v, ok := c.Get(makeAddr(3))
-	assert.True(t, ok)
-	assert.Equal(t, makeCode(3), v)
-	_, ok = c.Get(makeAddr(1))
-	assert.False(t, ok, "coldest code should have been evicted")
+	// Exactly one of the three addrs still resolves to its code — which one is
+	// the eviction policy's call, not the test's.
+	var live int
+	for i := 1; i <= 3; i++ {
+		if v, ok := c.Get(makeAddr(i)); ok {
+			assert.Equal(t, makeCode(i), v)
+			live++
+		}
+	}
+	assert.Equal(t, 1, live)
 }
 
 func TestCodeCache_Delete(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -415,7 +416,7 @@ func TestCodeCache_Delete(t *testing.T) {
 }
 
 func TestCodeCache_Clear(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
@@ -428,7 +429,7 @@ func TestCodeCache_Clear(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Get(makeAddr(1)) // hit
@@ -439,7 +440,7 @@ func TestCodeCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestCodeCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(100, 200))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset()
 }
@@ -453,8 +454,8 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	c.Put(addr, code, 0)
 
 	// Clear the code cache but keep addr mapping
-	c.hashToCode.Purge()
-	c.codeSize.Store(0)
+	c.codeHashToCode.Purge()
+	c.codeHashCodeSize.Store(0)
 
 	// Get should fail at code lookup stage
 	_, ok := c.Get(addr)
@@ -655,7 +656,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCodeCache_ConcurrentAccess(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(1000, 1000))
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 
 	done := make(chan bool)
 
@@ -722,23 +723,6 @@ func TestStateCache_DomainIsolation(t *testing.T) {
 // =============================================================================
 // RevertWithDiffset Tests
 // =============================================================================
-
-// makeDiffKey creates a domain entry key with an 8-byte step suffix, matching
-// the format used by DomainEntryDiff (full key = base key + inverted step).
-func makeDiffKey(baseKey []byte, step uint64) string {
-	k := make([]byte, len(baseKey)+8)
-	copy(k, baseKey)
-	// Store inverted step in the suffix (same encoding as domain tables).
-	k[len(k)-8] = byte(^step >> 56)
-	k[len(k)-7] = byte(^step >> 48)
-	k[len(k)-6] = byte(^step >> 40)
-	k[len(k)-5] = byte(^step >> 32)
-	k[len(k)-4] = byte(^step >> 24)
-	k[len(k)-3] = byte(^step >> 16)
-	k[len(k)-2] = byte(^step >> 8)
-	k[len(k)-1] = byte(^step)
-	return string(k)
-}
 
 // --- txNum/epoch unwind invalidation (replaces the blockHash/diffset model) ---
 
@@ -1541,7 +1525,7 @@ func TestStateCache_FillCodeUsesKnownHash(t *testing.T) {
 	t.Cleanup(c.Close)
 	addr := makeAddr(1)
 	code := makeCode(1)
-	codeHash := makeHash(1)
+	codeHash := crypto.Keccak256Hash(code)
 	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
 
 	view.FillCode(addr, code, codeHash[:], 10)
@@ -1583,191 +1567,116 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	require.True(t, c2.FillsEnabled())
 }
 
-// BenchmarkStateCachePublicationUnderLoad measures what a commit costs the
-// readers running beside it. b.N counts publications; the reported
-// reads/s and fill-reject ratio come from reader goroutines that run for the
-// whole timed region, so a publication that stalls readers shows up as reads/s
-// collapsing rather than as ns/op moving.
-//
-// version=current models a reader bound to the state the cache just published.
-// version=stale repeatedly constructs views for a transaction opened before
-// the last commit. Production getters retain this rejection; constructing each
-// view here deliberately measures the worst-case binding contention.
-func BenchmarkStateCachePublicationUnderLoad(b *testing.B) {
-	const keySpace = 4096
+// ByteLRU bounds by the bytes it holds rather than an entry count: mixed-size
+// values evict until the newcomer fits, every removal reports through onEvict,
+// and a value larger than the whole budget is rejected without disturbing the
+// resident set.
+func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
+	const maxBytes = 256 * datasize.KB
+	evicted := map[uint64]int{}
+	b := closeOnCleanup(t, newByteLRU(maxBytes,
+		func(_ uint64, v []byte) int64 { return int64(len(v)) },
+		func(k uint64, _ []byte) { evicted[k]++ }))
 
-	mkKey := func(i int) []byte {
-		return []byte{byte(i), byte(i >> 8), 0x5A}
+	sizes := map[uint64]int{}
+	for i := range 40 {
+		n := 1 * int(datasize.KB)
+		if i%4 == 0 {
+			n = 64 * int(datasize.KB)
+		}
+		sizes[uint64(i)] = n
+		b.Add(uint64(i), make([]byte, n))
 	}
 
-	for _, batch := range []int{1, 1000, 20000} {
-		for _, readers := range []int{0, 8, 32} {
-			for _, mix := range []string{"current", "stale", "half"} {
-				if readers == 0 && mix != "current" {
-					continue // reader mix is meaningless with no readers
-				}
-				b.Run(fmt.Sprintf("batch=%d/readers=%d/version=%s", batch, readers, mix), func(b *testing.B) {
-					c := NewStateCache(64<<20, 64<<20, 16<<20, 8<<20)
-					defer c.Close()
-					ap := c.Applier()
-
-					var version atomic.Uint64
-					version.Store(1)
-					ap.Initialize(1)
-
-					// Seed so readers mostly hit.
-					seed := make([]StateUpdate, keySpace)
-					for i := range seed {
-						seed[i] = StateUpdate{Domain: kv.AccountsDomain, Key: mkKey(i),
-							Value: []byte{byte(i), 0xEE}, TxNum: uint64(i)}
-					}
-					ap.Publish(1, 2, seed)
-					version.Store(2)
-
-					updates := make([]StateUpdate, batch)
-					for i := range updates {
-						updates[i] = StateUpdate{Domain: kv.AccountsDomain, Key: mkKey(i % keySpace),
-							Value: []byte{byte(i), 0xFF}, TxNum: uint64(i)}
-					}
-
-					var reads, fillsOffered, fillsLanded atomic.Uint64
-					stop := make(chan struct{})
-					var wg sync.WaitGroup
-
-					for r := range readers {
-						wg.Add(1)
-						go func(r int) {
-							defer wg.Done()
-							useStale := mix == "stale" || (mix == "half" && r%2 == 0)
-							n := uint64(r * 7919)
-							for {
-								select {
-								case <-stop:
-									return
-								default:
-								}
-								for range 64 {
-									n = n*1103515245 + 12345
-									idx := int(n>>16) % keySpace
-									key := mkKey(idx)
-
-									sv := version.Load()
-									if useStale {
-										sv = 1 // the version the cache has moved past
-									}
-									v := c.View(FrontierWithStateVersion(
-										FrontierFunc(func(kv.Domain) (uint64, bool) { return uint64(keySpace), true }), sv))
-
-									if _, ok := v.Get(kv.AccountsDomain, key); !ok {
-										fillsOffered.Add(1)
-										v.Fill(kv.AccountsDomain, key, []byte{byte(idx), 0xEE}, uint64(idx))
-										if _, ok := c.View(nil).Get(kv.AccountsDomain, key); ok {
-											fillsLanded.Add(1)
-										}
-									}
-									reads.Add(1)
-								}
-							}
-						}(r)
-					}
-
-					b.ResetTimer()
-					start := time.Now()
-					for i := 0; b.Loop(); i++ {
-						src := version.Load()
-						ap.Publish(src, src+1, updates)
-						version.Store(src + 1)
-					}
-					elapsed := time.Since(start)
-					b.StopTimer()
-
-					close(stop)
-					wg.Wait()
-
-					if readers > 0 {
-						b.ReportMetric(float64(reads.Load())/elapsed.Seconds()/1e6, "Mreads/s")
-						if off := fillsOffered.Load(); off > 0 {
-							b.ReportMetric(float64(fillsLanded.Load())/float64(off)*100, "%fills-landed")
-						}
-					}
-					b.ReportMetric(float64(batch), "updates/publish")
-				})
-			}
+	var resident int64
+	survivors := map[uint64]bool{}
+	for k, n := range sizes {
+		_, ok := b.Get(k)
+		survivors[k] = ok
+		if ok {
+			resident += int64(n)
 		}
+		require.Equal(t, ok, evicted[k] == 0, "key %d: onEvict must fire exactly for the evicted keys", k)
+	}
+	require.NotZero(t, resident, "the layer must not freeze empty")
+	require.LessOrEqual(t, resident, int64(maxBytes), "resident bytes must stay within the budget")
+
+	b.Add(999, make([]byte, int(maxBytes)+1))
+	_, ok := b.Get(999)
+	require.False(t, ok, "a value larger than the budget must not be admitted")
+	require.Zero(t, evicted[999], "onEvict must not fire for a value that was never admitted")
+	for k, wasResident := range survivors {
+		_, ok := b.Get(k)
+		require.Equal(t, wasResident, ok, "key %d: an oversize Add must not evict the resident set", k)
 	}
 }
 
-// BenchmarkPublishVsViewBindLock isolates what admissionMu costs a publication.
-// Readers do identical work; only the bind differs. View(nil) returns without
-// touching admissionMu, so the delta is the read-lock's contribution to both
-// the publisher's cost and reader throughput.
-func BenchmarkPublishVsViewBindLock(b *testing.B) {
-	const keySpace = 4096
-	mkKey := func(i int) []byte { return []byte{byte(i), byte(i >> 8), 0x5A} }
+// An unwind bumps the read-view epoch, so a view bound to the discarded fork
+// misses even when the replacement fork has an entry for the key. This does not
+// cover an unwind that lands between the entry read and the epoch load; that
+// window has no test seam, and the load order in GetVisible is what closes it.
+func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
 
-	for _, bind := range []string{"frontier-RLock", "nil-nolock"} {
-		b.Run(bind, func(b *testing.B) {
-			c := NewStateCache(64<<20, 64<<20, 16<<20, 8<<20)
-			defer c.Close()
-			ap := c.Applier()
-			ap.Initialize(1)
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
 
-			seed := make([]StateUpdate, keySpace)
-			for i := range seed {
-				seed[i] = StateUpdate{Domain: kv.AccountsDomain, Key: mkKey(i), Value: []byte{byte(i), 0xEE}, TxNum: uint64(i)}
-			}
-			ap.Publish(1, 2, seed)
-			var version atomic.Uint64
-			version.Store(2)
-
-			updates := make([]StateUpdate, 20000)
-			for i := range updates {
-				updates[i] = StateUpdate{Domain: kv.AccountsDomain, Key: mkKey(i % keySpace), Value: []byte{byte(i), 0xFF}, TxNum: uint64(i)}
-			}
-
-			var reads atomic.Uint64
-			stop := make(chan struct{})
-			var wg sync.WaitGroup
-			for r := range 32 {
-				wg.Add(1)
-				go func(r int) {
-					defer wg.Done()
-					n := uint64(r * 7919)
-					for {
-						select {
-						case <-stop:
-							return
-						default:
-						}
-						for range 64 {
-							n = n*1103515245 + 12345
-							key := mkKey(int(n>>16) % keySpace)
-							var v ReadView
-							if bind == "frontier-RLock" {
-								v = c.View(FrontierWithStateVersion(
-									FrontierFunc(func(kv.Domain) (uint64, bool) { return keySpace, true }), version.Load()))
-							} else {
-								v = c.View(nil)
-							}
-							v.Get(kv.AccountsDomain, key)
-							reads.Add(1)
-						}
-					}
-				}(r)
-			}
-
-			b.ResetTimer()
-			start := time.Now()
-			for b.Loop() {
-				src := version.Load()
-				ap.Publish(src, src+1, updates)
-				version.Store(src + 1)
-			}
-			el := time.Since(start)
-			b.StopTimer()
-			close(stop)
-			wg.Wait()
-			b.ReportMetric(float64(reads.Load())/el.Seconds()/1e6, "Mreads/s")
+	var unwindOnce sync.Once
+	oldFork := FrontierFunc(func(kv.Domain) (uint64, bool) {
+		unwindOnce.Do(func() {
+			sc.Applier().PublishUnwind(2, 3, 4, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(2), TxNum: 6}})
 		})
-	}
+		return 10, true
+	})
+	view := sc.View(FrontierWithStateVersion(oldFork, 2))
+
+	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
+	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
+}
+
+// A value written at txNum 5 is the value as of any later txNum, not as of 5 itself.
+func TestStateCache_GetAsOfServesValuesWrittenBefore(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
+	view := sc.View(FrontierWithStateVersion(FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true }), 2))
+
+	v, ok := view.GetAsOf(kv.AccountsDomain, key, 6)
+	require.True(t, ok)
+	require.Equal(t, makeValue(1), v)
+	_, ok = view.GetAsOf(kv.AccountsDomain, key, 5)
+	require.False(t, ok)
+}
+
+func TestAccountCodeHashes(t *testing.T) {
+	addr := makeAddr(1)
+	code := []byte{0x60, 0x00}
+	hash := crypto.Keccak256Hash(code)
+	enc := accounts.SerialiseV3(&accounts.Account{CodeHash: accounts.InternCodeHash(hash)})
+	codeUpd := StateUpdate{Domain: kv.CodeDomain, Key: addr, Value: code, TxNum: 5}
+	accUpd := StateUpdate{Domain: kv.AccountsDomain, Key: addr, Value: enc, TxNum: 5}
+	key := codeUpdateKey{string(addr), 5}
+
+	require.Equal(t, hash[:], accountCodeHashes([]StateUpdate{codeUpd, accUpd})[key])
+	require.Equal(t, hash[:], accountCodeHashes([]StateUpdate{accUpd, codeUpd})[key])
+
+	other := accUpd
+	other.TxNum = 6
+	require.Nil(t, accountCodeHashes([]StateUpdate{codeUpd, other})[key], "an account written by another tx")
+	other = accUpd
+	other.Key = makeAddr(2)
+	require.Nil(t, accountCodeHashes([]StateUpdate{codeUpd, other})[key], "another account")
+	other = accUpd
+	other.Value = enc[:2]
+	require.Nil(t, accountCodeHashes([]StateUpdate{codeUpd, other})[key], "a truncated account")
+	require.Nil(t, accountCodeHashes([]StateUpdate{accUpd}), "no code update")
+
+	require.Equal(t, hash[:], prepareStateUpdate(codeUpd, nil).codeHash, "no account hash falls back to hashing")
 }

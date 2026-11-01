@@ -25,7 +25,10 @@ import (
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
 	if (b.version < clparams.GloasVersion) != (version < clparams.GloasVersion) {
-		b.validators.SetProgressiveHashing(version >= clparams.GloasVersion)
+		progressive := version >= clparams.GloasVersion
+		b.validators.SetProgressiveHashing(progressive)
+		setUint64ListProgressiveHashing(b.balances, progressive)
+		setUint64ListProgressiveHashing(b.inactivityScores, progressive)
 		b.markLeaf(
 			ValidatorsLeafIndex,
 			BalancesLeafIndex,
@@ -41,13 +44,18 @@ func (b *BeaconState) SetVersion(version clparams.StateVersion) {
 	b.version = version
 }
 
-func (b *BeaconState) SetSlot(slot uint64) {
+func (b *BeaconState) SetSlot(slot uint64) error {
+	oldSlot := b.slot
 	b.slot = slot
 	if b.events.OnEpochBoundary != nil && b.slot%b.beaconConfig.SlotsPerEpoch == 0 {
-		b.events.OnEpochBoundary(b.slot / b.beaconConfig.SlotsPerEpoch)
+		if err := b.events.OnEpochBoundary(b.slot / b.beaconConfig.SlotsPerEpoch); err != nil {
+			b.slot = oldSlot
+			return err
+		}
 	}
 
 	b.markLeaf(SlotLeafIndex)
+	return nil
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
@@ -60,44 +68,64 @@ func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	b.markLeaf(LatestBlockHeaderLeafIndex)
 }
 
-func (b *BeaconState) SetBlockRootAt(index int, root common.Hash) {
+func (b *BeaconState) SetBlockRootAt(index int, root common.Hash) error {
 	if b.events.OnNewBlockRoot != nil {
-		b.events.OnNewBlockRoot(index, root)
+		if err := b.events.OnNewBlockRoot(index, root); err != nil {
+			return err
+		}
 	}
 	b.markLeaf(BlockRootsLeafIndex)
 	b.blockRoots.Set(index, root)
+	return nil
 }
 
-func (b *BeaconState) SetStateRootAt(index int, root common.Hash) {
+func (b *BeaconState) SetStateRootAt(index int, root common.Hash) error {
 	if b.events.OnNewStateRoot != nil {
-		b.events.OnNewStateRoot(index, root)
+		if err := b.events.OnNewStateRoot(index, root); err != nil {
+			return err
+		}
 	}
 	b.markLeaf(StateRootsLeafIndex)
 	b.stateRoots.Set(index, root)
+	return nil
 }
 
-func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) {
-	b.markLeaf(ValidatorsLeafIndex)
+func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorWithdrawalCredentials != nil {
-		b.events.OnNewValidatorWithdrawalCredentials(index, creds[:])
+		if err := b.events.OnNewValidatorWithdrawalCredentials(index, creds[:]); err != nil {
+			return err
+		}
 	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetWithdrawalCredentialForValidatorAtIndex(index, creds)
+	return nil
 }
 
-func (b *BeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
-	b.markLeaf(ValidatorsLeafIndex)
-	if b.events.OnNewValidatorExitEpoch != nil {
-		b.events.OnNewValidatorExitEpoch(index, epoch)
+func (b *BeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
 	}
+	if b.events.OnNewValidatorExitEpoch != nil {
+		if err := b.events.OnNewValidatorExitEpoch(index, epoch); err != nil {
+			return err
+		}
+	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetExitEpochForValidatorAtIndex(index, epoch)
+	return nil
 }
 
 func (b *BeaconState) SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	if b.events.OnNewValidatorWithdrawableEpoch != nil {
-		b.events.OnNewValidatorWithdrawableEpoch(index, epoch)
+		if err := b.events.OnNewValidatorWithdrawableEpoch(index, epoch); err != nil {
+			return err
+		}
 	}
 
 	b.markLeaf(ValidatorsLeafIndex)
@@ -105,30 +133,46 @@ func (b *BeaconState) SetWithdrawableEpochForValidatorAtIndex(index int, epoch u
 	return nil
 }
 
-func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
-	b.markLeaf(ValidatorsLeafIndex)
+func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorEffectiveBalance != nil {
-		b.events.OnNewValidatorEffectiveBalance(index, balance)
+		if err := b.events.OnNewValidatorEffectiveBalance(index, balance); err != nil {
+			return err
+		}
 	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetEffectiveBalanceForValidatorAtIndex(index, balance)
+	return nil
 }
 
-func (b *BeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
-	b.markLeaf(ValidatorsLeafIndex)
+func (b *BeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorActivationEpoch != nil {
-		b.events.OnNewValidatorActivationEpoch(index, epoch)
+		if err := b.events.OnNewValidatorActivationEpoch(index, epoch); err != nil {
+			return err
+		}
 	}
-
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetActivationEpochForValidatorAtIndex(index, epoch)
+	return nil
 }
 
-func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
-	b.markLeaf(ValidatorsLeafIndex)
-	if b.events.OnNewValidatorActivationEligibilityEpoch != nil {
-		b.events.OnNewValidatorActivationEligibilityEpoch(index, epoch)
+func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
 	}
-
+	if b.events.OnNewValidatorActivationEligibilityEpoch != nil {
+		if err := b.events.OnNewValidatorActivationEligibilityEpoch(index, epoch); err != nil {
+			return err
+		}
+	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetActivationEligibilityEpochForValidatorAtIndex(index, epoch)
+	return nil
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
@@ -141,12 +185,15 @@ func (b *BeaconState) SetEth1DataVotes(votes *solid.ListSSZ[*cltypes.Eth1Data]) 
 	b.eth1DataVotes = votes
 }
 
-func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
+func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) error {
 	if b.events.OnAppendEth1Data != nil {
-		b.events.OnAppendEth1Data(vote)
+		if err := b.events.OnAppendEth1Data(vote); err != nil {
+			return err
+		}
 	}
 	b.markLeaf(Eth1DataVotesLeafIndex)
 	b.eth1DataVotes.Append(vote)
+	return nil
 }
 
 func (b *BeaconState) ResetEth1DataVotes() {
@@ -175,22 +222,21 @@ func (b *BeaconState) SetHistoricalRoots(hRoots solid.HashListSSZ) {
 }
 
 func (b *BeaconState) SetValidatorSlashed(index int, slashed bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorSlashed != nil {
 		if err := b.events.OnNewValidatorSlashed(index, slashed); err != nil {
 			return err
 		}
 	}
-
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetValidatorSlashed(index, slashed)
 	return nil
 }
 
 func (b *BeaconState) SetValidatorMinCurrentInclusionDelayAttestation(index int, value *solid.PendingAttestation) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.validators.SetMinCurrentInclusionDelayAttestation(index, value)
@@ -198,7 +244,7 @@ func (b *BeaconState) SetValidatorMinCurrentInclusionDelayAttestation(index int,
 }
 
 func (b *BeaconState) SetValidatorIsCurrentMatchingSourceAttester(index int, value bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.validators.SetIsCurrentMatchingSourceAttester(index, value)
@@ -206,7 +252,7 @@ func (b *BeaconState) SetValidatorIsCurrentMatchingSourceAttester(index int, val
 }
 
 func (b *BeaconState) SetValidatorIsCurrentMatchingTargetAttester(index int, value bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.validators.SetIsCurrentMatchingTargetAttester(index, value)
@@ -214,7 +260,7 @@ func (b *BeaconState) SetValidatorIsCurrentMatchingTargetAttester(index int, val
 }
 
 func (b *BeaconState) SetValidatorIsCurrentMatchingHeadAttester(index int, value bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.validators.SetIsCurrentMatchingHeadAttester(index, value)
@@ -222,7 +268,7 @@ func (b *BeaconState) SetValidatorIsCurrentMatchingHeadAttester(index int, value
 }
 
 func (b *BeaconState) SetValidatorMinPreviousInclusionDelayAttestation(index int, value *solid.PendingAttestation) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.validators.SetMinPreviousInclusionDelayAttestation(index, value)
@@ -230,7 +276,7 @@ func (b *BeaconState) SetValidatorMinPreviousInclusionDelayAttestation(index int
 }
 
 func (b *BeaconState) SetValidatorIsPreviousMatchingSourceAttester(index int, value bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.validators.SetIsPreviousMatchingSourceAttester(index, value)
@@ -238,7 +284,7 @@ func (b *BeaconState) SetValidatorIsPreviousMatchingSourceAttester(index int, va
 }
 
 func (b *BeaconState) SetValidatorIsPreviousMatchingTargetAttester(index int, value bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.markLeaf(ValidatorsLeafIndex)
@@ -247,7 +293,7 @@ func (b *BeaconState) SetValidatorIsPreviousMatchingTargetAttester(index int, va
 }
 
 func (b *BeaconState) SetValidatorIsPreviousMatchingHeadAttester(index int, value bool) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.markLeaf(ValidatorsLeafIndex)
@@ -257,7 +303,7 @@ func (b *BeaconState) SetValidatorIsPreviousMatchingHeadAttester(index int, valu
 }
 
 func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	if b.events.OnNewValidatorBalance != nil {
@@ -270,31 +316,40 @@ func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 	return nil
 }
 
-func (b *BeaconState) AddValidator(validator solid.Validator, balance uint64) {
+func (b *BeaconState) AddValidator(validator solid.Validator, balance uint64) error {
 	if b.events.OnNewValidator != nil {
-		b.events.OnNewValidator(b.validators.Length(), validator, balance)
+		if err := b.events.OnNewValidator(b.validators.Length(), validator, balance); err != nil {
+			return err
+		}
 	}
 	b.validators.Append(validator)
 	b.balances.Append(balance)
 
 	b.markLeaf(ValidatorsLeafIndex)
 	b.markLeaf(BalancesLeafIndex)
+	return nil
 }
 
-func (b *BeaconState) SetRandaoMixAt(index int, mix common.Hash) {
+func (b *BeaconState) SetRandaoMixAt(index int, mix common.Hash) error {
 	if b.events.OnRandaoMixChange != nil {
-		b.events.OnRandaoMixChange(index, mix)
+		if err := b.events.OnRandaoMixChange(index, mix); err != nil {
+			return err
+		}
 	}
 	b.markLeaf(RandaoMixesLeafIndex)
 	b.randaoMixes.Set(index, mix)
+	return nil
 }
 
-func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
+func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) error {
 	if b.events.OnNewSlashingSegment != nil {
-		b.events.OnNewSlashingSegment(index, segment)
+		if err := b.events.OnNewSlashingSegment(index, segment); err != nil {
+			return err
+		}
 	}
 	b.markLeaf(SlashingsLeafIndex)
 	b.slashings.Set(index, segment)
+	return nil
 }
 
 func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {
@@ -312,14 +367,17 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) 
 	b.markLeaf(ValidatorsLeafIndex)
 }
 
-func (b *BeaconState) ResetEpochParticipation() {
-	b.previousEpochParticipation = b.currentEpochParticipation
+func (b *BeaconState) ResetEpochParticipation() error {
 	if b.events.OnResetParticipation != nil {
-		b.events.OnResetParticipation(b.previousEpochParticipation)
+		if err := b.events.OnResetParticipation(b.currentEpochParticipation); err != nil {
+			return err
+		}
 	}
+	b.previousEpochParticipation = b.currentEpochParticipation
 	b.currentEpochParticipation = solid.NewParticipationBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)
+	return nil
 }
 
 func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
@@ -342,20 +400,26 @@ func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoin
 	b.markLeaf(FinalizedCheckpointLeafIndex)
 }
 
-func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) {
+func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) error {
 	if b.events.OnNewCurrentSyncCommittee != nil {
-		b.events.OnNewCurrentSyncCommittee(currentSyncCommittee)
+		if err := b.events.OnNewCurrentSyncCommittee(currentSyncCommittee); err != nil {
+			return err
+		}
 	}
 	b.currentSyncCommittee = currentSyncCommittee
 	b.markLeaf(CurrentSyncCommitteeLeafIndex)
+	return nil
 }
 
-func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) {
+func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) error {
 	if b.events.OnNewNextSyncCommittee != nil {
-		b.events.OnNewNextSyncCommittee(nextSyncCommittee)
+		if err := b.events.OnNewNextSyncCommittee(nextSyncCommittee); err != nil {
+			return err
+		}
 	}
 	b.nextSyncCommittee = nextSyncCommittee
 	b.markLeaf(NextSyncCommitteeLeafIndex)
+	return nil
 }
 
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
@@ -422,7 +486,7 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if index >= b.inactivityScores.Length() {
+	if index < 0 || index >= b.inactivityScores.Length() {
 		return ErrInvalidValidatorIndex
 	}
 	b.markLeaf(InactivityScoresLeafIndex)
@@ -604,7 +668,9 @@ func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorS
 }
 
 func (b *BeaconState) SetExecutionPayloadAvailability(slot uint64, available bool) {
-	b.executionPayloadAvailability.SetBitAt(int(slot%b.beaconConfig.SlotsPerHistoricalRoot), available)
+	// slot % SlotsPerHistoricalRoot is always within the bitvector's cap
+	// (it was allocated with that same size), so SetBitAt cannot error here.
+	_ = b.executionPayloadAvailability.SetBitAt(int(slot%b.beaconConfig.SlotsPerHistoricalRoot), available)
 	b.markLeaf(ExecutionPayloadAvailabilityLeafIndex)
 }
 

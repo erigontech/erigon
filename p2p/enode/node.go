@@ -70,8 +70,8 @@ func newNodeWithID(r *enr.Record, id ID) *Node {
 	// Here we decide between IPv4 and IPv6, choosing the 'most global' address.
 	var ip4 netip.Addr
 	var ip6 netip.Addr
-	n.Load((*enr.IPv4Addr)(&ip4))
-	n.Load((*enr.IPv6Addr)(&ip6))
+	_ = n.Load((*enr.IPv4Addr)(&ip4))
+	_ = n.Load((*enr.IPv6Addr)(&ip6))
 	valid4 := validIP(ip4)
 	valid6 := validIP(ip6)
 	switch {
@@ -117,8 +117,8 @@ func (n *Node) setIP4(ip netip.Addr) {
 }
 
 func (n *Node) setIPv4Ports() {
-	n.Load((*enr.UDP)(&n.udp))
-	n.Load((*enr.TCP)(&n.tcp))
+	_ = n.Load((*enr.UDP)(&n.udp))
+	_ = n.Load((*enr.TCP)(&n.tcp))
 }
 
 func (n *Node) setIP6(ip netip.Addr) {
@@ -128,10 +128,10 @@ func (n *Node) setIP6(ip netip.Addr) {
 	}
 	n.ip = ip
 	if err := n.Load((*enr.UDP6)(&n.udp)); err != nil {
-		n.Load((*enr.UDP)(&n.udp))
+		_ = n.Load((*enr.UDP)(&n.udp))
 	}
 	if err := n.Load((*enr.TCP6)(&n.tcp)); err != nil {
-		n.Load((*enr.TCP)(&n.tcp))
+		_ = n.Load((*enr.TCP)(&n.tcp))
 	}
 }
 
@@ -246,9 +246,9 @@ func (n *Node) TCPEndpoint() (netip.AddrPort, bool) {
 func (n *Node) QUICEndpoint() (netip.AddrPort, bool) {
 	var quic uint16
 	if n.ip.Is4() || n.ip.Is4In6() {
-		n.Load((*enr.QUIC)(&quic))
+		_ = n.Load((*enr.QUIC)(&quic))
 	} else if n.ip.Is6() {
-		n.Load((*enr.QUIC6)(&quic))
+		_ = n.Load((*enr.QUIC6)(&quic))
 	}
 	if !n.ip.IsValid() || n.ip.IsUnspecified() || quic == 0 {
 		return netip.AddrPort{}, false

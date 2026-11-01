@@ -19,6 +19,7 @@ package cltypes
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 
@@ -676,5 +677,52 @@ func TestBeaconBodyGloasProgressiveLimitsUseConfig(t *testing.T) {
 		body := NewBeaconBody(&cfg, clparams.GloasVersion)
 
 		require.NoError(t, body.ProposerSlashings.DecodeSSZ(make([]byte, 33*416), int(clparams.GloasVersion)))
+	}
+}
+
+func TestSignedBeaconBlockGloasJSONValidatesPayloadAttestationBits(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		ptcSize uint64
+		bits    string
+		wantErr string
+	}{
+		{name: "configured width", ptcSize: 16, bits: "0x0000"},
+		{name: "short width", ptcSize: 16, bits: "0x00", wantErr: "invalid bitvector byte length"},
+		{name: "non-byte-aligned width", ptcSize: 10, bits: "0x0003"},
+		{name: "non-byte-aligned unused bits", ptcSize: 10, bits: "0x0004", wantErr: "invalid bitvector unused bits"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.PtcSize = test.ptcSize
+			block := NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			input := []byte(fmt.Sprintf(`{"message":{"body":{"payload_attestations":[{"aggregation_bits":%q,"data":{}}]}}}`, test.bits))
+
+			err := json.Unmarshal(input, block)
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestSignedBeaconBlockJSONPayloadAttestationValidationVersionBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version clparams.StateVersion
+		input   string
+	}{
+		{name: "Fulu body", version: clparams.FuluVersion, input: `{"message":{"body":{}}}`},
+		{name: "Gloas omitted attestations", version: clparams.GloasVersion, input: `{"message":{"body":{}}}`},
+		{name: "Gloas empty attestations", version: clparams.GloasVersion, input: `{"message":{"body":{"payload_attestations":[]}}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			block := NewSignedBeaconBlock(&cfg, test.version)
+
+			require.NoError(t, json.Unmarshal([]byte(test.input), block))
+		})
 	}
 }

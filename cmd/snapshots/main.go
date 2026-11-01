@@ -67,7 +67,6 @@ func main() {
 			debug.RaiseFdLimit()
 
 			logger, err := setupLogger(cmd)
-
 			if err != nil {
 				return ctx, err
 			}
@@ -96,7 +95,7 @@ func setupLogger(ctx *cli.Command) (log.Logger, error) {
 	if len(dataDir) > 0 {
 		logsDir := filepath.Join(dataDir, "logs")
 
-		if err := os.MkdirAll(logsDir, 0755); err != nil {
+		if err := os.MkdirAll(logsDir, 0o755); err != nil {
 			return nil, err
 		}
 	}

@@ -48,7 +48,7 @@ openssl ecparam -name prime256v1 -genkey -noout -out CA-key.pem
 
 ## 2. Creating the CA certificate file
 
-Create CA self-signed certificate (this command will ask questions, the answers aren’t important for now, but at least the first one needs to be filled in with some data). The file created by this command will be called `CA-cert.pem`:
+Create the self-signed CA certificate (this command will ask questions; the answers aren’t important for now, but at least the first one needs to be filled in with some data). The file created by this command will be called `CA-cert.pem`:
 
 ```bash
 openssl req -x509 -new -nodes -key CA-key.pem -sha256 -days 3650 -out CA-cert.pem
@@ -73,6 +73,10 @@ openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
 Now create the Certificate Signing Request for the Erigon key pair, and from this request, produce the certificate (signed by the CA) that proves that this key is now part of the “cluster of trust”:
 
 ```bash
+openssl req -new -key erigon-key.pem -out erigon.csr
+```
+
+```bash
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
 ```
 
@@ -82,7 +86,7 @@ Then create the certificate signing request for the RPC Daemon key pair:
 openssl req -new -key RPC-key.pem -out RPC.csr
 ```
 
-From this request, produce the certificate (signed by CA), proving that this key is now part of the “cluster of trust”:
+From this request, produce the certificate (signed by the CA), proving that this key is now part of the “cluster of trust”:
 
 ```bash
 openssl x509 -req -in RPC.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out RPC.crt -days 3650 -sha256

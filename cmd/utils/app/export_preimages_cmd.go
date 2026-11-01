@@ -39,14 +39,18 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 const (
@@ -99,40 +103,57 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	if tmpDir == "" {
 		tmpDir = dirs.Tmp
 	}
-	tmpDir, err = prepareScratchDir(tmpDir)
-	if err != nil {
-		return err
-	}
 
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
-	aggTx := agg.BeginFilesRo()
-	defer aggTx.Close()
-	tx, err := chainDB.BeginRo(ctx)
+	blockSnaps := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err := blockSnaps.OpenFolder(); err != nil {
+		return err
+	}
+	defer blockSnaps.Close()
+	db, err := temporal.New(chainDB, agg, blockSnaps)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	br := freezeblocks.NewBlockReader(blockSnaps)
+	headerAt := func(blockNum uint64) (*types.Header, error) {
+		return br.HeaderByNumber(ctx, tx, blockNum)
+	}
+	return runExport(ctx, tx, headerAt, outDir, tmpDir, logger)
+}
 
-	commitmentState, _, ok, err := aggTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, tx, kv.GetLatestOptions{})
+func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
+	root, err := pinnedStateRoot(ctx, tx, logger)
 	if err != nil {
-		return fmt.Errorf("read commitment state: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("commitment state record not found in %s", dirs.DataDir)
-	}
-	rootBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(commitmentState)
-	if err != nil {
-		return fmt.Errorf("extract state root: %w", err)
-	}
-	commitmentRoot := common.BytesToHash(rootBytes)
-	if err := checkRootPin(commitmentRoot, rawdb.ReadHeaderByNumber(tx, blockNum), blockNum); err != nil {
 		return err
 	}
-	logger.Info("[export-preimages] pin", "block", blockNum, "txNum", txNum, "stateRoot", commitmentRoot.Hex())
+	block, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	header, err := headerAt(block)
+	if err != nil {
+		return fmt.Errorf("read canonical header for block %d: %w", block, err)
+	}
+	if err := checkRootPin(root, header, block); err != nil {
+		return err
+	}
+	logger.Info("[export-preimages] pin", "block", block, "stateRoot", root.Hex())
 
+	tmpDir, err = prepareScratchDir(tmpDir)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
@@ -147,13 +168,14 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	defer outputFile.Close()
 
 	start := time.Now()
+	aggTx := state.AggTx(tx)
 	stats, err := writePreimagesFile(ctx, outputFile, tmpDir, aggTx, tx, logger)
 	if err != nil {
 		return fmt.Errorf("export aborted (partial file %s): %w", framedPath, err)
 	}
 
 	metadata := preimagesMeta{
-		Block: blockNum, StateRoot: commitmentRoot.Hex(), Order: preimagesOrderKeccak256,
+		Block: block, StateRoot: root.Hex(), Order: preimagesOrderKeccak256,
 		Accounts: stats.Accounts, Storage: stats.Slots,
 	}
 	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
@@ -165,6 +187,21 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	logger.Info("[export-preimages] done", "accounts", stats.Accounts, "slots", stats.Slots, "file", framedPath, "bytes", stats.sizeBytes(), "took", time.Since(start).Round(time.Second))
 	return nil
+}
+
+func pinnedStateRoot(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (common.Hash, error) {
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	if domains != nil {
+		defer domains.Close()
+	}
+	if err != nil {
+		return common.Hash{}, err
+	}
+	rootBytes, err := domains.GetCommitmentCtx().Trie().RootHash()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return common.BytesToHash(rootBytes), nil
 }
 
 // writePreimagesFile hashes both domain scans through an ETL sort and writes the
@@ -210,7 +247,7 @@ func writePreimagesFile(
 		}
 	}
 
-	collector := etl.NewCollector("export-preimages", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	collector := etl.NewCollector("export-preimages", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger).SortAndFlushInBackground(true)
 	defer collector.Close()
 
 	collected, err := collectHashedPreimages(ctx, accounts, storage, collector, reportHashing)

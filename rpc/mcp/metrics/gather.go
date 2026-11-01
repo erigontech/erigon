@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"path"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -42,8 +43,14 @@ func GatherMetricsFiltered(pattern string) (map[string]any, error) {
 		metricName := *mf.Name
 
 		// Apply filter if pattern is provided
-		if pattern != "" && !matchPattern(pattern, metricName) {
-			continue
+		if pattern != "" {
+			ok, err := matchPattern(pattern, metricName)
+			if err != nil {
+				return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+			}
+			if !ok {
+				continue
+			}
 		}
 
 		metricType := mf.Type.String()
@@ -139,7 +146,7 @@ func GatherMetricsFiltered(pattern string) (map[string]any, error) {
 
 		result[metricName] = map[string]any{
 			"type":    metricType,
-			"help":    getStringPtr(mf.Help),
+			"help":    mf.GetHelp(),
 			"metrics": metrics,
 		}
 	}
@@ -147,53 +154,8 @@ func GatherMetricsFiltered(pattern string) (map[string]any, error) {
 	return result, nil
 }
 
-// matchPattern performs simple wildcard matching (* and ? wildcards).
-func matchPattern(pattern, name string) bool {
-	// Handle exact match first
-	if pattern == name {
-		return true
-	}
-
-	// Handle wildcards
-	i, j := 0, 0
-	starIdx, matchIdx := -1, 0
-
-	for i < len(name) {
-		switch {
-		case j < len(pattern) && (pattern[j] == name[i] || pattern[j] == '?'):
-			i++
-			j++
-		case j < len(pattern) && pattern[j] == '*':
-			starIdx = j
-			matchIdx = i
-			j++
-		case starIdx != -1:
-			j = starIdx + 1
-			matchIdx++
-			i = matchIdx
-		default:
-			return false
-		}
-	}
-
-	// Check remaining pattern characters
-	for j < len(pattern) && pattern[j] == '*' {
-		j++
-	}
-
-	return j == len(pattern)
-}
-
-// GatherMetrics gathers all metrics from the Prometheus default registry
-// and returns them as a structured map for MCP consumption.
-func GatherMetrics() (map[string]any, error) {
-	return GatherMetricsFiltered("")
-}
-
-// getStringPtr safely dereferences a string pointer
-func getStringPtr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
+// matchPattern reports whether a metric name matches a glob pattern. Prometheus
+// names carry no "/", so path.Match's separator handling never applies.
+func matchPattern(pattern, name string) (bool, error) {
+	return path.Match(pattern, name)
 }

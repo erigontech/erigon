@@ -76,10 +76,25 @@ func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
 	return a.DecodeSSZWithConfig(buf, version, nil)
 }
 
+func (a *AttesterSlashing) DecodeSSZStrict(buf []byte, version int) error {
+	return a.DecodeSSZStrictWithConfig(buf, version, nil)
+}
+
 // DecodeSSZWithConfig decodes an AttesterSlashing with preset-aware limits.
 func (a *AttesterSlashing) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return a.decodeSSZWithConfig(buf, version, cfg, false)
+}
+
+func (a *AttesterSlashing) DecodeSSZStrictWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return a.decodeSSZWithConfig(buf, version, cfg, true)
+}
+
+func (a *AttesterSlashing) decodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig, strict bool) error {
 	a.Attestation_1 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
 	a.Attestation_2 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, a.Attestation_1, a.Attestation_2)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 

@@ -161,7 +161,7 @@ func (r *Reader) ForceInMem() datasize.ByteSize {
 	if r.m == nil || r.inner == nil {
 		return 0
 	}
-	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
+	cpy := make([]byte, len(r.inner.Fingerprints)) // don't use bytes.Clone - to see ram owner on heap profiler
 	copy(cpy, r.inner.Fingerprints)
 	r.inner.Fingerprints = cpy
 	r.keepInMem = true
@@ -176,6 +176,7 @@ func (r *Reader) MadvWillNeed() {
 		panic(err)
 	}
 }
+
 func (r *Reader) MadvNormal() {
 	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
@@ -184,6 +185,7 @@ func (r *Reader) MadvNormal() {
 		panic(err)
 	}
 }
+
 func (r *Reader) MadvRandom() {
 	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
@@ -348,6 +350,7 @@ func (r *ReaderSharded) MadvNormal() {
 		panic(err)
 	}
 }
+
 func (r *ReaderSharded) MadvRandom() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return

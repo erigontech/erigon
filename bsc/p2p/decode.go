@@ -30,46 +30,23 @@ import (
 // Execution never reads sidecars, so the decoders skip it.
 func MessageListenerOptions() []p2p.MessageListenerOption {
 	return []p2p.MessageListenerOption{
-		p2p.WithBlockBodiesDecoder(decodeBlockBodies),
+		p2p.WithBlockBodyDecoder(decodeBlockBody),
 		p2p.WithNewBlockDecoder(decodeNewBlock),
 	}
 }
 
-func decodeBlockBodies(data []byte) (*eth.BlockBodiesPacket66, error) {
-	s := rlp.NewBytesStream(data)
-	defer rlp.PutStream(s)
-
+func decodeBlockBody(s *rlp.Stream) (*types.Body, error) {
 	if _, err := s.List(); err != nil {
 		return nil, err
 	}
-	packet := &eth.BlockBodiesPacket66{}
-	var err error
-	if packet.RequestId, err = s.Uint64(); err != nil {
-		return nil, fmt.Errorf("read RequestId: %w", err)
-	}
-	if _, err := s.List(); err != nil {
+	body := &types.Body{}
+	if err := body.DecodeFields(s); err != nil {
 		return nil, err
 	}
-	for s.MoreDataInList() {
-		body := &types.Body{}
-		if _, err := s.List(); err != nil {
-			return nil, err
-		}
-		if err := body.DecodeFields(s); err != nil {
-			return nil, err
-		}
-		if err := endWithOptionalSidecars(s); err != nil {
-			return nil, err
-		}
-		packet.BlockBodiesPacket = append(packet.BlockBodiesPacket, body)
-	}
-	if err := s.ListEnd(); err != nil {
+	if err := endWithOptionalSidecars(s); err != nil {
 		return nil, err
 	}
-	if err := s.ListEnd(); err != nil {
-		return nil, err
-	}
-	return packet, endOfInput(s)
+	return body, nil
 }
 
 func decodeNewBlock(data []byte) (*eth.NewBlockPacket, error) {

@@ -28,9 +28,6 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
@@ -66,11 +63,8 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
-	// create the http2 server for handling h2c
-	h2 := &http2.Server{}
-	// enable h2c support
-	handler = h2c.NewHandler(handler, h2)
-	// Bundle the http server
+	// Bundle the http server. Server.Protocols is left nil, so the default applies: HTTP/1 plus
+	// HTTP/2 over TLS. Cleartext HTTP/2 is not served; a client that negotiates gets HTTP/1.1.
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadTimeout:       cfg.Timeouts.ReadTimeout,

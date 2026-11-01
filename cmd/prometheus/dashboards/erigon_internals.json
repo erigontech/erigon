@@ -5144,7 +5144,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "commit_key_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_keys_total{instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "total keys",
               "range": true,
               "refId": "A",
@@ -5155,7 +5155,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_account_key_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_key_traversals_total{kind=\"address\",instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "account keys",
               "range": true,
               "refId": "B",
@@ -5166,7 +5166,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_storage_key_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_key_traversals_total{kind=\"storage\",instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "storage keys",
               "range": true,
               "refId": "C",
@@ -5265,7 +5265,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "commit_fold_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_folds_total{instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "fold",
               "range": true,
               "refId": "A",
@@ -5276,7 +5276,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_unfold_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_unfolds_total{instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "unfold",
               "range": true,
               "refId": "B",
@@ -5375,7 +5375,7 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "commit_branch_read_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_reads_total{kind=\"branch\",instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "branch reads",
               "range": true,
               "refId": "A",
@@ -5386,7 +5386,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_branch_write_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_branch_writes_total{instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "branch writes",
               "range": true,
               "refId": "B",
@@ -5397,7 +5397,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_read_rate{instance=~\"$instance\"}",
+              "expr": "sum without (kind) (rate(commitment_reads_total{instance=~\"$instance\"}[$__rate_interval]))",
               "legendFormat": "total reads",
               "range": true,
               "refId": "C",
@@ -5408,7 +5408,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_account_read_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_reads_total{kind=\"account\",instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "account reads",
               "range": true,
               "refId": "D",
@@ -5419,7 +5419,7 @@
             },
             {
               "editorMode": "code",
-              "expr": "commit_storage_read_rate{instance=~\"$instance\"}",
+              "expr": "rate(commitment_reads_total{kind=\"storage\",instance=~\"$instance\"}[$__rate_interval])",
               "legendFormat": "storage reads",
               "range": true,
               "refId": "E",
@@ -5535,8 +5535,8 @@
           "targets": [
             {
               "editorMode": "code",
-              "expr": "commit_block_dur{instance=~\"$instance\"}",
-              "legendFormat": "block dur (ns)",
+              "expr": "1e9 * histogram_quantile(0.9, sum by (le, instance) (rate(commitment_round_duration_seconds_bucket{instance=~\"$instance\"}[$__rate_interval])))",
+              "legendFormat": "block dur (ns) {{instance}}",
               "range": true,
               "refId": "A",
               "datasource": {

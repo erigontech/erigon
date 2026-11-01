@@ -38,7 +38,7 @@ var (
 // Builder represents a builder in the consensus layer.
 type Builder struct {
 	Pubkey            common.Bytes48 `json:"pubkey"`
-	Version           uint8          `json:"version"`
+	Version           uint8          `json:"version,string"`
 	ExecutionAddress  common.Address `json:"execution_address"`
 	Balance           uint64         `json:"balance,string"`
 	DepositEpoch      uint64         `json:"deposit_epoch,string"`

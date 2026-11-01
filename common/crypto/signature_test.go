@@ -135,28 +135,3 @@ func TestPubkeyRandom(t *testing.T) {
 		}
 	}
 }
-
-func BenchmarkEcrecoverSignature(b *testing.B) {
-	for b.Loop() {
-		if _, err := Ecrecover(testmsg, testsig); err != nil {
-			b.Fatal("ecrecover error", err)
-		}
-	}
-}
-
-func BenchmarkVerifySignature(b *testing.B) {
-	sig := testsig[:len(testsig)-1] // remove recovery id
-	for b.Loop() {
-		if !VerifySignature(testpubkey, testmsg, sig) {
-			b.Fatal("verify error")
-		}
-	}
-}
-
-func BenchmarkDecompressPubkey(b *testing.B) {
-	for b.Loop() {
-		if _, err := DecompressPubkey(testpubkeyc); err != nil {
-			b.Fatal(err)
-		}
-	}
-}

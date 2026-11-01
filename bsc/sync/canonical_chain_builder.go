@@ -255,14 +255,14 @@ func (ccb *CanonicalChainBuilder) Connect(_ context.Context, headers []*types.He
 		return nil, nil
 	}
 
-	var isBehindRoot = func(h *types.Header) bool {
+	isBehindRoot := func(h *types.Header) bool {
 		return h.Number.Cmp(&ccb.root.header.Number) < 0
 	}
 
 	if isBehindRoot(headers[len(headers)-1]) {
 		return nil, nil
 	}
-	var connectionIdx = 0
+	connectionIdx := 0
 	if headers[0].Number.Cmp(&ccb.root.header.Number) <= 0 {
 		for ; connectionIdx < len(headers) && isBehindRoot(headers[connectionIdx]); connectionIdx++ {
 		}

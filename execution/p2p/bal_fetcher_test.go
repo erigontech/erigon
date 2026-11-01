@@ -18,8 +18,10 @@ package p2p
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -30,13 +32,73 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
+	reads := make([]uint64, 100_000)
+	for i := range reads {
+		reads[i] = uint64(i)
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, reads, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+	hash := crypto.Keccak256Hash(raw)
+	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: hash}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "block access list too large")
+	require.True(t, bad)
+	require.Empty(t, out)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
+	slots := make([]rlp.RawValue, 100_000)
+	for i := range slots {
+		slots[i] = rlp.RawValue{0xc2, 0x80, 0xc0}
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, slots, []any{}, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 1_000_000_000, ExpectedHash: crypto.Keccak256Hash(raw)}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "empty slot changes")
+	require.True(t, bad)
+	require.Empty(t, out)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestValidateBALResponseChecksHashBeforeDecoding(t *testing.T) {
+	changes := make([][2]uint64, 100_000)
+	for i := range changes {
+		changes[i] = [2]uint64{uint64(i), 1}
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, []any{}, changes, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 60_000_000, ExpectedHash: common.Hash{0xff}}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "wanted")
+	require.True(t, bad)
+	require.Empty(t, out)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
 
 func TestValidateBALResponse(t *testing.T) {
 	t.Parallel()
 	wantBAL := types.BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{1}),
+		Address: common.Address{1},
 	}}
 	bal, err := types.EncodeBlockAccessListBytes(wantBAL)
 	require.NoError(t, err)
@@ -164,8 +226,8 @@ func TestFetchAcrossPeers(t *testing.T) {
 	h0 := common.BytesToHash([]byte{1})
 	h1 := common.BytesToHash([]byte{2})
 	reqs := []BALRequest{{Hash: h0}, {Hash: h1}}
-	balA := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xaa})}})
-	balB := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xbb})}})
+	balA := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0xaa}}})
+	balB := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0xbb}}})
 	serveAll := func(rs []BALRequest) map[common.Hash]*types.BlockAccessListSidecar {
 		out := map[common.Hash]*types.BlockAccessListSidecar{}
 		for _, r := range rs {
@@ -185,6 +247,52 @@ func TestFetchAcrossPeers(t *testing.T) {
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *serving}, 8, fetch)
 		require.Len(t, out, 2)
+	})
+
+	t.Run("cancels redundant requests once the batch is complete", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			serving := PeerIdFromUint64(1)
+			blocked := PeerIdFromUint64(2)
+			started := make(chan struct{})
+			stopped := make(chan struct{})
+			var queuedCalls atomic.Int32
+			fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+				switch {
+				case p.Equal(serving):
+					<-started
+					return serveAll(rs)
+				case p.Equal(blocked):
+					close(started)
+					<-ctx.Done()
+					close(stopped)
+					return nil
+				default:
+					queuedCalls.Add(1)
+					return nil
+				}
+			}
+			result := make(chan map[common.Hash]*types.BlockAccessListSidecar, 1)
+			go func() {
+				result <- fetchAcrossPeers(ctx, reqs,
+					[]PeerId{*serving, *blocked, *PeerIdFromUint64(3)}, 2, fetch)
+			}()
+			synctest.Wait()
+			select {
+			case got := <-result:
+				require.Equal(t, serveAll(reqs), got)
+			default:
+				t.Fatal("complete BAL batch is still waiting for a redundant peer")
+			}
+			select {
+			case <-stopped:
+			default:
+				t.Fatal("redundant peer request was not stopped")
+			}
+			require.Zero(t, queuedCalls.Load())
+			require.NoError(t, ctx.Err())
+		})
 	})
 
 	t.Run("merges partial results across peers", func(t *testing.T) {

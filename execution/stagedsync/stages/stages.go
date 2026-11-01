@@ -35,14 +35,13 @@ var (
 	Snapshots SyncStage = "OtterSync" // Snapshots
 	Headers   SyncStage = "Headers"   // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 
-	BlockHashes       SyncStage = "BlockHashes"       // Headers Number are written, fills blockHash => number bucket
-	Bodies            SyncStage = "Bodies"            // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders           SyncStage = "Senders"           // "From" recovered from signatures, bodies re-written
-	Execution         SyncStage = "Execution"         // Executing each block w/o building a trie
-	CustomTrace       SyncStage = "CustomTrace"       // Executing each block w/o building a trie
-	WitnessProcessing SyncStage = "WitnessProcessing" // Process witnesses buffered from the wit protocol
-	TxLookup          SyncStage = "TxLookup"          // Generating transactions lookup index
-	Finish            SyncStage = "Finish"            // Nominal stage after all other stages
+	BlockHashes SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
+	Bodies      SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders     SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
+	Execution   SyncStage = "Execution"   // Executing each block w/o building a trie
+	CustomTrace SyncStage = "CustomTrace" // Executing each block w/o building a trie
+	TxLookup    SyncStage = "TxLookup"    // Generating transactions lookup index
+	Finish      SyncStage = "Finish"      // Nominal stage after all other stages
 )
 
 var AllStages = []SyncStage{

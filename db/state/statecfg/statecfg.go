@@ -18,6 +18,7 @@ type DomainCfg struct {
 
 	// Write shortened key references in commitment branch values; commitment domain only.
 	ReferencesInCommitmentBranches bool
+	CommitmentV3Records            bool
 
 	ExistenceFilter ExistenceFilterMode
 

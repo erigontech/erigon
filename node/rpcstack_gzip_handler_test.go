@@ -22,13 +22,19 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
+	"weak"
 
+	"github.com/klauspost/compress/gzhttp"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/pool"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 // decompressGzip reads a gzip-compressed body and returns the raw bytes.
@@ -38,6 +44,17 @@ func decompressGzip(t *testing.T, r io.Reader) []byte {
 	require.NoError(t, err)
 	defer gz.Close()
 	data, err := io.ReadAll(gz)
+	require.NoError(t, err)
+	return data
+}
+
+// decompressZstd reads a zstd-compressed body and returns the raw bytes.
+func decompressZstd(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	zr, err := zstd.NewReader(r)
+	require.NoError(t, err)
+	defer zr.Close()
+	data, err := io.ReadAll(zr)
 	require.NoError(t, err)
 	return data
 }
@@ -170,6 +187,32 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
+}
+
+// A flushed response must reach the client while the handler is still running.
+func TestGzipHandlerFlushReachesClient(t *testing.T) {
+	body := bytes.Repeat([]byte("erigon "), 1024)
+	release := make(chan struct{})
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+		w.(http.Flusher).Flush()
+		<-release
+	})))
+	defer srv.Close()
+	defer close(release)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	zr, err := gzip.NewReader(resp.Body)
+	require.NoError(t, err)
+	got := make([]byte, len(body))
+	_, err = io.ReadFull(zr, got)
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
 }
 
 // TestGzipMetricsCounters verifies the raw/compressed byte counters:
@@ -310,6 +353,200 @@ func TestHTTPHandlerStackCompressionDisabled(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, body, got, "body must round-trip unchanged")
+		})
+	}
+}
+
+// TestZstdNegotiation pins what each Accept-Encoding gets. A client offering only
+// zstd used to fall through to an uncompressed body.
+func TestZstdNegotiation(t *testing.T) {
+	body := strings.Repeat(`{"pc":1,"op":"SSTORE","gas":42},`, 4000)
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	})))
+	defer srv.Close()
+
+	// DisableCompression stops http.Transport from injecting its own
+	// Accept-Encoding and auto-decoding the response, so the "" case below
+	// reaches the server with the header genuinely absent, not set to an empty
+	// value, and the wire bytes reach the test unmangled either way.
+	transport := &http.Transport{DisableCompression: true}
+
+	for _, tc := range []struct {
+		accept, want string
+	}{
+		{"gzip", "gzip"},
+		{"zstd", "zstd"},
+		{"zstd, gzip", "zstd"},
+		{"gzip, zstd", "zstd"},
+		{"gzip, deflate, br, zstd", "zstd"},
+		{"identity", ""},
+		{"", ""},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+			require.NoError(t, err)
+			if tc.accept != "" {
+				req.Header.Set("Accept-Encoding", tc.accept)
+			}
+			resp, err := transport.RoundTrip(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, tc.want, resp.Header.Get("Content-Encoding"))
+			switch tc.want {
+			case "gzip":
+				require.Equal(t, []byte(body), decompressGzip(t, resp.Body))
+			case "zstd":
+				require.Equal(t, []byte(body), decompressZstd(t, resp.Body))
+			default:
+				got, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.Equal(t, []byte(body), got, "an unencoded body must arrive whole")
+			}
+		})
+	}
+}
+
+// TestZstdHandlerStreaming verifies that a handler which writes, flushes, then writes again
+// still produces a fully decodable zstd stream -- a dropped frame or corrupt block shows up
+// only as a short body, which a size-only check cannot catch.
+func TestZstdHandlerStreaming(t *testing.T) {
+	parts := [][]byte{
+		[]byte(`{"jsonrpc":"2.0","result":`),
+		[]byte(`"hello"`),
+		[]byte(`}`),
+	}
+	tail := []byte(`{"jsonrpc":"2.0","result":"after flush"}`)
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, p := range parts {
+			_, _ = w.Write(p)
+		}
+		// Pad past minGzipBodySize: below it a response is sent verbatim.
+		_, _ = w.Write(bytes.Repeat([]byte(" "), minGzipBodySize))
+		w.(http.Flusher).Flush()
+		_, _ = w.Write(tail)
+	})))
+	defer srv.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "zstd")
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, "zstd", resp.Header.Get("Content-Encoding"))
+	want := append([]byte(`{"jsonrpc":"2.0","result":"hello"}`), bytes.Repeat([]byte(" "), minGzipBodySize)...)
+	want = append(want, tail...)
+	require.Equal(t, want, decompressZstd(t, resp.Body))
+}
+
+// TestCompressionMetricsAttributed pins that zstd responses are counted, not
+// silently dropped by a gzip-only check.
+func TestCompressionMetricsAttributed(t *testing.T) {
+	body := strings.Repeat(`{"pc":1,"op":"SSTORE","gas":42},`, 4000)
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	})))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		accept  string
+		in, out metrics.Counter
+		decode  func(*testing.T, io.Reader) []byte
+	}{
+		{"gzip", gzipInBytes, gzipOutBytes, decompressGzip},
+		{"zstd", zstdInBytes, zstdOutBytes, decompressZstd},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			beforeIn, beforeOut := tc.in.GetValueUint64(), tc.out.GetValueUint64()
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+			require.NoError(t, err)
+			req.Header.Set("Accept-Encoding", tc.accept)
+			resp, err := http.DefaultTransport.RoundTrip(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, []byte(body), tc.decode(t, resp.Body), "body must round-trip unchanged")
+
+			require.Greater(t, tc.in.GetValueUint64(), beforeIn, "raw bytes were not counted")
+			require.Greater(t, tc.out.GetValueUint64(), beforeOut, "wire bytes were not counted")
+			require.Less(t, tc.out.GetValueUint64()-beforeOut, tc.in.GetValueUint64()-beforeIn, "ratio must be under 1")
+		})
+	}
+}
+
+// TestCompressorFactoriesRejectOtherLevels pins that a wrapper cannot be built
+// with a level the level-blind pools would silently ignore.
+func TestCompressorFactoriesRejectOtherLevels(t *testing.T) {
+	t.Run("gzip", func(t *testing.T) {
+		_, err := gzhttp.NewWrapper(
+			gzhttp.CompressionLevel(gzip.BestCompression),
+			gzhttp.Implementation(gzipWriterFactory),
+		)
+		require.Error(t, err)
+	})
+	t.Run("zstd", func(t *testing.T) {
+		_, err := gzhttp.NewWrapper(
+			gzhttp.EnableZstd(true),
+			gzhttp.ZstdCompressionLevel(int(zstd.SpeedBestCompression)),
+			gzhttp.ZstdImplementation(zstdWriterFactory),
+		)
+		require.Error(t, err)
+	})
+}
+
+// TestCompressionWritersInUse pins that a writer counts as in use from the
+// moment compression starts until the response is closed.
+func TestCompressionWritersInUse(t *testing.T) {
+	for _, tc := range []struct {
+		accept string
+		inUse  metrics.Gauge
+	}{
+		{"gzip", gzipWritersInUse},
+		{"zstd", zstdWritersInUse},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			before := tc.inUse.GetValue()
+			var during float64
+			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(bytes.Repeat([]byte("x"), 4*minGzipBodySize))
+				during = tc.inUse.GetValue()
+			}))
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.Header.Set("Accept-Encoding", tc.accept)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tc.accept, rec.Header().Get("Content-Encoding"))
+
+			assert.Equal(t, before+1, during, "an active response must hold one writer")
+			assert.Equal(t, before, tc.inUse.GetValue(), "a closed response must release its writer")
+		})
+	}
+}
+
+// TestPooledWritersDetachDestination pins that an idle pooled writer does not
+// keep the response writer of its last response alive.
+func TestPooledWritersDetachDestination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		new  func(io.Writer) io.WriteCloser
+	}{
+		{"gzip", func(w io.Writer) io.WriteCloser { return gzipWriterFactory.New(w, gzipLevel) }},
+		{"zstd", func(w io.Writer) io.WriteCloser { return zstdWriterFactory.New(w, int(zstdLevel)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := new(bytes.Buffer)
+			ref := weak.Make(dst)
+			w := tc.new(dst)
+			_, err := w.Write(bytes.Repeat([]byte("x"), minGzipBodySize))
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+
+			runtime.GC()
+			assert.Nil(t, ref.Value(), "a pooled writer must not retain its destination")
 		})
 	}
 }

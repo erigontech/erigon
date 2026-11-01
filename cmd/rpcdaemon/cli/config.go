@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,9 +99,7 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-var (
-	stateCacheStr string
-)
+var stateCacheStr string
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -168,13 +167,15 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxLogs, "rpc.subscription.filters.maxlogs", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxLogs, "Maximum number of logs to store per subscription.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxHeaders, "rpc.subscription.filters.maxheaders", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxHeaders, "Maximum number of block headers to store per subscription.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTxs, "rpc.subscription.filters.maxtxs", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs, "Maximum number of transactions to store per subscription.")
-	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "rpc.subscription.filters.maxaddresses", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "Maximum number of addresses per subscription to filter logs by.")
-	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTopics, "rpc.subscription.filters.maxtopics", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics, "Maximum number of topics per subscription to filter logs by.")
+	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "rpc.subscription.filters.maxaddresses", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "Maximum number of addresses accepted per log subscription.")
+	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTopics, "rpc.subscription.filters.maxtopics", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics, "Maximum number of topic alternatives accepted across all positions per log subscription.")
 	rootCmd.PersistentFlags().DurationVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersTimeout, "rpc.subscription.filters.timeout", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout, "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.")
+	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions, "rpc.subscription.filters.maxsubscriptions", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions, "Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit.")
 	rootCmd.PersistentFlags().IntVar(&cfg.BlockRangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.GetLogsMaxResults, utils.RpcGetLogsMaxResults.Name, utils.RpcGetLogsMaxResults.Value, utils.RpcGetLogsMaxResults.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.LogQueryLimit, utils.RpcLogQueryLimit.Name, utils.RpcLogQueryLimit.Value, utils.RpcLogQueryLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
+	rootCmd.PersistentFlags().IntVar(&cfg.SubscriptionLimit, utils.RpcSubscriptionLimit.Name, utils.RpcSubscriptionLimit.Value, utils.RpcSubscriptionLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
@@ -191,7 +192,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-
 		err := cfg.StateCache.CacheSize.UnmarshalText([]byte(stateCacheStr))
 		if err != nil {
 			return fmt.Errorf("state.cache value of %v is not valid", stateCacheStr)
@@ -344,7 +344,8 @@ func EmbeddedServices(ctx context.Context,
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine,
-	ff *rpchelper.Filters, err error) {
+	ff *rpchelper.Filters, err error,
+) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("either remote db or local db must be specified")
 	}
@@ -430,16 +431,38 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, rawDB)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("create aggregator: %w", err)
+		}
+
+		// Built before the snapshot stats below and before onNewSnapshot fires: both
+		// resolve txNum to block, which needs a tx pinning a block-files view.
+		temporalDB, err := temporal.New(rawDB, agg, allSnapshots)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+		db = temporalDB
+
+		logSnapshotStats := func() {
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				aggTx := agg.BeginFilesRo()
+				defer aggTx.Close()
+				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
+					return histBlockNumProgress, err
+				})
+				return nil
+			}); err != nil {
+				logger.Error("[rpc] log stats", "err", err)
+			}
 		}
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 
-		//TODO - its probably better to use:  <-blockReader.Ready() here - but it depends how
-		//this is called at a process level
+		// TODO - its probably better to use:  <-blockReader.Ready() here - but it depends how
+		// this is called at a process level
 		allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -448,17 +471,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
-			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+			_ = temporalDB.OpenStateSnapshots(ctx)
 
-			rawDB.View(context.Background(), func(tx kv.Tx) error {
-				aggTx := agg.BeginFilesRo()
-				defer aggTx.Close()
-				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
-					return histBlockNumProgress, err
-				})
-				return nil
-			})
+			logSnapshotStats()
 		} else {
 			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 		}
@@ -475,28 +490,16 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allSnapshots.LogStat("reopen")
 				}
 
-				if err = agg.OpenFolder(); err != nil {
+				if err = temporalDB.OpenStateSnapshots(ctx); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					rawDB.View(context.Background(), func(tx kv.Tx) error {
-						ac := agg.BeginFilesRo()
-						defer ac.Close()
-						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
-							return histBlockNumProgress, err
-						})
-						return nil
-					})
+					logSnapshotStats()
 				}
 				return nil
 			})
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg, allSnapshots)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
-		}
 		stateCache = kvcache.NewLatestBatchCache()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
@@ -581,7 +584,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+			if err := remoteCE.init(db, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)
 				rootCancel()
 			}
@@ -634,6 +637,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	srv.SetAllowList(allowListForRPC)
 
 	srv.SetBatchLimit(cfg.BatchLimit)
+	srv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	defer srv.Stop()
 
@@ -684,11 +688,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}
 		defer tcpListener.Close()
 		go func() {
-			err := srv.ServeListener(tcpListener)
-			if err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					logger.Error("Socket Listener Fatal Error", "err", err)
-				}
+			// ServeListener only returns on error, never nil.
+			if err := srv.ServeListener(tcpListener); !errors.Is(err, net.ErrClosed) {
+				logger.Error("Socket Listener Fatal Error", "err", err)
 			}
 		}()
 		info = append(info, "socket.url", socketUrl)
@@ -713,10 +715,17 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
+		// With a CORS list, NewWSOriginHandler checks origins; the handshake validator only keeps
+		// its localhost default for an empty list.
+		wsOrigins := cfg.HttpCORSDomain
+		if len(wsOrigins) > 0 {
+			wsOrigins = []string{"*"}
+		}
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
-			srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger))
+			node.NewWSOriginHandler(cfg.HttpCORSDomain,
+				srv.WebsocketHandler(wsOrigins, nil, cfg.WebsocketCompression, logger)))
 	}
-	graphQLHandler := graphql.CreateHandler(defaultAPIList)
+	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList), rpcConcurrencyLimit)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
@@ -724,7 +733,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 
 	// Separate Websocket handler if websocket port flag specified
 	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
-		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.WebsocketPort)
 		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isWebsocket(r) {
 				wsHandler.ServeHTTP(w, r)
@@ -744,7 +753,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	if cfg.HttpServerEnabled {
-		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+		httpEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
 			httpEndpoint = cfg.HttpURL
 		}
@@ -761,7 +770,6 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			defer cancel()
 			_ = listener.Shutdown(shutdownCtx)
 			logger.Info("HTTP endpoint closed", "url", httpAddr)
-
 		}()
 	}
 	if cfg.HttpsURL != "" {
@@ -771,7 +779,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if cfg.HttpsPort == 0 {
 			cfg.HttpsPort = cfg.HttpPort + 363
 		}
-		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
+		httpsEndpoint := "tcp://" + listenHostPort(cfg.HttpsListenAddress, cfg.HttpsPort)
 		if cfg.HttpsURL != "" {
 			httpsEndpoint = cfg.HttpsURL
 		}
@@ -800,7 +808,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		grpcEndpoint string
 	)
 	if cfg.GRPCServerEnabled {
-		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		grpcEndpoint = listenHostPort(cfg.GRPCListenAddress, cfg.GRPCPort)
 		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil { //nolint:noctx
 			return fmt.Errorf("could not start GRPC listener: %w", err)
 		}
@@ -809,7 +817,15 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			healthServer = grpcHealth.NewServer()
 			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		}
-		go grpcServer.Serve(grpcListener)
+		go func() {
+			// ErrServerStopped can surface here if GracefulStop/Stop (deferred
+			// below) runs before this goroutine gets scheduled into Serve, since
+			// both check/clear the same listener state under one mutex; that is
+			// an ordinary shutdown race, not a listener failure.
+			if err := grpcServer.Serve(grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				logger.Error("GRPC Server Fatal Error", "err", err)
+			}
+		}()
 		info = append(info, "grpc.port", cfg.GRPCPort)
 
 		defer func() {
@@ -875,16 +891,20 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
 
-	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
+	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0o600); err != nil {
 		return nil, err
 	}
 	logger.Info("Generated JWT secret", "path", cfg.JWTSecretPath)
 	return jwtSecret, nil
 }
 
+func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurrencyLimit int64) http.Handler {
+	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, rpcConcurrencyLimit, true)
+}
+
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
+		if cfg.GraphQLEnabled && graphQLHandler != nil && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
 			return
 		}
 
@@ -916,10 +936,19 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 // server and is invoked only after the same JWT check as authenticated JSON-RPC.
 var AuthenticatedEngineRESTHandler http.Handler
 
+// listenHostPort accepts IPv6 hosts with or without brackets.
+func listenHostPort(host string, port int) string {
+	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
 func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
-	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
+	engineHttpEndpoint := "tcp://" + listenHostPort(cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
+	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
@@ -938,9 +967,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	// latency-critical, and gzip costs far more time than the transfer it saves.
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
 
-	graphQLHandler := graphql.CreateHandler(engineApi)
-
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, graphQLHandler, jwtSecret)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, nil, jwtSecret)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -987,7 +1014,7 @@ func (e *remoteRulesEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockReader, remoteKV remoteproto.KVClient, logger log.Logger) error {
+func (e *remoteRulesEngine) init(db kv.RoDB, remoteKV remoteproto.KVClient, logger log.Logger) error {
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err
@@ -1000,7 +1027,6 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).
 			Open()
-
 		if err != nil {
 			return err
 		}
@@ -1096,7 +1122,8 @@ func (e *remoteRulesEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageF
 
 func (e *remoteRulesEngine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	if err := e.validateEngineReady(); err != nil {
 		return err
 	}

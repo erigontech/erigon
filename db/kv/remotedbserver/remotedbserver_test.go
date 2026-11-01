@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"errors"
 	"runtime"
 	"testing"
 
@@ -36,6 +37,23 @@ type getLatestOptionsTx struct {
 	opts kv.GetLatestOptions
 }
 
+type prunableStepsDB struct {
+	kv.TemporalRoDB
+	steps uint64
+}
+
+func (db *prunableStepsDB) MaxPrunableStepsBacklog() uint64 {
+	return db.steps
+}
+
+func TestMaxPrunableStepsBacklog(t *testing.T) {
+	db := &prunableStepsDB{steps: 123}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	reply, err := s.MaxPrunableStepsBacklog(t.Context(), nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), reply.Steps)
+}
+
 func (tx *getLatestOptionsTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	tx.opts = opts
 	return nil, 0, nil
@@ -49,6 +67,21 @@ func TestGetLatestForwardsMaxStep(t *testing.T) {
 	_, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.AccountsDomain.String(), Latest: true, MaxStep: &maxStep})
 	require.NoError(t, err)
 	require.Equal(t, kv.Step(0), tx.opts.MaxStep())
+}
+
+type readSequenceTx struct {
+	kv.TemporalTx
+	err error
+}
+
+func (tx *readSequenceTx) ReadSequence(string) (uint64, error) { return 0, tx.err }
+
+func TestSequenceReturnsReadSequenceError(t *testing.T) {
+	sentinel := errors.New("read sequence failed")
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: &readSequenceTx{err: sentinel}}
+	_, err := s.Sequence(t.Context(), &remoteproto.SequenceReq{TxId: 1, Table: kv.HeaderNumber})
+	require.ErrorIs(t, err, sentinel)
 }
 
 func TestGetLatestForwardsBranchCache(t *testing.T) {

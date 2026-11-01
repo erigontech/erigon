@@ -31,6 +31,8 @@ type walkEntry struct {
 	prefix       []byte
 	subtreeCount uint32
 	bitmap       uint16
+	plainKey     []byte
+	update       *Update
 }
 
 func collectWalk(t *prefixTrie) []walkEntry {
@@ -43,7 +45,7 @@ func collectWalk(t *prefixTrie) []walkEntry {
 		prefix := make([]byte, len(accPrefix)+len(n.ext))
 		copy(prefix, accPrefix)
 		copy(prefix[len(accPrefix):], n.ext)
-		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.subtreeCount, bitmap: n.bitmap})
+		out = append(out, walkEntry{prefix: prefix, subtreeCount: n.subtreeCount, bitmap: n.bitmap, plainKey: n.plainKey, update: n.update})
 		childIdx := 0
 		for bm := n.bitmap; bm != 0; {
 			nib := byte(bits.TrailingZeros16(bm))
@@ -387,17 +389,6 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 		assert.False(t, ok)
 		assert.Equal(t, 3, idx)
 	})
-
-	t.Run("popcount", func(t *testing.T) {
-		n := &prefixNode{}
-		assert.Equal(t, 0, popcount(n))
-		n.bitmap = 0xFFFF
-		assert.Equal(t, 16, popcount(n))
-		n.bitmap = 0x0001
-		assert.Equal(t, 1, popcount(n))
-		n.bitmap = uint16(1)<<0x03 | uint16(1)<<0x07 | uint16(1)<<0x0B
-		assert.Equal(t, 3, popcount(n))
-	})
 }
 
 func TestParallelUpdateLifecycle(t *testing.T) {
@@ -411,7 +402,7 @@ func TestParallelUpdateLifecycle(t *testing.T) {
 
 	t.Run("close", func(t *testing.T) {
 		pu := newParallelUpdate()
-		pu.Insert(nibs(0x01, 0x02), nil, nil)
+		pu.Collect(nibs(0x01, 0x02), nil, nil)
 		pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
 
 		pu.Close()
@@ -424,9 +415,10 @@ func TestParallelUpdateLifecycle(t *testing.T) {
 func TestParallelUpdateInsertDelegates(t *testing.T) {
 	pu := newParallelUpdate()
 
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
-	pu.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
-	pu.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
+	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
+	pu.Collect(nibs(0x01, 0x02, 0x04), nil, nil)
+	pu.Collect(nibs(0x05, 0x06, 0x07), nil, nil)
+	pu.Build()
 
 	expected := newPrefixTrie()
 	expected.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
@@ -442,9 +434,10 @@ func TestParallelUpdateInsertDelegates(t *testing.T) {
 func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	pu := newParallelUpdate()
 
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
-	pu.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
+	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
+	pu.Collect(nibs(0x05, 0x06, 0x07), nil, nil)
 	pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
+	pu.Build()
 
 	require.Equal(t, uint32(2), pu.trie.root.subtreeCount)
 	require.Len(t, pu.deferredCombined, 1)
@@ -455,7 +448,8 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	assert.Equal(t, 1, pu.trie.arena.nodeCount(), "arena must be reset to a single root node")
 	assert.Empty(t, pu.deferredCombined, "deferredCombined must be cleared")
 
-	pu.Insert(nibs(0x0A, 0x0B), nil, nil)
+	pu.Collect(nibs(0x0A, 0x0B), nil, nil)
+	pu.Build()
 	assert.Equal(t, uint32(1), pu.trie.root.subtreeCount)
 }
 

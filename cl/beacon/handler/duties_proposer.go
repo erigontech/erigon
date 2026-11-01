@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
@@ -49,14 +50,17 @@ func (a *ApiHandler) isProposerDutyInLookaheadVector(s *state.CachingBeaconState
 }
 
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return a.getDutiesProposerForVersion(w, r, false)
+	return a.getDutiesProposerForVersion(r, false)
 }
 
 func (a *ApiHandler) getDutiesProposerV2(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	return a.getDutiesProposerForVersion(w, r, true)
+	return a.getDutiesProposerForVersion(r, true)
 }
 
-func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.Request, v2 bool) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) getDutiesProposerForVersion(r *http.Request, v2 bool) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -170,7 +174,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.
 
 		mix := s.GetRandaoMix(int(mixPosition))
 
-		input := shuffling2.GetSeed(a.beaconChainCfg, mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
+		input := shuffling2.GetSeed(mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
 		seedArray := [32]byte{}
 		copy(seedArray[:], input[:])
 		indices := s.GetActiveValidatorsIndices(epoch)
@@ -178,7 +182,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.
 		if err != nil {
 			return err
 		}
-		return fillProposerDutiesFromIndices(duties, s, proposerIndices, expectedSlot)
+		return fillProposerDutiesFromIndices(duties, s.BeaconState, proposerIndices, expectedSlot)
 	}); err != nil {
 		return nil, err
 	}
@@ -205,10 +209,10 @@ func fillProposerDutiesFromState(duties []proposerDuties, s *state.CachingBeacon
 	if err != nil {
 		return err
 	}
-	return fillProposerDutiesFromIndices(duties, s, proposerIndices, expectedSlot)
+	return fillProposerDutiesFromIndices(duties, s.BeaconState, proposerIndices, expectedSlot)
 }
 
-func fillProposerDutiesFromIndices(duties []proposerDuties, s *state.CachingBeaconState, proposerIndices []uint64, expectedSlot uint64) error {
+func fillProposerDutiesFromIndices(duties []proposerDuties, s *raw.BeaconState, proposerIndices []uint64, expectedSlot uint64) error {
 	for i := uint64(0); i < s.BeaconConfig().SlotsPerEpoch; i++ {
 		proposerIndex := proposerIndices[i]
 		pk, err := s.ValidatorPublicKey(int(proposerIndex))
@@ -329,7 +333,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 		a.beaconChainCfg.EpochsPerHistoricalVector
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, stateGetter, expectedSlot, mixPosition)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, expectedSlot, mixPosition)
 	if err != nil {
 		return nil, err
 	}
@@ -337,15 +341,17 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
 	}
 
-	historicalState := state.New(a.beaconChainCfg)
+	historicalState := raw.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
-	historicalState.SetSlot(expectedSlot)
+	if err := historicalState.SetSlot(expectedSlot); err != nil {
+		return nil, err
+	}
 	historicalState.SetValidators(validatorSet)
 
-	epochSeed := shuffling2.GetSeed(a.beaconChainCfg, mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
+	epochSeed := shuffling2.GetSeed(mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
 	seedArray := [32]byte{}
 	copy(seedArray[:], epochSeed[:])
-	proposerIndices, err := shuffling2.ComputeProposerIndices(historicalState.BeaconState, epoch, seedArray, activeIndices)
+	proposerIndices, err := shuffling2.ComputeProposerIndices(historicalState, epoch, seedArray, activeIndices)
 	if err != nil {
 		return nil, err
 	}

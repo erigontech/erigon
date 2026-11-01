@@ -149,27 +149,6 @@ func TestAAHashMatchesMarshalBinary(t *testing.T) {
 	}
 }
 
-func BenchmarkTxHash(b *testing.B) {
-	tr := NewTRand()
-	for name, txType := range map[string]int{
-		"legacy":     LegacyTxType,
-		"accesslist": AccessListTxType,
-		"dynamicfee": DynamicFeeTxType,
-		"blob":       BlobTxType,
-		"setcode":    SetCodeTxType,
-		"aa":         AccountAbstractionTxType,
-	} {
-		tx := tr.RandTransaction(txType)
-		b.Run(name, func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				tx.Hash()
-				resetTxHashCache(tx)
-			}
-		})
-	}
-}
-
 func resetTxHashCache(tx Transaction) {
 	switch t := tx.(type) {
 	case *LegacyTx:

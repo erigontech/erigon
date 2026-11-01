@@ -315,6 +315,10 @@ func (s *EthBackendClientDirect) Block(ctx context.Context, in *remoteproto.Bloc
 	return s.server.Block(ctx, in)
 }
 
+func (s *EthBackendClientDirect) BlockBody(ctx context.Context, in *remoteproto.BlockRequest, opts ...grpc.CallOption) (*remoteproto.BlockBodyReply, error) {
+	return s.server.BlockBody(ctx, in)
+}
+
 func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remoteproto.TxnLookupRequest, opts ...grpc.CallOption) (*remoteproto.TxnLookupReply, error) {
 	return s.server.TxnLookup(ctx, in)
 }
@@ -361,4 +365,8 @@ func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remotepr
 
 func (s *EthBackendClientDirect) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
 	return s.server.MinimumBlockAvailable(ctx, in)
+}
+
+func (s *EthBackendClientDirect) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	return s.server.FrozenBlocks(ctx, in)
 }

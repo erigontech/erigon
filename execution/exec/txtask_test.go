@@ -34,9 +34,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -213,7 +215,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := log.New()
-			db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), 16)
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 			require.NoError(t, db.UpdateTemporal(t.Context(), func(rwTx kv.TemporalRwTx) error {
 				domains, err := execctx.NewSharedDomains(t.Context(), rwTx, logger)
 				if err != nil {
@@ -242,6 +244,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				calls:    syscalls,
 				failAt:   tc.failAt,
 			}
+			var completions int
 			txTask := &TxTask{
 				TxNum:   1,
 				TxIndex: 0,
@@ -251,6 +254,13 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				},
 				Config: chain.TestChainBerlinConfig,
 				Engine: engine,
+				Hooks: &tracing.Hooks{
+					OnTxEndV2: func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+						require.Nil(t, receipt)
+						require.Zero(t, txnGasUsage)
+						completions++
+					},
+				},
 			}
 			result := &TxResult{Task: txTask}
 
@@ -264,6 +274,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 
 			_, _, err = p.processResults(consumer, cfg, rws, txTask.TxNum, roTx, false, logger)
 			require.NoError(t, err)
+			require.Equal(t, 1, completions)
 
 			if tc.failAt > 0 {
 				require.Error(t, result.Err)
@@ -273,4 +284,49 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 			require.Len(t, result.Logs, tc.wantLogs)
 		})
 	}
+}
+
+// A value transfer debits the sender during execution, so charging the sender at
+// validation cannot let it run before its predecessor; only a zero-value call can.
+func TestChargesSenderAtValidationSkipsValueTransfer(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	to := common.HexToAddress("0xbb")
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, Value: *uint256.NewInt(value), GasLimit: 21000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.False(t, task(1).ChargesSenderAtValidation(0))
+}
+
+// A signature the workers cannot recover makes the block invalid, not the node failed.
+func TestTxSenderInvalidSignatureInvalidatesBlock(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(27)}, GasPrice: *uint256.NewInt(1)}
+	task := &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	_, err := task.TxSender()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// A bad signature must win over the tx's own validity checks, as it did when senders were recovered before execution.
+func TestTxMessageReportsBadSignatureFirst(t *testing.T) {
+	to := common.HexToAddress("0xbb")
+	txn := &types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: 21000, V: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1)}}
+	task := &TxTask{Header: &types.Header{BaseFee: uint256.NewInt(1)}, Config: chain.AllProtocolChanges, Txs: types.Transactions{txn}}
+	_, err := task.TxMessage()
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+// A creation takes its address from the tx nonce, which validation checks against the
+// sender's nonce, so a zero-value creation can run before its predecessor.
+func TestChargesSenderAtValidationIncludesZeroValueCreation(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xaa"))
+	task := func(value uint64) *TxTask {
+		txn := &types.LegacyTx{CommonTx: types.CommonTx{Value: *uint256.NewInt(value), GasLimit: 100000}, GasPrice: *uint256.NewInt(1)}
+		txn.SetSender(sender)
+		return &TxTask{Header: &types.Header{}, Config: chain.TestChainBerlinConfig, Txs: types.Transactions{txn}}
+	}
+	require.True(t, task(0).ChargesSenderAtValidation(0))
+	require.False(t, task(1).ChargesSenderAtValidation(0))
 }

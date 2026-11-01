@@ -69,7 +69,7 @@ go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainn
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -178,7 +178,8 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 	fmt.Println(strings.Repeat("-", 78))
 
 	for _, stats := range results {
-		fmt.Printf("%-15s %15s %18s %10d %15.2fx\n",
+		fmt.Printf(
+			"%-15s %15s %18s %10d %15.2fx\n",
 			stats.Domain.String(),
 			common.PrettyCounter(stats.UniqueKeys),
 			common.PrettyCounter(stats.TotalKeysKV),

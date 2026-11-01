@@ -67,5 +67,5 @@ func ApplySystemTransaction(engine rules.SystemTxEngine, evm *vm.EVM, ibs *state
 	if err != nil {
 		return nil, err
 	}
-	return &evmtypes.ExecutionResult{ReceiptGasUsed: gasUsed.Total(), BlockExecutionGasUsed: gasUsed.Total()}, nil
+	return &evmtypes.ExecutionResult{TxnGasUsage: mdgas.TxnGasUsage{BlockExecutionGasUsed: gasUsed.Total()}, ReceiptGasUsed: gasUsed.Total()}, nil
 }

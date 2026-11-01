@@ -62,3 +62,11 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 		require.NoError(b, err)
 	}
 }
+
+func BenchmarkStateEncode(b *testing.B) {
+	s := state{Root: make([]byte, 128), RootPresent: true, RootChecked: true}
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = s.Encode(nil)
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -95,7 +96,7 @@ func TestEventChannelTakeAll(t *testing.T) {
 		done := make(chan []string)
 		go func() {
 			events, err := ch.TakeAll(t.Context())
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			done <- events
 		}()
 		synctest.Wait()

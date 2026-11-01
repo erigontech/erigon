@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -55,7 +57,9 @@ import (
 // 3.2.0 - add EngineGetBlobsBundleV1k
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
 // 4.0.0 - remove BorTxnLookup and BorEvents
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 0, Patch: 0}
+// 4.1.0 - add FrozenBlocks function
+// 4.2.0 - add BlockBody function
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 2, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -89,6 +93,9 @@ type EthBackend interface {
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
+	if chainConfig == nil {
+		panic("privateapi: NewEthBackendServer: nil chainConfig")
+	}
 	s := &EthBackendServer{
 		ctx:                   ctx,
 		eth:                   eth,
@@ -96,7 +103,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		db:                    db,
 		blockReader:           blockReader,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
-		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events, chainConfig),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,
@@ -285,7 +292,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.Pro
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
-	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
+	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionWithCommit(version.GitCommit))}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remoteproto.TxnLookupRequest) (*remoteproto.TxnLookupReply, error) {
@@ -314,7 +321,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	defer tx.Rollback()
 
 	var blockHash common.Hash
-	var blockHeight = req.BlockHeight
+	blockHeight := req.BlockHeight
 	if req.BlockHash != nil {
 		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
 	} else if req.BlockHeight > 0 {
@@ -348,6 +355,35 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 		copy(sendersBytes[i*20:], sender[:])
 	}
 	return &remoteproto.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+}
+
+func (s *EthBackendServer) BlockBody(ctx context.Context, req *remoteproto.BlockRequest) (*remoteproto.BlockBodyReply, error) {
+	hash := req.GetBlockHash()
+	if hash == nil || hash.Hi == nil || hash.Lo == nil {
+		return nil, status.Error(codes.InvalidArgument, "block hash is required")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(hash)
+	if blockHash == (common.Hash{}) {
+		return nil, status.Error(codes.InvalidArgument, "block hash must be non-zero")
+	}
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	body, txCount, err := s.blockReader.Body(ctx, tx, blockHash, req.BlockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return &remoteproto.BlockBodyReply{}, nil
+	}
+	bodyRlp, err := rlp.EncodeToBytes(body)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteproto.BlockBodyReply{BodyRlp: bodyRlp, TxCount: txCount}, nil
 }
 
 func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *remoteproto.CanonicalBodyForStorageRequest) (*remoteproto.CanonicalBodyForStorageReply, error) {
@@ -466,6 +502,9 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	if err != nil {
 		return nil, err
 	}
+	if currentBlock == nil {
+		return nil, errors.New("AAValidation: no current block")
+	}
 	header := currentBlock.HeaderNoCopy()
 
 	aaTxn := types.FromProto(req.Tx)
@@ -534,4 +573,8 @@ func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *empty
 
 	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
+}
+
+func (s *EthBackendServer) FrozenBlocks(ctx context.Context, req *emptypb.Empty) (*remoteproto.FrozenBlocksReply, error) {
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: s.blockReader.FrozenBlocks()}, nil
 }

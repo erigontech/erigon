@@ -80,7 +80,8 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []byte, tx kv.TemporalTx,
 	txNumsReader rawdbv3.TxNumsReader,
 	logEvery *time.Ticker,
-	keysCnt, prefixesDone, prefixesTotal *atomic.Uint64) error {
+	keysCnt, prefixesDone, prefixesTotal *atomic.Uint64,
+) error {
 	stepSize := tx.Debug().StepSize()
 
 	var minStep uint64 = math.MaxUint64

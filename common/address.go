@@ -102,12 +102,12 @@ func (a Address) hex() []byte {
 func (a Address) Format(s fmt.State, c rune) {
 	switch c {
 	case 'v', 's':
-		s.Write(a.checksumHex())
+		_, _ = s.Write(a.checksumHex())
 	case 'q':
 		q := []byte{'"'}
-		s.Write(q)
-		s.Write(a.checksumHex())
-		s.Write(q)
+		_, _ = s.Write(q)
+		_, _ = s.Write(a.checksumHex())
+		_, _ = s.Write(q)
 	case 'x', 'X':
 		// %x disables the checksum.
 		hex := a.hex()
@@ -117,7 +117,7 @@ func (a Address) Format(s fmt.State, c rune) {
 		if c == 'X' {
 			hex = bytes.ToUpper(hex)
 		}
-		s.Write(hex)
+		_, _ = s.Write(hex)
 	case 'd':
 		fmt.Fprint(s, ([len(a)]byte)(a))
 	default:

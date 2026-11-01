@@ -14,19 +14,12 @@ on:
   push:
     branches:
       - 'release/3.*'
-  # Auto-fire on PRs that touch this workflow's own YAML so changes to the
-  # exec-mode matrix can be validated in-PR without a manual dispatch.
-  # Regular PRs that don't touch this file are unaffected.
-  pull_request:
-    paths:
-      - '.github/workflows/qa-rpc-integration-tests-latest.yml'
 
 permissions:
   contents: read
 
 jobs:
   mainnet-rpc-integ-tests-latest:
-    name: mainnet-rpc-integ-tests-latest (${{ matrix.commitment_mode }})
     concurrency:
       group: >-
         ${{
@@ -36,18 +29,6 @@ jobs:
         }}
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
-    strategy:
-      fail-fast: false
-      # Self-hosted pool typically has a single rpc-latest-erigon runner; the
-      # workflow also touches shared state on the runner box (testbed datadir,
-      # reference datadir). max-parallel=1 forces the two matrix entries to
-      # run sequentially on the same runner — both still execute automatically,
-      # just one after the other (~2× wall-clock).
-      max-parallel: 1
-      matrix:
-        commitment_mode:
-          - serial
-          - parallel
     env:
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -56,12 +37,11 @@ jobs:
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
       CHAIN: mainnet
-      # Toggle statecfg.ExperimentalParallelCommitment from CI without code
-      # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
-      # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
-      ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Check out repository
         uses: actions/checkout@v7
         with:
@@ -128,7 +108,7 @@ jobs:
         if: failure() && steps.preparing_step.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: preparing-step-logs-${{ matrix.commitment_mode }}
+          name: preparing-step-logs
           path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Pause the Erigon instance dedicated to db maintenance
@@ -185,20 +165,21 @@ jobs:
         if: failure() && steps.pre_test_step.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: pre-test-logs-${{ matrix.commitment_mode }}
+          name: pre-test-logs
           path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Run RPC Integration Tests
         id: test_step
         env:
           RUNNER_WS: ${{ runner.workspace }}
+          FORCE_DUMP_RESPONSE: ${{ inputs.force_dump_response }}
         run: |
           commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           DUMP_RESPONSE=""
-          if [[ "${{ inputs.force_dump_response }}" == "true" ]]; then
+          if [[ "$FORCE_DUMP_RESPONSE" == "true" ]]; then
             DUMP_RESPONSE="always-dump-response"
             echo "Force response dump is enabled"
           fi
@@ -257,7 +238,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-${{ matrix.commitment_mode }}
+          name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
             ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
@@ -277,7 +258,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch "$GITHUB_REF_NAME" \
-            --test_name rpc-integration-tests-latest-commitment-${{ matrix.commitment_mode }} \
+            --test_name rpc-integration-tests-latest \
             --chain $CHAIN \
             --runner "$RUNNER_NAME" \
             --db_version $db_version \

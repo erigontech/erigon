@@ -29,20 +29,24 @@ import (
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
+// 7.1 - standalone InvertedIndex values tables store chunks of txNums per dup
+var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 1, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
 
 const (
 
-	//HashedAccounts
+	// HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
+	// key - address hash + incarnation + storage key hash
+	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
+
+	// CodeCacheDeprecated held decompressed contract code keyed by code hash.
+	CodeCacheDeprecated = "CodeCache"
 )
 
 const (
@@ -117,15 +121,6 @@ const (
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
-	// Stateless witnesses received over the wit protocol
-	// Renamed from BorWitnesses/BorWitnessSizes: the WIT side-protocol is not
-	// Polygon-specific, it only ever had a Polygon-prefixed name.
-	BorWitnessesDeprecated    = "BorWitnesses"
-	BorWitnessSizesDeprecated = "BorWitnessSizes"
-
-	Witnesses    = "Witnesses"    // block_num_u64 + block_hash -> witness
-	WitnessSizes = "WitnessSizes" // block_num_u64 + block_hash -> witness size (uint64)
-
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -147,11 +142,6 @@ const (
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
-
-	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
-	// persistent backing tier for the in-memory code cache so reads skip the
-	// CodeDomain decompression across restarts. Immutable (content-addressed).
-	TblCodeCache = "CodeCache"
 
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
@@ -190,6 +180,8 @@ const (
 
 	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+	// [slot + block root] => [execution payload envelope signature]
+	ExecutionPayloadEnvelopeSignatures = "ExecutionPayloadEnvelopeSignature"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
 	BalancesDump          = "BalancesDump"
@@ -259,21 +251,22 @@ const (
 
 	// GLOAS (EIP-7732)
 	BuildersDump                      = "BuildersDump"                   // slot => dump
-	Builders                          = "Builders"                       // slot => queue_diffs
+	Builders                          = "Builders"                       // slot => per-index builders diff
 	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
 	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
 	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
 	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
 	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
 	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
-	PtcWindowTable                    = "PtcWindow"                      // slot => ptc window SSZ
+	PtcWindowTable                    = "PtcWindow"                      // legacy table; no longer written
 	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	PtcWindowEpochTable               = "PtcWindowEpoch"                 // epoch-start slot => compressed ptc window SSZ
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
 	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
-	//Diagnostics tables
+	// Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 )
@@ -333,8 +326,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	Witnesses,
-	WitnessSizes,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -349,7 +340,6 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
-	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -383,6 +373,7 @@ var ChaindataTables = []string{
 
 	// Beacon stuff
 	BeaconBlocks,
+	ExecutionPayloadEnvelopeSignatures,
 	CanonicalBlockRoots,
 	BlockRootToSlot,
 	BlockRootToStateRoot,
@@ -437,6 +428,7 @@ var ChaindataTables = []string{
 	BuilderPendingPaymentsTable,
 	PtcWindowTable,
 	LatestExecutionPayloadBidTable,
+	PtcWindowEpochTable,
 }
 
 const (
@@ -452,15 +444,19 @@ var TxPoolTables = []string{
 	PoolInfo,
 	SenderLastActivity,
 }
+
 var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables
-var DownloaderTables = []string{
-	BittorrentCompletion,
-	BittorrentInfo,
-}
+
+var (
+	ConsensusTables  = ChaindataTables
+	DownloaderTables = []string{
+		BittorrentCompletion,
+		BittorrentInfo,
+	}
+)
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{
@@ -479,10 +475,7 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
-
-	// Renamed to Witnesses / WitnessSizes; dropped by `drop_bor_witness_tables`.
-	BorWitnessesDeprecated,
-	BorWitnessSizesDeprecated,
+	CodeCacheDeprecated, // dropped by the drop_code_cache_table migration
 }
 
 // Diagnostics tables
@@ -493,11 +486,15 @@ var DiagnosticsTables = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableCfgItem
-type Bucket string
+type (
+	TableCfg map[string]TableCfgItem
+	Bucket   string
+)
 
-type DBI uint32
-type TableFlags uint
+type (
+	DBI        uint32
+	TableFlags uint
+)
 
 const (
 	Default    TableFlags = 0x00
@@ -566,16 +563,18 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var TxpoolTablesCfg = TableCfg{}
-var SentryTablesCfg = TableCfg{}
-var ConsensusTablesCfg = TableCfg{}
-var DownloaderTablesCfg = TableCfg{}
-var DiagnosticsTablesCfg = TableCfg{}
-var MigrationsTablesCfg = TableCfg{Migrations: {}}
+var (
+	TxpoolTablesCfg      = TableCfg{}
+	SentryTablesCfg      = TableCfg{}
+	ConsensusTablesCfg   = TableCfg{}
+	DownloaderTablesCfg  = TableCfg{}
+	DiagnosticsTablesCfg = TableCfg{}
+	MigrationsTablesCfg  = TableCfg{Migrations: {}}
+)
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: // TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.MigrationsDB:
 		return MigrationsTablesCfg
@@ -593,6 +592,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
 }
+
 func sortBuckets() {
 	slices.Sort(ChaindataTables)
 }

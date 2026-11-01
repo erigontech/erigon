@@ -83,7 +83,7 @@ func TestInitializeDeploysHistoryContractOnFirstPragueBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), nonce)
 
-	slot := accounts.InternKey(common.BytesToHash(uint256.NewInt((forkBlock - 1) % params.BlockHashHistoryServeWindow).Bytes()))
+	slot := accounts.InternKey(common.BytesToHash(uint256.NewInt((forkBlock - 1) % blockHashHistoryServeWindow).Bytes()))
 	got, err := ibs.GetState(params.HistoryStorageAddress, slot)
 	require.NoError(t, err)
 	require.Equal(t, parentHash, common.Hash(got.Bytes32()))
@@ -98,7 +98,7 @@ func TestInitializeStoresParentHashFromPrague(t *testing.T) {
 
 	parentHash := common.HexToHash("0x696ff4c97416482d0dd9c9565c67e6e71b69f63faa32ada7250c8033dce61277")
 	const pragueBlock, pragueTime = 49000000, 1741722894
-	slot := accounts.InternKey(common.BytesToHash(uint256.NewInt((pragueBlock - 1) % params.BlockHashHistoryServeWindow).Bytes()))
+	slot := accounts.InternKey(common.BytesToHash(uint256.NewInt((pragueBlock - 1) % blockHashHistoryServeWindow).Bytes()))
 
 	for _, tc := range []struct {
 		name     string

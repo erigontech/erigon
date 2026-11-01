@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -58,7 +59,7 @@ func (r *ExecutionSnapshotReader) Transactions(number uint64, hash common.Hash) 
 		return nil, err
 	}
 	if body == nil {
-		return nil, fmt.Errorf("transactions not found for block %d", number)
+		return nil, fmt.Errorf("%w for block %d (%x)", snapshot_format.ErrExecutionBodyNotFound, number, hash)
 	}
 	// compute txs flats
 	txs, err := types.MarshalTransactionsBinary(body.Transactions)
@@ -81,20 +82,20 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 		return nil, err
 	}
 	if body == nil {
-		return nil, fmt.Errorf("transactions not found for block %d", number)
+		return nil, fmt.Errorf("%w for block %d (%x)", snapshot_format.ErrExecutionBodyNotFound, number, hash)
 	}
 	ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(r.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range body.Withdrawals {
 		ret.Append(&cltypes.Withdrawal{
-			Index:     w.Index,
-			Validator: w.Validator,
+			Index:     uint64(w.Index),
+			Validator: uint64(w.Validator),
 			Address:   w.Address,
-			Amount:    w.Amount,
+			Amount:    uint64(w.Amount),
 		})
 	}
 	return ret, nil
 }
 
-func (r *ExecutionSnapshotReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+func (r *ExecutionSnapshotReader) CacheBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
 	// No-op: local snapshot reader doesn't need caching — EL data is always available.
 }

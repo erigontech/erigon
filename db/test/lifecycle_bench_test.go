@@ -72,11 +72,11 @@ func newKeyGenerator(rnd *rndGen, nHot, nCold int) *keyGenerator {
 	}
 	for i := range g.hotAddrs {
 		g.hotAddrs[i] = make([]byte, length.Addr)
-		rnd.Read(g.hotAddrs[i])
+		_, _ = rnd.Read(g.hotAddrs[i])
 	}
 	for i := range g.coldAddrs {
 		g.coldAddrs[i] = make([]byte, length.Addr)
-		rnd.Read(g.coldAddrs[i])
+		_, _ = rnd.Read(g.coldAddrs[i])
 	}
 	return g
 }
@@ -232,7 +232,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 		if step > 3 {
 			collateStart := time.Now()
 			buildTo := txNum - 2*stepSize
-			err = agg.BuildFiles(buildTo)
+			err = agg.BuildFiles(db, buildTo, unboundedFinalityCtx)
 			require.NoError(b, err)
 			timings.collate += time.Since(collateStart)
 		}
@@ -478,7 +478,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for b.Loop() {
-			err := agg.BuildFiles(txNum - 2*stepSize)
+			err := agg.BuildFiles(db, txNum-2*stepSize, unboundedFinalityCtx)
 			require.NoError(b, err)
 		}
 	})

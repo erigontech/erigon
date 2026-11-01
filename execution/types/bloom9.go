@@ -120,6 +120,11 @@ func (b Bloom) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(b[:]).MarshalText()
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Bloom) AppendText(dst []byte) ([]byte, error) {
+	return hexutil.Bytes(b[:]).AppendText(dst)
+}
+
 // UnmarshalText b as a hex string with 0x prefix.
 func (b *Bloom) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
@@ -160,10 +165,8 @@ func Bloom9(data []byte) []byte {
 
 // bloomValues returns the bytes (index-value pairs) to set for the given data
 func bloomValues(data []byte, hashbuf *[6]byte) (uint, byte, uint, byte, uint, byte) {
-	sha := crypto.NewKeccakState()
-	sha.Write(data)      //nolint:errcheck
-	sha.Read(hashbuf[:]) //nolint:errcheck
-	crypto.ReturnToPool(sha)
+	hash := crypto.Keccak256Hash(data)
+	copy(hashbuf[:], hash[:6])
 	// The actual bits to flip
 	v1 := byte(1 << (hashbuf[1] & 0x7))
 	v2 := byte(1 << (hashbuf[3] & 0x7))

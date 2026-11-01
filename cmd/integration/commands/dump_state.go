@@ -103,7 +103,7 @@ var dumpState = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening db: %w", err)
 		}
@@ -183,7 +183,7 @@ var dumpState = &cobra.Command{
 
 // buildDumpMetadata gathers sidecar fields. Block hash and state root need the block reader,
 // and are omitted rather than failing the dump if the header cannot be read.
-func buildDumpMetadata(ctx context.Context, db kv.RoDB, tx kv.TemporalTx, blockNumber uint64, logger log.Logger, res dumpResult) dumpMetadata {
+func buildDumpMetadata(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx, blockNumber uint64, logger log.Logger, res dumpResult) dumpMetadata {
 	meta := dumpMetadata{
 		Chain:          chain,
 		Block:          blockNumber,
