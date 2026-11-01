@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 
 	blst "github.com/supranational/blst/bindings/go"
@@ -49,13 +50,8 @@ func NewSignatureFromBytes(b []byte) (*Signature, error) {
 
 // VerifyAggregate verify signature against many public keys.
 func (s Signature) VerifyAggregate(msg []byte, publicKeys []PublicKey) bool {
-	if len(publicKeys) == 0 {
+	if len(publicKeys) == 0 || slices.Contains(publicKeys, nil) {
 		return false
-	}
-	for _, publicKey := range publicKeys {
-		if publicKey == nil {
-			return false
-		}
 	}
 	return s.affine.Verify(true, aggregatePublicKeys(publicKeys).ToAffine(), false, msg, eth2Curve)
 }
