@@ -313,6 +313,8 @@ func TestSequencerStatus(t *testing.T) {
 	api := eezrpc.NewAPI()
 	_, err := api.SequencerStatus(t.Context())
 	require.ErrorIs(t, err, eezrpc.ErrNoSequencer)
+	_, err = api.ExecutionWitnessByNumber(t.Context(), 1)
+	require.ErrorIs(t, err, eezrpc.ErrNoWitnesses)
 
 	_, chain := derivertest.NewL2(t)
 	f, err := follower.New(c.L1, chain, derivertest.Config(), follower.DefaultConfig, log.New())

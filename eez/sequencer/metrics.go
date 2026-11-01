@@ -27,6 +27,7 @@ type sequencerMetrics struct {
 	head          metrics.Gauge
 	offGridSkips  metrics.Counter
 	triggerFailed metrics.Counter
+	witnessFailed metrics.Counter
 }
 
 var (
@@ -47,6 +48,7 @@ func loadMetrics() *sequencerMetrics {
 			head:          metrics.GetOrCreateGauge("eez_sequencer_head"),
 			offGridSkips:  metrics.GetOrCreateCounter("eez_sequencer_off_grid_skips_total"),
 			triggerFailed: metrics.GetOrCreateCounter("eez_sequencer_trigger_failures_total"),
+			witnessFailed: metrics.GetOrCreateCounter("eez_sequencer_witness_failures_total"),
 		}
 	})
 	return sm

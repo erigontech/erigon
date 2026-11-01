@@ -3615,6 +3615,8 @@ With `--eez.sequencer` the node also produces the chain ahead of settlement, fro
 
 `--eez.proof.time` and `--eez.submission.slack` size the Future blocks, ceil((proof + slack) / L2 block time) − 1 of them, so that a slot's proof reaches L1 the slack before the next L1 block; the node refuses a timing that leaves no room for it. Produced blocks carry the beneficiary `--eez.sequencer.feerecipient`, else the chain's fee collector, and empty extra data. Transactions enter the pool as on any node, but blocks leave out blob transactions, EEZ system transactions and transactions from the system address, and each block's transactions stay within what lets a slot settle in one batch. Until a composer exists the Sync block holds pool transactions too, and nothing settles. `--eez.sequencer.maxdepth` pauses steady slots once the head is that many blocks past the latest settlement.
 
+Every produced block's execution witness is kept in `<datadir>/eez/witnesses` until L1 finality covers the block. It has the shape of `debug_executionWitness`, plus the trie nodes that removing each accessed account or slot collapses onto, so that a prover can recompute the state root after every transaction. A block left without one logs `[eez] produced block without a witness` at error level.
+
 The sequencer keeps the txpool, without gossip, and serves its blocks to its [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-peers): a reth-based follower fetches the body of the head it is given this way. Erigon followers take the produced blocks with `--eez.sequencer.rpc`. The first producer of a new chain has no peers to take history from and runs with `--eez.sync.l1only`. The sequencer runs on a node of its own, not beside its L1, follows neither `--eez.sequencer.rpc` nor `--eez.p2p.listen`, and produces rollup0 networks only.
 
 ## Flags
@@ -3665,6 +3667,7 @@ The `eez` namespace, enabled with `--http.api=...,eez`:
 - `eez_followerStatus()`: the last L1 block scanned, the latest finalized L1 block, the cursor, safe and finalized EEZ blocks, the latest settlement, the sync mode and boot phase, L1's finalized block and root as boot read them, the L2 and overlay peers, the tracked signed heads and the source of the head; see [Status](https://docs.erigon.tech/fundamentals/eez-follower#status).
 - `eez_settlement(blockNumber)`: the L1 settlement that settled an EEZ block, or `null` while none has, or when it predates the follower's start or the latest finalized settlement.
 - `eez_decodeBatch(input)`: a `postAndVerifyBatch` input decoded, with the DA payload it carries.
+- `eez_executionWitnessByNumber(blockNumber)`: on a sequencer whose `--http.api` includes `debug`, the witness kept for a produced canonical block, or `null` when there is none.
 - `eez_sequencerStatus()`: on a sequencer, the Live, Future and Sync blocks produced since start, the latest produced block, the Sync block of the latest slot and the consecutive Sync blocks skipped off the grid.
 
 EEZ system transactions (type `0x76`) render with the gas limit of their rule set, a zero gas price and zero signature values, from the system address. The gas limit is `2000000` on rollup0 networks. On rollupX v0.0.1 networks it is the cap of `16777216`: a rollupX system transaction runs with the gas its block has left, up to that cap.
@@ -3687,7 +3690,7 @@ Of boot and [L2 peers](https://docs.erigon.tech/fundamentals/eez-follower#l2-pee
 - `eez_p2p_message_received_total`, and of those `eez_p2p_message_accepted_total`, `eez_p2p_message_ignored_total` and `eez_p2p_message_rejected_total`: overlay messages from peers, by the verdict of the relay rule.
 - `eez_p2p_inbound_dropped_total`: accepted heads dropped because the follower had not taken the previous 64.
 
-Of a sequencer: `eez_sequencer_blocks_total{kind}`, `eez_sequencer_head`, `eez_sequencer_off_grid_skips_total` and `eez_sequencer_trigger_failures_total`.
+Of a sequencer: `eez_sequencer_blocks_total{kind}`, `eez_sequencer_head`, `eez_sequencer_off_grid_skips_total`, `eez_sequencer_trigger_failures_total` and `eez_sequencer_witness_failures_total`.
 
 Every 30 seconds the follower logs `[eez] following` with the last L1 block it scanned (`l1Scanned`), the L1 head it scans to (`l1Head`), the finalized L1 block, the safe and finalized EEZ blocks, the batches derived since the previous line and the blocks they carry. Each derived batch also logs `[eez] batch derived` with its L1 block, transaction and block range. A sequencer logs `[eez] Sync slot` with the blocks each trigger produces, and `[eez] produced block` with each block's kind, number and transaction count. A Sync block that would land off the grid is skipped with a warning (`eez.sequencer.sync_slot.off_grid_skipped`), and three in a row log `eez.sequencer.sync_slot.off_grid_stalled` at error level.
 

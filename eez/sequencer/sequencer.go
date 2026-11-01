@@ -75,6 +75,14 @@ type Committer interface {
 	Settled() uint64
 }
 
+// Witnesses captures the execution witness of each produced block.
+type Witnesses interface {
+	// Pin snapshots the head's state for the witness of its child.
+	Pin(ctx context.Context) (interface{ Close() }, error)
+	// Record builds and keeps the witness of block h, a child of pin's head.
+	Record(ctx context.Context, pin interface{ Close() }, h *types.Header) error
+}
+
 // Config tunes a Sequencer.
 type Config struct {
 	Timing Timing
@@ -87,6 +95,8 @@ type Config struct {
 	// DABudget bounds the DA bytes of each block's transactions; zero is
 	// DABudget(K).
 	DABudget int
+	// Witnesses, when set, captures each produced block's witness.
+	Witnesses Witnesses
 }
 
 // Sequencer produces an EEZ chain's blocks from the pool on the triggers of
@@ -280,11 +290,26 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 		Extra:      []byte{},
 		GasLimit:   s.l2.BlockGasLimit,
 	}
+	var pin interface{ Close() }
+	if w := s.cfg.Witnesses; w != nil {
+		// The pin must hold the parent's state: taken before the block commits.
+		var err error
+		if pin, err = w.Pin(ctx); err != nil {
+			s.witnessFailed(in.Number, err)
+		} else {
+			defer pin.Close()
+		}
+	}
 	built, err := s.committer.Produce(ctx, in, newPoolTxns(s.pool, s.cfg.DABudget, s.logger))
 	if err != nil {
 		return nil, err
 	}
 	h := built.Block.Header()
+	if pin != nil {
+		if err := s.cfg.Witnesses.Record(ctx, pin, h); err != nil {
+			s.witnessFailed(in.Number, err)
+		}
+	}
 	s.logger.Info("[eez] produced block", "event", "eez.sequencer.block.produced", "kind", kind, "number", h.Number.Uint64(),
 		"hash", h.Hash(), "time", h.Time, "txs", len(built.Block.Transactions()))
 	s.statusMu.Lock()
@@ -295,6 +320,13 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 	m.produced[kind].Inc()
 	m.head.SetUint64(h.Number.Uint64())
 	return h, nil
+}
+
+// witnessFailed logs a block left without a witness, which no attester can
+// prove.
+func (s *Sequencer) witnessFailed(number uint64, err error) {
+	loadMetrics().witnessFailed.Inc()
+	s.logger.Error("[eez] produced block without a witness", "event", "eez.sequencer.witness.failed", "number", number, "err", err)
 }
 
 // paused reports whether head has reached the cap on blocks ahead of the

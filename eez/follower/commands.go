@@ -122,6 +122,11 @@ func (f *Follower) HeadTo(ctx context.Context, ancestor common.Hash) error {
 // Head returns the header of the head block.
 func (f *Follower) Head(ctx context.Context) (*types.Header, error) { return f.chain.Head(ctx) }
 
+// CanonicalHash returns the hash of the canonical block at number.
+func (f *Follower) CanonicalHash(ctx context.Context, number uint64) (common.Hash, bool, error) {
+	return f.chain.CanonicalHash(ctx, number)
+}
+
 // Settled returns the block the latest derived settlement ended at, as of
 // Run's latest step.
 func (f *Follower) Settled() uint64 { return f.Status().Cursor }

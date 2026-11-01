@@ -39,6 +39,7 @@ import (
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/sequencer"
+	"github.com/erigontech/erigon/eez/witness"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/node/debug"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/node/rulesconfig"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
 
@@ -169,13 +171,13 @@ func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconf
 
 // startStandalone registers on n, the node of an EEZ chain, its follower,
 // which reads the L1 node of cfg and syncs from L2 peers loopBlockLimit
-// blocks at a time.
-func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
+// blocks at a time; debug serves the debug-only eez methods.
+func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, loopBlockLimit uint, debug bool, logger log.Logger) (*follower.Service, error) {
 	reader, err := dialL1(ctx, cfg, dirs, logger)
 	if err != nil {
 		return nil, err
 	}
-	return startFollower(ctx, n, n, reader, nil, cfg, api, dirs, eez.Dir(dirs), loopBlockLimit, logger)
+	return startFollower(ctx, n, n, reader, nil, cfg, api, dirs, eez.Dir(dirs), loopBlockLimit, debug, logger)
 }
 
 // allInOneTracer returns the EEZ chain's own instance of the --vmtrace tracer
@@ -202,7 +204,7 @@ func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.
 	var svc *follower.Service
 	reader, err := localL1(ctx, l1Node.Backend(), l1Dirs, logger)
 	if err == nil {
-		svc, err = startFollower(ctx, l2Node, l1Node, reader, caplinBlobs(l1Node.Backend()), cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, logger)
+		svc, err = startFollower(ctx, l2Node, l1Node, reader, caplinBlobs(l1Node.Backend()), cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, false, logger)
 	}
 	if err != nil {
 		l2Node.Close()
@@ -243,7 +245,7 @@ func sentryPeers(backend *eth.Ethereum) func(context.Context) (uint64, error) {
 
 // newSequencer returns the sequencer of the chain of backend, producing on
 // f from the backend's txpool.
-func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, cfg *eez.SequencerConfig, logger log.Logger) (*sequencer.Service, error) {
+func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, logger log.Logger) (*sequencer.Service, error) {
 	pool := backend.TxPool()
 	if pool == nil {
 		return nil, errors.New("the sequencer needs the txpool")
@@ -256,7 +258,7 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 		Proof: cfg.ProofTime,
 		Slack: cfg.SubmissionSlack,
 	}
-	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth}, f, pool, logger)
+	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, Witnesses: witnesses}, f, pool, logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
 	}
@@ -266,6 +268,12 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 	}
 	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), logger), nil
 }
+
+// onStop is a lifecycle that runs a function when stopped.
+type onStop func()
+
+func (onStop) Start() error  { return nil }
+func (f onStop) Stop() error { f(); return nil }
 
 // dialL1 connects to the L1 node of cfg.
 func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.Logger) (l1.ChainReader, error) {
@@ -304,9 +312,10 @@ func caplinBlobs(backend *eth.Ethereum) l1.BeaconStore {
 
 // startFollower registers on n the follower of its EEZ chain, reading L1
 // from reader, blobs also from local when not nil, and keeping its stores in
-// dir. When it halts on its own it closes stop, the node whose exit ends the
-// process.
-func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, local l1.BeaconStore, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, logger log.Logger) (*follower.Service, error) {
+// dir, and its sequencer when cfg has one, whose witnesses api serves with
+// debug. When the follower halts on its own it closes stop, the node whose
+// exit ends the process.
+func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, local l1.BeaconStore, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, debug bool, logger log.Logger) (*follower.Service, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
 	if err := cfg.L2.Check(chainConfig); err != nil {
@@ -359,9 +368,18 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	if err != nil {
 		return nil, err
 	}
+	var witnesses *witness.Store
 	if cfg.Sequencer != nil {
-		if seq, err = newSequencer(ctx, backend, chain, f, cfg.Sequencer, logger); err != nil {
+		if witnesses, err = witness.Open(ctx, dir, logger); err != nil {
 			return nil, err
+		}
+		capture := witness.NewCapture(jsonrpc.NewHeadWitnesses(db, blockReader, engine), witnesses, func() uint64 { return f.Status().Finalized })
+		if seq, err = newSequencer(ctx, backend, chain, f, cfg.Sequencer, capture, logger); err != nil {
+			witnesses.Close()
+			return nil, err
+		}
+		if debug {
+			api.AttachWitnesses(witnesses)
 		}
 	}
 	api.Attach(f)
@@ -374,7 +392,9 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	})
 	n.RegisterLifecycle(svc)
 	if seq != nil {
-		// Registered after the follower, it stops before it.
+		// Lifecycles stop in reverse: the sequencer, then the witness store,
+		// then the follower.
+		n.RegisterLifecycle(onStop(witnesses.Close))
 		n.RegisterLifecycle(seq)
 		logger.Info("[eez] sequencer mode", "feeRecipient", cfg.Sequencer.FeeRecipient, "proofTime", cfg.Sequencer.ProofTime,
 			"submissionSlack", cfg.Sequencer.SubmissionSlack, "maxDepth", cfg.Sequencer.MaxDepth)

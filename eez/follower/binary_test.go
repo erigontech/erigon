@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -724,11 +725,11 @@ func (n *proc) enode(p2pPort string) string {
 
 // TestSequencerBinary is T-SEQ-3 between Erigon nodes: the erigon binary
 // named by EEZ_ERIGON produces the chain of a fresh devnet genesis on the L1
-// heads of a composed L1, takes a transaction into its pool and a block, and
-// serves eth/69 to its trusted peer; an Erigon follower with the sequencer's
-// RPC takes its blocks as its head. The sequencer, first producer of the
-// chain, derives from L1 alone, reports itself as the source of its head and
-// refuses debug_setHead.
+// heads of a composed L1, takes a transaction into its pool and block 1, and
+// serves eth/69 to its trusted peer and the block's witness over RPC; an
+// Erigon follower with the sequencer's RPC takes its blocks as its head. The
+// sequencer, first producer of the chain, derives from L1 alone, reports
+// itself as the source of its head and refuses debug_setHead.
 func TestSequencerBinary(t *testing.T) {
 	bin := os.Getenv("EEZ_ERIGON")
 	if bin == "" {
@@ -738,7 +739,16 @@ func TestSequencerBinary(t *testing.T) {
 	server, err := l1test.NewServer(c.L1, log.New())
 	require.NoError(t, err)
 	t.Cleanup(server.Stop)
-	l1Server := httptest.NewServer(server)
+	// L1 is down until the transaction is in the pool: the sequencer boots
+	// and produces only then, so block 1 holds the transaction.
+	var l1Up atomic.Bool
+	l1Server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !l1Up.Load() {
+			http.Error(w, "L1 down", http.StatusServiceUnavailable)
+			return
+		}
+		server.ServeHTTP(w, r)
+	}))
 	t.Cleanup(l1Server.Close)
 	// Each head's slot fires at once: its timestamp is the proof window
 	// past.
@@ -794,6 +804,7 @@ func TestSequencerBinary(t *testing.T) {
 		var hash common.Hash
 		return call(t.Context(), s.url, "eth_sendRawTransaction", &hash, tx) == nil
 	})
+	l1Up.Store(true)
 	var receipt *struct {
 		BlockNumber hexutil.Uint64 `json:"blockNumber"`
 		BlockHash   common.Hash    `json:"blockHash"`
@@ -802,6 +813,7 @@ func TestSequencerBinary(t *testing.T) {
 	s.waitFor("a produced block holds the transaction", func() bool {
 		return call(t.Context(), s.url, "eth_getTransactionReceipt", &receipt, txHash) == nil && receipt != nil
 	})
+	require.Equal(t, hexutil.Uint64(1), receipt.BlockNumber, "block 1 holds the transaction")
 	f.waitFor("the follower takes the sequencer's block", func() bool {
 		h, err := blockHash(t.Context(), f.url, hexutil.Uint64(receipt.BlockNumber).String())
 		return err == nil && h == receipt.BlockHash
@@ -830,6 +842,14 @@ func TestSequencerBinary(t *testing.T) {
 	require.NoError(t, call(t.Context(), s.url, "eez_sequencerStatus", &status))
 	require.Positive(t, status.Live)
 	require.Positive(t, status.Sync)
+	var w *struct {
+		State   []hexutil.Bytes `json:"state"`
+		Headers []hexutil.Bytes `json:"headers"`
+	}
+	require.NoError(t, call(t.Context(), s.url, "eez_executionWitnessByNumber", &w, hexutil.Uint64(1)))
+	require.NotNil(t, w, "block 1, a child of genesis, has a witness")
+	require.NotEmpty(t, w.State)
+	require.NotEmpty(t, w.Headers)
 	var followerStatus struct {
 		HeadSource string `json:"headSource"`
 	}
