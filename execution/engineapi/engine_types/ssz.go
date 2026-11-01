@@ -5,7 +5,6 @@ package engine_types
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -17,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -203,53 +201,6 @@ func withdrawalsFromList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdra
 	return out
 }
 
-// optionalSSZString is Optional[String] = List[List[byte, MAX_ERROR_BYTES], 1].
-type optionalSSZString struct {
-	value *string
-}
-
-func (o *optionalSSZString) Static() bool { return false }
-
-func (o *optionalSSZString) EncodeSSZ(dst []byte) ([]byte, error) {
-	if o.value == nil {
-		return dst, nil
-	}
-	msg := []byte(*o.value)
-	if len(msg) > sszMaxValidationError {
-		msg = msg[:sszMaxValidationError]
-	}
-	dst = append(dst, 4, 0, 0, 0)
-	return append(dst, msg...), nil
-}
-
-func (o *optionalSSZString) DecodeSSZ(buf []byte, _ int) error {
-	o.value = nil
-	if len(buf) == 0 {
-		return nil
-	}
-	if len(buf) < 4 {
-		return ssz.ErrLowBufferSize
-	}
-	if binary.LittleEndian.Uint32(buf) != 4 {
-		return ssz.ErrBadOffset
-	}
-	if len(buf)-4 > sszMaxValidationError {
-		return ssz.ErrTooBigList
-	}
-	msg := string(buf[4:])
-	o.value = &msg
-	return nil
-}
-
-func (o *optionalSSZString) EncodingSizeSSZ() int {
-	if o.value == nil {
-		return 0
-	}
-	return 4 + min(len(*o.value), sszMaxValidationError)
-}
-
-func (*optionalSSZString) Clone() clonable.Clonable { return &optionalSSZString{} }
-
 func (s *PayloadStatus) Static() bool { return false }
 
 func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -261,17 +212,18 @@ func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
 	if s.LatestValidHash != nil {
 		latestHashes.Append(*s.LatestValidHash)
 	}
-	validationErr := &optionalSSZString{}
+	// Optional[String] is a list with zero or one byte strings.
+	var validationErr [][]byte
 	if s.ValidationError != nil && s.ValidationError.Error() != nil {
 		msg := s.ValidationError.Error().Error()
-		validationErr.value = &msg
+		validationErr = [][]byte{[]byte(msg[:min(len(msg), sszMaxValidationError)])}
 	}
-	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, validationErr)
+	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, solid.NewTransactionsSSZFromTransactions(validationErr))
 }
 
 func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 	latest := solid.NewHashList(1)
-	validationErr := &optionalSSZString{}
+	validationErr := solid.NewTransactionsSSZWithLimits(1, sszMaxValidationError)
 	status := []byte{0}
 	if err := ssz2.UnmarshalSSZ(buf, version, status, latest, validationErr); err != nil {
 		return err
@@ -287,8 +239,8 @@ func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 		s.LatestValidHash = &hash
 	}
 	s.ValidationError = nil
-	if validationErr.value != nil {
-		s.ValidationError = NewStringifiedErrorFromString(*validationErr.value)
+	if validationErr.Len() != 0 {
+		s.ValidationError = NewStringifiedErrorFromString(string(validationErr.UnderlyngReference()[0]))
 	}
 	return nil
 }
