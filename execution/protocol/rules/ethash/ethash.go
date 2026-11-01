@@ -166,7 +166,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 		return nil, nil, nil, err
 	}
 	// Memory map the file for writing and fill it with the generator
-	buffer := []uint32(nil)
+	var buffer []uint32
 	mem, buffer, err = memoryMapFile(dump, true)
 	if err != nil {
 		return nil, nil, nil, err

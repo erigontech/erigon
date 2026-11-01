@@ -3,18 +3,8 @@ name: QA - RPC Performance Tests Latest
 on:
   workflow_dispatch:
     inputs:
-      run_geth:
-        description: 'Run the Geth benchmark besides the Erigon one'
-        type: boolean
-        required: false
-        default: false
-      run_nethermind:
-        description: 'Run the Nethermind benchmark besides the Erigon one'
-        type: boolean
-        required: false
-        default: false
-      run_reth:
-        description: 'Run the Reth benchmark besides the Erigon one'
+      run_all_clients:
+        description: 'Run the Geth, Nethermind and Reth benchmarks besides the Erigon one'
         type: boolean
         required: false
         default: false
@@ -46,55 +36,50 @@ jobs:
         id: vars
         shell: bash
         env:
-          INPUT_RUN_GETH: ${{ github.event.inputs.run_geth }}
-          INPUT_RUN_NETHERMIND: ${{ github.event.inputs.run_nethermind }}
-          INPUT_RUN_RETH: ${{ github.event.inputs.run_reth }}
+          INPUT_RUN_ALL_CLIENTS: ${{ github.event.inputs.run_all_clients }}
         run: |
           set -euo pipefail
 
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Decide which clients, if any, run besides erigon:
-          # - schedule: all of them, every day
-          # - workflow_dispatch: controlled by inputs, any combination of them
-          PEERS=()
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            PEERS=(geth nethermind reth)
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            for input in "geth:$INPUT_RUN_GETH" "nethermind:$INPUT_RUN_NETHERMIND" "reth:$INPUT_RUN_RETH"; do
-              [ "${input#*:}" = "true" ] && PEERS+=("${input%%:*}")
-            done
+          # schedule: all clients, every day; workflow_dispatch: erigon alone unless run_all_clients is set.
+          # Every client joins the start barrier with all the other clients as its remotes.
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "$INPUT_RUN_ALL_CLIENTS" = "true" ]; then
+            COORDINATED=true
+            MATRIX='{"include":[
+              {"client":"erigon",     "remotes":"geth,nethermind,reth",   "install_dir":""},
+              {"client":"geth",       "remotes":"erigon,nethermind,reth", "install_dir":"/opt/go-ethereum"},
+              {"client":"nethermind", "remotes":"erigon,geth,reth",       "install_dir":"/opt/nethermind"},
+              {"client":"reth",       "remotes":"erigon,geth,nethermind", "install_dir":"/opt/reth"}
+            ]}'
+          else
+            COORDINATED=false
+            MATRIX='{"include":[
+              {"client":"erigon",     "remotes":"",                       "install_dir":""}
+            ]}'
           fi
 
-          # Every client joins the start barrier with all the other clients as its remotes.
-          declare -A INSTALL_DIR=([erigon]="" [geth]=/opt/go-ethereum [nethermind]=/opt/nethermind [reth]=/opt/reth)
-          CLIENTS=(erigon "${PEERS[@]}")
-          MATRIX=""
-          for client in "${CLIENTS[@]}"; do
-            remotes=$(printf '%s\n' "${CLIENTS[@]}" | { grep -vx "$client" || true; } | paste -sd, -)
-            MATRIX+="${MATRIX:+,}{\"client\":\"$client\",\"remotes\":\"$remotes\",\"runs-on\":[\"self-hosted\",\"qa\",\"Ethereum\",\"rpc-latest-$client\"],\"install_dir\":\"${INSTALL_DIR[$client]}\"}"
-          done
-
-          # Variables
-          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
-          echo "matrix={\"include\":[${MATRIX}]}" >> "$GITHUB_OUTPUT"
-          echo "coordinated=$([ ${#PEERS[@]} -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          echo "peers=$(IFS=,; echo "${PEERS[*]}")" >> "$GITHUB_OUTPUT"
+          {
+            echo "run_id=${RUN_ID}"
+            echo "network=${{ env.CHAIN }}"
+            echo "matrix<<EOF"
+            echo "$MATRIX"
+            echo "EOF"
+            echo "coordinated=$COORDINATED"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Print configuration (for logs)
         shell: bash
         env:
           RUN_ID: ${{ steps.vars.outputs.run_id }}
           NETWORK: ${{ steps.vars.outputs.network }}
-          PEERS: ${{ steps.vars.outputs.peers }}
+          COORDINATED: ${{ steps.vars.outputs.coordinated }}
         run: |
           set -euo pipefail
           echo "Run ID:             $RUN_ID"
           echo "Network:            $NETWORK"
-          echo "Run Erigon:         true"
-          echo "Peer clients:       ${PEERS:-none}"
+          echo "All clients:        $COORDINATED"
 
       - name: Prepare Redis database
         if: steps.vars.outputs.coordinated == 'true'
@@ -117,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: [self-hosted, qa, Ethereum, "rpc-latest-${{ matrix.client }}"]
     timeout-minutes: 480
     permissions:
       contents: read
@@ -168,12 +153,14 @@ jobs:
           set -euo pipefail
           python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
 
-      - name: Checkout the rpc-tests version file
+      - name: Checkout the rpc-tests version file and the benchmark script
         if: matrix.client != 'erigon'
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-          sparse-checkout: .github/workflows/scripts/rpc_version.env
+          sparse-checkout: |
+            .github/workflows/scripts/rpc_version.env
+            .github/workflows/scripts/run_rpc_perf.sh
           sparse-checkout-cone-mode: false
 
       - name: Checkout RPC Tests Repository
@@ -377,206 +364,149 @@ jobs:
           # Wait for an agreement between all the clients
           python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
 
-      - name: Run RPC Performance Tests
-        id: test_step
+      - name: Prepare the benchmark result directories
+        id: prepare_perf
         env:
           RUNNER_WS: ${{ runner.workspace }}
-          COORDINATED: ${{ needs.setup.outputs.coordinated }}
         run: |
-          set +e # Disable exit on error
-
-          failed_test=0
+          set -euo pipefail
 
           if [ "$CLIENT" == "erigon" ]; then
             commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           else
-            commit=$(git -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo no-version)
+            # The client checkouts are owned by another user than the runner, which git refuses without safe.directory
+            commit=$(git -c safe.directory="$CLIENT_INSTALL_DIR" -C "$CLIENT_INSTALL_DIR" rev-parse --short HEAD || echo no-version)
           fi
-          
-          # Prepare historical test results directory
+
           # a) Save text results to a directory with timestamp and commit hash
           past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
-          echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV          
-          mkdir -p $past_test_dir
+          mkdir -p "$past_test_dir"
           # b) Save binary results to a fixed directory
           bin_past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_bin
-          rm -rf $bin_past_test_dir  # we want only the latest binary files
-          mkdir -p $bin_past_test_dir
+          rm -rf "$bin_past_test_dir"  # we want only the latest binary files
+          mkdir -p "$bin_past_test_dir"
 
-          # Define result_dir (same for all run_perf calls since workspace and network are constant)
           result_dir="$RUNNER_WS/rpc-tests/perf/reports/$CHAIN"
-          mkdir -p $result_dir
-          echo "result_dir=$result_dir" >> $GITHUB_ENV
+          mkdir -p "$result_dir"
 
-          # Initialize output log file in perf dir (moved to result_dir after all tests)
+          # Moved to result_dir after all tests, since every test cleans result_dir
           output_log="$RUNNER_WS/rpc-tests/perf/output.log"
-          > $output_log
-          
-          run_perf () {
-            workspace=$1
-            network=$2
-            method=$3
-            pattern=$4
-            sequence=$5
-            client=$6
-            label=${7:-$method} # names the results; set it to run the same method with another pattern
-            verbose=${8:-false}
+          > "$output_log"
 
-            verbose_flag=()
-            if [ "$verbose" == "true" ]; then
-              verbose_flag=(--verbose)
-            fi
+          {
+            echo "COMMIT=$commit"
+            echo "PAST_TEST_DIR=$past_test_dir"
+            echo "BIN_PAST_TEST_DIR=$bin_past_test_dir"
+            echo "RESULT_DIR=$result_dir"
+            echo "OUTPUT_LOG=$output_log"
+            echo "RUNNER_WS=$RUNNER_WS"
+          } >> "$GITHUB_ENV"
 
-            result_file=$client-$label-result.json
-          
-            # clean temporary area
-            cd $workspace/rpc-tests/perf
-            rm -rf ./reports/$network/*
+      # A failed load pattern does not stop the next ones; a failed sync between clients stops the benchmark.
+      # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
+      - name: Run mixed
+        id: perf_mixed
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh mixed stress_test_mixed_gen_latest 100:20,1000:20,3000:20,6000:20 mixed true
 
-            # Move to home dir of rpc-tests
-            cd ..
-            ./build/bin/rpc_perf --blockchain "$network" \
-                                      --test-type "$method" \
-                                      --pattern-file perf/pattern/"$network"/"$pattern".tar \
-                                      --test-sequence "$sequence" \
-                                      --repetitions 4 \
-                                      --response-timeout 30s \
-                                      --client-build-dir "/" \
-                                      --test-report \
-                                      --json-report $result_dir/$result_file \
-                                      --testing-client $client \
-                                      --more-percentiles \
-                                      "${verbose_flag[@]}" 2>&1 | tee -a $output_log
-          
-            # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
-            perf_exit_status=${PIPESTATUS[0]}
-          
-            # Detect the pre-built db version
-            if [ "$client" == "erigon" ]; then
-              db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
-            else
-              db_version=$commit
-            fi
-          
-            # Check test runner script exit status
-            if [ $perf_exit_status -eq 0 ]; then
-              outcome=success
-          
-              # Save all vegeta binary reports
-              echo "Save current vegeta binary files"
-              if [ -d "$workspace/rpc-tests/perf/reports/bin" ]; then
-                cp -r "$workspace/rpc-tests/perf/reports/bin" "$bin_past_test_dir"
-              else
-                echo "::warning::vegeta binary reports directory '$workspace/rpc-tests/perf/reports/bin' not found; skipping copy."
-              fi
-          
-              echo "Execute Latency Percentile HDR Analysis"
-              cd $result_dir
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
-                --test_name $client-$label \
-                --input_file ./$result_file \
-                --output_file ./$client-$label-latency_hdr_analysis.pdf
-              perf_hdr_status=$?
-              if [ $perf_hdr_status -ne 0 ]; then
-                echo "::warning::perf_hdr_analysis.py failed with exit code $perf_hdr_status"
-              fi
-            else
-              failed_test=1
-              outcome=failure
-            fi
-          
-            # Save results on DB
-            echo "Save test result on DB"
+      - name: Sync clients before eth_call_gen
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK"
 
-            if [ "$client" == "erigon" ]; then
-              branch_name="$GITHUB_REF_NAME"
-              commit_hash=$(git -C $workspace/erigon rev-parse HEAD)
-            else
-              branch_name="release"
-              commit_hash=$commit
-            fi
-          
-            echo branch_name=$branch_name
-            echo commit_hash=$commit_hash
-            echo method=$method
-            echo db_version=$db_version
-            echo outcome=$outcome
-            echo result_file=$result_file
-          
-            python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-              --repo $client \
-              --branch $branch_name \
-              --commit $commit_hash \
-              --test_name rpc-performance-test-latest-$label \
-              --chain $CHAIN \
-              --runner "$RUNNER_NAME" \
-              --db_version $db_version \
-              --outcome $outcome \
-              --result_file $result_dir/$result_file
-          
-            if [ $? -ne 0 ]; then
-              failed_test=1
-              echo "Failure saving test results on DB"
-            fi
-          
-            # Save test results to a directory with timestamp and commit hash
-            if [ -d "$result_dir" ]; then
-              cp -r "$result_dir" "$past_test_dir"
-            else
-              echo "::warning::Result directory '$result_dir' does not exist; skipping archival to $past_test_dir"
-            fi
-          }
+      - name: Run eth_call_gen
+        id: perf_eth_call_gen
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 eth_call_gen
 
-          # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
-          sync_clients () {
-            if [ "$COORDINATED" != "true" ]; then
-              return 0
-            fi
-            (cd "$ERIGON_QA_PATH/test_system/qa-tests/rpc-tests" &&
-              python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-$1" --chain "$NETWORK") ||
-              { echo "::error::No agreement with the other clients before $1"; exit 1; }
-          }
+      - name: Sync clients before eth_getLogs_gen
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK"
 
-          # Launch the RPC performance test runner
+      - name: Run eth_getLogs_gen
+        id: perf_eth_getLogs_gen
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,5000:20 eth_getLogs_gen
 
-          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client> [label] [verbose]
-          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 100:20,1000:20,3000:20,6000:20 $CLIENT mixed true
-          sync_clients eth_call_gen
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 $CLIENT eth_call_gen false
-          sync_clients eth_getLogs_gen
-          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,5000:20 $CLIENT eth_getLogs_gen false
-          sync_clients eth_getLogs_head
-          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_head_gen_latest 2000:20,10000:20 $CLIENT eth_getLogs_head false
-          sync_clients eth_getLogs_topics
-          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_topics_gen_latest 1000:20,5000:20 $CLIENT eth_getLogs_topics false
-          sync_clients eth_getLogs_wide
-          run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 $CLIENT eth_getLogs_wide false
-          
-          # Move output.log to result_dir after all tests
-          mv $output_log $result_dir/
+      - name: Sync clients before eth_getLogs_head
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK"
 
-          # Save the subsection reached status
-          
-          echo "test_executed=true" >> $GITHUB_OUTPUT
-          
-          if [ $failed_test -eq 0 ]; then
-            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-            echo "Tests completed successfully"
-          else
-            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-            echo "Error detected during tests"
-            echo "::error::Error detected during tests"
-            exit 1
+      - name: Run eth_getLogs_head
+        id: perf_eth_getLogs_head
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_head_gen_latest 2000:20,10000:20 eth_getLogs_head
+
+      - name: Sync clients before eth_getLogs_topics
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK"
+
+      - name: Run eth_getLogs_topics
+        id: perf_eth_getLogs_topics
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_topics_gen_latest 1000:20,5000:20 eth_getLogs_topics
+
+      - name: Sync clients before eth_getLogs_wide
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK"
+
+      - name: Run eth_getLogs_wide
+        id: perf_eth_getLogs_wide
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 eth_getLogs_wide
+
+      - name: Collect the benchmark results
+        id: collect_results
+        if: always() && steps.prepare_perf.outcome == 'success'
+        env:
+          OUTCOMES: >-
+            mixed=${{ steps.perf_mixed.outcome }}
+            eth_call_gen=${{ steps.perf_eth_call_gen.outcome }}
+            eth_getLogs_gen=${{ steps.perf_eth_getLogs_gen.outcome }}
+            eth_getLogs_head=${{ steps.perf_eth_getLogs_head.outcome }}
+            eth_getLogs_topics=${{ steps.perf_eth_getLogs_topics.outcome }}
+            eth_getLogs_wide=${{ steps.perf_eth_getLogs_wide.outcome }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mv "$OUTPUT_LOG" "$RESULT_DIR/"
+
+          result=success
+          for entry in $OUTCOMES; do
+            echo "$entry"
+            case "${entry#*=}" in
+              success) ;;
+              failure) result=failure ;;
+              *) if [ "$result" = "success" ]; then result=incomplete; fi ;;
+            esac
+          done
+          # A pattern is skipped after a failed sync too, so only the job status tells a cancellation apart
+          if [ "$result" = "incomplete" ]; then
+            if [ "$JOB_STATUS" = "cancelled" ]; then result=cancelled; else result=failure; fi
           fi
+          echo "TEST_RESULT=$result" >> "$GITHUB_OUTPUT"
+
+          case "$result" in
+            success)
+              echo "Tests completed successfully" ;;
+            cancelled)
+              echo "::notice::Benchmark cancelled before all the load patterns ran" ;;
+            *)
+              echo "::error::Error detected during tests"
+              exit 1 ;;
+          esac
 
       - name: Generate Summary
-        if: always() && steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.prepare_perf.outcome == 'success'
         env:
           WORKFLOW: ${{ github.workflow }}
-          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+          TEST_RESULT: ${{ steps.collect_results.outputs.TEST_RESULT }}
         run: |
-          SUMMARY_FILE="$result_dir/summary.md"
-          LOG_FILE="$result_dir/output.log"
+          SUMMARY_FILE="$RESULT_DIR/summary.md"
+          LOG_FILE="$RESULT_DIR/output.log"
 
           {
             echo "# $WORKFLOW Report"
@@ -598,11 +528,11 @@ jobs:
           cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
-        if: always() && steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.prepare_perf.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
-          path: ${{ env.past_test_dir }}
+          path: ${{ env.PAST_TEST_DIR }}
 
       - name: Stop Erigon
         if: always() && matrix.client == 'erigon'
@@ -618,7 +548,7 @@ jobs:
           fi
 
       - name: Upload Erigon logs
-        if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
+        if: matrix.client == 'erigon' && steps.prepare_perf.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: erigon-logs-${{ env.CHAIN }}

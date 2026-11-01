@@ -17,7 +17,6 @@
 package raw
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -201,7 +200,7 @@ func TestBeaconStateSSZRoundtrip(t *testing.T) {
 			require.Equal(t, len(encoded1), len(encoded2),
 				"encoded length mismatch: first=%d second=%d", len(encoded1), len(encoded2))
 			require.Equal(t, encoded1, encoded2,
-				fmt.Sprintf("encoded bytes differ after roundtrip (len1=%d, len2=%d)", len(encoded1), len(encoded2)))
+				"encoded bytes differ after roundtrip (len1=%d, len2=%d)", len(encoded1), len(encoded2))
 		})
 	}
 }
