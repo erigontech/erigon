@@ -486,7 +486,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						}
 						if hadGloasPending && completedReqCount == reqCount {
 							lastSlot := lastSlotInRange(reqSlot, reqCount)
-							confirmed := f.confirmEmptyRange(peerId, lastSlot) != nil
+							confirmed := f.confirmEmptyRange(peerId, lastSlot, false) != nil
 							singlePeer := !confirmed && (f.httpFallbackURL == "" || httpFallbackFailed.Load()) && !f.canAskAnotherPeer()
 							if confirmed || singlePeer {
 								emptyResponse = &emptyRangeResult{
@@ -779,7 +779,7 @@ func (f *ForwardBeaconDownloader) tipWithoutSuccessorResponse(peerID string, ran
 	if !hadGloasPending || completedCount >= rangeCount {
 		return nil
 	}
-	lookahead := f.confirmTipWithoutSuccessor(peerID, lastSlotInRange(rangeStart, rangeCount))
+	lookahead := f.confirmEmptyRange(peerID, lastSlotInRange(rangeStart, rangeCount), true)
 	if lookahead == nil {
 		return nil
 	}
@@ -794,23 +794,10 @@ func (f *ForwardBeaconDownloader) tipWithoutSuccessorResponse(peerID string, ran
 }
 
 // confirmEmptyRange returns the held lookahead once two distinct P2P peers, or the HTTP fallback, answered empty through lastSlot.
-func (f *ForwardBeaconDownloader) confirmEmptyRange(peerID string, lastSlot uint64) *cltypes.SignedBeaconBlock {
+func (f *ForwardBeaconDownloader) confirmEmptyRange(peerID string, lastSlot uint64, requireConfirmedScan bool) *cltypes.SignedBeaconBlock {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.confirmEmptyRangeLocked(peerID, lastSlot)
-}
-
-func (f *ForwardBeaconDownloader) confirmTipWithoutSuccessor(peerID string, lastSlot uint64) *cltypes.SignedBeaconBlock {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.gloasScanUnconfirmed {
-		return nil
-	}
-	return f.confirmEmptyRangeLocked(peerID, lastSlot)
-}
-
-func (f *ForwardBeaconDownloader) confirmEmptyRangeLocked(peerID string, lastSlot uint64) *cltypes.SignedBeaconBlock {
-	if f.gloasLookahead == nil {
+	if f.gloasLookahead == nil || (requireConfirmedScan && f.gloasScanUnconfirmed) {
 		return nil
 	}
 	if peerID != "http-fallback" && (f.gloasEmptyPeer == "" || f.gloasEmptyPeer == peerID || f.gloasEmptyThrough != lastSlot) {
