@@ -479,8 +479,8 @@ func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
 // Authorities is RecoveredAuthorities, recovering and publishing the list here when the pre-pass has not
 // started it, so re-executions and the pre-pass reuse it. Nil for a message without a tx's list.
 func (m *Message) Authorities(chainID *uint256.Int) *RecoveredAuthorities {
-	if m.authorities == nil {
-		return nil
+	if r := m.RecoveredAuthorities(); r != nil || m.authorities == nil {
+		return r
 	}
 	r := &RecoveredAuthorities{done: make(chan struct{})}
 	if m.authorities.CompareAndSwap(nil, r) {

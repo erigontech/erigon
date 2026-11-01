@@ -250,3 +250,11 @@ func TestMessageAuthoritiesPublishesItsRecovery(t *testing.T) {
 	require.Same(t, r, tx.authorities.Load(), "a re-execution and the pre-pass reuse the executor's recovery")
 	require.Same(t, r, msg.Authorities(uint256.NewInt(1)))
 }
+
+func TestMessageAuthoritiesReusesRecoveryWithoutAllocating(t *testing.T) {
+	tx := &SetCodeTransaction{}
+	msg := &Message{authorities: &tx.authorities}
+	chainID := uint256.NewInt(1)
+	msg.Authorities(chainID)
+	require.Zero(t, testing.AllocsPerRun(10, func() { msg.Authorities(chainID) }))
+}
