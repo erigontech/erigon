@@ -672,7 +672,7 @@ func TestBatchResponseLimit(t *testing.T) {
 	srv := newTestServer(log.Root())
 	defer srv.Stop()
 	srv.batchConcurrency = 1
-	srv.batchResponseLimit = 50
+	srv.SetBatchResponseLimit(50)
 
 	body := `[{"jsonrpc":"2.0","id":1,"method":"test_streamEcho","params":["aaaaaaaaaa"]},` +
 		`{"jsonrpc":"2.0","id":2,"method":"test_streamEcho","params":["bbbbbbbbbb"]},` +
@@ -685,8 +685,8 @@ func TestBatchResponseLimit(t *testing.T) {
 
 	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"aaaaaaaaaa"},`+
 		`{"jsonrpc":"2.0","id":2,"result":"bbbbbbbbbb"},`+
-		`{"jsonrpc":"2.0","id":3,"error":{"code":-32003,"message":"response too large"}},`+
-		`{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"response too large"}}]`, rec.Body.String())
+		`{"jsonrpc":"2.0","id":3,"error":{"code":-32003,"message":"batch response limit 50 exceeded (can increase by --rpc.batch.response.limit)"}},`+
+		`{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"batch response limit 50 exceeded (can increase by --rpc.batch.response.limit)"}}]`, rec.Body.String())
 }
 
 // echoRequest returns a test_echo call padded to exactly size bytes.

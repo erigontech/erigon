@@ -435,6 +435,11 @@ var (
 		Usage: "Maximum number of requests in a batch",
 		Value: 100,
 	}
+	RpcBatchResponseLimit = cli.IntFlag{
+		Name:  "rpc.batch.response.limit",
+		Usage: "Maximum bytes of all answers in a batch; the calls after it get an error. 0 = unlimited",
+		Value: rpccfg.DefaultBatchResponseLimit,
+	}
 	RpcSubscriptionLimit = cli.IntFlag{
 		Name:  "rpc.subscription.limit",
 		Usage: "Maximum number of concurrent subscriptions per connection (WebSocket, IPC). 0 = unlimited",

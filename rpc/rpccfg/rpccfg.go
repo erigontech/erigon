@@ -22,6 +22,8 @@ package rpccfg
 import (
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/db/datadir"
 )
 
@@ -65,6 +67,7 @@ const (
 	DefaultRpcTxSyncMaxTimeout       = 1 * time.Minute
 	DefaultGasCap                    = 50_000_000
 	DefaultSubscriptionLimit         = 1024 // concurrent subscriptions one connection may hold, as in reth
+	DefaultBatchResponseLimit        = int(25 * datasize.MB)
 )
 
 type BaseApiConfig struct {

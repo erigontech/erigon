@@ -69,6 +69,7 @@ const (
 	ErrCodeResourceNotFound        = -32001
 	ErrCodeVMError                 = -32015
 	ErrCodeServerOverloaded        = -32005 // JSON-RPC "Too many requests"
+	ErrCodeResponseTooLarge        = -32003
 
 	ErrCodeTxSyncTimeout = 4
 )
@@ -90,12 +91,6 @@ func (e *subscriptionNotFoundError) ErrorCode() int { return -32601 }
 func (e *subscriptionNotFoundError) Error() string {
 	return fmt.Sprintf("no %q subscription in %s namespace", e.subscription, e.namespace)
 }
-
-type responseTooLargeError struct{}
-
-func (e *responseTooLargeError) ErrorCode() int { return -32003 }
-
-func (e *responseTooLargeError) Error() string { return "response too large" }
 
 // Invalid JSON was received by the server.
 type parseError struct{ message string }

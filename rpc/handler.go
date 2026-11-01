@@ -219,9 +219,8 @@ func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage, responseByt
 	stream := jsonstream.Get(buf)
 	defer jsonstream.Put(stream)
 	if h.batchResponseLimit > 0 && responseBytes.Load() > int64(h.batchResponseLimit) && msg.isCall() {
-		res := errorMessage(&responseTooLargeError{})
-		res.ID = msg.ID
-		res.writeTo(stream)
+		reason := fmt.Sprintf("batch response limit %d exceeded (can increase by --rpc.batch.response.limit)", h.batchResponseLimit)
+		msg.errorResponse(&CustomError{Code: ErrCodeResponseTooLarge, Message: reason}).writeTo(stream)
 	} else if res := h.handleCallMsg(cp, msg, stream); res != nil {
 		res.writeTo(stream)
 	}

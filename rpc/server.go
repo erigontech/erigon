@@ -26,7 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -37,8 +36,6 @@ import (
 const MetadataApi = "rpc"
 
 const minBatchConcurrency uint = 1
-
-const defaultBatchResponseLimit = int(25 * datasize.MB)
 
 // CodecOption specifies which type of messages a codec supports.
 //
@@ -83,7 +80,7 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
 		subscriptionLimit:  rpccfg.DefaultSubscriptionLimit,
 		ingress:            ingressBudget{limit: defaultIngressBudget},
-		batchResponseLimit: defaultBatchResponseLimit,
+		batchResponseLimit: rpccfg.DefaultBatchResponseLimit,
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -103,6 +100,11 @@ func (s *Server) SetAllowList(allowList AllowList) {
 // SetBatchLimit sets limit of number of requests in a batch
 func (s *Server) SetBatchLimit(limit int) {
 	s.batchLimit = limit
+}
+
+// SetBatchResponseLimit sets the answer bytes of a batch past which the remaining calls are refused; 0 removes the limit.
+func (s *Server) SetBatchResponseLimit(limit int) {
+	s.batchResponseLimit = limit
 }
 
 // SetSubscriptionLimit sets how many subscriptions one connection may hold at a time; 0 removes the limit.
