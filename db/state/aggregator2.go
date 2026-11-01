@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -31,6 +32,7 @@ type AggOpts struct { //nolint:gocritic
 	disableFsync        bool // for tests speed
 	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
 	skipFilesDBGapCheck bool
+	btIndexInMem        bool // see BtIndexInMem
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -51,7 +53,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
 
@@ -81,6 +83,14 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
+	}
+	if opts.btIndexInMem {
+		budget := newBtInMemBudget(estimate.TotalMemory())
+		for _, d := range a.d {
+			if d != nil {
+				d.btBudget = budget
+			}
+		}
 	}
 
 	return a, nil
@@ -118,6 +128,14 @@ func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; re
 func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
+	return opts
+}
+
+// BtIndexInMem lets the domains read state .bt files into memory when the node has room for them (see
+// readBtIndexInMem). Only the process that executes blocks gains from it; other processes on the same
+// datadir would hold their own copies.
+func (opts AggOpts) BtIndexInMem() AggOpts { //nolint:gocritic
+	opts.btIndexInMem = true
 	return opts
 }
 
@@ -221,6 +239,12 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			fileInfo, _, _ := snaptype.ParseFileName("", name)
 
 			currentFileVersion := fileInfo.Version
+
+			if dir := filepath.Dir(path); statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
+				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major < 3 {
+				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
+					"convert the datadir with `integration commitment convert --v3`", fileInfo.Name(), currentFileVersion.Major)
+			}
 
 			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]
 			if !ok {

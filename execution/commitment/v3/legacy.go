@@ -418,17 +418,73 @@ func ResolveLegacy(key []byte, entries []LegacyEntry) (value []byte, write bool,
 	}
 }
 
-func ConvertLegacyState(value []byte) ([]byte, error) {
+func legacyTrieState(value []byte) (txNum, blockNum uint64, trieState []byte, err error) {
 	if len(value) < 18 {
-		return nil, fmt.Errorf("%w: %d bytes", errLegacyState, len(value))
+		return 0, 0, nil, fmt.Errorf("%w: %d bytes", errLegacyState, len(value))
 	}
-	txNum := binary.BigEndian.Uint64(value[0:8])
-	blockNum := binary.BigEndian.Uint64(value[8:16])
-	trieState := value[18:]
+	txNum = binary.BigEndian.Uint64(value[0:8])
+	blockNum = binary.BigEndian.Uint64(value[8:16])
+	trieState = value[18:]
 	if n := int(binary.BigEndian.Uint16(value[16:18])); n <= len(trieState) {
-		trieState = trieState[:n]
+		return txNum, blockNum, trieState[:n], nil
 	} else {
-		return nil, fmt.Errorf("%w: trie state of %d bytes in %d", errLegacyState, n, len(trieState))
+		return 0, 0, nil, fmt.Errorf("%w: trie state of %d bytes in %d", errLegacyState, n, len(trieState))
+	}
+}
+
+func LegacyRootExtension(value []byte) (ext, hash []byte, err error) {
+	_, _, trieState, err := legacyTrieState(value)
+	if err != nil || len(trieState) == 0 {
+		return nil, nil, err
+	}
+	hph := commitment.NewHexPatriciaHashed(length.Addr, leafRootContext{}, commitment.DefaultTrieConfig())
+	defer hph.Release()
+	if err := hph.SetState(trieState); err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", errLegacyState, err)
+	}
+	ext, hash = hph.RootExtension()
+	return ext, hash, nil
+}
+
+func (c *LegacyConverter) RootExtensionRecord(stateValue []byte) (key, record []byte, err error) {
+	c.rootKey = nodeKey(planeAccount, nil, nil, c.rootKey[:0])
+	if len(stateValue) == 0 {
+		return c.rootKey, nil, nil
+	}
+	ext, hash, err := LegacyRootExtension(stateValue)
+	if err != nil || len(ext) == 0 {
+		return c.rootKey, nil, err
+	}
+	if err := checkNibbles(ext); err != nil {
+		return nil, nil, err
+	}
+	if len(ext) > 63 {
+		return nil, nil, fmt.Errorf("%w: root extension of %d nibbles", errLegacyState, len(ext))
+	}
+	resetNode(&c.root, ext, planeAccount)
+	appendStoredChild(&c.root, int(ext[0]), hash, nil)
+	c.rootOut = encodeRecord(&c.root, 0, c.rootOut[:0])
+	return c.rootKey, c.rootOut, nil
+}
+
+func (c *LegacyConverter) EmitRootExtension(stateValue []byte, emit LegacyEmitFunc) error {
+	key, record, err := c.RootExtensionRecord(stateValue)
+	if err != nil {
+		return err
+	}
+	if len(record) != 0 {
+		return emit(key, record, LegacySynthesized)
+	}
+	if c.incremental {
+		return emit(key, nil, LegacyTombstone)
+	}
+	return nil
+}
+
+func ConvertLegacyState(value []byte) ([]byte, error) {
+	txNum, blockNum, trieState, err := legacyTrieState(value)
+	if err != nil {
+		return nil, err
 	}
 	root := empty.RootHash[:]
 	if len(trieState) != 0 {
@@ -437,7 +493,6 @@ func ConvertLegacyState(value []byte) ([]byte, error) {
 		if err := hph.SetState(trieState); err != nil {
 			return nil, fmt.Errorf("%w: %w", errLegacyState, err)
 		}
-		var err error
 		if root, err = hph.RootHash(); err != nil {
 			return nil, fmt.Errorf("%w: %w", errLegacyState, err)
 		}

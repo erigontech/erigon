@@ -66,8 +66,13 @@ func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
 func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps int) (kv.TemporalRwDB, *state.Aggregator, map[uint64][]byte) {
 	t.Helper()
 	previousSchema := statecfg.Schema
+	previousParallel := statecfg.ExperimentalParallelCommitment
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	statecfg.ExperimentalParallelCommitment = true
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+		statecfg.ExperimentalParallelCommitment = previousParallel
+	})
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -145,7 +150,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	const stepSize, steps = 4, 2
-	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	db, agg, rwTx, domains := convertTestDomainsWithParallel(t, stepSize, true)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
 
@@ -266,13 +271,15 @@ func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
 			runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 			agg.CloseFilesNoReopen()
 			if resume {
-				converted, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
+				var converted []string
+				converted, err = filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
 				require.NoError(t, err)
 				for _, p := range converted {
 					require.NoError(t, dir.RemoveFile(p))
 				}
 				domainBackup := filepath.Join(dirs.Snap, "backup", "domains")
-				backups, err := os.ReadDir(domainBackup)
+				var backups []os.DirEntry
+				backups, err = os.ReadDir(domainBackup)
 				require.NoError(t, err)
 				for _, e := range backups {
 					require.NoError(t, os.Rename(filepath.Join(domainBackup, e.Name()), filepath.Join(dirs.SnapDomain, e.Name())))
@@ -299,7 +306,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	const stepSize, steps = 4, 3
-	db, agg, _ := buildRecreatedOwnerFiles(t, stepSize, steps, 4, true)
+	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, 4, true, true)
 	ctx := t.Context()
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
@@ -307,5 +314,88 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 	for txNum := uint64(1); txNum <= stepSize*steps; txNum++ {
 		_, err := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
+	}
+}
+
+func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap(t *testing.T) {
+	previousSchema := statecfg.Schema
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.EnableHistoricalCommitment()
+	statecfg.ExperimentalParallelCommitment = false
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+		statecfg.ExperimentalParallelCommitment = previousParallel
+	})
+
+	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, 4, 3, 4, true, false)
+	beforeDomain := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain)
+	beforeHistory := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory)
+	beforeIdx := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapIdx)
+	beforeAccessors := snapshotCommitmentFilesV3History(t, agg.Dirs().SnapAccessors)
+	require.NotEmpty(t, beforeIdx)
+	require.NotEmpty(t, beforeAccessors)
+	backupRoot := filepath.Join(agg.Dirs().Snap, "backup")
+	_, err := os.Stat(backupRoot)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.ErrorContains(t, err, "[commitment_convert] phase 1 history:")
+
+	require.Equal(t, beforeDomain, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapDomain))
+	require.Equal(t, beforeHistory, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapHistory))
+	require.Equal(t, beforeIdx, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapIdx))
+	require.Equal(t, beforeAccessors, snapshotCommitmentFilesV3History(t, agg.Dirs().SnapAccessors))
+	_, err = os.Stat(backupRoot)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func snapshotCommitmentFilesV3History(t *testing.T, snapDir string) map[string][]byte {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(snapDir, "*-commitment.*"))
+	require.NoError(t, err)
+	content := make(map[string][]byte, len(files))
+	for _, path := range files {
+		content[filepath.Base(path)], err = os.ReadFile(path)
+		require.NoError(t, err)
+	}
+	return content
+}
+
+func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
+	const stepSize, steps = 4, 8
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	next := uint64(1)
+	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+	roots := map[uint64][]byte{}
+	for txNum := range uint64(stepSize * steps) {
+		putAccount(addrs[txNum%2], txNum)
+		if txNum == 0 {
+			putAccount(addrs[1], txNum)
+		}
+		root, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+		roots[txNum] = root
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	for _, txNum := range slices.Sorted(maps.Keys(roots)) {
+		if txNum >= stepSize*(steps-1) {
+			break
+		}
+		root, err := state.DebugCommitmentV3RootAsOf(t.Context(), agg, txNum+1)
+		require.NoErrorf(t, err, "records as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
@@ -399,7 +400,6 @@ func rebuildCommitmentFromScratch(t *testing.T, db kv.TemporalRwDB, agg *state.A
 	require.NoError(t, err)
 	defer db.Close()
 
-	// now clean all commitment files along with related db buckets
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -581,6 +581,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer tdb.Close()
+	history := commitmentHistory(t, tdb, txNum)
 
 	clearTx, err := tdb.BeginRw(ctx)
 	require.NoError(t, err)
@@ -633,6 +634,7 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 		direct[0] = false
 	}
 	require.Equal(t, direct, rebuild(lastBlock), "steps with state files go straight to files, the rest and a resumed step through the DB")
+	require.Equal(t, history, commitmentHistory(t, tdb, txNum), "the rebuilt commitment history reads as the original")
 	if !v3 {
 		return
 	}
@@ -647,6 +649,54 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 		require.Equal(t, uint64(b), check.BlockNum)
 		require.Equal(t, roots[uint64(b)], common.Hash(check.Root), "block %d", b)
 	}
+}
+
+func TestDumpCommitmentStepClosesCollationOnBuildError(t *testing.T) {
+	schema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = schema })
+	statecfg.EnableHistoricalCommitment()
+	db, agg := testDbAndAggregatorv3(t, 16)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, []byte("key1"), []byte("value1"), 1, nil))
+
+	dirs := agg.Dirs()
+	require.NoError(t, dir.RemoveFile(dirs.SnapHistory), "no history file is open yet, so the empty dir can go and History.buildFiles cannot write .ef")
+	require.Error(t, state.DumpCommitmentStepForTest(ctx, agg, domains, 0))
+	leftovers, err := filepath.Glob(filepath.Join(dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Empty(t, leftovers, "the domain values compressor is closed when buildFiles fails")
+}
+
+func TestRebuildCommitmentShardSkipsEmptyKeyOfExhaustedIterator(t *testing.T) {
+	db, _ := testDbAndAggregatorv3(t, 16)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	const n = 3
+	var served byte
+	next := func() (bool, []byte) {
+		if served == n {
+			return false, nil
+		}
+		served++
+		return true, bytes.Repeat([]byte{served}, length.Addr)
+	}
+	keys, err := state.RebuildCommitmentShardKeysForTest(ctx, domains, rwTx, next)
+	require.NoError(t, err)
+	require.Equal(t, uint64(n), keys, "the (false, nil) that ends the iterator is not a key")
 }
 
 func composite(k, k2 []byte) []byte {
@@ -713,26 +763,14 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 
 	t.Parallel()
 
-	t.Run("BPlus", func(t *testing.T) {
-		rc := runCfg{
-			aggStep:  50,
-			useBplus: true,
-		}
-		aggregatorV3_RestartOnDatadir(t, rc)
-	})
-	t.Run("B", func(t *testing.T) {
-		rc := runCfg{
-			aggStep: 50,
-		}
-		aggregatorV3_RestartOnDatadir(t, rc)
-	})
+	rc := runCfg{
+		aggStep: 50,
+	}
+	aggregatorV3_RestartOnDatadir(t, rc)
 }
 
 type runCfg struct {
-	aggStep      uint64
-	useBplus     bool
-	compressVals bool
-	largeVals    bool
+	aggStep uint64
 }
 
 // here we create a bunch of updates for further aggregation.
@@ -1188,4 +1226,32 @@ func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
 	useCommitmentSchema(t, true)
 	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
 	require.NoError(t, agg.MergeLoop(t.Context()))
+}
+
+func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	it, err := tx.HistoryRange(kv.CommitmentDomain, 0, int(toTxNum), order.Asc, -1)
+	require.NoError(t, err)
+	keys := map[string]struct{}{}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		if !commitment.IsCommitmentStateKey(k) {
+			keys[string(k)] = struct{}{}
+		}
+	}
+	it.Close()
+	require.NotEmpty(t, keys)
+	values := map[string][]byte{}
+	for k := range keys {
+		for ts := uint64(0); ts < toTxNum; ts += 3 {
+			v, _, err := tx.HistorySeek(kv.CommitmentDomain, []byte(k), ts)
+			require.NoError(t, err)
+			values[fmt.Sprintf("%x@%d", k, ts)] = bytes.Clone(v)
+		}
+	}
+	return values
 }

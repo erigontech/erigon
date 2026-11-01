@@ -175,6 +175,7 @@ type legacyHistoryValues struct {
 	accounts, storage *DomainRoTx
 	asOf              uint64
 	cache             map[string]historyValue
+	cacheCap          int
 }
 
 type historyValue struct {
@@ -194,27 +195,29 @@ func (v *legacyHistoryValues) lookup(dt *DomainRoTx, plainKey []byte) ([]byte, e
 	if c, ok := v.cache[string(plainKey)]; ok && c.from <= v.asOf && v.asOf <= c.until {
 		return c.value, nil
 	}
-	found, nextWrite, err := dt.ht.iit.seekInFiles(plainKey, v.asOf)
+	found, seek, err := dt.ht.iit.seekInFiles(plainKey, v.asOf)
 	if err != nil {
 		return nil, err
 	}
 	var value []byte
 	until := uint64(1<<64 - 1)
 	if found {
-		if value, _, err = dt.ht.historyValueAt(plainKey, nextWrite, v.asOf); err != nil {
+		if value, _, err = dt.ht.historyValueAt(plainKey, seek, v.asOf); err != nil {
 			return nil, err
 		}
-		until = nextWrite
+		until = seek.txNum
 	} else if value, _, _, _, err = dt.getLatestFromFiles(plainKey, nil, kv.NoStepBound); err != nil {
 		return nil, err
 	}
-	if len(v.cache) >= 1<<20 {
+	if len(v.cache) >= v.cacheCap {
 		clear(v.cache)
 	}
 	c := historyValue{value: bytes.Clone(value), from: v.asOf, until: until}
 	v.cache[string(plainKey)] = c
 	return c.value, nil
 }
+
+const historyValueCacheTotal = 1 << 20
 
 func appendEscapedKey(dst, key []byte) []byte {
 	for _, b := range key {
@@ -571,7 +574,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			wat := at.a.BeginFilesRo()
 			defer wat.Close()
 			wdt := wat.d[kv.CommitmentDomain]
-			vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}}
+			vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}, cacheCap: max(1<<14, historyValueCacheTotal/workers)}
 			conv := v3.NewLegacyConverter(vals, keysV2, false)
 			var cur, nextVersion, childCur, childNext, scratch historyVersion
 			var beforeChildren, afterChildren []legacyChild
@@ -675,7 +678,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				if err != nil {
 					return err
 				}
-				if found && written == txNum {
+				if found && written.txNum == txNum {
 					return nil
 				}
 				value, err := legacyCommitmentAsOf(wdt, childKey, txNum)
@@ -771,7 +774,25 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 							if err != nil {
 								return fmt.Errorf("state after txNum %d: %w", txNum, err)
 							}
-							if stateRootsDiffer(before, afterState) {
+							rootKey, beforeExt, err := conv.RootExtensionRecord(value(i))
+							if err != nil {
+								return err
+							}
+							beforeExt = bytes.Clone(beforeExt)
+							_, afterExt, err := conv.RootExtensionRecord(next)
+							if err != nil {
+								return err
+							}
+							if !bytes.Equal(beforeExt, afterExt) {
+								kind := v3.LegacySynthesized
+								if len(beforeExt) == 0 {
+									kind = v3.LegacyTombstone
+								}
+								if emitErr := emit(rootKey, txNum, beforeExt, kind); emitErr != nil {
+									return emitErr
+								}
+							}
+							if len(beforeExt) == 0 && len(afterExt) == 0 && stateRootsDiffer(before, afterState) {
 								if err := childChanged(rootLegacyKey, txNum, true); err != nil {
 									return err
 								}

@@ -229,13 +229,6 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
-// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
-//
-// Deprecated: use BuildEthConfig instead.
-func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
-	applyRemainingEthFlags(ctx, cfg, logger)
-}
-
 func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
@@ -483,7 +476,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
 		OverlayReplayBlockTimeout: ctx.Duration(OverlayReplayBlockFlag.Name),
 		WebsocketPort:             ctx.Int(utils.WSPortFlag.Name),
-		WebsocketEnabled:          ctx.IsSet(utils.WSEnabledFlag.Name),
+		WebsocketEnabled:          ctx.Bool(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),

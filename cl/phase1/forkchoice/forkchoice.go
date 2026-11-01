@@ -41,13 +41,18 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"golang.org/x/sync/singleflight"
 )
+
+var currentStateCopy = metrics.GetOrCreateSummary("caplin_forkchoice_current_state_copy")
 
 // ForkNode is a struct that represents a node in the fork choice tree.
 type ForkNode struct {
@@ -62,11 +67,14 @@ type ForkNode struct {
 }
 
 const (
-	checkpointsPerCache        = 1024
-	allowedCachedStates        = 8
-	queueCacheSize             = 128
-	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
-	maxPendingELPayloads       = 1024
+	checkpointsPerCache                = 1024
+	maxCheckpointStates                = 10
+	maxConcurrentTargetCommitteeBuilds = 2
+	maxTargetCheckpointBlockAge        = 4
+	allowedCachedStates                = 8
+	queueCacheSize                     = 128
+	pendingELPayloadsShrinkCap         = 256 // drain releases the backing array when cap exceeds this
+	maxPendingELPayloads               = 1024
 )
 
 type randaoDelta struct {
@@ -87,7 +95,7 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time             atomic.Uint64
+	timeMs           atomic.Uint64
 	highestSeen      atomic.Uint64
 	highestSeenRoot  atomic.Value // common.Hash
 	blocksProcessing atomic.Int64
@@ -101,6 +109,8 @@ type ForkChoiceStore struct {
 	headHash                           common.Hash
 	headSlot                           uint64
 	headPayloadStatus                  cltypes.PayloadStatus
+	headIsFallback                     bool                           // Gloas get_head found no viable node and fell back to the justified root
+	selectedHead                       atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
 	genesisTime                        uint64
 	genesisValidatorsRoot              common.Hash
 	anchorExecutionPayloadBuilderIndex uint64
@@ -117,8 +127,11 @@ type ForkChoiceStore struct {
 	inFlightInvalidPayloads *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
-	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
-	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	executionPayloadStatus   *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	payloadStatusByRoot      *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	pendingEnvelopeApplyGate sync.Map // blockRoot -> chan struct{}: admits one apply of a parked envelope per root, closed when it ends
+	envelopeAppliesMu        sync.Mutex
+	envelopeApplies          map[common.Hash]int // envelope applies past the signature check, by block root
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
@@ -133,12 +146,20 @@ type ForkChoiceStore struct {
 	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
 	unrealizedJustifications sync.Map // blockRoot -> solid.Checkpoint
 	unrealizedFinalizations  sync.Map // blockRoot -> solid.Checkpoint
+	// Serializes checkpointStates inserts and evictions with justified promotion,
+	// so an eviction pass never deletes the current justified state.
+	checkpointStatesMu sync.Mutex
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 	localValidators    *validator_params.ValidatorParams
 
+	checkpointStateBuilds singleflight.Group
+	targetStateBuildsMu   sync.Mutex
+	targetStateBuilds     map[solid.Checkpoint]*targetStateBuild
+
 	latestMessages    *latestMessagesStore
+	voteTally         voteTally
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[common.Hash, common.Hash] // ETH2 root -> ETH1 hash
@@ -160,6 +181,7 @@ type ForkChoiceStore struct {
 	proposerLookahead *lru.Cache[uint64, solid.Uint64VectorSSZ]
 
 	mu                             sync.RWMutex
+	payloadPreparation             PayloadPreparationImports
 	executionPayloadValidationOnce sync.Once
 	executionPayloadValidation     chan struct{}
 
@@ -185,12 +207,12 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
-	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
-	payloadAttestationSeenSlot  uint64
-	payloadAttestationSeen      map[uint64]struct{}
-	payloadAttestationContexts  *payloadAttestationValidationContexts
+	ptcVoteMu                    sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
+	payloadTimelinessVote        sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadDataAvailabilityVote  sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationSeen       map[payloadAttestationSeenKey]struct{}
+	payloadAttestationPrunedSlot uint64
+	payloadAttestationContexts   *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -198,7 +220,6 @@ type ForkChoiceStore struct {
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732]
 	gloasWeightTree *gloasWeightTree
-	voteTally       voteTally
 	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
 	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
 	// Due to network timing, the envelope may arrive before its corresponding block.
@@ -206,8 +227,10 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
-	// Earliest time RetryDataAvailablePendingExecutionPayloadEnvelopes may retry a pending envelope again, by block root.
+	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// a proposal's retry of its parent share it.
 	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -285,9 +308,16 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	slot := anchorState.Slot()
+	anchorEpoch := state.Epoch(anchorState.BeaconState)
+	if slot%anchorState.BeaconConfig().SlotsPerEpoch != 0 && anchorState.LatestBlockHeader().Slot == slot {
+		// A checkpoint block that is not at an epoch start is also the checkpoint at the next
+		// epoch start. A state advanced past its block keeps the epoch of its own slot.
+		anchorEpoch++
+	}
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state.Epoch(anchorState.BeaconState),
+		Epoch: anchorEpoch,
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
@@ -492,7 +522,7 @@ func NewForkChoiceStore(
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
-	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
+	f.timeMs.Store(utils.SecondsToMilliseconds(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot()))
 
 	var anchorTimelinessVotes [clparams.PtcSize]int8
 	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
@@ -614,6 +644,70 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
 }
 
+// HasImportedDescendantAfter reports whether a block imported on top of root, on a branch that
+// passes get_head's justification and finalization filter and that an invalidation did not cut
+// off, is past slot. A correct head has no such descendant, since get_head walks down to a leaf,
+// so one means the head is stuck. When root is the selected head, its children count only on a
+// payload variant get_head could have walked to. Viability is judged on blocks, not on get_head's
+// payload nodes: a block whose children all sit on one variant and are all non-viable is dropped
+// even when its other variant is a viable leaf. That needs a long non-finality period and errs
+// toward serving duties.
+func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	var pending []common.Hash
+	for _, child := range f.children(root) {
+		if !f.cutOffByInvalidation(child) && f.reachableFromSelectedHead(root, child) {
+			pending = append(pending, child)
+		}
+	}
+	if len(pending) == 0 {
+		return false
+	}
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	viable := make(map[common.Hash]*cltypes.BeaconBlockHeader)
+	for _, child := range pending {
+		f.markViableUncutBlocks(child, viable, currentEpoch, justified)
+	}
+	for len(pending) > 0 {
+		block := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		header, ok := viable[block]
+		if !ok {
+			continue
+		}
+		if header.Slot > slot {
+			return true
+		}
+		pending = append(pending, f.children(block)...)
+	}
+	return false
+}
+
+// markViableUncutBlocks is getFilterBlockTree without the children an invalidation cut off: a
+// block whose other children are all cut off is judged as a leaf, as get_head judges its EMPTY
+// node.
+func (f *ForkChoiceStore) markViableUncutBlocks(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justified solid.Checkpoint) bool {
+	header, has := f.forkGraph.GetHeader(blockRoot)
+	if !has {
+		return false
+	}
+	anyChild, anyViable := false, false
+	for _, child := range f.children(blockRoot) {
+		if f.cutOffByInvalidation(child) {
+			continue
+		}
+		anyChild = true
+		if f.markViableUncutBlocks(child, blocks, currentEpoch, justified) {
+			anyViable = true
+		}
+	}
+	if anyViable || (!anyChild && f.isViableLeaf(blockRoot, header, currentEpoch, justified)) {
+		blocks[blockRoot] = header
+		return true
+	}
+	return false
+}
+
 // BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
 // Blocks parked between network-service retries have not entered OnBlock and are not counted.
 func (f *ForkChoiceStore) BlockProcessing() bool {
@@ -653,7 +747,11 @@ func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child common
 
 // Time returns current time
 func (f *ForkChoiceStore) Time() uint64 {
-	return f.time.Load()
+	return f.timeMs.Load() / 1000
+}
+
+func (f *ForkChoiceStore) GenesisTime() uint64 {
+	return f.genesisTime
 }
 
 // ProposerBoostRoot returns proposer boost root
@@ -739,16 +837,68 @@ func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
 	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
-func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+	current := f.forkGraph.CurrentStateLocked(blockRoot)
+	if current == nil {
+		return nil, false, nil
+	}
+	start := time.Now()
+	defer currentStateCopy.ObserveDuration(start)
+	copied, err := current.Copy()
+	return copied, true, err
+}
+
+func (f *ForkChoiceStore) copyCurrentState(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+	return f.copyCurrentStateLocked(blockRoot)
+}
+
+func (f *ForkChoiceStore) copyStateAtBlockRootLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentStateLocked(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+func (f *ForkChoiceStore) getStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	if current := f.forkGraph.CurrentStateLocked(blockRoot); current != nil {
+		return current, nil
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentState(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	return f.forkGraph.ReplayState(blockRoot)
+}
+
+// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies a replayed
+// state, because replay leaves pointers to stored block objects in it.
+func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	copied, current, err := f.copyCurrentState(blockRoot)
+	if current || err != nil {
+		return copied, err
+	}
+	replayed, err := f.forkGraph.ReplayState(blockRoot)
+	if replayed == nil || err != nil {
+		return replayed, err
+	}
+	return replayed.Copy()
 }
 
 func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
 	f.mu.RLock()
-	defer f.mu.RUnlock()
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if current := f.forkGraph.CurrentStateLocked(blockRoot); current != nil {
+		defer f.mu.RUnlock()
+		return fn(current)
+	}
+	f.mu.RUnlock()
+	blockState, err := f.forkGraph.ReplayState(blockRoot)
 	if err != nil {
 		return err
 	}
@@ -842,21 +992,29 @@ func (f *ForkChoiceStore) Participation(epoch uint64) (*solid.ParticipationBitLi
 }
 
 func (f *ForkChoiceStore) ForkNodes() []ForkNode {
+	trackGloasWeights := f.trackGloasWeights()
+	if trackGloasWeights {
+		_, _, _ = f.GetHeadNode()
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	forkNodes := make([]ForkNode, 0, len(f.weights))
-	for blockRoot, weight := range f.weights {
+	weights := f.weights
+	if trackGloasWeights {
+		weights = f.gloasWeightTree.snapshotWeights()
+	}
+	forkNodes := make([]ForkNode, 0, len(weights))
+	for blockRoot, weight := range weights {
 		header, has := f.forkGraph.GetHeader(blockRoot)
 		if !has {
 			continue
 		}
-		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			continue
-		}
-		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
-		if !has {
-			continue
+		justifiedCheckpoint, hasJustified := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		finalizedCheckpoint, hasFinalized := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !hasJustified || !hasFinalized {
+			if blockRoot != f.forkGraph.AnchorRoot() || blockRoot != f.JustifiedCheckpoint().Root {
+				continue
+			}
+			justifiedCheckpoint, finalizedCheckpoint = f.JustifiedCheckpoint(), f.FinalizedCheckpoint()
 		}
 		blockHash, _ := f.eth2Roots.Get(blockRoot)
 
@@ -1156,8 +1314,47 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	if !known || current != effective {
 		f.headHash = common.Hash{}
 		f.headPayloadStatus = cltypes.PayloadStatusPending
+		// The decision can rule out the published variant; get_head publishes again.
+		f.selectedHead.Store(nil)
 	}
 	return effective
+}
+
+// reachableFromSelectedHead reports whether get_head could reach child from root when root is
+// the selected head: a child on the other payload variant counts only while that variant is not
+// a candidate, that is, an unavailable FULL. Without a published head every child counts.
+func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) bool {
+	head := f.selectedHead.Load()
+	if head == nil || head.Root != root || (head.PayloadStatus != cltypes.PayloadStatusEmpty && head.PayloadStatus != cltypes.PayloadStatusFull) {
+		return true
+	}
+	block, ok := f.forkGraph.GetBlock(child)
+	if !ok || block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+		return true
+	}
+	variant := f.getParentPayloadStatus(block.Block)
+	return variant == head.PayloadStatus || (variant == cltypes.PayloadStatusFull && !f.isPayloadAvailable(root))
+}
+
+// cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
+// invalidations: an invalid pre-Gloas block, a child of one (it has no EMPTY alternative), or a
+// Gloas block built on an invalid parent payload.
+func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return false
+	}
+	if block.Version() < clparams.GloasVersion {
+		return f.forkGraph.IsBlockInvalid(root)
+	}
+	parentRoot := block.Block.ParentRoot
+	if !f.forkGraph.IsBlockInvalid(parentRoot) {
+		return false
+	}
+	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {
+		return true
+	}
+	return f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
 }
 
 func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
@@ -1194,12 +1391,31 @@ func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.
 	return f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 }
 
+func (f *ForkChoiceStore) existingStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	st, err := f.GetStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		return nil, fork_graph.ErrStateNotFound
+	}
+	return st, nil
+}
+
 func (f *ForkChoiceStore) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	return f.forkGraph.GetBalances(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.Balances(), nil
 }
 
 func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	return f.forkGraph.GetInactivitiesScores(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.InactivityScores(), nil
 }
 
 func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error) {
@@ -1211,7 +1427,11 @@ func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot common.Hash
 }
 
 func (f *ForkChoiceStore) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {
-	return f.forkGraph.GetValidatorSet(blockRoot)
+	st, err := f.existingStateAtBlockRoot(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	return st.ValidatorSet(), nil
 }
 
 func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot common.Hash) (*solid.ParticipationBitList, error) {

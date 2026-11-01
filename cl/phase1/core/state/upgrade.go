@@ -385,13 +385,6 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 	cfg := b.BeaconConfig()
 
-	// Build a set of validator pubkeys
-	validatorPubkeys := make(map[common.Bytes48]struct{})
-	b.ValidatorSet().Range(func(_ int, v solid.Validator, _ int) bool {
-		validatorPubkeys[v.PublicKey()] = struct{}{}
-		return true
-	})
-
 	// Process pending deposits
 	pendingDeposits := b.GetPendingDeposits()
 	newPendingDeposits := solid.NewPendingDepositList(cfg)
@@ -400,7 +393,7 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 		deposit := pendingDeposits.Get(i)
 
 		// Deposits for existing validators stay in pending queue
-		if _, isValidator := validatorPubkeys[deposit.PubKey]; isValidator {
+		if _, isValidator := b.ValidatorIndexByPubkey(deposit.PubKey); isValidator {
 			newPendingDeposits.Append(deposit)
 			continue
 		}

@@ -18,6 +18,7 @@ package p2p
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -32,6 +33,67 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
+	reads := make([]uint64, 100_000)
+	for i := range reads {
+		reads[i] = uint64(i)
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, reads, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+	hash := crypto.Keccak256Hash(raw)
+	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: types.BalItemCost, ExpectedHash: hash}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "block access list too large")
+	require.True(t, bad)
+	require.Empty(t, out)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
+	slots := make([]rlp.RawValue, 100_000)
+	for i := range slots {
+		slots[i] = rlp.RawValue{0xc2, 0x80, 0xc0}
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, slots, []any{}, []any{}, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 1_000_000_000, ExpectedHash: crypto.Keccak256Hash(raw)}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "empty slot changes")
+	require.True(t, bad)
+	require.Empty(t, out)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestValidateBALResponseChecksHashBeforeDecoding(t *testing.T) {
+	changes := make([][2]uint64, 100_000)
+	for i := range changes {
+		changes[i] = [2]uint64{uint64(i), 1}
+	}
+	raw, err := rlp.EncodeToBytes([]any{[]any{
+		common.Address{}, []any{}, []any{}, changes, []any{}, []any{},
+	}})
+	require.NoError(t, err)
+	reqs := []BALRequest{{Hash: common.Hash{1}, GasLimit: 60_000_000, ExpectedHash: common.Hash{0xff}}}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "wanted")
+	require.True(t, bad)
+	require.Empty(t, out)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
 
 func TestValidateBALResponse(t *testing.T) {
 	t.Parallel()

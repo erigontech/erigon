@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -370,4 +371,24 @@ func TestTrieContextBranchOwnedCopiesOnlyBorrowedBytes(t *testing.T) {
 	got, _, err = owned.BranchOwned([]byte{0xaa})
 	require.NoError(t, err)
 	require.Same(t, &data[0], &got[0])
+}
+
+type identityLeafRefsReader struct{ ownedTestStateReader }
+
+func (r identityLeafRefsReader) LeafRefs(_, data []byte) *commitment.LeafRefs {
+	if len(data) > 0 && &data[0] == &r.branchData[0] {
+		return &commitment.LeafRefs{}
+	}
+	return nil
+}
+
+func TestSyncStateReaderKeepsOwnedBranchIdentity(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	fake := identityLeafRefsReader{ownedTestStateReader{&testStateReader{branchData: []byte{1, 2, 3}}}}
+	tc := &TrieContext{stateReader: newSyncStateReader(&mu, fake)}
+
+	got, _, err := tc.BranchOwned([]byte{0xaa})
+	require.NoError(t, err)
+	require.NotNil(t, tc.LeafRefs([]byte{0xaa}, got))
 }

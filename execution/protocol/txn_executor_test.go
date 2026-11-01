@@ -71,6 +71,36 @@ func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) 
 	)
 }
 
+// panicOnBalanceReader panics on the first account read, standing in for a genuine
+// infrastructure failure during versioned transition execution.
+type panicOnBalanceReader struct {
+	*state.NoopReader
+}
+
+func (panicOnBalanceReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	panic("injected exec panic")
+}
+
+// TestExecute_VersionedPanicWrapsErrExecPanic pins that a panic recovered inside
+// versioned transition execution surfaces as ErrExecPanic, so downstream (TxTask.Execute)
+// can route it operationally rather than condemning the block as invalid.
+func TestExecute_VersionedPanicWrapsErrExecPanic(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.NewWithVersionMap(panicOnBalanceReader{state.NewNoopReader()}, state.NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(0, 0)
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+
+	_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.ErrorIs(t, err, ErrExecPanic,
+		"a panic in versioned execution must surface as ErrExecPanic (operational, not a block verdict)")
+}
+
 type nilBlobFeeCapMessage struct {
 	*types.Message
 }
@@ -1738,4 +1768,38 @@ func TestNoBALSkipsAccessRecording(t *testing.T) {
 			ibs.Close()
 		}
 	}
+}
+
+type serviceTxEngine struct {
+	rules.EngineReader
+	service bool
+}
+
+func (e *serviceTxEngine) IsServiceTransaction(accounts.Address, rules.SystemCall) bool {
+	return e.service
+}
+
+// A re-executed tx reuses its message, so the service-tx decision must be taken
+// again on every application rather than stay on the message.
+func TestApplyMessage_ServiceTxDecisionNotKeptOnReusedMessage(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	msg := newSimpleTransferMsg(sender, recipient, 21000, true)
+	engine := &serviceTxEngine{}
+
+	apply := func(service bool) error {
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		blockCtx := evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: blockGasLimit, BaseFee: *uint256.NewInt(1)}
+		evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{})
+		engine.service = service
+		_, err := ApplyMessage(evm, msg, new(GasPool).AddGas(blockGasLimit), true, false, engine)
+		return err
+	}
+
+	require.NoError(t, apply(true))
+	require.ErrorIs(t, apply(false), ErrFeeCapTooLow)
 }

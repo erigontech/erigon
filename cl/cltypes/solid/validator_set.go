@@ -169,16 +169,18 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.MerkleTree = nil
 	}
 	if v.progressiveTrees != nil {
-		t.progressiveTrees = make([]*merkle_tree.MerkleTree, len(v.progressiveTrees))
+		t.progressiveTrees = slices.Grow(t.progressiveTrees[:0], len(v.progressiveTrees))[:len(v.progressiveTrees)]
 		start := 0
 		capacity := 1
 		for i, tree := range v.progressiveTrees {
-			t.progressiveTrees[i] = &merkle_tree.MerkleTree{}
-			tree.CopyInto(t.progressiveTrees[i])
 			segmentStart := start
-			t.progressiveTrees[i].SetComputeLeafFn(t.progressiveLeafFn(segmentStart))
 			start += capacity
 			capacity *= 4
+			if t.progressiveTrees[i] == nil {
+				t.progressiveTrees[i] = &merkle_tree.MerkleTree{}
+			}
+			tree.CopyInto(t.progressiveTrees[i])
+			t.progressiveTrees[i].SetComputeLeafFn(t.progressiveLeafFn(segmentStart))
 		}
 	} else {
 		t.progressiveTrees = nil
@@ -235,10 +237,10 @@ func (v *ValidatorSet) Get(idx int) Validator {
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
 	if v.MerkleTree == nil {
-		v.MerkleTree = &merkle_tree.MerkleTree{}
+		tree := &merkle_tree.MerkleTree{}
 		cap := uint64(v.c)
 		hashBuffer := make([]byte, 8*32)
-		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+		serialLeafFn := func(idx int, out []byte) {
 			validator := v.Get(idx)
 			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
 				panic(err)
@@ -247,7 +249,21 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
 				panic(err)
 			}
-		}, &cap)
+		}
+		helperCount := validatorRootWorkers.acquireHelpers(v.l)
+		if helperCount == 0 {
+			tree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, serialLeafFn, &cap)
+			v.MerkleTree = tree
+		} else {
+			defer validatorRootWorkers.releaseHelpers(helperCount)
+			roots := validatorRootWorkers.computeRoots(v, helperCount+1)
+			tree, coreRoot := merkle_tree.BuildFromLeafRoots(
+				roots, v.l, merkle_tree.OptimalMaxTreeCacheDepth, &cap, helperCount+1, serialLeafFn,
+			)
+			v.MerkleTree = tree
+			lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
+			return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
+		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 	coreRoot := v.MerkleTree.ComputeRoot()
@@ -255,12 +271,26 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 }
 
 func (v *ValidatorSet) HashSSZProgressive() ([32]byte, error) {
+	var roots []byte
+	var segmentRoots []common.Hash
+	workerCount := 1
 	if v.progressiveTrees == nil {
-		v.initializeProgressiveTrees()
+		helperCount := validatorRootWorkers.acquireHelpers(v.l)
+		if helperCount > 0 {
+			defer validatorRootWorkers.releaseHelpers(helperCount)
+			workerCount = helperCount + 1
+			roots = validatorRootWorkers.computeRoots(v, workerCount)
+		}
+		segmentRoots = v.initializeProgressiveTrees(roots, workerCount)
 	}
 	var root common.Hash
-	for _, tree := range slices.Backward(v.progressiveTrees) {
-		left := tree.ComputeRoot()
+	for i, tree := range slices.Backward(v.progressiveTrees) {
+		var left common.Hash
+		if segmentRoots != nil {
+			left = segmentRoots[i]
+		} else {
+			left = tree.ComputeRoot()
+		}
 		root = crypto.Sha256(left[:], root[:])
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
@@ -329,19 +359,36 @@ func (v *ValidatorSet) zeroTreeHash(idx int) {
 	}
 }
 
-func (v *ValidatorSet) initializeProgressiveTrees() {
-	v.progressiveTrees = make([]*merkle_tree.MerkleTree, 0)
+func (v *ValidatorSet) initializeProgressiveTrees(roots []byte, workerCount int) []common.Hash {
+	trees := make([]*merkle_tree.MerkleTree, 0)
+	var segmentRoots []common.Hash
 	start := 0
 	capacity := 1
 	for start < v.l {
 		count := min(capacity, v.l-start)
-		tree := &merkle_tree.MerkleTree{}
 		limit := uint64(capacity)
-		tree.Initialize(count, merkle_tree.OptimalMaxTreeCacheDepth, v.progressiveLeafFn(start), &limit)
-		v.progressiveTrees = append(v.progressiveTrees, tree)
+		computeLeaf := v.progressiveLeafFn(start)
+		var tree *merkle_tree.MerkleTree
+		if roots != nil {
+			var root common.Hash
+			tree, root = merkle_tree.BuildFromLeafRoots(
+				roots[start*32:(start+count)*32], count, merkle_tree.OptimalMaxTreeCacheDepth,
+				&limit, workerCount, computeLeaf,
+			)
+			segmentRoots = append(segmentRoots, root)
+		} else {
+			tree = &merkle_tree.MerkleTree{}
+			tree.Initialize(count, merkle_tree.OptimalMaxTreeCacheDepth, computeLeaf, &limit)
+		}
+		trees = append(trees, tree)
+		if validatorRootWorkers.progressiveTreeHook != nil {
+			validatorRootWorkers.progressiveTreeHook()
+		}
 		start += capacity
 		capacity *= 4
 	}
+	v.progressiveTrees = trees
+	return segmentRoots
 }
 
 func (v *ValidatorSet) appendProgressiveLeaf(index int) {

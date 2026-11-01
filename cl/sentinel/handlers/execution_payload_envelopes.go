@@ -66,13 +66,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return nil
 	}
 
-	// Compute minimum serve slot: max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS) * SLOTS_PER_EPOCH
-	minServeEpoch := c.beaconConfig.GloasForkEpoch
-	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
-		if lowerBound := curEpoch - c.beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
-			minServeEpoch = lowerBound
-		}
-	}
+	minServeEpoch := minExecutionPayloadServeEpoch(c.beaconConfig, curEpoch, c.forkChoiceReader.FinalizedCheckpoint().Epoch)
 
 	startSlot := max(req.StartSlot, minServeEpoch*c.beaconConfig.SlotsPerEpoch)
 	if startSlot >= endSlot {
@@ -271,14 +265,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 	defer tx.Rollback()
 
-	// Compute serve range: [max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS), current_epoch]
-	// Spec: consensus-specs PR #4950
-	minServeEpoch := c.beaconConfig.GloasForkEpoch
-	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
-		if lowerBound := curEpoch - c.beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
-			minServeEpoch = lowerBound
-		}
-	}
+	minServeEpoch := minExecutionPayloadServeEpoch(c.beaconConfig, curEpoch, c.forkChoiceReader.FinalizedCheckpoint().Epoch)
 
 	count := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
@@ -338,4 +325,17 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	})
 
 	return nil
+}
+
+func minExecutionPayloadServeEpoch(beaconConfig *clparams.BeaconChainConfig, currentEpoch, finalizedEpoch uint64) uint64 {
+	minServeEpoch := beaconConfig.GloasForkEpoch
+	if currentEpoch > beaconConfig.MinEpochsForBlockRequests() {
+		if lowerBound := currentEpoch - beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
+			minServeEpoch = lowerBound
+		}
+	}
+	if finalizedEpoch < minServeEpoch {
+		minServeEpoch = max(beaconConfig.GloasForkEpoch, finalizedEpoch)
+	}
+	return minServeEpoch
 }

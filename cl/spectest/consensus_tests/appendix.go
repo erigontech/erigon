@@ -290,7 +290,8 @@ func addSszTests() {
 		With("DepositMessage", sszStaticTestByEmptyObject(&depositMessage{})).
 		With("Eth1Block", sszStaticTestByEmptyObject(&validatorEth1Block{})).
 		With("ForkData", sszStaticTestByEmptyObject(&forkData{})).
-		With("HistoricalBatch", spectest.UnimplementedHandler).
+		With("HistoricalBatch", sszStaticTestByEmptyObject(newHistoricalBatch(int(clparams.MainnetBeaconConfig.SlotsPerHistoricalRoot)))).
+		With("NewPayloadRequest", sszStaticTestNewObjectByFunc(newNewPayloadRequest)).
 		With("PartialDataColumnGroupID", sszStaticTestByEmptyObject(&partialDataColumnGroupID{})).
 		With("PowBlock", sszStaticTestByEmptyObject(&powBlock{})).
 		With("SigningData", sszStaticTestByEmptyObject(&signingData{}))

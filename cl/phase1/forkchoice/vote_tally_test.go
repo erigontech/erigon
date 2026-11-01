@@ -90,3 +90,47 @@ func TestVoteTallyMatchesFullRecount(t *testing.T) {
 	}
 	require.Greater(t, compared, 500)
 }
+
+func TestVoteTallyReusesSlotsAndOmitsZeroWeightRoots(t *testing.T) {
+	const validators = 4
+	cs := &checkpointState{
+		balances:         make([]uint64, validators),
+		actives:          make([]byte, 1),
+		slasheds:         make([]byte, 1),
+		validatorSetSize: validators,
+	}
+	for i := range validators {
+		cs.balances[i] = 32_000_000_000
+		writeToBitset(cs.actives, i, true)
+	}
+	f := &ForkChoiceStore{latestMessages: newLatestMessagesStore(validators)}
+	checkpoint := solid.Checkpoint{Epoch: 1}
+	roots := []common.Hash{{1}, {2}}
+	for epoch := range 8 {
+		root := roots[epoch%len(roots)]
+		f.setLatestMessage(0, LatestMessage{Epoch: uint64(epoch), Root: root})
+		require.Equal(t, map[common.Hash]uint64{root: 32_000_000_000}, f.voteTally.votes(f, checkpoint, cs), "epoch %d", epoch)
+		require.LessOrEqual(t, len(f.voteTally.weights), len(roots)+1, "epoch %d", epoch)
+	}
+}
+
+func TestVoteTallyResetsOnlyOnGloasAttestation(t *testing.T) {
+	for _, gloasForkEpoch := range []uint64{0, 1} {
+		f, _ := newHeadSnapshotTestStore()
+		f.beaconCfg.GloasForkEpoch = gloasForkEpoch
+		f.beaconCfg.InitializeForkSchedule()
+		f.voteTally.votes(f, solid.Checkpoint{Epoch: 1}, newVoteTallyTestState(rand.New(rand.NewSource(1)), 16))
+		require.NotNil(t, f.voteTally.state)
+
+		f.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+			Slot:            1,
+			BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		}}, []uint64{1})
+
+		if gloasForkEpoch == 0 {
+			require.Zero(t, f.voteTally)
+		} else {
+			require.NotNil(t, f.voteTally.state)
+		}
+	}
+}

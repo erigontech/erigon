@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -204,7 +205,14 @@ func keyWithHashPrefix(size int, prefix []byte, next *uint64) []byte {
 }
 
 func convertTestDomains(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
+	return convertTestDomainsWithParallel(t, stepSize, statecfg.ExperimentalParallelCommitment)
+}
+
+func convertTestDomainsWithParallel(t *testing.T, stepSize uint64, parallel bool) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalParallelCommitment = parallel
+	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = previousParallel })
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	rwTx, err := db.BeginTemporalRw(t.Context())
@@ -245,8 +253,12 @@ func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 }
 
 func buildRecreatedOwnerFiles(t *testing.T, stepSize, steps uint64, accounts int, laterSlot bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
+	return buildRecreatedOwnerFilesWithParallel(t, stepSize, steps, accounts, laterSlot, statecfg.ExperimentalParallelCommitment)
+}
+
+func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, accounts int, laterSlot, parallel bool) (kv.TemporalRwDB, *state.Aggregator, []byte) {
 	t.Helper()
-	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	db, agg, rwTx, domains := convertTestDomainsWithParallel(t, stepSize, parallel)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
 
@@ -468,6 +480,7 @@ func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, mod
 		c, foldErr := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
 		results = append(results, result{filepath.Base(path), fmt.Sprintf("%x", c.Root), fmt.Sprintf("%x", recorded), foldErr})
 
+		agg.CloseFilesNoReopen()
 		base := strings.TrimSuffix(path, ".kv")
 		for _, ext := range []string{".kv", ".bt", ".kvei", ".kvi"} {
 			if rmErr := dir.RemoveFile(base + ext); rmErr != nil {
@@ -566,4 +579,112 @@ func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalR
 	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
 	convertFixture(t, db, agg, mode)
 	return db, agg
+}
+
+func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
+	const stepSize, steps = 4, 2
+	useCommitmentSchema(t, false)
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	next := uint64(1)
+	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+	for txNum := range uint64(stepSize * steps) {
+		for _, a := range addrs {
+			putAccount(a, txNum)
+		}
+		if txNum%stepSize == stepSize-1 {
+			_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/stepSize, txNum, "", nil)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	require.NoError(t, err)
+	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
+	keys, vals := readKVFile(t, agg, kvs[len(kvs)-1])
+	idx := slices.IndexFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
+	require.GreaterOrEqual(t, idx, 0)
+	_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", c.Root))
+}
+
+func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
+	const stepSize, steps = 4, 2
+	useCommitmentSchema(t, false)
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	_, _, putAccount := domainWriter(t, domains, rwTx)
+	next := uint64(1)
+	addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next)}
+	for txNum := range uint64(stepSize * steps) {
+		for _, a := range addrs {
+			putAccount(a, txNum)
+		}
+		if txNum%stepSize == stepSize-1 {
+			_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/stepSize, txNum, "", nil)
+			require.NoError(t, err)
+		}
+	}
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback) //nolint:gocritic
+	_, err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
+	tx.Rollback()
+	require.Error(t, err)
+	require.Equal(t, kvs, commitmentFilesByEnd(t, agg.Dirs().SnapDomain))
+}
+
+func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
+	for _, name := range []string{"branch", "empty"} {
+		t.Run(name, func(t *testing.T) {
+			const stepSize, steps = 1, 4
+			useCommitmentSchema(t, false)
+			db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+			_, del, putAccount := domainWriter(t, domains, rwTx)
+			next := uint64(1)
+			addrs := [][]byte{addressWithHashPrefix(t, []byte{4}, &next), addressWithHashPrefix(t, []byte{4}, &next)}
+			other := addressWithHashPrefix(t, []byte{9}, &next)
+			for txNum := range uint64(stepSize * steps) {
+				switch {
+				case txNum < stepSize*2:
+					for _, a := range addrs {
+						putAccount(a, txNum)
+					}
+				case name == "branch":
+					putAccount(other, txNum)
+				case txNum == stepSize*2:
+					for _, a := range addrs {
+						del(kv.AccountsDomain, a, txNum)
+					}
+				}
+				_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum, txNum, "", nil)
+				require.NoError(t, err)
+			}
+			require.NoError(t, domains.Flush(t.Context(), rwTx))
+			require.NoError(t, rwTx.Commit())
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, steps-1, unboundedFinalityCtx, false))
+			require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
+
+			runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+			c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+			require.NoError(t, err)
+			kvs := commitmentFilesByEnd(t, agg.Dirs().SnapDomain)
+			keys, vals := readKVFile(t, agg, kvs[len(kvs)-1])
+			idx := slices.IndexFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
+			require.GreaterOrEqual(t, idx, 0)
+			_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
+			require.NoError(t, err)
+			require.Equal(t, fmt.Sprintf("%x", recorded), fmt.Sprintf("%x", c.Root))
+			require.Greater(t, len(kvs), 1)
+		})
+	}
 }

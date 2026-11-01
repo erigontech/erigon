@@ -455,12 +455,14 @@ func TestRecordCodec(t *testing.T) {
 			suffix := packPath(bytes.Repeat([]byte{1}, 60), nil)
 			extension := extFixture([]byte{6, 7, 8})
 			second := extFixture([]byte{9})
-			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0005,
+			data := commitmenttest.Record(&commitmenttest.RecordSpec{
+				Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0005,
 				Extensions: [16][]byte{0: extension, 2: second},
 				Leaves: [16]commitmenttest.Leaf{
 					1: {Suffix: suffix, Value: []byte{0x11, 0x12}},
 					3: {Suffix: suffix, Value: []byte{0x31}},
-				}})
+				},
+			})
 			require.NoError(t, Validate(data, depth))
 			r := Record{data: data, depth: depth}
 			l := r.layout()
@@ -501,12 +503,14 @@ func TestRecordCodec(t *testing.T) {
 			require.Equal(t, value, gotValue)
 		}},
 		{"E27/RecordDecodeNoAllocations", func(t *testing.T) {
-			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0001,
+			data := commitmenttest.Record(&commitmenttest.RecordSpec{
+				Flags: hdrHasChildExt, ChildMask: 0x000f, LeafMask: 0x000a, ExtensionMask: 0x0001,
 				Extensions: [16][]byte{0: extFixture([]byte{6, 7})},
 				Leaves: [16]commitmenttest.Leaf{
 					1: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{1}},
 					3: {Suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), Value: []byte{3}},
-				}})
+				},
+			})
 			r := Record{data: data, depth: 3}
 			require.Zero(t, testing.AllocsPerRun(100, func() {
 				l := r.layout()
@@ -786,4 +790,35 @@ func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
 	}
 	hash := keccak.Sum256(encodedBytes)
 	return append(dst[:start], hash[:]...)
+}
+
+func TestUnfoldRejectsInvalidRecords(t *testing.T) {
+	branch := func(path []byte) []byte {
+		n := fork(path)
+		n.plane = planeAccount
+		n.setStoredChild(0, bytes.Repeat([]byte{1}, 32), nil)
+		n.setStoredChild(1, bytes.Repeat([]byte{2}, 32), nil)
+		data := encodeRecord(n, len(path), nil)
+		return data[:len(data)-10]
+	}
+	for _, tc := range []struct {
+		name string
+		path []byte
+		data []byte
+	}{
+		{"self-extension flag without an extension", nil, []byte{0x90}},
+		{"bare header at the root", nil, []byte{0x10}},
+		{"bare header below the root", []byte{3}, []byte{0x10}},
+		{"short leaf root", nil, []byte{0x80, 1, 2, 3}},
+		{"truncated slot at the root", nil, branch(nil)},
+		{"truncated slot below the root", []byte{3}, branch([]byte{3})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newShardedContext()
+			require.NoError(t, ctx.PutBranch(nodeKey(planeAccount, nil, tc.path, nil), tc.data, nil))
+			var err error
+			require.NotPanics(t, func() { _, err = unfold(ctx, tc.path, planeAccount, nil) })
+			require.Error(t, err)
+		})
+	}
 }

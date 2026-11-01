@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -118,8 +117,25 @@ type syncStateReader struct {
 
 var _ StateReader = (*syncStateReader)(nil)
 
-func newSyncStateReader(mu *sync.Mutex, src StateReader) *syncStateReader {
-	return &syncStateReader{mu: mu, src: src}
+func newSyncStateReader(mu *sync.Mutex, src StateReader) StateReader {
+	r := &syncStateReader{mu: mu, src: src}
+	if _, ok := src.(ownedBranchReader); ok {
+		return ownedSyncStateReader{r}
+	}
+	return r
+}
+
+type ownedSyncStateReader struct{ *syncStateReader }
+
+func (ownedSyncStateReader) ReadsOwnedBranches() {}
+
+func (r ownedSyncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if d != kv.CommitmentDomain {
+		return r.syncStateReader.Read(d, plainKey, stepSize)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.src.Read(d, plainKey, stepSize)
 }
 
 func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
@@ -341,10 +357,8 @@ type ParentState interface {
 }
 
 var (
-	parentRecords      atomic.Pointer[ParentRecords]
-	parentReadsWanted  atomic.Bool
-	mxParentRecordHit  = metrics.GetOrCreateCounter("witness_parent_record_hits_total")
-	mxParentRecordMiss = metrics.GetOrCreateCounter("witness_parent_record_misses_total")
+	parentRecords     atomic.Pointer[ParentRecords]
+	parentReadsWanted atomic.Bool
 )
 
 func WantParentReads(want bool) { parentReadsWanted.Store(want) }
@@ -374,10 +388,8 @@ func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return n
 func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if d == kv.CommitmentDomain && r.recs != nil {
 		if enc, step, ok := r.recs.Get(plainKey); ok {
-			mxParentRecordHit.Inc()
 			return bytes.Clone(enc), step, nil
 		}
-		mxParentRecordMiss.Inc()
 	}
 	enc, step, err := r.tx.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {

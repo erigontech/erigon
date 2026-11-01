@@ -63,7 +63,6 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 
 	reader := &codeReader{addr: addr, account: &acc, code: staleDelegation} // ...but CodeDomain still holds the stale bytes
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
 
@@ -80,67 +79,31 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 	assert.False(t, ok, "an empty-codehash account must not read as 7702-delegated")
 }
 
-// committedCodeIBS builds a noMaterialize IBS over one committed contract with
-// its CodePath read set warmed. accountHash, when set, makes the account record
-// disagree with the CodeDomain bytes.
-func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash) (*IntraBlockState, accounts.Address) {
-	tb.Helper()
-
+// The account record is the authority for the hash of committed code: the
+// CodeDomain is keyed by address, so its bytes can disagree with the record.
+func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
-	code := make([]byte, codeLen)
-	for i := range code {
-		code[i] = byte(i)
-	}
-
+	code := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}
+	recordHash := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xDE, 0xAD}))
 	acc := accounts.NewAccount()
 	acc.Nonce = 1
 	acc.Incarnation = 1
 	acc.Balance.SetUint64(1000)
-	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	if accountHash != nil {
-		acc.CodeHash = *accountHash
-	}
+	acc.CodeHash = recordHash
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: code}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
 	ibs.SetVersion(0)
-
 	got, err := ibs.GetCode(addr)
-	require.NoError(tb, err)
-	require.Len(tb, got, codeLen)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
 
-	return ibs, addr
-}
-
-// TestCommittedCodeHashComesFromAccountRecord pins the account record as the
-// authority for committed code. The CodeDomain is keyed by address, so it can
-// hold bytes the account no longer owns — a cleared 7702 delegation leaves them.
-func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
-	t.Run("account hash agrees with the bytes", func(t *testing.T) {
-		ibs, addr := committedCodeIBS(t, 4096, nil)
-
-		so, err := ibs.getStateObject(addr, false)
-		require.NoError(t, err)
-		require.NotNil(t, so)
-
-		expected := accounts.InternCodeHash(crypto.Keccak256Hash(so.code.Bytes))
-		require.Equal(t, expected, so.data.CodeHash)
-		require.Equal(t, expected, so.code.Hash)
-	})
-
-	t.Run("stale CodeDomain bytes do not override the account hash", func(t *testing.T) {
-		stale := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xDE, 0xAD}))
-		ibs, addr := committedCodeIBS(t, 4096, &stale)
-
-		so, err := ibs.getStateObject(addr, false)
-		require.NoError(t, err)
-		require.NotNil(t, so)
-
-		require.Equal(t, stale, so.data.CodeHash, "account record must stay authoritative")
-		require.Equal(t, stale, so.code.Hash)
-		require.Equal(t, stale, so.original.CodeHash)
-	})
+	so, err := ibs.getStateObject(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+	require.Equal(t, recordHash, so.data.CodeHash, "account record must stay authoritative")
+	require.Equal(t, recordHash, so.code.Hash)
+	require.Equal(t, recordHash, so.original.CodeHash)
 }
 
 // TestPriorTxCodeWriteHashComesFromTheCell pins the cell as the authority for a
@@ -159,7 +122,6 @@ func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Hash: cellHash, Bytes: priorCode}, true)
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 
@@ -189,7 +151,6 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Hash: cellHash, Bytes: priorCode}, true)
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 
@@ -228,7 +189,6 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Bytes: []byte{0x60, 0x00}}, true)
 
 	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 7)
 	ibs.SetVersion(0)
 

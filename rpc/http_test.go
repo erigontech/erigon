@@ -119,6 +119,40 @@ func TestHTTPResponseWithEmptyGet(t *testing.T) {
 	confirmHTTPRequestYieldsStatusCode(t, http.MethodGet, "", "", http.StatusOK)
 }
 
+func TestHTTPGetQueryRequiresJSONContentType(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		wantStatus  int
+	}{
+		{"none", "", http.StatusUnsupportedMediaType},
+		{"textPlain", "text/plain", http.StatusUnsupportedMediaType},
+		{"json", contentType, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/?method=test_rets", nil)
+			require.NoError(t, err)
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			resp, err := ts.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantStatus, resp.StatusCode, string(body))
+			if tc.wantStatus == http.StatusOK {
+				require.Contains(t, string(body), `"result":""`)
+			}
+		})
+	}
+}
+
 // This checks that maxRequestContentLength is not applied to the response of a request.
 func TestHTTPRespBodyUnlimited(t *testing.T) {
 	if testing.Short() {

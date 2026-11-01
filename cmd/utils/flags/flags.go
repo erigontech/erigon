@@ -34,24 +34,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 )
 
-// DirectoryString is custom type which is registered in the flags library which cli uses for
-// argument parsing. This allows us to expand Value to an absolute path when
-// the argument is parsed
-type DirectoryString string
-
-func (s *DirectoryString) String() string {
-	return string(*s)
-}
-
-func (s *DirectoryString) Set(value string) error {
-	*s = DirectoryString(expandPath(value))
-	return nil
-}
-
-func (s *DirectoryString) Get() any {
-	return s.String()
-}
-
 // DirectoryFlag is a cli.Flag type which expands the received string to an absolute path.
 // e.g. ~/.ethereum -> /home/username/.ethereum
 type DirectoryFlag = cli.FlagBase[string, cli.StringConfig, directoryValue]

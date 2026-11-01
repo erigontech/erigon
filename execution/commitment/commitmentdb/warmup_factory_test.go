@@ -611,3 +611,14 @@ func TestConcurrentTrieContextSkipsPutterWithoutWorkerTx(t *testing.T) {
 	require.Zero(t, shared.putDels.Load(), "a worker with no read tx must not bind a putter to a nil one")
 	require.NoError(t, trieCtx.PutBranch([]byte("prefix"), []byte("data"), nil))
 }
+
+func TestConcurrentTrieContextFactoryReportsAFullReadTxLimitAsNoContext(t *testing.T) {
+	t.Parallel()
+	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
+	factory, _ := sdc.concurrentTrieContextFactory(t.Context(), &beginRoRecordingDB{}, nil, nil, 0, nil)
+	trieCtx, cleanup := factory(kv.WithNonBlockingAcquire(t.Context()))
+	if cleanup != nil {
+		defer cleanup()
+	}
+	require.Nil(t, trieCtx, "a fold that tries for a read tx and finds none runs that part on its own context")
+}

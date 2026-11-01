@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -362,6 +361,28 @@ func TestOpenRollingPin(t *testing.T) {
 	pin.close() // idempotent
 }
 
+func TestOpenRollingPinWarmTxsOnlyForV3(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+
+	statecfg.ExperimentalCommitmentV3 = false
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.Empty(t, pin.warm)
+
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.ExperimentalCommitmentV3 = true
+	pin, err = openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.NotEmpty(t, pin.warm)
+}
+
 // TestBuildAndCacheHeadCaptureStalePin drives the head-capture build with no held pin.
 // The parent-commitment gate rejects it, so nothing is cached and the pin is
 // re-established at the committed head for the next block.
@@ -445,6 +466,47 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 	t.Run("legacy", func(t *testing.T) { headCaptureReadsParentRecords(t, false) })
 	t.Run("v3", func(t *testing.T) { headCaptureReadsParentRecords(t, true) })
+}
+
+func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
+	previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+	for _, tc := range []struct {
+		name string
+		v3   bool
+	}{
+		{name: "legacy"},
+		{name: "v3", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statecfg.Schema = previousSchema
+			statecfg.ExperimentalCommitmentV3 = tc.v3
+			if tc.v3 {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			}
+			commitmentdb.WantParentReads(false)
+			cache := newWitnessResultCache(1, 0, true, true)
+			header, hash := encodeSyntheticHeader(t, 1)
+			cache.Add(hash, &ExecutionWitnessResult{})
+			dbg := &DebugAPIImpl{witnessCache: cache}
+			headerCh := make(chan [][]byte, 1)
+			headerCh <- [][]byte{header}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() {
+				RunWitnessCacheBuilder(ctx, dbg, headerCh)
+				close(done)
+			}()
+			require.Eventually(t, func() bool { return len(headerCh) == 0 }, time.Second, time.Millisecond)
+			require.Equal(t, tc.v3, commitmentdb.ParentReadsWanted())
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("builder did not stop")
+			}
+		})
+	}
 }
 
 func headCaptureReadsParentRecords(t *testing.T, commitmentV3 bool) {
@@ -912,12 +974,12 @@ func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTeste
 	return m, testChain
 }
 
-func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
-	previousAssert, previousCarry, previousSchema, previousV3 := dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3
+func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
+	previousAssert, previousSchema, previousV3 := dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
-		dbg.AssertEnabled, dbg.CommitmentBranchCarry, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousCarry, previousSchema, previousV3
+		dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousSchema, previousV3
 	})
-	dbg.AssertEnabled, dbg.CommitmentBranchCarry = true, true
+	dbg.AssertEnabled = true
 	commitmentdb.WantParentReads(true)
 	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
@@ -925,8 +987,6 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
 
-	adopted := metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()
-	filled := metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()
 	used := witnessCacheParentRecordsCounter.GetValueUint64()
 	stateHits := mxParentStateHit.GetValueUint64()
 	warmed := mxWarmRecords.GetValueUint64()
@@ -966,12 +1026,10 @@ func TestHeadCaptureOverCarriedRecordsMatchesDurablePerBlock(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, wantBytes, gotBytes, "block %d", n)
 	}
-	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_adopted_total").GetValueUint64()-adopted, "blocks validated one at a time adopt the carried records")
 	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
 	require.Positive(t, deletions, "some blocks hand their verified deletions to head-capture")
 	require.Positive(t, mxParentStateHit.GetValueUint64()-stateHits, "head-capture re-execution reads the validation's parent state")
 	require.Positive(t, mxWarmRecords.GetValueUint64()-warmed, "head-capture warms accessed paths the validation's records miss")
-	require.Positive(t, metrics.GetOrCreateCounter("commitment_branch_carry_refs_filled_total").GetValueUint64()-filled, "records adopted from a block's deltas get their leaf refs")
 }
 
 func TestHeadCaptureWarmPanicIsContained(t *testing.T) {

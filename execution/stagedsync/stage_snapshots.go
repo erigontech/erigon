@@ -560,9 +560,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
-	if dbg.NoPrune() {
-		return nil
-	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		if s.CurrentSyncCycle.IsInitialCycle {
@@ -594,10 +591,13 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 	}
 
+	if dbg.NoPrune() {
+		return nil
+	}
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneLimit = 10_000
+		pruneLimit = 100_000
 		pruneTimeout = time.Hour
 	}
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
@@ -610,7 +610,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 }
 
 func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
-	if dbg.NoRetire() {
+	if dbg.NoRetire() || dbg.NoPrune() {
 		return false, nil
 	}
 	tx, err := cfg.db.BeginRo(ctx)

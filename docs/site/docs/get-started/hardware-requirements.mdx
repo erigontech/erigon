@@ -16,7 +16,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Component | Recommendation | Notes |
 | --- | --- | --- |
 | Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so striping across a redundant array of independent disks (RAID 0) is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. On amd64, the CPU must support the `x86-64-v2` baseline (SSE4.2, POPCNT): Intel Nehalem (2008), AMD Bulldozer (2011) or newer. |
@@ -29,7 +29,7 @@ Use **ext4** or **XFS** on a single NVMe device. The disk figures below are meas
 
 Mount with `noatime` so reads do not generate metadata writes:
 
-```
+```text
 UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /data  ext4  defaults,noatime  0 2
 ```
 
@@ -37,7 +37,7 @@ Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, w
 
 ### Why the filesystem matters
 
-Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
+Erigon's bottleneck is disk **latency**, not throughput or input/output operations per second (IOPS) — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
 
 * **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
 * **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
@@ -66,7 +66,7 @@ It is a warning, not a refusal: the node starts and runs either way. A type Erig
 A few more points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
 
 * **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
-* **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
+* **For failure protection, use redundancy — not RAID 0.** A mirrored array and error-correcting code (ECC) memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
 * **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
 * **Erigon memory-maps its database.** Leave RAM free for the page cache rather than handing it to a filesystem or volume manager to cache on its own.
 * **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
@@ -87,7 +87,7 @@ These nodes were measured before the receipts cache was on by default. From 3.7 
 | --- | --- | --- | --- | --- |
 | Archive | {/* ds:mainnet:archive */}2.25 TB{/* ds:end */} | 4 TB | 32 GB | 64 GB |
 | Full (Default) | {/* ds:mainnet:full */}534.94 GB{/* ds:end */} | 2 TB | 16 GB | 32 GB |
-| Minimal | {/* ds:mainnet:minimal */}510.82 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
+| Minimal | {/* ds:mainnet:minimal */}524.45 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
 
 _Current Disk Usage measured as of {/* ds-date:mainnet */}2026-09-17{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 

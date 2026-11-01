@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -64,6 +65,8 @@ type maliciousColumnSentinel struct {
 	columnRequested chan struct{}
 	releaseColumn   chan struct{}
 	columnCalls     atomic.Int32
+	callTimesMu     sync.Mutex
+	columnCallTimes []time.Time
 	banOnce         sync.Once
 	banned          chan struct{}
 }
@@ -83,6 +86,9 @@ func (s *maliciousColumnSentinel) SendPeerRequest(ctx context.Context, req *sent
 		s.metadataOnce.Do(func() { close(s.metadataReady) })
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
+	s.callTimesMu.Lock()
+	s.columnCallTimes = append(s.columnCallTimes, time.Now())
+	s.callTimesMu.Unlock()
 	if s.columnRequested != nil {
 		s.columnOnce.Do(func() { close(s.columnRequested) })
 	}
@@ -164,7 +170,7 @@ func newColumnResponseRPCWithPeerAndForkEpoch(t *testing.T, cfg *clparams.Beacon
 		metadataReady:    make(chan struct{}),
 		banned:           make(chan struct{}),
 	}
-	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 	select {
 	case <-sentinel.metadataReady:
 	case <-time.After(30 * time.Second):
@@ -747,6 +753,47 @@ func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
+func TestRunDownloadDoesNotRepeatRequestsToPeerThatAnsweredNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.AltairForkEpoch = 0
+		cfg.BellatrixForkEpoch = 0
+		cfg.CapellaForkEpoch = 0
+		cfg.DenebForkEpoch = 0
+		cfg.ElectraForkEpoch = 0
+		cfg.FuluForkEpoch = 0
+		cfg.InitializeForkSchedule()
+		initTestBeaconConfig(&cfg)
+		rpcClient, sentinel := newColumnResponseRPC(t, &cfg, 100, nil)
+		d := &peerdas{
+			rpc:           rpcClient,
+			beaconConfig:  &cfg,
+			state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+			columnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		}
+		req := &downloadRequest{
+			beaconConfig: &cfg,
+			downloadTable: map[downloadTableEntry]map[uint64]bool{
+				{blockRoot: common.Hash{1}, slot: 100}: {0: true},
+			},
+		}
+		// Long enough to cross the 15 s peer refresh.
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancel()
+		d.runDownload(ctx, req, false)
+		synctest.Wait()
+
+		sentinel.callTimesMu.Lock()
+		defer sentinel.callTimesMu.Unlock()
+		times := sentinel.columnCallTimes
+		require.Greater(t, len(times), 1)
+		for i := 1; i < len(times); i++ {
+			require.GreaterOrEqual(t, times[i].Sub(times[i-1]), 2*time.Second, "gap before request %d", i)
+		}
+		require.Equal(t, 1, req.remainingEntriesCount())
+	})
+}
+
 func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -1164,7 +1211,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
 
 	select {
 	case <-sentinel.metadataReady:

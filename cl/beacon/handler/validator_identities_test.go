@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -41,7 +42,7 @@ type overwriteAfterViewSyncedData struct {
 
 func (s overwriteAfterViewSyncedData) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
 	return s.SyncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error {
-		defer func() { require.NoError(s.t, s.next.CopyInto(headState)) }()
+		defer func() { assert.NoError(s.t, s.next.CopyInto(headState)) }()
 		return fn(headState, root, slot)
 	})
 }

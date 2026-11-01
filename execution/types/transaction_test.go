@@ -575,41 +575,9 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 	return nil
 }
 
-func assertEqualBlobWrapper(orig *BlobTxWrapper, cpy *BlobTxWrapper) error {
-	// compare commitments, blobs, proofs
-	if want, got := len(orig.Commitments), len(cpy.Commitments); want != got {
-		return fmt.Errorf("parsed txn commitments have unequal size: want%v, got %v", want, got)
-	}
-
-	if want, got := len(orig.Blobs), len(cpy.Blobs); want != got {
-		return fmt.Errorf("parsed txn blobs have unequal size: want%v, got %v", want, got)
-	}
-
-	if want, got := len(orig.Proofs), len(cpy.Proofs); want != got {
-		return fmt.Errorf("parsed txn proofs have unequal size: want%v, got %v", want, got)
-	}
-
-	if want, got := orig.Commitments, cpy.Commitments; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed txn commitments unequal: want%v, got %v", want, got)
-	}
-
-	if want, got := orig.Blobs, cpy.Blobs; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed txn blobs unequal: want%v, got %v", want, got)
-	}
-
-	if want, got := orig.Proofs, cpy.Proofs; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed txn proofs unequal: want%v, got %v", want, got)
-	}
-
-	return nil
-}
-
 const N = 50
 
-var (
-	dummyBlobTxs        = [N]*BlobTx{}
-	dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
-)
+var dummyBlobTxs = [N]*BlobTx{}
 
 func randIntInRange(_min, _max int) int {
 	return (rand.Intn(_max-_min) + _min)
@@ -682,57 +650,6 @@ func newRandBlobTx() *BlobTx {
 		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
 	return stx
-}
-
-func randByte() byte {
-	return byte(rand.Intn(256))
-}
-
-func newRandCommitments(size int) BlobKzgs {
-	var result BlobKzgs
-	for range size {
-		var arr [LEN_48]byte
-		for j := range LEN_48 {
-			arr[j] = randByte()
-		}
-		result = append(result, arr)
-	}
-	return result
-}
-
-func newRandProofs(size int) KZGProofs {
-	var result KZGProofs
-	for range size {
-		var arr [LEN_48]byte
-		for j := range LEN_48 {
-			arr[j] = randByte()
-		}
-		result = append(result, arr)
-	}
-	return result
-}
-
-func newRandBlobs(size int) Blobs {
-	var result Blobs
-	for range size {
-		var arr [params.BlobSize]byte
-		for j := range params.BlobSize {
-			arr[j] = randByte()
-		}
-		result = append(result, arr)
-	}
-	return result
-}
-
-func newRandBlobWrapper() *BlobTxWrapper {
-	btxw := newRandBlobTx()
-	l := len(btxw.BlobVersionedHashes)
-	return &BlobTxWrapper{
-		Tx:          btxw.copyData(),
-		Commitments: newRandCommitments(l),
-		Blobs:       newRandBlobs(l),
-		Proofs:      newRandProofs(l),
-	}
 }
 
 func populateBlobTxs() {

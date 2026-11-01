@@ -94,6 +94,14 @@ func (arr *uint64ListSSZ) HashSSZ() ([32]byte, error) {
 	return arr.u.HashListSSZ()
 }
 
+func (arr *uint64ListSSZ) HashSSZProgressive() ([32]byte, error) {
+	return arr.u.HashListSSZProgressive()
+}
+
+func (arr *uint64ListSSZ) SetProgressiveHashing(enabled bool) {
+	arr.u.SetProgressiveHashing(enabled)
+}
+
 func (arr *uint64ListSSZ) Clone() clonable.Clonable {
 	return NewUint64ListSSZ(arr.Cap())
 }

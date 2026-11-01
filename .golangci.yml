@@ -28,12 +28,14 @@ linters:
     - errorlint
     - unused
     - testifylint
+    - nosprintfhostport
+    - gocheckcompilerdirectives
+    - gosec
+    - usetesting
   disable:
     - contextcheck
     - err113
     - exhaustive
-    - gocheckcompilerdirectives
-    - gosec
     - musttag
     - nilerr
     - protogetter
@@ -48,6 +50,15 @@ linters:
     - loggercheck # we don't use Zap
     - unconvert # not enough profit from always enabling
   settings:
+    gosec:
+      includes:
+        - G109
+        - G110
+        - G112
+        - G114
+        - G402
+    usetesting:
+      os-mkdir-temp: false
     goconst:
       min-len: 2
       min-occurrences: 2
@@ -110,21 +121,27 @@ linters:
         - nilness
         - unusedwrite
         - shadow
+        - sortslice
+        - unsafeptr
       disable:
         - deepequalerrors
         - fieldalignment
-        - unsafeptr
   exclusions:
     generated: lax
     presets:
       - comments
       - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       - linters:
           - modernize
         path: _grpc\.pb\.go
+      # errcheck v2.15+ flags bare channel receives of error types (e.g. <-errCh) as
+      # unchecked errors. These are intentional drains to wait for channel closure.
+      - linters:
+          - errcheck
+        text: "^Error return value is not checked"
+        source: "^\\s*(case\\s+)?<-"
       # shadow runs under db/ only for now; the rest of the tree is not swept yet.
       - linters:
           - govet

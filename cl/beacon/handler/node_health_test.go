@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestGetNodeHealthWhileSyncing(t *testing.T) {
@@ -74,8 +76,9 @@ func TestGetNodeHealthAcceptsInformationalSyncingStatus(t *testing.T) {
 func TestGetNodeHealthWhenSynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
-	syncedData.EXPECT().Syncing().Return(false).AnyTimes()
-	a := &ApiHandler{syncedData: syncedData}
+	syncedData.EXPECT().StateHead().Return(common.Hash{1}, uint64(10), true).AnyTimes()
+	cfg := clparams.MainnetBeaconConfig
+	a := &ApiHandler{syncedData: syncedData, beaconChainCfg: &cfg, forkchoiceStore: &forkchoicemock.ForkChoiceStorageMock{}}
 
 	for _, tc := range []struct {
 		query string

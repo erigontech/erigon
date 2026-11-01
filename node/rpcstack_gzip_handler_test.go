@@ -189,6 +189,32 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
 }
 
+// A flushed response must reach the client while the handler is still running.
+func TestGzipHandlerFlushReachesClient(t *testing.T) {
+	body := bytes.Repeat([]byte("erigon "), 1024)
+	release := make(chan struct{})
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+		w.(http.Flusher).Flush()
+		<-release
+	})))
+	defer srv.Close()
+	defer close(release)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	zr, err := gzip.NewReader(resp.Body)
+	require.NoError(t, err)
+	got := make([]byte, len(body))
+	_, err = io.ReadFull(zr, got)
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
+}
+
 // TestGzipMetricsCounters verifies the raw/compressed byte counters:
 // in must grow by the uncompressed payload size, out by the bytes on the wire.
 func TestGzipMetricsCounters(t *testing.T) {

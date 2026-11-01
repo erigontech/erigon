@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -583,7 +584,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+			if err := remoteCE.init(db, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)
 				rootCancel()
 			}
@@ -714,8 +715,15 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
+		// With a CORS list, NewWSOriginHandler checks origins; the handshake validator only keeps
+		// its localhost default for an empty list.
+		wsOrigins := cfg.HttpCORSDomain
+		if len(wsOrigins) > 0 {
+			wsOrigins = []string{"*"}
+		}
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
-			srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger))
+			node.NewWSOriginHandler(cfg.HttpCORSDomain,
+				srv.WebsocketHandler(wsOrigins, nil, cfg.WebsocketCompression, logger)))
 	}
 	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList), rpcConcurrencyLimit)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
@@ -725,7 +733,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 
 	// Separate Websocket handler if websocket port flag specified
 	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
-		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.WebsocketPort)
 		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isWebsocket(r) {
 				wsHandler.ServeHTTP(w, r)
@@ -745,7 +753,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	}
 
 	if cfg.HttpServerEnabled {
-		httpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
+		httpEndpoint := "tcp://" + listenHostPort(cfg.HttpListenAddress, cfg.HttpPort)
 		if cfg.HttpURL != "" {
 			httpEndpoint = cfg.HttpURL
 		}
@@ -771,7 +779,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if cfg.HttpsPort == 0 {
 			cfg.HttpsPort = cfg.HttpPort + 363
 		}
-		httpsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpsListenAddress, cfg.HttpsPort)
+		httpsEndpoint := "tcp://" + listenHostPort(cfg.HttpsListenAddress, cfg.HttpsPort)
 		if cfg.HttpsURL != "" {
 			httpsEndpoint = cfg.HttpsURL
 		}
@@ -800,7 +808,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		grpcEndpoint string
 	)
 	if cfg.GRPCServerEnabled {
-		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		grpcEndpoint = listenHostPort(cfg.GRPCListenAddress, cfg.GRPCPort)
 		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil { //nolint:noctx
 			return fmt.Errorf("could not start GRPC listener: %w", err)
 		}
@@ -896,7 +904,7 @@ func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurr
 
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
+		if cfg.GraphQLEnabled && graphQLHandler != nil && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
 			return
 		}
 
@@ -928,8 +936,16 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 // server and is invoked only after the same JWT check as authenticated JSON-RPC.
 var AuthenticatedEngineRESTHandler http.Handler
 
+// listenHostPort accepts IPv6 hosts with or without brackets.
+func listenHostPort(host string, port int) string {
+	if len(host) > 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
 func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
-	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
+	engineHttpEndpoint := "tcp://" + listenHostPort(cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
@@ -951,9 +967,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	// latency-critical, and gzip costs far more time than the transfer it saves.
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
 
-	graphQLHandler := graphql.CreateHandler(engineApi)
-
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, graphQLHandler, jwtSecret)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, nil, jwtSecret)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -1000,7 +1014,7 @@ func (e *remoteRulesEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockReader, remoteKV remoteproto.KVClient, logger log.Logger) error {
+func (e *remoteRulesEngine) init(db kv.RoDB, remoteKV remoteproto.KVClient, logger log.Logger) error {
 	cc, err := readChainConfigFromDB(context.Background(), db)
 	if err != nil {
 		return err

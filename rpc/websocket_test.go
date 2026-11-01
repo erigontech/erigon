@@ -96,6 +96,21 @@ func TestWebsocketOriginCheck(t *testing.T) {
 	client.Close()
 }
 
+func TestWebsocketOriginCheckDoesNotLeakGoroutines(t *testing.T) {
+	logger := log.New()
+	validate := wsHandshakeValidator([]string{"http://localhost", "http://localhost:3000", "localhost"}, logger)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+
+	before := runtime.NumGoroutine()
+	for range 128 {
+		require.True(t, validate(req))
+	}
+	require.Eventually(t, func() bool {
+		return runtime.NumGoroutine() <= before+8
+	}, 5*time.Second, 10*time.Millisecond, "goroutines: before=%d now=%d", before, runtime.NumGoroutine())
+}
+
 // This test checks whether calls exceeding the request size limit are rejected.
 func TestWebsocketLargeCall(t *testing.T) {
 	if testing.Short() {

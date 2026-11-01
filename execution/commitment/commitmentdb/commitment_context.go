@@ -893,7 +893,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	// building a reader touches tx: AsStateGetter reads the state version off it.
 	var pinnedMu sync.Mutex
 	var pinnedMetrics *kvmetrics.DomainMetrics
-	var pinned *syncStateReader
+	var pinned StateReader
 	if sharedSource || (tx != nil && !caller.writer) {
 		pinnedMetrics = kvmetrics.NewDomainMetrics()
 		src := sdc.stateReader
@@ -913,6 +913,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		if !sharedSource {
 			var err error
 			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
+			if errors.Is(err, kv.ErrReadTxLimitExceeded) {
+				return nil, nil
+			}
 			if err != nil {
 				return &errorTrieContext{err: err}, func() {}
 			}

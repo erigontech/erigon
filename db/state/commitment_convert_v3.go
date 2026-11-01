@@ -360,7 +360,10 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, conv *
 		if err != nil {
 			return err
 		}
-		return emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect)
+		if err := emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect); err != nil {
+			return err
+		}
+		return conv.EmitRootExtension(v, emit)
 	}
 	live, err := reach.reachable(k, v)
 	if err != nil {
@@ -503,6 +506,8 @@ type legacyReach struct {
 	path   []byte
 	chain  []legacyReachNode
 	hashed [64]byte
+
+	rootExt []byte
 }
 
 type legacyReachNode struct {
@@ -534,13 +539,30 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			return false, err
 		}
 		r.chain = append(r.chain, legacyReachNode{0, bytes.Clone(root)})
+		r.rootExt = nil
+		if len(root) < 4 || binary.BigEndian.Uint16(root[2:4]) == 0 {
+			state, err := r.read(commitment.KeyCommitmentState)
+			if err != nil || len(state) == 0 {
+				return false, err
+			}
+			if r.rootExt, _, err = v3.LegacyRootExtension(state); err != nil {
+				return false, err
+			}
+		}
 	}
 	for {
 		n := r.chain[len(r.chain)-1]
 		if n.depth == len(path) {
 			return true, nil
 		}
-		next, ok, err := r.childDepth(n.value, path, n.depth)
+		var next int
+		var ok bool
+		var err error
+		if n.depth == 0 && len(r.rootExt) != 0 {
+			next, ok = len(r.rootExt), bytes.HasPrefix(path, r.rootExt)
+		} else {
+			next, ok, err = r.childDepth(n.value, path, n.depth)
+		}
 		if err != nil || !ok || next > len(path) {
 			return false, err
 		}

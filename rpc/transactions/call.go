@@ -66,14 +66,7 @@ func DoCall(
 
 	ibs := state.NewPooled(stateReader)
 	defer state.ReleasePooled(ibs)
-	// Overrides end in FinalizeTx, which clears the journal; the versioned read
-	// path then serves this tx's own writes only from a resident stateObject.
-	if dbg.CallNoMaterialize && stateOverrides == nil {
-		ibs.SetVersionMap(state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
-		ibs.SetTxContext(0, 0)
-		ibs.SetNoConflictDetection()
-	}
+	VersionedCallState(ibs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -207,6 +200,26 @@ func (r *ReusableCaller) Close() {
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
+// VersionedCallState puts a one-shot call on the versioned state path block execution
+// uses. Reset clears the flags, so a reused state calls this again.
+func VersionedCallState(ibs *state.IntraBlockState) {
+	VersionedBlockState(ibs)
+	if ibs.IsVersioned() {
+		ibs.SetNoConflictDetection()
+	}
+}
+
+// VersionedBlockState is VersionedCallState for a state that runs several txs in order:
+// a later tx may re-create an account an earlier one destroyed, so CreateAccount keeps
+// the read that carries the balance it was given in between.
+func VersionedBlockState(ibs *state.IntraBlockState) {
+	if !dbg.CallNoMaterialize {
+		return
+	}
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+	ibs.SetTxContext(0, 0)
+}
+
 // InitialState returns the state every call runs against, rewound to the request's
 // overrides. eth_estimateGas probes the same state several times, so the state object
 // is reused and reset rather than rebuilt: Reset returns its objects to their pools,
@@ -221,6 +234,7 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 	} else {
 		ibs.Reset()
 	}
+	VersionedCallState(ibs)
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}

@@ -167,7 +167,7 @@ func TestPartition(t *testing.T) {
 func TestStorageTransitions(t *testing.T) {
 	path := func(first, fill byte) []byte { return commitmenttest.Path([]byte{first}, fill) }
 	put := func(p []byte, value byte) commitmenttest.Op { return commitmenttest.Op{Key: p, Storage: []byte{value}} }
-	del := func(p []byte) commitmenttest.Op { return commitmenttest.DeleteAt(p) }
+	del := commitmenttest.DeleteAt
 	for _, tc := range []struct {
 		name     string
 		addr     byte
@@ -455,7 +455,7 @@ func TestScheduling(t *testing.T) {
 		}
 		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{parityAccount(address, 3), commitmenttest.StorageAt(commitmenttest.SlotKey(address, paritySlot(3)), 3)})
 		before := storageRoot()
-		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{commitmenttest.Op{Key: address, Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField, Balance: *uint256.NewInt(99)}}})
+		runV3(t, ctx, v3Config{workers: 1}, []commitmenttest.Op{{Key: address, Account: &commitmenttest.AccountValue{Fields: commitmenttest.BalanceField, Balance: *uint256.NewInt(99)}}})
 		require.Equal(t, before, storageRoot())
 	})
 
@@ -772,4 +772,70 @@ func TestMetrics(t *testing.T) {
 			require.Positive(t, after[i]-before[i], "deferred rounds still bill %s", names[i])
 		}
 	})
+}
+
+type slotFactory struct {
+	ctx   commitment.PatriciaContext
+	slots chan struct{}
+}
+
+func (f *slotFactory) factory(ctx context.Context) (commitment.PatriciaContext, func()) {
+	if kv.IsNonBlockingAcquire(ctx) {
+		select {
+		case f.slots <- struct{}{}:
+		default:
+			return nil, nil
+		}
+	} else {
+		select {
+		case f.slots <- struct{}{}:
+		case <-ctx.Done():
+			return nil, nil
+		}
+	}
+	return f.ctx, func() { <-f.slots }
+}
+
+func requireFinishes(t *testing.T, label string, run func() error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- run() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err, label)
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s: hung with a two-slot context factory", label)
+	}
+}
+
+func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
+	entries := benchEntries("storage", 40)
+	updates := updatesOf(entries)
+	for i := range 20 {
+		c := newShardedContext()
+		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
+		tr := &Trie{scheduleWorkers: 2}
+		tr.ResetContext(c)
+		tr.SetTrieContextFactory(f.factory)
+		u := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries, updates)
+		requireFinishes(t, fmt.Sprintf("process run %d", i), func() error {
+			_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
+			return err
+		})
+		tr.Release()
+	}
+
+	paths := make([][]byte, 64)
+	for i := range paths {
+		paths[i] = commitmenttest.Path([]byte{byte(i % 16), byte(i / 16)}, 5)
+	}
+	tasks := []storageTask{storageTaskFor([32]byte{1}, storageOps(paths)), storageTaskFor([32]byte{2}, storageOps(paths))}
+	for i := range 20 {
+		c := newShardedContext()
+		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
+		roots, parts := make([][32]byte, len(tasks)), make([]deltaParts, len(tasks))
+		requireFinishes(t, fmt.Sprintf("storage phase run %d", i), func() error {
+			return runStoragePhase(context.Background(), c, f.factory, tasks, roots, parts, 2, 16)
+		})
+	}
 }

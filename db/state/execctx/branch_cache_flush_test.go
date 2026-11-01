@@ -361,3 +361,21 @@ func TestBranchCacheRejectsFillFromViewOpenedBeforeUnwind(t *testing.T) {
 	require.True(t, ok, "a view opened after the unwind commit must still fill")
 	require.Equal(t, stepOneValue, got)
 }
+
+func TestBranchCacheRejectsFillFromViewOpenedBeforeCommit(t *testing.T) {
+	const stepSize = uint64(16)
+	db := newTestDb(t, stepSize)
+	key := []byte{0x0a, 0x0c}
+	oldValue := []byte{0, 0, 0, 0, 1}
+	newValue := []byte{0, 0, 0, 0, 2}
+	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: oldValue})
+	oldTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+	writeCommitmentRows(t, db, key, oldValue, commitmentWrite{txNum: 20, value: newValue})
+	got, _, err := oldTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	require.NoError(t, err)
+	require.Equal(t, oldValue, got)
+	oldTx.Rollback()
+	require.Equal(t, newValue, latestCommitment(t, db, key))
+}

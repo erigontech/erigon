@@ -39,6 +39,9 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	if len(data) == 0 {
 		return fork(path), nil
 	}
+	if err := Validate(data, len(path)); err != nil {
+		return nil, fmt.Errorf("commitment v3: record %x: %w", key, err)
+	}
 
 	n := fork(path)
 	n.raw = data
