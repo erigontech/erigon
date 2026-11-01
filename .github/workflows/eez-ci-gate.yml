@@ -98,6 +98,38 @@ jobs:
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
+  # The binary tests run erigon as a standalone follower and as an all-in-one
+  # node beside the dev chain; without EEZ_ERIGON they skip, as they do in the
+  # full tier's test workflows, so both tiers run this job.
+  binary-tests:
+    needs: [tier]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-erigon
+        with:
+          cache-namespace: eez-ci-gate
+
+      - name: EEZ binary tests
+        run: |
+          if [ -f eez/follower/binary_test.go ]; then
+            make erigon
+            EEZ_ERIGON="$PWD/build/bin/erigon" go test -count=1 -run 'Binary$' ./eez/follower/
+          else
+            echo "::notice::No EEZ binary tests on this ref"
+          fi
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
   tests:
     needs: [tier]
     if: needs.tier.outputs.full == 'true'
@@ -130,6 +162,7 @@ jobs:
       - tier
       - lint
       - short-tests
+      - binary-tests
       - tests
       - race-tests
       - eest-spec-tests
