@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -41,6 +42,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		slReexec:            reexec,
 		slReexecFlag:        make([]atomic.Bool, n),
 		writeChangedPrev:    map[int]*state.WriteSet{},
+		revalidate:          map[int]bool{},
 	}
 }
 
@@ -206,7 +208,6 @@ func TestMarkReadersDirty(t *testing.T) {
 	}
 	newBE := func() *blockExecutor {
 		be := newDetExecutor(t, 4)
-		be.revalidate = map[int]bool{}
 		read(be, 0, 0, slot1)
 		read(be, 2, 0, slot1)
 		read(be, 3, 0, slot2)
@@ -230,20 +231,25 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
-	t.Run("a reader of balance and nonce is flagged by a write to either", func(t *testing.T) {
-		for name, ws := range map[string]*state.WriteSet{
-			"balance": newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
-			"nonce":   newWS().nonce(addr, writer, 1).build(),
-		} {
-			be := newDetExecutor(t, 4)
-			be.revalidate = map[int]bool{}
-			rs := state.ReadSet{}
-			rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
-			rs.SetHeader(addr, state.NoncePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
-			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
-			be.indexReads(2, rs)
-			be.markReadersDirty(1, ws)
-			require.Equal(t, map[int]bool{2: true}, be.revalidate, name)
+	writes := map[state.AccountPath]*state.WriteSet{
+		state.BalancePath:  newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
+		state.NoncePath:    newWS().nonce(addr, writer, 1).build(),
+		state.CodePath:     newWS().code(addr, writer, accounts.Code{}).build(),
+		state.CodeHashPath: newWS().codeHash(addr, writer, accounts.CodeHash{}).build(),
+		state.CodeSizePath: newWS().codeSize(addr, writer, 1).build(),
+		state.StoragePath:  newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build(),
+	}
+	for written, ws := range writes {
+		for read := state.AddressPath; read <= state.CreateContractPath; read++ {
+			t.Run(fmt.Sprintf("write %d read %d", written, read), func(t *testing.T) {
+				be := newDetExecutor(t, 4)
+				rs := state.ReadSet{}
+				rs.SetHeader(addr, read, slot1, state.ReadHeader{Source: state.StorageRead})
+				be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+				be.indexReads(2, rs)
+				be.markReadersDirty(1, ws)
+				require.Equal(t, read == written, be.revalidate[2])
+			})
 		}
-	})
+	}
 }

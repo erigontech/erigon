@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -2969,9 +2970,9 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	return be
 }
 
-// indexReads records taskIdx as a reader of every address in rs. Append-only across
-// incarnations; the DependsOn re-check filters stale entries, so over-inclusion
-// only costs a redundant check.
+// indexReads records taskIdx as a reader of every address and path in rs. Entries and path
+// bits only accumulate across incarnations, so the mask over-approximates the latest read
+// set; the DependsOn re-check filters stale entries at the cost of a redundant check.
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, _ accounts.StorageKey, _ state.ReadHeader) bool {
 		l := be.readerByAddr[a]
@@ -2990,9 +2991,12 @@ type addrReader struct {
 	paths uint16
 }
 
+// A path of 16 or more would make pathBit 0 and hide its readers from every writer.
+const _ uint16 = 1 << state.CreateContractPath
+
 func pathBit(p state.AccountPath) uint16 { return 1 << p }
 
-func cmpReaderTx(r addrReader, tx int) int { return r.tx - tx }
+func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
 const balDispatchWindow = 32
