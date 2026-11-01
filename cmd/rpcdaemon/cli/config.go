@@ -963,8 +963,9 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	}
 
 	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, &node.HttpEndpointConfig{
-		Timeouts: cfg.AuthRpcTimeouts,
-		Listener: cfg.AuthRpcListener,
+		Timeouts:              cfg.AuthRpcTimeouts,
+		Listener:              cfg.AuthRpcListener,
+		AllowUnencryptedHTTP2: true,
 	}, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
