@@ -34,6 +34,8 @@ func loadPoolFixture(t *testing.T) *blockreplay.Fixture {
 
 const counterTxGas = 26010
 
+var counterAddr = common.HexToAddress("0x00000000000000000000000000000000000000d3")
+
 // counterChainFixture rewrites the committed mainnet block into n calls from
 // distinct senders to a contract that increments storage slot 0, so every tx
 // reads the value its predecessor writes. Each call costs counterTxGas.
@@ -44,7 +46,7 @@ func counterChainFixture(t *testing.T, n int) *blockreplay.Fixture {
 	require.NoError(t, err)
 	header := orig.HeaderNoCopy()
 	template := fx.Accounts[fx.Senders[0]]
-	to := common.HexToAddress("0x00000000000000000000000000000000000000d3")
+	to := counterAddr
 	code := []byte{0x5f, 0x54, 0x60, 0x01, 0x01, 0x5f, 0x55, 0x00}
 	contract := template
 	contract.Nonce = 1
@@ -86,7 +88,7 @@ func counterChainFixture(t *testing.T, n int) *blockreplay.Fixture {
 	return fx
 }
 
-func runPoolReplay(t *testing.T, ctx context.Context, fx *blockreplay.Fixture, workers string) error {
+func runPoolReplay(t *testing.T, ctx context.Context, fx *blockreplay.Fixture, workers string, check func(*state.ReaderV3)) error {
 	t.Helper()
 	t.Setenv("EPHEMERAL_WORKERS", workers)
 	r, closeFn := setupEphemeralReplay(t, fx)
@@ -95,7 +97,13 @@ func runPoolReplay(t *testing.T, ctx context.Context, fx *blockreplay.Fixture, w
 	tx, doms := r.newDomains(t, fx)
 	defer tx.Rollback()
 	defer doms.Close()
-	return r.exec(tx, doms)
+	if err := r.exec(tx, doms); err != nil {
+		return err
+	}
+	if check != nil {
+		check(state.NewReaderV3(doms.AsGetter(tx)))
+	}
+	return nil
 }
 
 type poolCounts struct {
@@ -131,7 +139,7 @@ func TestPoolReadTxsBoundedByWorkers(t *testing.T) {
 	require.Greater(t, len(b.Transactions()), 10*workers)
 
 	c := countPool(t)
-	require.NoError(t, runPoolReplay(t, context.Background(), fx, "4"))
+	require.NoError(t, runPoolReplay(t, context.Background(), fx, "4", nil))
 	opens := c.opens.Load()
 	require.Positive(t, opens, "no pool worker opened a read tx: the run measured nothing")
 	require.LessOrEqual(t, opens, int64(workers+1), "pool opened more read txs than it has workers (%d txs in the block)", len(b.Transactions()))
@@ -145,7 +153,11 @@ func TestPoolDependencyChainRunsBoundedByNamedReruns(t *testing.T) {
 	fx := counterChainFixture(t, poolTestTxs)
 	for _, workers := range []string{"4", "16"} {
 		c := countPool(t)
-		require.NoError(t, runPoolReplay(t, context.Background(), fx, workers))
+		require.NoError(t, runPoolReplay(t, context.Background(), fx, workers, func(r *state.ReaderV3) {
+			counter, _, err := r.ReadAccountStorage(accounts.InternAddress(counterAddr), accounts.InternKey(common.Hash{}))
+			require.NoError(t, err)
+			require.Equal(t, uint64(poolTestTxs+1), counter.Uint64(), "the chain lost an increment with %s workers", workers)
+		}))
 		require.Positive(t, c.opens.Load(), "no pool worker ran: the run measured nothing")
 		require.LessOrEqual(t, c.runs(), poolNamedReruns+2, "a tx in a %d-call chain ran more than %d times with %s workers", poolTestTxs, poolNamedReruns+2, workers)
 	}
