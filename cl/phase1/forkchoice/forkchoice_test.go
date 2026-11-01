@@ -1894,7 +1894,7 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
-func (g *getFinalizedExecutionHashForkGraph) SetNextEpochState(context.Context, common.Hash, *state.CachingBeaconState) {
+func (g *getFinalizedExecutionHashForkGraph) SetNextEpochState(common.Hash, *state.CachingBeaconState) {
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {

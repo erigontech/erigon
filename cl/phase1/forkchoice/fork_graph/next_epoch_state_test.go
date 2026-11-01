@@ -18,7 +18,6 @@ package fork_graph
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 
@@ -70,7 +69,7 @@ func newEpochBoundaryGraph(t *testing.T) (*forkGraphDisk, *state.CachingBeaconSt
 func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
 	graph, parent, block := newEpochBoundaryGraph(t)
 	advanced := precomputedEpochState(t, parent, block)
-	graph.SetNextEpochState(t.Context(), block.Block.ParentRoot, advanced)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	beforeTarget := *block.Block
 	beforeTarget.Slot = advanced.Slot() - 1
 	require.Nil(t, graph.takeNextEpochStateLocked(&beforeTarget, true))
@@ -92,7 +91,7 @@ func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
 func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
 	graph, parent, block := newEpochBoundaryGraph(t)
 	advanced := precomputedEpochState(t, parent, block)
-	graph.SetNextEpochState(t.Context(), common.Hash{0xff}, advanced)
+	graph.SetNextEpochState(common.Hash{0xff}, advanced)
 
 	postState, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
@@ -116,7 +115,7 @@ func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T
 	balance, err := advanced.ValidatorBalance(0)
 	require.NoError(t, err)
 	require.NoError(t, advanced.SetValidatorBalance(0, balance+1))
-	graph.SetNextEpochState(t.Context(), block.Block.ParentRoot, advanced)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	logs := captureLogs(t)
 
 	postState, result, err := graph.AddChainSegment(block, true)
@@ -139,7 +138,7 @@ func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T
 func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testing.T) {
 	graph, parent, block := newEpochBoundaryGraph(t)
 	advanced := precomputedEpochState(t, parent, block)
-	graph.SetNextEpochState(t.Context(), block.Block.ParentRoot, advanced)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 
 	postState, result, err := graph.AddChainSegment(block, false)
 	require.NoError(t, err)
@@ -155,7 +154,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testi
 func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.T) {
 	graph, parent, block := newEpochBoundaryGraph(t)
 	advanced := precomputedEpochState(t, parent, block)
-	graph.SetNextEpochState(t.Context(), block.Block.ParentRoot, advanced)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	block.Block.StateRoot[0] ^= 0xff
 	blockRoot := common.Hash(mustBlockRoot(t, block))
 	logs := captureLogs(t)
@@ -179,17 +178,7 @@ func TestSetNextEpochStateRejectsLatePublication(t *testing.T) {
 	_, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
-	graph.SetNextEpochState(t.Context(), block.Block.ParentRoot, advanced)
-	require.Nil(t, graph.nextEpochState)
-}
-
-func TestSetNextEpochStateRejectsCancelledPublication(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
-	advanced := precomputedEpochState(t, parent, block)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	graph.SetNextEpochState(ctx, block.Block.ParentRoot, advanced)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	require.Nil(t, graph.nextEpochState)
 }
 

@@ -81,6 +81,9 @@ func (f *ForkChoiceStore) precomputeNextEpochState(ctx context.Context, nextEpoc
 	if _, err := nextState.HashSSZ(); err != nil {
 		return fmt.Errorf("hash state at slot %d: %w", nextEpochStart, err)
 	}
-	f.forkGraph.SetNextEpochState(ctx, parentRoot, nextState)
+	if ctx.Err() != nil {
+		return nil
+	}
+	f.forkGraph.SetNextEpochState(parentRoot, nextState)
 	return nil
 }

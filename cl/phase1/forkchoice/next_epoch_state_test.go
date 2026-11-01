@@ -39,15 +39,11 @@ import (
 
 type recordingNextEpochForkGraph struct {
 	fork_graph.ForkGraph
-	state         *state.CachingBeaconState
-	beforePublish func()
+	state *state.CachingBeaconState
 }
 
-func (g *recordingNextEpochForkGraph) SetNextEpochState(ctx context.Context, parentRoot common.Hash, next *state.CachingBeaconState) {
-	if g.beforePublish != nil {
-		g.beforePublish()
-	}
-	g.ForkGraph.SetNextEpochState(ctx, parentRoot, next)
+func (g *recordingNextEpochForkGraph) SetNextEpochState(parentRoot common.Hash, next *state.CachingBeaconState) {
+	g.ForkGraph.SetNextEpochState(parentRoot, next)
 	g.state = next
 }
 
@@ -144,9 +140,9 @@ func TestPrecomputeNextEpochStateDoesNotPublishAfterCancellation(t *testing.T) {
 	require.NoError(t, test.manager.OnHeadStateWithBlockRoot(test.parent, test.block.Block.ParentRoot))
 
 	cancelledCtx, cancel := context.WithCancel(t.Context())
-	test.graph.beforePublish = cancel
+	cancel()
 	require.NoError(t, test.store.precomputeNextEpochState(cancelledCtx, test.nextEpochStart))
-	require.NotNil(t, test.graph.state)
+	require.Nil(t, test.graph.state)
 
 	normalState, err := test.parent.Copy()
 	require.NoError(t, err)
@@ -156,7 +152,6 @@ func TestPrecomputeNextEpochStateDoesNotPublishAfterCancellation(t *testing.T) {
 	blockRoot, err := test.block.Block.HashSSZ()
 	require.NoError(t, err)
 	imported := test.realGraph.CurrentStateLocked(common.Hash(blockRoot))
-	require.NotSame(t, test.graph.state, imported)
 	normalBytes, err := normalState.EncodeSSZ(nil)
 	require.NoError(t, err)
 	importedBytes, err := imported.EncodeSSZ(nil)

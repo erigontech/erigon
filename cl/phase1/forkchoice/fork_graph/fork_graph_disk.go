@@ -17,7 +17,6 @@
 package fork_graph
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -234,10 +233,10 @@ func (f *forkGraphDisk) AnchorRoot() common.Hash {
 	return f.anchorRoot
 }
 
-func (f *forkGraphDisk) SetNextEpochState(ctx context.Context, parentRoot common.Hash, state *state.CachingBeaconState) {
+func (f *forkGraphDisk) SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState) {
 	f.addPruneMu.Lock()
 	defer f.addPruneMu.Unlock()
-	if ctx.Err() != nil || f.highestTransitionSlot >= state.Slot() {
+	if f.highestTransitionSlot >= state.Slot() {
 		return
 	}
 	f.nextEpochParentRoot = parentRoot
