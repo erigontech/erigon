@@ -67,6 +67,14 @@ func (eri *ErigonNode) Close() {
 // Backend returns the node's execution backend.
 func (eri *ErigonNode) Backend() *eth.Ethereum { return eri.backend }
 
+// Start starts the node's services. With Stop it makes the node a lifecycle
+// of another, which then starts it after and stops it before its own
+// services registered earlier.
+func (eri *ErigonNode) Start() error { return eri.stack.Start() }
+
+// Stop stops the node's services and closes it.
+func (eri *ErigonNode) Stop() error { return eri.stack.Close() }
+
 // RegisterLifecycle adds l to the node; it starts after the backend and
 // stops before it.
 func (eri *ErigonNode) RegisterLifecycle(l node.Lifecycle) { eri.stack.RegisterLifecycle(l) }
