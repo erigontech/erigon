@@ -18,7 +18,6 @@ package state
 
 import (
 	"errors"
-
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -172,4 +171,31 @@ func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	vm.SetBaseTxNum(0)
 	boom := errors.New("boom")
 	require.ErrorIs(t, vm.SeedEmptyRemovals(bal, true, false, errAccountBase{boom}), boom)
+}
+
+// TestSeedEmptyRemovals_DrainThenRefund pins the removal at an interior index: an
+// account drained to empty and funded again later in the block reads absent to a
+// step checkpoint between the two, and present at block end.
+func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a1"))
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{
+		{Index: 1, Value: uint256.Int{}},
+		{Index: 2, Value: *uint256.NewInt(7)},
+	}}}
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	base := accounts.NewAccount()
+	base.Balance = *uint256.NewInt(5)
+	reader.accounts[addr] = &base
+
+	vm := NewVersionMap(bal)
+	vm.SetBaseTxNum(0)
+	require.NoError(t, vm.SeedEmptyRemovals(bal, true, false, reader))
+
+	_, ok := vm.View(1, reader).GetAccount(addr)
+	require.False(t, ok, "drained to empty at index 1: absent before the re-fund")
+	acc, ok := vm.View(2, reader).GetAccount(addr)
+	require.True(t, ok, "funded again at index 2: present at block end")
+	require.Equal(t, *uint256.NewInt(7), acc.Balance)
 }

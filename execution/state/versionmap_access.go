@@ -129,14 +129,10 @@ func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
 	return state != LifecycleLive
 }
 
-// SeedEmptyRemovals encodes the EIP-161 empty-account removal as a write-side data
-// artifact in the BAL-seeded map, so GetAccount reads the deletion deterministically
-// with no read-side rules. The BAL carries no removal field (EIP-7928), so for each
-// touched account whose block-end state — its seeded cells composed with the committed
-// base for untouched fields — is empty and removable, it stamps a self-destruct removal
-// cell at the account's last-changed index. Mirrors exec's encodeExistingEmptyRemovals.
 func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base AccountBaseReader) error {
 	ws := &WriteSet{}
+	var interior []*WriteSet
+	var candidates []uint32
 	for i := range bal {
 		ac := &bal[i]
 		addr := accounts.InternAddress(ac.Address)
@@ -147,15 +143,33 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
-		av := NewVersionedAccountView(addr, int(maxIdx), vm, base)
-		acc, ok := av.GetAccount()
-		if err := av.Err(); err != nil {
-			return err
+		candidates = candidates[:0]
+		for _, c := range ac.BalanceChanges {
+			if c.Value.IsZero() && c.Index != maxIdx {
+				candidates = append(candidates, c.Index)
+			}
 		}
-		if !ok || !isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) {
-			continue
+		candidates = append(candidates, maxIdx)
+		for _, idx := range candidates {
+			av := NewVersionedAccountView(addr, int(idx), vm, base)
+			acc, ok := av.GetAccount()
+			if err := av.Err(); err != nil {
+				return err
+			}
+			if !ok || !isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) {
+				continue
+			}
+			if idx == maxIdx {
+				ws.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
+				continue
+			}
+			rm := &WriteSet{}
+			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
+			interior = append(interior, rm)
 		}
-		ws.SetEmptyRemoval(addr, Version{TxIndex: int(maxIdx) - 1})
+	}
+	for _, rm := range interior {
+		vm.FlushVersionedWrites(rm, true)
 	}
 	if !ws.IsEmpty() {
 		vm.FlushVersionedWrites(ws, true)
