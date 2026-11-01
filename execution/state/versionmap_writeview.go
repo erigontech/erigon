@@ -237,8 +237,10 @@ func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int
 	if sd, res, ok := vm.ReadSelfDestruct(addr, txIdx+1); !ok || !res.resolved() || !sd {
 		return false, nil
 	}
-	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
-		return false, nil
+	if bal, ok := ws.GetBalance(addr); !ok || !bal.Deletes() {
+		if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
+			return false, nil
+		}
 	}
 	if bal, res, ok := vm.ReadBalance(addr, txIdx+1); eip8246 && ok && (!res.resolved() || !bal.IsZero()) {
 		return false, nil

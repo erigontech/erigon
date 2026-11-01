@@ -244,7 +244,12 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 		bal, ok := ws.GetBalance(addr)
 		return ok && bal.Deletes()
 	}
-	require.True(t, removed(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx: folds to the removal verdict")
+	vanished := func(ws *WriteSet) bool {
+		_, sd := ws.GetSelfDestruct(addr)
+		_, bal := ws.GetBalance(addr)
+		return !sd && !bal
+	}
+	require.True(t, vanished(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx: no writes")
 	require.True(t, removed(run(t, newAccountStateReader(addr), NewVersionMap(nil))), "a CREATE onto a pre-funded address deletes it")
 
 	funded := NewVersionMap(nil)
@@ -259,6 +264,33 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
 	empty.FlushVersionedWrites(w, true)
 	require.True(t, removed(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
+}
+
+func TestWithoutVanished_CreatedEmptyTouch(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xE4E7"))
+	run := func(t *testing.T, reader StateReader) *WriteSet {
+		t.Helper()
+		vm := NewVersionMap(nil)
+		ibs := NewWithVersionMap(reader, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 1)
+		require.NoError(t, ibs.TouchAccount(addr))
+		ws := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
+		vm.FlushVersionedWrites(ws, true)
+		out, err := WithoutVanished(ws, vm, 1, false, reader)
+		require.NoError(t, err)
+		return out
+	}
+	out := run(t, &minimalStateReader{})
+	_, sd := out.GetSelfDestruct(addr)
+	_, bal := out.GetBalance(addr)
+	require.False(t, sd || bal, "a touch of an absent account publishes no writes")
+
+	existing := accounts.NewAccount()
+	out = run(t, &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &existing}})
+	b, ok := out.GetBalance(addr)
+	require.True(t, ok && b.Deletes(), "a touched existing empty account keeps its removal")
 }
 
 // The view's value iterators reuse one VersionedWrite per call, so ranging one costs
