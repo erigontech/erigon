@@ -314,10 +314,10 @@ jobs:
             printf '[methods]\ndebug_traceBlockByNumber 100%% %s blocks=32\n' "$option" > "$RUNNER_TEMP/trace_block_$tracer.profile"
           done
           ./build/bin/rpc_pattern_gen --profile "$RUNNER_TEMP/trace_block_structLog.profile" --url http://localhost:8545 \
-            --counts 50 --block-tag latest --verify --keep ok \
+            --counts 50 --block-tag latest --verify --keep ok --max-blocks 32 \
             --out "perf/pattern/$CHAIN/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl"
           ./build/bin/rpc_pattern_gen --profile "$RUNNER_TEMP/trace_block_callTracer.profile" --url http://localhost:8545 \
-            --counts 600 --block-tag latest --verify --keep ok \
+            --counts 600 --block-tag latest --verify --keep ok --max-blocks 32 \
             --out "perf/pattern/$CHAIN/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
             --counts 120000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
@@ -607,8 +607,8 @@ jobs:
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
-          for run_id in "$RUN_ID" "$RUN_ID-eth_call_gen" "$RUN_ID-eth_getLogs_gen" \
-            "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide"; do
+          for run_id in "$RUN_ID" "$RUN_ID-trace_block_call_tracer" "$RUN_ID-trace_block_struct_log" "$RUN_ID-eth_call_gen" \
+            "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide"; do
             python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
