@@ -1218,8 +1218,10 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		if err != nil {
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
-		for i, h := range blobHashes {
-			p.blobs.putCells(h, cells[i])
+		if p.isAmsterdam() {
+			for i, h := range blobHashes {
+				p.blobs.putCells(h, cells[i])
+			}
 		}
 	} else {
 		// https://github.com/ethereum/consensus-specs/blob/017a8495f7671f5fff2075a9bfc9238c1a0982f8/specs/deneb/polynomial-commitments.md#verify_blob_kzg_proof_batch

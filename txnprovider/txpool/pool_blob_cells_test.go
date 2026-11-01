@@ -38,11 +38,11 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func newOsakaPoolWithBlobTxn(t *testing.T) (context.Context, *TxPool, *TxnSlot, TxnSlots) {
+func newPoolWithBlobTxn(t *testing.T, fork string) (context.Context, *TxPool, *TxnSlot, TxnSlots) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	chainConfig := testforks.Forks["Osaka"]
+	chainConfig := testforks.Forks[fork]
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -75,7 +75,7 @@ func newOsakaPoolWithBlobTxn(t *testing.T) (context.Context, *TxPool, *TxnSlot, 
 }
 
 func TestValidationCellsServedByGetBlobs(t *testing.T) {
-	ctx, pool, slot, txns := newOsakaPoolWithBlobTxn(t)
+	ctx, pool, slot, txns := newPoolWithBlobTxn(t, "Amsterdam")
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
@@ -93,10 +93,18 @@ func TestValidationCellsServedByGetBlobs(t *testing.T) {
 }
 
 func TestValidationCachesNoCellsOnBlobHashMismatch(t *testing.T) {
-	ctx, pool, slot, txns := newOsakaPoolWithBlobTxn(t)
+	ctx, pool, slot, txns := newPoolWithBlobTxn(t, "Amsterdam")
 	slot.GetBlobHashes()[0] = common.Hash{0x01, 0xff}
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.BlobHashCheckFail}, reasons)
 	require.Zero(t, pool.blobs.cells.Len(), "cells cached for a txn whose blob hash does not match its commitment")
+}
+
+func TestValidationCachesNoCellsBeforeAmsterdam(t *testing.T) {
+	ctx, pool, _, txns := newPoolWithBlobTxn(t, "Osaka")
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Zero(t, pool.blobs.cells.Len(), "cells cached before Amsterdam, where no getBlobs version serves them")
 }
