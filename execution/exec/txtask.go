@@ -123,6 +123,10 @@ type TxResult struct {
 	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
 	// means every read was settled.
 	Dep int
+
+	// ValStamp is the versionMap write sequence loaded before the worker's read-set
+	// validation; 0 means not validated.
+	ValStamp uint64
 }
 
 func (r *TxResult) compare(other *TxResult) int {
