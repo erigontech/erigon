@@ -338,7 +338,8 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	if blockEnd {
 		var shadowRoot common.Hash
-		if afterFork {
+		switch {
+		case afterFork:
 			if !publishedHexFound {
 				publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
 				if err != nil {
@@ -350,9 +351,9 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			} else {
 				blockEnd = false
 			}
-		} else if hooks.skipVerify {
+		case hooks.skipVerify:
 			blockEnd = false
-		} else {
+		default:
 			shadowRoot = publishedPbtRoot
 		}
 		if blockEnd {
