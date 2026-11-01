@@ -178,3 +178,72 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	require.Nil(t, so)
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
+
+// TestEIP8246PreserveCommitmentMatchesCodelessEOA pins the commitment projection of an
+// EIP-8246 balance-preserving self-destruct of a PRE-EXISTING contract: at end-of-tx the
+// account resolves to a codeless EOA {balance, nonce 0, EmptyCodeHash}, the same thing the
+// domain apply writes (NewAccount+balance). The why-free projection reads raw cells over
+// base, so Finalize must stamp the cleared nonce+codeHash, else it inherits the base
+// contract's and the commitment leaf diverges from the domain (wrong state root).
+func TestEIP8246PreserveCommitmentMatchesCodelessEOA(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246c0de"))
+	base := accounts.NewAccount()
+	base.Nonce = 5
+	base.Balance = *uint256.NewInt(100)
+	base.CodeHash = accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &base}}
+
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersion(0)
+
+	destroyed, err := ibs.Selfdestruct(addr, true) // preserveBalance = EIP-8246 no-burn
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	writes := finalizedWrites(t, ibs, amsterdamRules)
+	vm.FlushVersionedWrites(writes, true)
+
+	acc, ok := vm.View(1, reader).GetAccount(addr)
+	require.True(t, ok, "a balance-preserving destruct survives as an EOA")
+	require.Equal(t, *uint256.NewInt(100), acc.Balance, "balance is preserved")
+	require.Equal(t, uint64(0), acc.Nonce, "the codeless EOA's nonce is 0, not the base contract's")
+	require.True(t, acc.CodeHash.IsEmpty() || acc.CodeHash == accounts.EmptyCodeHash, "the codeless EOA has no code, not the base contract's")
+}
+
+// TestEIP8246PreserveRevertRestoresContract pins that reverting the preserve destruct
+// leaves the pre-existing contract intact (the destruct's cell changes are undone), so
+// the commitment projects the original contract, not a cleared codeless EOA.
+func TestEIP8246PreserveRevertRestoresContract(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246res"))
+	codeHash := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
+	base := accounts.NewAccount()
+	base.Nonce = 5
+	base.Balance = *uint256.NewInt(100)
+	base.CodeHash = codeHash
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &base}}
+
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersion(0)
+
+	snap := ibs.PushSnapshot()
+	destroyed, err := ibs.Selfdestruct(addr, true)
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	ibs.RevertToSnapshot(snap, nil)
+
+	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	writes := finalizedWrites(t, ibs, amsterdamRules)
+	vm.FlushVersionedWrites(writes, true)
+	acc, ok := vm.View(1, reader).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")
+	require.Equal(t, codeHash, acc.CodeHash, "revert leaves the original contract code")
+}

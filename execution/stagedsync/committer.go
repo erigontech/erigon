@@ -16,11 +16,13 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -95,13 +97,22 @@ type commitmentCalculator struct {
 	// to avoid reallocating a fresh prefix-trie arena each block.
 	balUpdates *commitment.Updates
 
-	// state accumulates account/storage values across a block's TX writes, then
-	// flushes them to updates at the block boundary. Values are lazy-loaded from
-	// the domain on first touch via asOfReader.
-	state *calcState
+	// prefetchFn warms the commitment trie readers for a touched plain key; nil
+	// disables warmup. Called from accumulateTouched on this calculator's goroutine.
+	prefetchFn func(plainKey []byte)
 
-	// asOfReader is shared between calcState (lazy-load) and compute methods
-	// (fold/unfold sibling reads); its txNum advances at each block boundary.
+	// touched* are the per-block key-only union the commitment path folds over: no
+	// values are retained — emitTouched reads each value from the version map.
+	// destructed carries the self-destruct subtree-reset signal. Cleared after each
+	// block's emit.
+	touchedAccounts map[accounts.Address]struct{}
+	touchedStorage  map[accounts.Address]map[accounts.StorageKey]struct{}
+	destructed      map[accounts.Address]struct{}
+	// curVersionMap is the block currently being folded; emitTouched reads it.
+	curVersionMap *state.VersionMap
+
+	// asOfReader serves emitTouched's committed-base reads and the compute methods'
+	// fold/unfold sibling reads; its txNum advances at each block boundary.
 	asOfReader *asOfStateReader
 
 	// roTx is a persistent read-only transaction living for the calculator's lifetime.
@@ -225,7 +236,7 @@ func newCommitmentCalculator(
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
 
-	// Single asOfStateReader shared by calcState (lazy-load) and compute methods.
+	// Single asOfStateReader shared by emitTouched's base reads and compute methods.
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0, dr: drTemplate.CloneWithTx(roTx)}
 
 	cc := &commitmentCalculator{
@@ -237,7 +248,6 @@ func newCommitmentCalculator(
 		logCommit:            logCommit,
 		updates:              calcUpdates,
 		spare:                spareUpdates,
-		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
 		signalCtx:            signalCtx,
@@ -252,7 +262,7 @@ func newCommitmentCalculator(
 		done:                 make(chan struct{}),
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
-		cc.state.prefetch = func(plainKey []byte) {
+		cc.prefetchFn = func(plainKey []byte) {
 			if !cc.balBlock {
 				cc.prefetchKey(workCtx, plainKey)
 			}
@@ -367,10 +377,16 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// with seekInFiles(txNum=0) on datadirs whose history window starts past
 		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
 		// it only affects the lazy-load path, never the trie fold.
-		if r.writes != nil && !r.writes.IsEmpty() {
+		// r.writes enumerates the tx's key-set and reads each value from the version
+		// map's cells — it is a view over the map, not a retained write-set copy.
+		writes := r.writes
+		if r.versionMap != nil {
+			cc.curVersionMap = r.versionMap
+		}
+		if writes != nil && !writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
-			cc.state.ApplyWrites(r.writes)
+			cc.accumulateTouched(writes)
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -411,7 +427,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if dbg.BALShadowCompute {
 				cc.shadowCrossCheck(ctx, r)
 			} else {
-				cc.state.ResetBlockFlags()
+				cc.clearTouched()
 			}
 		case cc.perBlockCompute(r.BlockNum):
 			if cc.lastComputedBlock == 0 && r.isPartial {
@@ -539,10 +555,9 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 }
 
 // computeBlockFromBAL computes block pb's commitment from its BAL, ahead of the
-// per-tx result stream. The root is verified against the block header's
-// stateRoot — a mismatch fails the block. The fresh calcState is used because
-// a BAL-driven block's changed-key set comes wholly from the BAL, never from
-// the cross-block incremental accumulator.
+// per-tx result stream. The root is verified against the block header's stateRoot —
+// a mismatch fails the block. The touched-key set comes wholly from the BAL, never
+// from the cross-block incremental accumulator.
 func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pendingBlock) {
 	req := pb.req
 	br := &blockResult{
@@ -551,17 +566,14 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	// IsEIP161Enabled (not IsSpuriousDragon) so a chain with EIP-161 in
-	// disabledEIPs keeps empty leaves exactly as exec does.
-	emptyRemoval := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
-	if err := cc.checkpointStepsFromBAL(ctx, req, emptyRemoval); err != nil {
+	if err := cc.checkpointStepsFromBAL(ctx, req); err != nil {
 		cc.fail(ctx, br, err)
 		return
 	}
-	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, emptyRemoval, targetOf(br))
+	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, targetOf(br))
 	if err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -596,7 +608,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 // BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
 // gives the state as of the edge. The returned root is discarded (no header to
 // verify mid-block). Runs before the block-end compute so that builds on it.
-func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, emptyRemoval bool) error {
+func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest) error {
 	ss := cc.doms.StepSize()
 	if ss == 0 {
 		return nil
@@ -606,7 +618,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 			continue
 		}
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
-		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, uint32(edge-req.firstTxNum), emptyRemoval, targetOf(stepBr))
+		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, uint32(edge-req.firstTxNum), targetOf(stepBr))
 		if err != nil {
 			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
@@ -619,16 +631,13 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 	return nil
 }
 
-// computeRootFromBAL builds a calcState from the BAL restricted to maxTxIndex,
-// flushes it to a fresh updates buffer, and computes the root at t. Shared by
-// the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
-func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, t commitTarget) ([]byte, func() error, error) {
+// computeRootFromBAL folds the BAL block's touched keys (up to maxTxIndex) straight
+// from its BAL-seeded version map via emitTouched, into a fresh updates buffer, and
+// computes the root at t. Shared by the block-end compute-ahead and the mid-block step
+// checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
+// (and the seeded EIP-161 removal) is read from the version map view.
+func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr}
-	balState := newCalcState(reader, cc.logger, cc.logPrefix)
-	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil)
-	if err := balState.LazyLoadErr(); err != nil {
-		return nil, nil, fmt.Errorf("lazy-load: %w", err)
-	}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
 		// ModeDirect must upgrade to ModeUpdate to carry the BAL values.
@@ -639,14 +648,17 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		cc.balUpdates.Reset()
 	}
 	balUpdates := cc.balUpdates
-	balState.FlushToUpdates(balUpdates)
+	cc.clearTouched()
+	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex))
+	cc.emitTouched(req.versionMap.View(t.lastTxNum, &committedAccountReader{reader}), balUpdates)
+	cc.clearTouched()
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
 // commitment context and computes the root, routed by ownsChangeset like
-// compute(). Used by BAL compute-ahead, which supplies its own balState-derived
-// updates rather than cc.state.
+// compute(). Used by BAL compute-ahead, which supplies its own BAL-folded updates
+// buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
 	sdCtx := cc.doms.GetCommitmentContext()
@@ -665,18 +677,12 @@ func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t co
 // incremental root. BALShadowCompute only.
 func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockResult) {
 	balRoot := cc.balRoots[r.BlockNum]
-	if err := cc.state.LazyLoadErr(); err != nil {
-		cc.fail(ctx, r, fmt.Errorf("shadow incremental lazy-load: %w", err))
-		return
-	}
-	// Mirror compute(): the raw versionMap view carries no EIP-161 deletion
-	// marker, so a touched-empty account must be removed before the flush or the
-	// recompute keeps a spurious leaf the BAL-driven root dropped.
-	emptyRemoval := r.BlockNum != 0 && cc.chainConfig.IsEIP161Enabled(r.BlockNum)
-	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.finishPrefetch()
-	cc.state.flushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
+	// Recompute block r the raw-view way (emitTouched over the version map) to
+	// cross-check against the BAL-driven root.
+	cc.asOfReader.txNum = r.lastTxNum + 1
+	cc.emitTouched(cc.curVersionMap.View(r.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
+	cc.clearTouched()
 	incUpdates := cc.handOffUpdates()
 	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, targetOf(r), incUpdates, cc.asOfReader)
 	if err != nil {
@@ -772,27 +778,21 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
-	if err := cc.state.LazyLoadErr(); err != nil {
-		cc.publish(ctx, commitmentResult{
-			blockNum: t.blockNum, txNum: t.lastTxNum,
-			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err),
-		})
-		return
-	}
-	// The raw versionMap view carries no EIP-161 deletion marker; synthesize the
-	// empty→removal here.
-	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
-	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.finishPrefetch()
-	cc.state.flushToUpdates(cc.updates)
+	// The version map is the ledger: exec's writes already encode every EIP-161 /
+	// self-destruct removal, so emitTouched folds the block's touched keys straight
+	// from the view with no EIP knowledge. In a cross-block batch the touched union
+	// spans earlier blocks whose writes are not in curVersionMap; the view's base
+	// resolves those (and their seeded removals) through the prevBlocks chain.
+	cc.asOfReader.txNum = t.lastTxNum + 1
+	cc.emitTouched(cc.curVersionMap.View(t.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
 	if !m.midBlock {
-		cc.state.ResetBlockFlags()
+		cc.clearTouched()
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.handOffUpdates())
 
-	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
 	var rh []byte

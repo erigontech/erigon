@@ -100,7 +100,7 @@ func newParallelResultTestBlock(t *testing.T, pe *parallelExecutor, config *chai
 	pe.workersCtx = t.Context()
 
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(header.GasLimit), nil, discardConsumers(16), false, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(header.GasLimit), nil, discardConsumers(16), false, nil, nil)
 	txTask := &exec.TxTask{
 		Header:          header,
 		TxNum:           1,

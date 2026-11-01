@@ -64,6 +64,26 @@ func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64
 	}
 }
 
+// newRawViewVM builds a raw-view (no-BAL) version map for one block whose base maps
+// the block's first txNum to TxIndex 0, as exec's per-block be.versionMap does.
+func newRawViewVM(firstTxNum uint64) *state.VersionMap {
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(firstTxNum - 1)
+	return vm
+}
+
+// recordTx flushes ws into vm — as exec's publish does — and returns the txResult
+// carrying that version map plus a map-view over the tx's writes, from which the
+// calculator folds commitment, exactly as a production txResult does.
+func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNum uint64, rules *chain.Rules, ws *state.WriteSet) *txResult {
+	var writes state.WriteSetView
+	if ws != nil {
+		vm.FlushVersionedWrites(ws, true)
+		writes = state.NewVersionMapWriteView(ws, vm, int(txNum-vm.BaseTxNum())-1)
+	}
+	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: writes, versionMap: vm}
+}
+
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
 // step-boundary commitment bug: a block whose txNum range straddles a step
 // edge must leave a commitment checkpoint at that edge, otherwise the step's
@@ -92,6 +112,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(42))
 	accountValues := make(map[string][]byte)
+	vm1, vm2 := newRawViewVM(1), newRawViewVM(block1End+1)
 
 	writeAccount := func(txNum uint64) {
 		addrBytes := make([]byte, length.Addr)
@@ -104,16 +125,11 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		if txNum <= stepEdgeTxNum {
 			accountValues[string(addrBytes)] = buf
 		}
-		blockNum := uint64(1)
+		blockNum, vm := uint64(1), vm1
 		if txNum > block1End {
-			blockNum = 2
+			blockNum, vm = 2, vm2
 		}
-		cc.handleMessage(ctx, &txResult{
-			blockNum: blockNum,
-			txNum:    txNum,
-			rules:    &chain.Rules{},
-			writes:   nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, blockNum, common.Hash{byte(blockNum)}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	for txNum := uint64(1); txNum <= block1End; txNum++ {
@@ -160,6 +176,7 @@ func TestCommitmentCalculator_ReportsProgress(t *testing.T) {
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(7))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= 4; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -167,7 +184,7 @@ func TestCommitmentCalculator_ReportsProgress(t *testing.T) {
 		bal := *uint256.NewInt(txNum * 1000)
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
-		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 4})
 	cc.Stop()
@@ -197,6 +214,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	const stepEdgeTxNum = stepSize - 1 // 15
 
 	rnd := rand.New(rand.NewSource(42))
+	vm1, vm2 := newRawViewVM(1), newRawViewVM(block1End+1)
 	writeAccount := func(txNum, blockNum uint64) {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -205,12 +223,11 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			blockNum: blockNum,
-			txNum:    txNum,
-			rules:    &chain.Rules{},
-			writes:   nonceBalanceWrites(addr, txNum, bal),
-		})
+		vm := vm1
+		if blockNum == 2 {
+			vm = vm2
+		}
+		cc.handleMessage(ctx, recordTx(vm, blockNum, common.Hash{byte(blockNum)}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	for txNum := uint64(1); txNum <= block1End; txNum++ {
@@ -253,6 +270,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	defer cc.Stop()
 
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= 5; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -261,12 +279,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			rules:    &chain.Rules{},
-			blockNum: 1,
-			txNum:    txNum,
-			writes:   nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 	require.False(t, cc.hasComputed)
 
@@ -337,6 +350,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	writeAccount := func(txNum uint64, hasWrites bool) {
 		var writes *state.WriteSet
 		if hasWrites {
@@ -349,7 +363,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
 			writes = nonceBalanceWrites(addr, txNum, bal)
 		}
-		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: txNum, rules: &chain.Rules{}, writes: writes})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, writes))
 	}
 
 	for txNum := uint64(1); txNum < edgeTxNum; txNum++ {
@@ -434,6 +448,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	const stepEdgeTxNum = stepSize - 1 // 15: (txNum+1)%stepSize == 0
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -442,12 +457,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			rules:    &chain.Rules{},
-			blockNum: 1,
-			txNum:    txNum,
-			writes:   nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
@@ -494,6 +504,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 
 	const stepEdgeTxNum = stepSize - 1 // 15
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -502,13 +513,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			rules:     &chain.Rules{},
-			blockNum:  1,
-			blockHash: blockHash,
-			txNum:     txNum,
-			writes:    nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, 1, blockHash, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	require.Positive(t, ownCS.Diffs[kv.CommitmentDomain].Len(),
@@ -539,6 +544,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	defer cc.Stop()
 
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= 5; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -547,12 +553,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		buf := accounts.SerialiseV3(&acc)
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			rules:    &chain.Rules{},
-			blockNum: 1,
-			txNum:    txNum,
-			writes:   nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 	// First partial block => computeWithoutCheck, a per-block compute with no
 	// root check; pre-window, so it must isolate its commitment writes.
@@ -657,6 +658,12 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		})
 	}
 
+	// Seed the block's version map from its BAL, as exec does before dispatching the
+	// block; the BAL-driven fold reads every value from it via the view's GetAccount.
+	vm := state.NewVersionMap(bList)
+	vm.SetBaseTxNum(firstTxNum - 1)
+	vm.SeedEmptyRemovals(bList, false, false, nil)
+
 	// Drive compute-ahead. The block-end stateRoot is a dummy: the step checkpoints
 	// are written before the block-end root check, so a mismatch there still
 	// exercises the mid-block checkpoint under test (we assert on the checkpoint,
@@ -667,6 +674,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		lastTxNum:  lastTxNum,
 		stateRoot:  common.Hash{0xde, 0xad},
 		bal:        bList,
+		versionMap: vm,
 	})
 
 	require.NoError(t, doms.Flush(ctx, tx))
@@ -737,6 +745,9 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 					Address:      [20]byte(addrBytes),
 					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
 				}}
+				vm := state.NewVersionMap(bal)
+				vm.SetBaseTxNum(i - 1)
+				vm.SeedEmptyRemovals(bal, false, false, nil)
 
 				// stateRoot is deliberately wrong, so a processed request publishes
 				// ErrWrongTrieRoot and a dropped one publishes nothing at all.
@@ -747,6 +758,7 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 						lastTxNum:  i,
 						stateRoot:  common.Hash{0xba, 0xd5, 0x00, 0x71},
 						bal:        bal,
+						versionMap: vm,
 					}
 					in <- newTestBlockResult(i, common.Hash{0x01}, i, false)
 					close(reqs)
@@ -777,8 +789,8 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 	}
 }
 
-// feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into
-// cc.state, marks the block computed-ahead with balRoots[1]=balRoot, then delivers
+// feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into the
+// version map, marks the block computed-ahead with balRoots[1]=balRoot, then delivers
 // blockResult(1) with BAL_SHADOW_COMPUTE on so shadowCrossCheck recomputes the
 // incremental root and cross-checks it against balRoot. Returns the published result.
 func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
@@ -796,11 +808,12 @@ func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= n; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
 		addr := accounts.InternAddress([20]byte(addrBytes))
-		cc.handleMessage(ctx, &txResult{rules: &chain.Rules{}, blockNum: 1, txNum: txNum, writes: nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum * 1000))))
 	}
 	cc.computedAhead[1] = true
 	cc.balRoots[1] = balRoot
@@ -854,6 +867,7 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 
 	const stepEdgeTxNum = stepSize - 1
 	rnd := rand.New(rand.NewSource(42))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -861,13 +875,7 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 		bal := *uint256.NewInt(txNum * 1000)
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			rules:     &chain.Rules{},
-			blockNum:  1,
-			blockHash: blockHash,
-			txNum:     txNum,
-			writes:    nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, 1, blockHash, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	// Branch writes alone would satisfy a bare Len() check. KeyCommitmentState is the
@@ -928,6 +936,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 	defer cc.Stop()
 
 	rnd := rand.New(rand.NewSource(43))
+	vm := newRawViewVM(1)
 	for txNum := uint64(1); txNum <= 5; txNum++ {
 		addrBytes := make([]byte, length.Addr)
 		rnd.Read(addrBytes)
@@ -935,12 +944,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 		bal := *uint256.NewInt(txNum * 1000)
 		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
-		cc.handleMessage(ctx, &txResult{
-			rules:    &chain.Rules{},
-			blockNum: 1,
-			txNum:    txNum,
-			writes:   nonceBalanceWrites(addr, txNum, bal),
-		})
+		cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, bal)))
 	}
 
 	// A partial first block computes without checking the root; the test header

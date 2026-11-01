@@ -35,10 +35,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
+func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 	var got [][]byte
-	cs := newTestCalcState()
-	cs.prefetch = func(plainKey []byte) { got = append(got, plainKey) }
+	cc := &commitmentCalculator{prefetchFn: func(plainKey []byte) { got = append(got, plainKey) }}
 	payer, contract := common.Address{19: 1}, common.Address{19: 2}
 	slot := accounts.InternKey(common.Hash{31: 9})
 	writes := func(v uint64) *state.WriteSet {
@@ -52,13 +51,13 @@ func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 	slotValue := slot.Value()
 	want := [][]byte{payer[:], contract[:], append(contract[:], slotValue[:]...)}
 
-	cs.ApplyWrites(writes(1))
-	cs.ApplyWrites(writes(2))
-	require.ElementsMatch(t, want, got, "a key written twice in one block is prefetched once")
+	cc.accumulateTouched(writes(1))
+	cc.accumulateTouched(writes(2))
+	require.ElementsMatch(t, want, got, "a key touched twice in one block is prefetched once")
 
 	got = nil
-	cs.ResetBlockFlags()
-	cs.ApplyWrites(writes(3))
+	cc.clearTouched()
+	cc.accumulateTouched(writes(3))
 	require.ElementsMatch(t, want, got, "the next block prefetches the key again")
 }
 
@@ -116,15 +115,11 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 		require.NoError(t, err)
 
 		const lastTxNum = 1 + 64
+		vm := newRawViewVM(2)
 		for i, addr := range addrs[:64] {
 			txNum := uint64(2 + i)
 			putAccount(doms, tx, addr, 2, txNum)
-			cc.handleMessage(ctx, &txResult{
-				blockNum: 2,
-				txNum:    txNum,
-				rules:    &chain.Rules{IsAmsterdam: amsterdam},
-				writes:   nonceBalanceWrites(accounts.InternAddress(addr), 2, *uint256.NewInt(20)),
-			})
+			cc.handleMessage(ctx, recordTx(vm, 2, common.Hash{0x02}, txNum, &chain.Rules{IsAmsterdam: amsterdam}, nonceBalanceWrites(accounts.InternAddress(addr), 2, *uint256.NewInt(20))))
 		}
 		started := cc.prefetch != nil
 		cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, lastTxNum, false))
