@@ -386,7 +386,8 @@ func New(
 	// settings against the real dir and would create erigondb.toml with the default regime,
 	// which the later flag-aware resolve in SetUpBlockReader then reads as pre-existing and
 	// drops the flag. Seeding here first makes --commitment.plainValues stick.
-	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
+	dbSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart())
+	if err != nil {
 		return nil, err
 	}
 
@@ -448,6 +449,9 @@ func New(
 	setDefaultMinerGasLimit(config, chainConfig)
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+	if dbSettings.TrieVariantName() == state.TrieVariantHexBin && !chainConfig.IsBinaryTrieScheduled() {
+		logger.Warn("hex+bin datadir with no binaryTrieTime: the hex root stays canonical at every block, so this node splits off when the network forks to the binary trie; schedule it with --override.binary-trie")
+	}
 	if dbg.OnlyCreateDB {
 		logger.Info("done")
 		os.Exit(1)
@@ -463,7 +467,7 @@ func New(
 	}
 	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 	backend.chainDB = temporalDb
-	if err := temporalDb.View(ctx, func(tx kv.Tx) error { return stagedsync.CheckBinaryShadowRunning(tx, chainConfig) }); err != nil {
+	if err := temporalDb.View(ctx, func(tx kv.Tx) error { return stagedsync.CheckBinaryShadowRunning(tx, chainConfig, logger) }); err != nil {
 		return nil, err
 	}
 

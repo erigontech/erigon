@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -85,6 +86,87 @@ func TestPBinLaggingShadowDoesNotClampVisibleFiles(t *testing.T) {
 	defer at.Close()
 	require.EqualValues(t, 2*alignStepSize, at.d[kv.AccountsDomain].files.EndTxNum())
 	require.EqualValues(t, alignStepSize, at.d[kv.CommitmentBinDomain].files.EndTxNum())
+}
+
+func TestPBinLaggingShadowBuildsItsMissingStepFromDB(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateDomainFiles(t, "commitment-bin", agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	writeDupSortStepBacklog(t, db, agg.d[kv.CommitmentBinDomain], alignStepSize, 4, 8, 1)
+
+	before := agg.BeginFilesRo()
+	var emptyDomains []kv.Domain
+	for id, dt := range before.d {
+		if dt != nil && len(dt.files) == 0 && kv.Domain(id) != kv.CommitmentBinDomain {
+			emptyDomains = append(emptyDomains, kv.Domain(id))
+		}
+	}
+	var emptyIIs []int
+	for i := range agg.standaloneIIs() {
+		if len(before.iis[i].files) == 0 {
+			emptyIIs = append(emptyIIs, i)
+		}
+	}
+	before.Close()
+	require.NotEmpty(t, emptyIIs)
+
+	fin, started := agg.buildFilesInBackground(asTemporalRoDB(db), 4*alignStepSize, false, unboundedFinalityCtx)
+	require.True(t, started)
+	<-fin
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	files := at.d[kv.CommitmentBinDomain].files
+	require.NotEmpty(t, files)
+	for i := 1; i < len(files); i++ {
+		require.Equal(t, files[i-1].endTxNum, files[i].startTxNum, "commitment-bin visible files have a gap")
+	}
+	require.Equal(t, at.d[kv.CommitmentDomain].files.EndTxNum(), files.EndTxNum())
+	for _, d := range emptyDomains {
+		if len(at.d[d].files) > 0 {
+			require.GreaterOrEqual(t, at.d[d].files[0].startTxNum, uint64(2*alignStepSize), "%s built below the canonical start", d)
+		}
+	}
+	for _, i := range emptyIIs {
+		if len(at.iis[i].files) > 0 {
+			require.GreaterOrEqual(t, at.iis[i].files[0].startTxNum, uint64(2*alignStepSize), "%s built below the canonical start", agg.standaloneIIs()[i].FilenameBase)
+		}
+	}
+}
+
+func TestPBinLaggingShadowBatchesItsMissingSteps(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateDomainFiles(t, "commitment-bin", agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	bin := agg.d[kv.CommitmentBinDomain]
+	want := writeDupSortStepBacklog(t, db, bin, alignStepSize, 7, 40, 5)
+
+	fin, started := agg.buildFilesInBackground(asTemporalRoDB(db), 7*alignStepSize, false, unboundedFinalityCtx)
+	require.True(t, started)
+	<-fin
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	files := at.d[kv.CommitmentBinDomain].files
+	for step := 1; step < 6; step++ {
+		i := slices.IndexFunc(files, func(f visibleFile) bool { return f.startTxNum == uint64(step)*alignStepSize })
+		require.GreaterOrEqual(t, i, 0, "commitment-bin has no file starting at step %d", step)
+		require.Equal(t, uint64(step+1)*alignStepSize, files[i].endTxNum)
+		got := map[string]string{}
+		r := bin.dataReader(files[i].src.decompressor)
+		r.Reset(0)
+		for r.HasNext() {
+			k, _ := r.Next(nil)
+			v, _ := r.Next(nil)
+			got[string(k)] = string(v)
+		}
+		require.Equal(t, want[step], got, "step %d", step)
+	}
 }
 
 func TestPBinCanonicalRoleDoesNotChangeHexReferences(t *testing.T) {

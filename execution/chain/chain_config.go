@@ -304,6 +304,9 @@ func (c *Config) String() string {
 	if c.AmsterdamTime != nil {
 		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(*c.AmsterdamTime))
 	}
+	if c.BinaryTrieTime != nil {
+		fmt.Fprintf(&b, ", BinaryTrie: %v", timestampToTime(*c.BinaryTrieTime))
+	}
 	fmt.Fprintf(&b, ", Engine: %v}", engine)
 	return b.String()
 }
