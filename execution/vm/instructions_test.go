@@ -276,6 +276,28 @@ func TestAddMod(t *testing.T) {
 	}
 }
 
+// MULMOD reuses a modulus's reciprocal across calls, so changing the modulus must not reuse a stale one.
+func TestMulModAcrossModuli(t *testing.T) {
+	t.Parallel()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	callContext := &CallContext{}
+	hex := func(s string) *big.Int { v, _ := new(big.Int).SetString(s, 16); return v }
+	m1 := hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f")
+	m2 := hex("30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47")
+	m3 := hex("ffffffff")
+	x := hex("d4c3b2a1f0e9d8c7b6a5948372615049382716051f2e3d4c5b6a798897a6b5c4")
+	y := hex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	for i, m := range []*big.Int{m1, m1, m2, m1, m3, m2} {
+		want := new(big.Int).Mod(new(big.Int).Mul(x, y), m)
+		callContext.Stack.push(*uint256.MustFromBig(m))
+		callContext.Stack.push(*uint256.MustFromBig(y))
+		callContext.Stack.push(*uint256.MustFromBig(x))
+		opMulmod(0, evm, callContext)
+		got := callContext.Stack.popCopy()
+		require.Equal(t, want, got.ToBig(), "call %d", i)
+	}
+}
+
 // getResult is a convenience function to generate the expected values
 // func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 // 	var (
