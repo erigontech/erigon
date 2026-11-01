@@ -117,7 +117,7 @@ func NewPayloadAttestationService(
 		seenAttestationsCache:  seenCache,
 		validationAdmission:    make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 		validatedREST:          make(map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation),
-		now:                    time.Now,
+		now:                    ethClock.Now,
 	}
 	s.pending = s.newPendingQueue(ctx)
 	return s

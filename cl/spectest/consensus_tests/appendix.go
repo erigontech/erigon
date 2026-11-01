@@ -128,10 +128,10 @@ func init() {
 		With("gossip_blob_sidecar", spectest.UnimplementedHandler).
 		With("gossip_data_column_sidecar", spectest.UnimplementedHandler).
 		With("gossip_execution_payload_bid", spectest.UnimplementedHandler).
-		With("gossip_execution_payload_envelope", spectest.UnimplementedHandler).
+		WithFn("gossip_execution_payload_envelope", gloasGossipHandler).
 		With("gossip_partial_data_column_sidecar", spectest.UnimplementedHandler).
-		With("gossip_payload_attestation_message", spectest.UnimplementedHandler).
-		With("gossip_proposer_preferences", spectest.UnimplementedHandler).
+		WithFn("gossip_payload_attestation_message", gloasGossipHandler).
+		WithFn("gossip_proposer_preferences", gloasGossipHandler).
 		With("gossip_voluntary_exit", spectest.UnimplementedHandler).
 		WithFn("gossip_attester_slashing", gossipAttesterSlashingHandler).
 		WithFn("gossip_bls_to_execution_change", gossipBLSToExecutionChangeHandler).
