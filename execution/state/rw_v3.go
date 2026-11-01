@@ -221,7 +221,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
-					v, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+					v, _, err := domains.GetLatestForWrite(kv.AccountsDomain, roTx, address[:])
 					if err != nil {
 						return err
 					}
@@ -302,7 +302,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 	var acc accounts.Account
 	for addr, increase := range balanceIncreases {
 		addrValue := addr.Value()
-		enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
+		enc0, _, err := domains.GetLatestForWrite(kv.AccountsDomain, roTx, addrValue[:])
 		if err != nil {
 			return err
 		}
@@ -625,7 +625,7 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 		}
 		acc := accounts.NewAccount()
 		address := addr.Value()
-		v, _, err := rs.domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+		v, _, err := rs.domains.GetLatestForWrite(kv.AccountsDomain, roTx, address[:])
 		if err != nil {
 			return accounts.Account{}, err
 		}
@@ -704,7 +704,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 // existing account, and deleting one wipes its storage prefix), so this cheap
 // existence probe stands in for a full storage-prefix walk.
 func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
-	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
+	enc, _, err := domains.GetLatestForWrite(kv.AccountsDomain, roTx, addr)
 	if err != nil {
 		return false, err
 	}
