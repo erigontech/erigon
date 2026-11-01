@@ -2864,7 +2864,8 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, frames *TxnSlots) error {
 	if p.stateBlockHash == (common.Hash{}) {
-		p.stateBlockHash = rawdb.ReadHeadHeaderHash(coreTx)
+		// Header sync can run ahead of execution, so pin validation to the executed head.
+		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
 	}
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)

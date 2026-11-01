@@ -34,12 +34,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -796,6 +799,49 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 			}
 			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 			require.Len(t, backend.calls, 1)
+		})
+	}
+}
+
+func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
+	for _, mode := range []string{"new local transaction", "restored local transaction"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			pool.chainConfig = pool.chainConfig.Copy()
+			pool.chainConfig.BogotaTime = common.NewUint64(0)
+			pool.chainID.SetUint64(1)
+			executedHead, headerHead := common.Hash{1}, common.Hash{2}
+			require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+				rawdb.WriteHeadBlockHash(tx, executedHead)
+				return rawdb.WriteHeadHeaderHash(tx, headerHead)
+			}))
+			backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
+			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+				if req.ExpectedBlockHash == nil || gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash) != executedHead {
+					return nil, status.Error(codes.Aborted, "frame validation head changed")
+				}
+				return backend.FrameValidation(ctx, req)
+			}}
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			if mode == "restored local transaction" {
+				require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+					if err := tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...)); err != nil {
+						return err
+					}
+					return tx.Put(kv.RecentLocalTransaction, make([]byte, 8), frame.IDHash[:])
+				}))
+			}
+			require.NoError(t, pool.start(ctx))
+			if mode == "new local transaction" {
+				var txns TxnSlots
+				txns.Append(frame, sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			}
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+			require.Equal(t, 1, pool.pending.Len())
+			require.NotZero(t, pool.byHash[string(frame.IDHash[:])].subPool&IsLocal)
 		})
 	}
 }
