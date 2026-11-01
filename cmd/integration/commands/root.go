@@ -116,7 +116,7 @@ func isDefaultChaindata(chaindata, datadir string) bool {
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
 	if applyMigrations && isDefaultChaindata(chaindata, datadirCli) {
-		if err := app.RetireStateIfStepsInDB(ctx, dirs, 3, logger); err != nil {
+		if err := app.RetireStateIfStepsInDB(ctx, dirs, true, 3, logger); err != nil {
 			return nil, err
 		}
 		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {

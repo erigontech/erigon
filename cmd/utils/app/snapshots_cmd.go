@@ -67,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
@@ -3577,8 +3578,15 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 // RetireStateIfStepsInDB builds the state files of the steps chaindata holds and
 // prunes them from chaindata, when it holds more than maxStepsInDB steps. It
-// never merges files, and skips a datadir locked by another process.
-func RetireStateIfStepsInDB(ctx context.Context, dirs datadir.Dirs, maxStepsInDB float64, logger log.Logger) error {
+// never merges files. It skips a datadir locked by another process, a datadir
+// without salt files, and a chaindata with pending migrations.
+func RetireStateIfStepsInDB(ctx context.Context, dirs datadir.Dirs, produceStateFiles bool, maxStepsInDB float64, logger log.Logger) error {
+	if !produceStateFiles || dbg.NoPrune() {
+		return nil
+	}
+	if ok, err := state.CheckSaltFilesExist(dirs); err != nil || !ok {
+		return err
+	}
 	unlock, err := dirs.TryFlock()
 	if errors.Is(err, datadir.ErrDataDirLocked) {
 		return nil
@@ -3588,6 +3596,9 @@ func RetireStateIfStepsInDB(ctx context.Context, dirs datadir.Dirs, maxStepsInDB
 	}
 	defer unlock()
 	if exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat")); err != nil || !exists {
+		return err
+	}
+	if pending, err := hasPendingChainDBMigrations(dirs, logger); err != nil || pending {
 		return err
 	}
 
@@ -3731,6 +3742,16 @@ func doCompareIdx(ctx context.Context, cliCtx *cli.Command) error {
 
 	logger.Info("two files are identical")
 	return nil
+}
+
+// hasPendingChainDBMigrations reports pending migrations: before they run, chaindata may lack a table.
+func hasPendingChainDBMigrations(dirs datadir.Dirs, logger log.Logger) (bool, error) {
+	migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
+	if err != nil {
+		return false, err
+	}
+	defer migrationsDB.Close()
+	return migrations.NewMigrator(dbcfg.ChainDB).HasPendingMigrations(migrationsDB)
 }
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {

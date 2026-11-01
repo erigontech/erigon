@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,12 +28,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/migrations"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 type bundle struct {
@@ -1523,4 +1531,60 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		confirmExist(t, f)
 	}
 	confirmExist(t, dataTorrent)
+}
+
+// newRetireTestDatadir writes a chaindata that holds a chain config, without the drop table.
+func newRetireTestDatadir(t *testing.T, drop string) datadir.Dirs {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			cfg := maps.Clone(defaultBuckets)
+			delete(cfg, drop)
+			return cfg
+		}).MustOpen()
+	defer db.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteCanonicalHash(tx, common.Hash{1}, 0); err != nil {
+			return err
+		}
+		return rawdb.WriteChainConfig(tx, common.Hash{1}, chainspec.Mainnet.Config)
+	}))
+	return dirs
+}
+
+func TestRetireStateIfStepsInDBSkipsWithoutSalt(t *testing.T) {
+	dirs := newRetireTestDatadir(t, "")
+	require.NoError(t, RetireStateIfStepsInDB(t.Context(), dirs, true, 3, log.New()))
+}
+
+func TestRetireStateIfStepsInDBSkipsBeforeMigrations(t *testing.T) {
+	dirs := newRetireTestDatadir(t, kv.BlockAccessList)
+	for _, salt := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, salt), []byte{0, 0, 0, 1}, 0o644))
+	}
+	require.NoError(t, RetireStateIfStepsInDB(t.Context(), dirs, true, 3, log.New()))
+}
+
+func TestRetireStateIfStepsInDBRespectsPruneFlags(t *testing.T) {
+	dirs := newRetireTestDatadir(t, kv.BlockAccessList)
+	for _, salt := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, salt), []byte{0, 0, 0, 1}, 0o644))
+	}
+	migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, log.New())
+	require.NoError(t, err)
+	require.NoError(t, migrationsDB.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, m := range migrations.NewMigrator(dbcfg.ChainDB).Migrations {
+			if err := tx.Put(kv.Migrations, []byte(m.Name), nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	migrationsDB.Close()
+	// The missing table makes the open fail, so a call that does not stop on the flag errors.
+	require.NoError(t, RetireStateIfStepsInDB(t.Context(), dirs, false, 3, log.New()), "--snap.state.stop")
+	dbg.SetNoPrune(true)
+	t.Cleanup(func() { dbg.SetNoPrune(false) })
+	require.NoError(t, RetireStateIfStepsInDB(t.Context(), dirs, true, 3, log.New()), "--exec.no-prune")
 }

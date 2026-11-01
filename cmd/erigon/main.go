@@ -77,14 +77,13 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := erigonapp.RetireStateIfStepsInDB(ctx, nodeCfg.Dirs, 3, logger); err != nil {
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	if err := erigonapp.RetireStateIfStepsInDB(ctx, nodeCfg.Dirs, ethCfg.Snapshot.ProduceE3, 3, logger); err != nil {
 		return err
 	}
 	if err := backup.ApplyMigrations(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}
-
-	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
 
 	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
