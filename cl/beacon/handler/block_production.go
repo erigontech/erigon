@@ -2449,7 +2449,7 @@ func verifyBlobBundles(bundles []BlobBundle, cellProofs bool) error {
 		proofs      []goethkzg.KZGProof
 	)
 	for i := range bundles {
-		blobCells, err := das.ComputeCells(bundles[i].Blob)
+		blobCells, err := peerdasutils.ComputeCells(bundles[i].Blob)
 		if err != nil {
 			return err
 		}
@@ -3124,7 +3124,7 @@ func collectPublishedPayloadData(
 		cells := bundle.Cells
 		if cells == nil {
 			var err error
-			if cells, err = das.ComputeCells(bundle.Blob); err != nil {
+			if cells, err = peerdasutils.ComputeCells(bundle.Blob); err != nil {
 				return nil, false, err
 			}
 		}

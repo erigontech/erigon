@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,10 +25,10 @@ func mkDetTask(txIndex int) *execTask {
 func newDetExecutor(t *testing.T, n int) *blockExecutor {
 	t.Helper()
 	tasks := make([]*execTask, n)
-	reexec := make([]chan struct{}, n)
+	poolTasks := make([]*poolTask, n)
 	for i := range tasks {
 		tasks[i] = mkDetTask(i)
-		reexec[i] = make(chan struct{}, 1)
+		poolTasks[i] = &poolTask{}
 	}
 	return &blockExecutor{
 		tasks:               tasks,
@@ -39,8 +38,7 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
-		slReexec:            reexec,
-		slReexecFlag:        make([]atomic.Bool, n),
+		poolTasks:           poolTasks,
 		writeChangedPrev:    map[int]*state.WriteSet{},
 		revalidate:          map[int]bool{},
 	}
@@ -90,7 +88,7 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 
 	require.False(t, be.validateTasks.checkComplete(1),
 		"R was committed against W's in-flight value; W changed -> R must be un-committed")
-	require.True(t, be.slReexecFlag[1].Load(), "R must be signalled for re-execution")
+	require.True(t, be.poolTasks[1].pending, "R must be signalled for re-execution")
 }
 
 // TestValidated_CrossPathLifecycleWriteReExecutesReader pins item 2 at the executor
@@ -129,7 +127,7 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 
 	require.False(t, be.validateTasks.checkComplete(2),
 		"R read a live balance; a later self-destruct of that account must un-commit R (cross-path lifecycle dep)")
-	require.True(t, be.slReexecFlag[2].Load(), "R must be signalled for re-execution")
+	require.True(t, be.poolTasks[2].pending, "R must be signalled for re-execution")
 }
 
 // TestValidated_ReaderCommittingAfterWriterChange pins the OTHER ordering: the
