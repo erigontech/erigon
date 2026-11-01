@@ -1187,7 +1187,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	return txpoolcfg.Success
 }
 
-// validateBlobSidecar checks the blob sidecar against the txn without p.lock.
+// validateBlobSidecar checks the blob sidecar against the txn. It reads no pool state, so it does not need p.lock.
 func (p *TxPool) validateBlobSidecar(txn *TxnSlot) txpoolcfg.DiscardReason {
 	blobHashes := txn.GetBlobHashes()
 	blobCount := len(blobHashes)
@@ -1456,28 +1456,45 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 			p.recoverAuthorizations(txn)
 		}
 	}
-	// Later txns from a KZG offender are skipped here and by validateTxns, so none skip verification.
-	var kzgOffenders [][64]byte
-	skipAllRemote := false
+	offenders := kzgOffenders{sources: sources}
 	for _, i := range indices {
 		if txns.Txns[i].TxType() != BlobTxnType || reasons[i] != txpoolcfg.NotSet {
 			continue
 		}
 		remote := !txns.IsLocal[i]
-		remotePeer := remote && i < len(sources) && sources[i].peerID != nil
-		if remote && (skipAllRemote || remotePeer && slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))) {
+		if remote && offenders.skip(i) {
 			continue
 		}
 		reasons[i] = p.validateBlobSidecar(txns.Txns[i])
 		if reasons[i] == txpoolcfg.Success {
 			reasons[i] = txpoolcfg.NotSet
-		} else if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && remotePeer {
-			kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
 		} else if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && remote {
-			skipAllRemote = true
+			offenders.add(i)
 		}
 	}
 	return reasons, nil
+}
+
+// kzgOffenders tracks the remote sources of txns that failed KZG verification, so their later txns are skipped.
+type kzgOffenders struct {
+	sources   []remoteSource
+	peers     [][64]byte
+	allRemote bool // a failure without a peer ID skips every later remote txn
+}
+
+func (o *kzgOffenders) skip(i int) bool {
+	if o.allRemote {
+		return true
+	}
+	return i < len(o.sources) && o.sources[i].peerID != nil && slices.Contains(o.peers, gointerfaces.ConvertH512ToHash(o.sources[i].peerID))
+}
+
+func (o *kzgOffenders) add(i int) {
+	if i < len(o.sources) && o.sources[i].peerID != nil {
+		o.peers = append(o.peers, gointerfaces.ConvertH512ToHash(o.sources[i].peerID))
+	} else {
+		o.allRemote = true
+	}
 }
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
@@ -1494,31 +1511,12 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		return reasons, goodTxns, err
 	}
 
-	skipAllRemote := false
-	var kzgOffenders [][64]byte
-	isKZGOffender := func(i int) bool {
-		if skipAllRemote {
-			return true
-		}
-		if i >= len(sources) || sources[i].peerID == nil {
-			return false
-		}
-		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
-	}
-	// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
-	addKZGOffender := func(i int) {
-		if i < len(sources) && sources[i].peerID != nil {
-			kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
-		} else {
-			skipAllRemote = true
-		}
-	}
-
+	offenders := kzgOffenders{sources: sources}
 	for i, txn := range txns.Txns {
 		if reasons[i] == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			addKZGOffender(i)
+			offenders.add(i)
 		}
-		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
+		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && offenders.skip(i)) {
 			continue
 		}
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
