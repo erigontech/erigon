@@ -295,6 +295,61 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 		"lastComputedBlock must not advance past a block whose commitment failed")
 }
 
+// TestHandleMessage_BaseReadErrorFailsTheBlock pins that a failed base read in the
+// block compute publishes the error instead of folding the account as a delete.
+func TestHandleMessage_BaseReadErrorFailsTheBlock(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	addr := accounts.InternAddress([20]byte{0xe1})
+	av := addr.Value()
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], []byte{0, 0, 0}, 0, nil))
+	ws := &state.WriteSet{}
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
+	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, common.Hash{0x01}, 1, &chain.Rules{}, ws))
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 1})
+
+	require.Len(t, out, 1)
+	require.ErrorContains(t, (<-out).err, "base read failed")
+}
+
+func TestComputeAhead_BaseReadErrorFailsTheBlock(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	addr := [20]byte{0xe2}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], []byte{0, 0, 0}, 0, nil))
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   2,
+		firstTxNum: 11,
+		lastTxNum:  12,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal:        types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}}},
+	})
+
+	require.Len(t, out, 1)
+	require.ErrorContains(t, (<-out).err, "base read")
+}
+
 // requireBranchesConsistentWithAccounts verifies each flushed commitment branch
 // hashes consistently with the account values written through the step edge.
 func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, accountValues map[string][]byte) {

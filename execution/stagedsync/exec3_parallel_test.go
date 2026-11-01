@@ -1924,3 +1924,21 @@ func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
 	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
 }
+
+func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a4"))
+	av := addr.Value()
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		return putter.DomainPut(kv.AccountsDomain, av[:], []byte{0, 0, 0}, 0, nil)
+	})
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}})
+	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
+}
