@@ -226,7 +226,7 @@ func TestDeferredAccountsReachReadersAtMerge(t *testing.T) {
 	}
 
 	sd.putLatest(kv.AccountsDomain, "a", []byte("a1"), 1)
-	sd.DeferAccounts(true)
+	sd.DeferWrites(true)
 	require.False(t, sd.putLatest(kv.AccountsDomain, "a", []byte("a5"), 5))
 	require.True(t, sd.putLatest(kv.AccountsDomain, "a", []byte("a5'"), 5))
 	sd.putLatest(kv.AccountsDomain, "b", []byte("b6"), 6)
@@ -237,7 +237,7 @@ func TestDeferredAccountsReachReadersAtMerge(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "a5'", string(v), "the writer sees its own writes")
 
-	sd.MergePendingAccounts()
+	sd.MergePendingWrites()
 	require.Equal(t, "a5'", latest("a"))
 	require.Equal(t, "b6", latest("b"))
 	before, ok, err := sd.GetAsOf(kv.AccountsDomain, []byte("a"), 5)
@@ -246,4 +246,31 @@ func TestDeferredAccountsReachReadersAtMerge(t *testing.T) {
 	require.Equal(t, "a1", string(before), "the merge keeps the earlier version for history reads")
 	_, _, ok = sd.PendingLatest(kv.AccountsDomain, []byte("a"))
 	require.False(t, ok)
+}
+
+func TestDeferredStorageReachesReadersAtMerge(t *testing.T) {
+	t.Parallel()
+
+	sd := &TemporalMemBatch{
+		stepSize:          16,
+		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		inMemHistoryReads: true,
+	}
+	for d := range sd.domains {
+		sd.domains[d] = map[string][]dataWithTxNum{}
+	}
+	sd.putLatest(kv.StorageDomain, "s", []byte("s1"), 1)
+	sd.DeferWrites(true)
+	sd.putLatest(kv.StorageDomain, "s", []byte("s5"), 5)
+
+	v, _, _ := sd.GetLatest(kv.StorageDomain, []byte("s"))
+	require.Equal(t, "s1", string(v), "readers see the slot before the block")
+	sd.MergePendingWrites()
+	v, _, _ = sd.GetLatest(kv.StorageDomain, []byte("s"))
+	require.Equal(t, "s5", string(v))
+	before, ok, err := sd.GetAsOf(kv.StorageDomain, []byte("s"), 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "s1", string(before))
 }

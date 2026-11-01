@@ -64,7 +64,7 @@ type TemporalMemBatch struct {
 	domains          [kv.DomainLen]map[string][]dataWithTxNum
 	// pending holds the account, storage and code writes of the block being folded. Only
 	// the writer reads it; readers see the block through the executor's prevBlocks until
-	// MergePendingAccounts.
+	// MergePendingWrites.
 	pending [kv.DomainLen]map[string][]dataWithTxNum
 	storage *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
@@ -278,10 +278,10 @@ func (sd *TemporalMemBatch) putPending(p map[string][]dataWithTxNum, key string,
 
 var deferredDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
 
-// DeferAccounts makes account, storage and code writes go to the writer-only buffer (on)
+// DeferWrites makes account, storage and code writes go to the writer-only buffer (on)
 // or straight to the shared maps (off). Must be called by the writer.
-func (sd *TemporalMemBatch) DeferAccounts(on bool) {
-	sd.MergePendingAccounts()
+func (sd *TemporalMemBatch) DeferWrites(on bool) {
+	sd.MergePendingWrites()
 	for _, d := range deferredDomains {
 		if on {
 			sd.pending[d] = map[string][]dataWithTxNum{}
@@ -291,8 +291,8 @@ func (sd *TemporalMemBatch) DeferAccounts(on bool) {
 	}
 }
 
-// MergePendingAccounts publishes the buffered writes under one lock per domain.
-func (sd *TemporalMemBatch) MergePendingAccounts() {
+// MergePendingWrites publishes the buffered writes under one lock per domain.
+func (sd *TemporalMemBatch) MergePendingWrites() {
 	for _, d := range deferredDomains {
 		if len(sd.pending[d]) > 0 {
 			sd.mergePending(d)

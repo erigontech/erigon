@@ -1844,28 +1844,28 @@ func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-type pendingAccounts interface {
-	DeferAccounts(on bool)
-	MergePendingAccounts()
+type pendingWrites interface {
+	DeferWrites(on bool)
+	MergePendingWrites()
 	PendingLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool)
 }
 
-// DeferAccounts routes accounts writes to a writer-only buffer until MergePendingAccounts.
-func (sd *SharedDomains) DeferAccounts(on bool) {
-	if p, ok := sd.mem.(pendingAccounts); ok {
-		p.DeferAccounts(on)
+// DeferWrites routes accounts writes to a writer-only buffer until MergePendingWrites.
+func (sd *SharedDomains) DeferWrites(on bool) {
+	if p, ok := sd.mem.(pendingWrites); ok {
+		p.DeferWrites(on)
 	}
 }
 
-func (sd *SharedDomains) MergePendingAccounts() {
-	if p, ok := sd.mem.(pendingAccounts); ok {
-		p.MergePendingAccounts()
+func (sd *SharedDomains) MergePendingWrites() {
+	if p, ok := sd.mem.(pendingWrites); ok {
+		p.MergePendingWrites()
 	}
 }
 
 // GetLatestForWrite is GetLatest for the writer: it also sees the writer-only buffer.
 func (sd *SharedDomains) GetLatestForWrite(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	if p, ok := sd.mem.(pendingAccounts); ok {
+	if p, ok := sd.mem.(pendingWrites); ok {
 		if v, step, ok := p.PendingLatest(domain, k); ok {
 			return v, step, nil
 		}
@@ -1964,7 +1964,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		return errors.New("DomainDelPrefix: not supported")
 	}
 
-	sd.MergePendingAccounts()
+	sd.MergePendingWrites()
 	type tuple struct {
 		k, v []byte
 	}
