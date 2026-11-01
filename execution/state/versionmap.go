@@ -2056,9 +2056,6 @@ type ReadResult struct {
 	// validated: the floor cell was Validated (pre-seal, revertible); the reader
 	// continues on it like Done but the dep is not yet final.
 	validated bool
-	// valStatus carries the floor cell's write transition so validation can treat a
-	// no-op (ValueUnchanged) write as not invalidating a reader without re-reading
-	// and comparing the live value.
 	valStatus valueStatus
 }
 
