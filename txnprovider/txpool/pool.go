@@ -139,6 +139,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	flushes                 atomic.Uint64 // committed flushNoFsync runs
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -335,7 +336,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	p.lock.Lock()
+	var poolTx kv.Tx
+	if p.poolDB != nil {
+		if poolTx, err = p.beginRoThenLock(ctx); err != nil {
+			return err
+		}
+		defer poolTx.Rollback()
+	} else {
+		p.lock.Lock()
+	}
 	p.stateGeneration++
 	defer func() {
 		if err == nil {
@@ -345,16 +354,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 		p.lock.Unlock()
 	}()
-
-	// Opened under the lock, so the snapshot sees every flush, which commits under the same lock.
-	var poolTx kv.Tx
-	if p.poolDB != nil {
-		poolTx, err = p.poolDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer poolTx.Rollback()
-	}
 
 	pendingPre := p.pending.Len()
 	defer func() {
@@ -2153,6 +2152,10 @@ func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, 
 					}
 				}
 			}
+		} else if queued, ok := p.unprocessedRemoteByHash[hash]; ok {
+			full := *queued
+			full.SenderID, full.Traced = txn.SenderID, txn.Traced
+			txn = &full
 		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
 			txn = cached.TxnSlot
 		}
@@ -2636,6 +2639,25 @@ func (p *TxPool) Run(ctx context.Context) error {
 	}
 }
 
+// beginRoThenLock opens a pool read tx and then takes p.lock, the order every other caller uses. It
+// retries when a flush commits in between, because the flush clears the Rlp of pooled slots and the
+// older snapshot does not have the rows it wrote.
+func (p *TxPool) beginRoThenLock(ctx context.Context) (kv.Tx, error) {
+	for {
+		flushes := p.flushes.Load()
+		tx, err := p.poolDB.BeginRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		p.lock.Lock()
+		if p.flushes.Load() == flushes {
+			return tx, nil
+		}
+		p.lock.Unlock()
+		tx.Rollback()
+	}
+}
+
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -2653,6 +2675,7 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
+	p.flushes.Add(1)
 	return written, nil
 }
 

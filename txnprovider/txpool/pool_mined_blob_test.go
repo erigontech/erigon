@@ -21,15 +21,19 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -102,12 +106,27 @@ type minedBlobReorgTest struct {
 
 // newMinedBlobReorgTest starts a pool at block 0 holding one local blob txn with nonce 2.
 func newMinedBlobReorgTest(t *testing.T) *minedBlobReorgTest {
+	r := newMinedBlobReorgPool(t)
+	var local TxnSlots
+	local.Append(&r.blobTxn, r.sender[:], true)
+	reasons, err := r.pool.AddLocalTxns(r.ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	return r
+}
+
+// newMinedBlobReorgPool starts a pool at block 0 and builds a blob txn with nonce 2 without adding it.
+func newMinedBlobReorgPool(t *testing.T) *minedBlobReorgTest {
+	return newMinedBlobReorgPoolWithDB(t, mdbxtest.NewTestPoolDB(t))
+}
+
+func newMinedBlobReorgPoolWithDB(t *testing.T, poolDB kv.RwDB) *minedBlobReorgTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	chainConfig := *testforks.Forks["Cancun"]
 	chainConfig.ChainID = uint256.NewInt(5)
-	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
+	pool, err := New(ctx, make(chan Announcements, 5), poolDB, coreDB, txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig), &chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
 	r := &minedBlobReorgTest{ctx: ctx, pool: pool, sender: common.Address{1}}
@@ -123,11 +142,6 @@ func newMinedBlobReorgTest(t *testing.T) *minedBlobReorgTest {
 	parseCtx.WithSender(false)
 	_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &r.blobTxn, nil, false, true, nil)
 	require.NoError(t, err)
-	var local TxnSlots
-	local.Append(&r.blobTxn, r.sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, local)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 	r.hash = string(r.blobTxn.IDHash[:])
 	return r
 }
@@ -187,6 +201,21 @@ func TestMinedBlobTxnReturnsWithBlobsAfterUnwind(t *testing.T) {
 	require.Len(t, r.pool.byHash[r.hash].TxnSlot.BlobBundles, 2)
 }
 
+// A remote blob txn mined before its queue is processed must be cached with the blobs of the queued copy.
+func TestMinedQueuedRemoteBlobTxnReturnsWithBlobsAfterUnwind(t *testing.T) {
+	r := newMinedBlobReorgPool(t)
+	var remote TxnSlots
+	remote.Append(&r.blobTxn, r.sender[:], false)
+	r.pool.started.Store(true)
+	r.pool.AddRemoteTxns(r.ctx, remote, nil, nil)
+	r.mine(t, 1, 3)
+	require.NoError(t, r.pool.processRemoteTxns(r.ctx))
+
+	r.reorgOneBlock(t, 0x11, false)
+	require.Contains(t, r.pool.byHash, r.hash)
+	require.Len(t, r.pool.byHash[r.hash].TxnSlot.BlobBundles, 2)
+}
+
 func TestMinedBlobTxnKeepsRlpAfterFlushAndUnwind(t *testing.T) {
 	r := newMinedBlobReorgTest(t)
 	_, err := r.pool.flush(r.ctx)
@@ -238,4 +267,27 @@ func TestMinedBlobCacheIsBoundedWithoutFinality(t *testing.T) {
 	}
 	require.NotContains(t, r.pool.minedBlobTxnsByHash, r.hash)
 	require.NotContains(t, r.pool.minedBlobTxnsByBlock, uint64(1))
+}
+
+// GetRlp callers take a pool read tx before p.lock, so OnNewBlock must too: the other order deadlocks once
+// such readers hold every reader permit.
+func TestOnNewBlockTakesReaderBeforePoolLock(t *testing.T) {
+	poolDB := mdbxtest.InMem(t, mdbx.New(dbcfg.TxPoolDB, log.New()), t.TempDir()).RoTxsLimiter(semaphore.NewWeighted(1)).MustOpen()
+	t.Cleanup(poolDB.Close)
+	r := newMinedBlobReorgPoolWithDB(t, poolDB)
+	reader, err := poolDB.BeginRo(r.ctx)
+	require.NoError(t, err)
+	defer reader.Rollback()
+
+	ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- r.pool.OnNewBlock(ctx, r.block(1, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{})
+	}()
+	time.Sleep(100 * time.Millisecond) // let OnNewBlock reach its wait for the reader permit
+	_, err = r.pool.GetRlp(reader, []byte(r.hash))
+	require.NoError(t, err)
+	reader.Rollback()
+	require.NoError(t, <-done)
 }
