@@ -1337,8 +1337,8 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		if e == nil {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
-		e.mu.RLock()
-		defer e.mu.RUnlock()
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		if vw, ok := writes.address[addr]; ok {
 			markCellComplete(e.Address, addr, AddressPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 		}
