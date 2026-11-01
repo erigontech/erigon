@@ -78,6 +78,28 @@ func (tx *TxnSlot) hasKeyedNonce() bool {
 	return ok && !frame.UsesLegacyNonce()
 }
 
+// Restored frames need fresh validation outside the pool lock. Keep their
+// account-nonce chains together so nonce-gap checks see every predecessor.
+// The caller must hold the pool lock to read the local transaction history.
+func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
+	legacyFrameSenders := make(map[common.Address]struct{})
+	for i, txn := range txns.Txns {
+		if txn.TxType() == FrameTxnType && !txn.hasKeyedNonce() {
+			legacyFrameSenders[txns.Senders.AddressAt(i)] = struct{}{}
+		}
+	}
+	for i, txn := range txns.Txns {
+		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
+		_, sharesNonceChain := legacyFrameSenders[txns.Senders.AddressAt(i)]
+		if txn.TxType() == FrameTxnType || sharesNonceChain {
+			frames.Append(txn, txns.Senders.At(i), isLocal)
+		} else {
+			ordinary.Append(txn, txns.Senders.At(i), isLocal)
+		}
+	}
+	return ordinary, frames
+}
+
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
 	if !p.chainConfig.IsBogota(uint64(time.Now().Unix())) {
 		return txpoolcfg.TypeNotActivated

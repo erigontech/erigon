@@ -432,26 +432,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			}
 		}
 	}
-	// A reorg can invalidate frame approvals and payer reservations, so frames
-	// need fresh simulation outside the pool lock. Keep their account-nonce chains
-	// together so nonce-gap checks do not discard ordinary successors too early.
-	legacyFrameSenders := make(map[common.Address]struct{})
-	for i, txn := range unwindTxns.Txns {
-		if txn.TxType() == FrameTxnType && !txn.hasKeyedNonce() {
-			legacyFrameSenders[unwindTxns.Senders.AddressAt(i)] = struct{}{}
-		}
-	}
-	var ordinaryUnwind TxnSlots
-	for i, txn := range unwindTxns.Txns {
-		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
-		_, sharesNonceChain := legacyFrameSenders[unwindTxns.Senders.AddressAt(i)]
-		if txn.TxType() == FrameTxnType || sharesNonceChain {
-			frames.unwound.Append(txn, unwindTxns.Senders.At(i), isLocal)
-		} else {
-			ordinaryUnwind.Append(txn, unwindTxns.Senders.At(i), isLocal)
-		}
-	}
-	unwindTxns = ordinaryUnwind
+	unwindTxns, frames.unwound = p.splitRestoredTxns(unwindTxns)
 	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
 		return frames, err
 	}
@@ -2864,19 +2845,19 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 }
 
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
-	var frames TxnSlots
+	var deferredTxns TxnSlots
 	err := p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
-		return p.fromDBLocked(tx, coreTx, cacheView, &frames)
+		return p.fromDBLocked(tx, coreTx, cacheView, &deferredTxns)
 	})
 	// Validation results and payer reservations are not persisted. Restored
-	// frames must pass admission against the current head, outside the pool lock.
-	if err == nil && len(frames.Txns) > 0 {
-		_, err = p.addNewTxns(ctx, frames, nil)
+	// frame nonce chains must pass admission against the current head, outside the pool lock.
+	if err == nil && len(deferredTxns.Txns) > 0 {
+		_, err = p.addNewTxns(ctx, deferredTxns, nil)
 	}
 	return err
 }
 
-func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, frames *TxnSlots) error {
+func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, deferredTxns *TxnSlots) error {
 	if p.stateBlockHash == (common.Hash{}) {
 		// Header sync can run ahead of execution, so pin validation to the executed head.
 		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
@@ -2963,17 +2944,16 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	p.pendingBlobFee.Store(pendingBlobFee)
 	p.blockGasLimit.Store(blockGasLimit)
 
-	txns := TxnSlots{}
+	var restored TxnSlots
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
 
-	i := 0
 	it, err = tx.Range(kv.PoolTransaction, nil, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}
 	for it.HasNext() {
-		k, v, err := it.Next()
+		_, v, err := it.Next()
 		if err != nil {
 			return err
 		}
@@ -2988,12 +2968,15 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			continue
 		}
 		txn.Rlp = nil // means that we don't need store it in db anymore
+		restored.Append(txn, addr[:], false)
+	}
 
-		isLocalTx := p.isLocalLRU.Contains(string(k))
-		if txn.TxType() == FrameTxnType {
-			frames.Append(txn, addr[:], isLocalTx)
-			continue
-		}
+	var ordinary TxnSlots
+	ordinary, *deferredTxns = p.splitRestoredTxns(restored)
+	var txns TxnSlots
+	for i, txn := range ordinary.Txns {
+		addr := ordinary.Senders.AddressAt(i)
+		isLocalTx := ordinary.IsLocal[i]
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 
 		reason, err := p.validateTx(txn, isLocalTx, cacheView)
@@ -3004,11 +2987,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			continue
 		}
 		p.recoverAuthorizations(txn)
-		txns.Resize(uint(i + 1))
-		txns.Txns[i] = txn
-		txns.IsLocal[i] = isLocalTx
-		copy(txns.Senders.At(i), addr[:])
-		i++
+		txns.Append(txn, addr[:], isLocalTx)
 	}
 
 	err = p.senders.registerNewSenders(&txns, p.logger)

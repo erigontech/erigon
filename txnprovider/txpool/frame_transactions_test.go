@@ -893,6 +893,49 @@ func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
 	}
 }
 
+func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	frame := framePoolSlot(t, sender, 1, 2)
+
+	wrapped, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
+	require.NoError(t, err)
+	wrapper := wrapped.(*types.BlobTxWrapper)
+	wrapper.Tx.Nonce = 1
+	var encoded bytes.Buffer
+	require.NoError(t, wrapper.MarshalBinaryWrapped(&encoded))
+	blob := &TxnSlot{}
+	parser := NewTxnParseContext(*uint256.NewInt(1))
+	parser.WithSender(false)
+	_, err = parser.ParseTransaction(encoded.Bytes(), 0, blob, nil, false, true, nil)
+	require.NoError(t, err)
+
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	txns.Append(blob, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Equal(t, 2, pool.pending.Len())
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+
+	restored, err := New(ctx, make(chan Announcements, 1), pool.poolDB, pool._chainDB,
+		pool.cfg, pool._stateCache, pool.chainConfig, nil, nil, func() {}, nil,
+		pool.ethBackend, log.New(), WithFeeCalculator(nil))
+	require.NoError(t, err)
+	restored.chainID.SetUint64(1)
+	require.NoError(t, restored.start(ctx))
+	for _, txn := range txns.Txns {
+		mt := restored.byHash[string(txn.IDHash[:])]
+		require.NotNil(t, mt, "transaction type %d with nonce %d was not restored", txn.TxType(), txn.Nonce)
+		require.Equal(t, PendingSubPool, mt.currentSubPool)
+		require.NotZero(t, mt.subPool&IsLocal)
+		require.Equal(t, txn.BlobBundles, mt.TxnSlot.BlobBundles)
+	}
+}
+
 func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 	for _, mode := range []string{"unwind", "reload"} {
 		t.Run(mode, func(t *testing.T) {
