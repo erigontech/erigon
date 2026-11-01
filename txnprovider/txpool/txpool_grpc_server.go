@@ -207,6 +207,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 			case errors.Is(err, ErrRlpTooBig): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpoolproto.ImportResult_INVALID
+			case errors.Is(err, ErrParseTxn):
+				reply.Errors[i] = err.Error()
+				reply.Imported[i] = txpoolproto.ImportResult_INVALID
 			default:
 				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR

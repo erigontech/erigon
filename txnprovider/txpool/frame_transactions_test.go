@@ -152,6 +152,7 @@ func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, reply.Errors, 1)
 				require.Contains(t, reply.Errors[0], tc.want)
+				require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, reply.Imported)
 				require.Zero(t, pool.addLocalSlotsLen)
 			})
 		})
