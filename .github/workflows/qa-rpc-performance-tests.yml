@@ -57,19 +57,12 @@ jobs:
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Decide whether to run geth:
-          # - schedule: only on Sunday (UTC)
-          # - workflow_dispatch: controlled by input
+          # Geth runs on every schedule, never on push; workflow_dispatch controls it via input
           RUN_GETH="false"
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            DOW="$(date -u +%w)"
-            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
-              RUN_GETH="true"
-            fi
+            RUN_GETH="true"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$INPUT_RUN_GETH" = "true" ]; then
-              RUN_GETH="true"
-            fi
+            RUN_GETH="${INPUT_RUN_GETH:-false}"
           fi
           
           # Variables

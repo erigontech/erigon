@@ -307,13 +307,13 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
-	isPlainCall := txn != nil && txn.GetTo() != nil && txn.GetValue().IsZero() && len(txn.GetAuthorizations()) == 0 &&
+	isPlain := txn != nil && txn.GetValue().IsZero() && len(txn.GetAuthorizations()) == 0 &&
 		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType
-	if !isPlainCall {
+	if !isPlain {
 		return false
 	}
 	sender, err := t.TxSender()
-	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
+	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && (txn.GetTo() == nil || sender.Value() != *txn.GetTo())
 	return senderOnlyPays
 }
 

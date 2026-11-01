@@ -28,12 +28,14 @@ linters:
     - errorlint
     - unused
     - testifylint
+    - nosprintfhostport
+    - gocheckcompilerdirectives
+    - gosec
+    - usetesting
   disable:
     - contextcheck
     - err113
     - exhaustive
-    - gocheckcompilerdirectives
-    - gosec
     - musttag
     - nilerr
     - protogetter
@@ -48,6 +50,15 @@ linters:
     - loggercheck # we don't use Zap
     - unconvert # not enough profit from always enabling
   settings:
+    gosec:
+      includes:
+        - G109
+        - G110
+        - G112
+        - G114
+        - G402
+    usetesting:
+      os-mkdir-temp: false
     goconst:
       min-len: 2
       min-occurrences: 2
@@ -110,16 +121,16 @@ linters:
         - nilness
         - unusedwrite
         - shadow
+        - sortslice
+        - unsafeptr
       disable:
         - deepequalerrors
         - fieldalignment
-        - unsafeptr
   exclusions:
     generated: lax
     presets:
       - comments
       - common-false-positives
-      - legacy
       - std-error-handling
     rules:
       - linters:
