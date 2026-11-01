@@ -4,9 +4,10 @@ How the state aggregator decides when an on-disk snapshot file (`.kv/.v/.ef` +
 accessors) can be physically deleted, while readers may still be using it. This is
 the mechanism merged by PR #21397; the design rationale is in
 [20260525-lockfree-file-reclamation-spec.md](20260525-lockfree-file-reclamation-spec.md).
-`FilesItem.frozen` was removed (#22126); `FilesItem.canDelete`/`refcount` are still
-live, but for the SnapshotRepo mark-and-sweep path, not this one — the aggregator
-reclaims via `aggregatorVisible` generations and never consults them.
+`FilesItem.frozen` was removed (#22126). The aggregator reclaims via
+`aggregatorVisible` generations, not `FilesItem.refcount`, but `reclaimFiles` still
+reads `FilesItem.canDelete`: a deletable file is closed and removed, any other file
+(for example one that was removed from disk and then recreated) is only closed.
 
 ## The model: reference-count the *visible generation*, not each file
 
@@ -44,17 +45,22 @@ Load-then-increment isn't atomic, so it re-checks that the bundle is still curre
 after incrementing. A superseded bundle can still be incremented transiently — the
 loop mis-pins one whenever a publish lands between the load and the add — so the
 refcount is not monotonically falling once superseded. What the re-check buys is
-that such a mis-pin is always released before the bundle is used: a reader only
-ever *uses* a bundle it observed as current, and a current bundle's files are never
-in any `retired` set. The drain watermark holds because a mis-pin is dropped, not
-because the count cannot rise.
+that such a mis-pin is always released before the bundle is used. A reader opened
+by `BeginFilesRo` only *uses* a bundle it observed as current. A reader opened from
+an `AggregatorFilesPin` uses the pinned bundle, which may already be superseded; it
+is safe because the pin already holds a refcount on that bundle, so its retired
+files cannot be reclaimed. The drain watermark holds because a mis-pin is dropped and
+a pinned bundle is never at zero, not because the count cannot rise.
 
 ## Retire a file — remove from `dirtyFiles`, publish a new generation
 
 A file leaves the visible set when it's removed from `dirtyFiles`. Producers:
 - **merge cleanup** — `cleanAfterMerge` (superseded small files),
-- **retention** — `RetireOldHistoryFiles` (aged history/index below the cutoff),
-- **dedup / squeeze** replacements.
+- **retention** — `AggregatorRoTx.Retire` (aged history/index below the cutoff),
+- **dedup** replacements.
+
+`SqueezeCommitmentFiles` is the exception: it calls `closeFilesAndRemove` directly,
+without `onFilesDelete` and without the retired list.
 
 Each collects the removed `*FilesItem`s, tells the downloader to stop seeding
 them with `a.onFilesDelete(names)` — the producer does this itself, ahead of any

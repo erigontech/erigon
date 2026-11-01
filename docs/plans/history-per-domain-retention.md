@@ -90,7 +90,7 @@ persistence guards `enabled`, accepts window changes with a warning (today's
    `Extra map[Domain]BlockAmount` persists via existing `EnsureNotChanged`.
 3. **Wiring** — parse `--history.X` in `applyRemainingEthFlags` (+ cobra variant),
    set it, `prune.Validate`.
-4. **Retirement** — a case in `RetireOldHistoryFiles` + extend
+4. **Retirement** — a case in `AggregatorRoTx.Retire` + extend
    `historyRetireCutoffStep` (inherits the general window unless bounded tighter).
 5. **Download filter** — add X's step to `buildBlackListForPruning` (already per-domain).
 
@@ -114,5 +114,6 @@ urfave aliases); persisted DB keys unchanged.
   (a proof past retained state history can't be served). Minimal keeps all at
   `state`; archive can bound `commitment` alone (#21198).
 - **Whitelist download filter (#15589) deferred** — orthogonal to the per-file skip.
-- **RCache and standalone log/trace indices are out of scope** — they follow
-  blocks/receipts, not `--history.state`.
+- **RCache and standalone log/trace indices are in scope** — `Retire` uses the
+  `state` cutoff (`RetireCutoffs.Default`) for them, so a change to the `state`
+  window also changes how long they are kept.
