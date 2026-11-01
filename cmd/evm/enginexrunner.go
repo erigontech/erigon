@@ -407,7 +407,9 @@ func stopWallProfile(stop func() error, f *os.File) {
 			panic(r)
 		}
 		f.Close()
-		_ = dir.RemoveFile(f.Name())
+		if err := dir.RemoveFile(f.Name()); err != nil {
+			fmt.Fprintf(os.Stderr, "remove empty fgprof profile: %v\n", err)
+		}
 	}()
 	if err := stop(); err != nil {
 		fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
