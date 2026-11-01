@@ -151,9 +151,13 @@ type forkGraphDisk struct {
 	envelopeMissing  sync.Map // common.Hash -> struct{}
 	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
-	// reusable disk I/O buffers, each guarded by the mutex above it
-	stateDumpLock     sync.Mutex
-	sszBuffer         []byte
+	// stateDumpLock guards the reusable state buffer and the key of the last state dump
+	stateDumpLock  sync.Mutex
+	sszBuffer      []byte
+	lastDumpedRoot common.Hash
+	lastDumpedSlot uint64
+
+	// envelopeMu guards the reusable envelope buffer
 	envelopeMu        sync.Mutex
 	envelopeSSZBuffer []byte
 
