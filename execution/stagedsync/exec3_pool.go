@@ -268,7 +268,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if pt.aborted {
 		return false
 	}
-	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
+	if txTask, ok := tv.Task.(*exec.TxTask); ok && !pt.be.versionMap.HasBAL && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
 		return pt.rerunAfter(tv.index - 1)
 	}
