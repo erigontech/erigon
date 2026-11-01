@@ -111,6 +111,9 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 				Nonce:    acc.Nonce,
 				CodeHash: acc.CodeHash.Value(),
 			}
+			if acc.CodeHash.IsEmpty() {
+				u.CodeHash = empty.CodeHash
+			}
 		} else {
 			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash}
 			u.DeleteStorageSubtree = true

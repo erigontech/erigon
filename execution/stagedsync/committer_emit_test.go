@@ -221,6 +221,32 @@ func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
 	require.True(t, got.DeleteStorageSubtree, "a destruct in an earlier batch block must reset the storage subtree")
 }
 
+// TestEmitTouched_ZeroCodeHashFoldsAsEmpty pins that an account record carrying the
+// zero CodeHash (a balance-only account synthesized from accounts.Account{}) folds
+// with the empty-code hash, as the domain round-trip does.
+func TestEmitTouched_ZeroCodeHashFoldsAsEmpty(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 0
+	ver := state.Version{TxIndex: txIdx}
+	addr := accounts.InternAddress([20]byte{0xb0})
+	av := addr.Value()
+
+	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).addr(addr, ver, &accounts.Account{Balance: *uint256.NewInt(5)}).build()
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(0)
+	vm.FlushVersionedWrites(ws, true)
+
+	cc := &commitmentCalculator{}
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx))
+	u := newTestUpdates()
+	require.NoError(t, cc.emitTouched(vm.View(txIdx+1, &testStorageBase{}), u))
+
+	got := collectUpdates(t, u)[string(av[:])]
+	require.Equal(t, *uint256.NewInt(5), got.Balance)
+	require.Equal(t, empty.CodeHash, got.CodeHash)
+}
+
 type errStorageBase struct {
 	accErr, storErr error
 }
