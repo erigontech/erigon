@@ -88,6 +88,7 @@ type ForkChoiceStorageReader interface {
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	IsBlockInvalid(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
 	// waiting for its block or its data columns.
 	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
