@@ -49,17 +49,25 @@ func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
 	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
 }
 
-type bodiesRangeExecutionModule struct {
+type bodiesExecutionModule struct {
 	execmodule.ExecutionModule
-	bodies  []*execmodule.PayloadBody
-	headers map[uint64]*types.Header
+	bodies        []*execmodule.PayloadBody
+	headers       map[uint64]*types.Header
+	headersByHash map[common.Hash]*types.Header
 }
 
-func (m *bodiesRangeExecutionModule) GetPayloadBodiesByRange(context.Context, uint64, uint64) ([]*execmodule.PayloadBody, error) {
+func (m *bodiesExecutionModule) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*execmodule.PayloadBody, error) {
 	return m.bodies, nil
 }
 
-func (m *bodiesRangeExecutionModule) GetHeader(_ context.Context, _ *common.Hash, blockNumber *uint64) (*types.Header, error) {
+func (m *bodiesExecutionModule) GetPayloadBodiesByRange(context.Context, uint64, uint64) ([]*execmodule.PayloadBody, error) {
+	return m.bodies, nil
+}
+
+func (m *bodiesExecutionModule) GetHeader(_ context.Context, hash *common.Hash, blockNumber *uint64) (*types.Header, error) {
+	if hash != nil {
+		return m.headersByHash[*hash], nil
+	}
 	if blockNumber == nil {
 		return nil, nil
 	}
@@ -516,12 +524,89 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
+	shanghai := &types.Header{Time: 199}
+	cancun := &types.Header{Time: 200}
+	prague := &types.Header{Time: 300}
+	module := &bodiesExecutionModule{
+		bodies: []*execmodule.PayloadBody{
+			{Transactions: [][]byte{{0x03}}},
+			{Transactions: [][]byte{{0x02}}},
+			{Transactions: [][]byte{{0x01}}},
+			nil,
+		},
+		headersByHash: map[common.Hash]*types.Header{
+			shanghai.Hash(): shanghai,
+			cancun.Hash():   cancun,
+			prague.Hash():   prague,
+		},
+	}
+	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+	hashes := []common.Hash{prague.Hash(), cancun.Hash(), shanghai.Hash(), {0xff}}
+	body, err := encodeHashListRequest(hashes, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/bodies/hash", "cancun", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Len(t, entries, len(hashes))
+	for i, available := range []bool{false, true, false, false} {
+		require.Equal(t, available, entries[i].Available, "entry %d", i)
+		if available {
+			require.Equal(t, []hexutil.Bytes{{0x02}}, entries[i].Transactions)
+		} else {
+			require.Empty(t, entries[i].Transactions)
+			require.Empty(t, entries[i].Withdrawals)
+			require.Empty(t, entries[i].BlockAccessList)
+		}
+	}
+}
+
+func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
+	module := &bodiesExecutionModule{
+		bodies: []*execmodule.PayloadBody{
+			{Transactions: [][]byte{{0x01}}},
+			{Transactions: [][]byte{{0x02}}},
+			{Transactions: [][]byte{{0x03}}},
+			{Transactions: [][]byte{{0x04}}},
+		},
+		headers: map[uint64]*types.Header{
+			10: {Number: *uint256.NewInt(10), Time: 199},
+			11: {Number: *uint256.NewInt(11), Time: 200},
+			12: {Number: *uint256.NewInt(12), Time: 299},
+			13: {Number: *uint256.NewInt(13), Time: 300},
+		},
+	}
+	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=5", "cancun", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Len(t, entries, 4)
+	for i, available := range []bool{false, true, true, false} {
+		require.Equal(t, available, entries[i].Available, "entry %d", i)
+		if available {
+			require.Equal(t, []hexutil.Bytes{{byte(i + 1)}}, entries[i].Transactions)
+		} else {
+			require.Empty(t, entries[i].Transactions)
+			require.Empty(t, entries[i].Withdrawals)
+			require.Empty(t, entries[i].BlockAccessList)
+		}
+	}
+}
+
 func TestSSZRESTBodiesByRangePreservesTrailingUnavailableBody(t *testing.T) {
 	const (
 		from      = uint64(10)
 		blockTime = uint64(250)
 	)
-	module := &bodiesRangeExecutionModule{
+	module := &bodiesExecutionModule{
 		bodies: []*execmodule.PayloadBody{{Transactions: [][]byte{{0x01}}}},
 		headers: map[uint64]*types.Header{
 			from:     {Number: *uint256.NewInt(from), Time: blockTime},
