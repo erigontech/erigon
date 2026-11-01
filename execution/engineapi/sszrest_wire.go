@@ -50,6 +50,8 @@ const (
 	sszWithdrawalBytes             = 44
 )
 
+// These are implemented wire schemas, independent of the chain's fork schedule.
+// Each operation applies its own fork activation rules after decoding.
 var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}
 
 func engineForkVersion(name string) (clparams.StateVersion, bool) {
@@ -69,35 +71,6 @@ func engineForkVersion(name string) (clparams.StateVersion, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func forkScheduled(cfg *chain.Config, name string) bool {
-	switch name {
-	case "paris":
-		return true
-	case "shanghai":
-		return cfg.ShanghaiTime != nil
-	case "cancun":
-		return cfg.CancunTime != nil
-	case "prague":
-		return cfg.PragueTime != nil
-	case "osaka":
-		return cfg.OsakaTime != nil
-	case "amsterdam":
-		return cfg.AmsterdamTime != nil
-	default:
-		return false
-	}
-}
-
-func supportedForkNames(cfg *chain.Config) []string {
-	out := make([]string, 0, len(engineForkOrder))
-	for _, name := range engineForkOrder {
-		if forkScheduled(cfg, name) {
-			out = append(out, name)
-		}
-	}
-	return out
 }
 
 func forkNameAtTime(cfg *chain.Config, time uint64) string {

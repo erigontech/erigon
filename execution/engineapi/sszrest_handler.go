@@ -128,7 +128,7 @@ func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Reques
 
 	forkName := r.Header.Get(engineForkHeader)
 	version, ok := engineForkVersion(forkName)
-	if !ok || !forkScheduled(e.config, forkName) {
+	if !ok {
 		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("unsupported %s %q", engineForkHeader, forkName))
 		return
 	}
@@ -549,7 +549,7 @@ type sszRestCapabilities struct {
 
 func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 	writeJSON(w, sszRestCapabilities{
-		SupportedForks:         supportedForkNames(e.config),
+		SupportedForks:         engineForkOrder,
 		ForkScopedEndpoints:    []string{"payloads", "forkchoice", "bodies"},
 		IndependentlyVersioned: map[string][]string{"blobs": {"v1", "v2", "v3", "v4"}},
 		UnscopedEndpoints:      []string{"capabilities", "identity", "inclusion-list"},

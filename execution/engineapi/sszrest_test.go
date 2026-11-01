@@ -118,14 +118,16 @@ func TestSSZRESTForkNameAtTime(t *testing.T) {
 	}
 }
 
-func TestSSZRESTSupportedForkNames(t *testing.T) {
-	require.Equal(t, []string{"paris"}, supportedForkNames(&chain.Config{}))
-	require.Equal(t,
-		[]string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"},
-		supportedForkNames(allForksConfig()))
-	require.Equal(t,
-		[]string{"paris", "shanghai", "cancun"},
-		supportedForkNames(&chain.Config{ShanghaiTime: common.NewUint64(0), CancunTime: common.NewUint64(0)}))
+func TestSSZRESTCapabilitiesIndependentOfForkSchedule(t *testing.T) {
+	for _, cfg := range []*chain.Config{{}, allForksConfig(), {ShanghaiTime: common.NewUint64(0)}} {
+		srv := newTestEngineServer(cfg, false)
+		rec := httptest.NewRecorder()
+		srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/capabilities", "", nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var caps sszRestCapabilities
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
+		require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
+	}
 }
 
 func TestSSZRESTNewPayloadEnvelopeRoundTrip(t *testing.T) {
@@ -811,14 +813,16 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 	}
 }
 
-// A fork that is valid but not scheduled on this chain must be rejected
-// with 400 unsupported-fork.
-func TestSSZRESTUnscheduledFork(t *testing.T) {
-	srv := newTestEngineServer(&chain.Config{ShanghaiTime: common.NewUint64(0), CancunTime: common.NewUint64(0)}, false)
-	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "amsterdam", nil))
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+func TestSSZRESTUnscheduledForkSchema(t *testing.T) {
+	srv := newTestEngineServer(&chain.Config{}, false)
+	for _, fork := range []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"} {
+		t.Run(fork, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", fork, nil))
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, problemSSZDecodeError, problemType(t, rec))
+		})
+	}
 }
 
 // An empty (but well-formed) Paris payload travels through decode and dispatch
