@@ -335,16 +335,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 	}
 
-	// A resumed dependency wait restarts here: the predecessor it waited on may have
-	// self-destructed the account, so the lifecycle check is redone too.
-reread:
 	var destructedVersion Version
 	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
 	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
 	if ok && sdRes.Status() == MVReadResultDependency {
-		if s.waitFor(sdRes.DepIdx()) {
-			goto reread
-		}
 		s.dep = max(s.dep, sdRes.DepIdx())
 	}
 	if ok && sdRes.resolved() && destructed {
@@ -469,10 +463,6 @@ reread:
 								addr, AccountKey{path, key})
 						}
 						s.versionedReads.SetHeader(addr, path, key, hdr)
-						if s.waitFor(hdr.Version.TxIndex) {
-							goto reread
-						}
-						// Shutdown / no pause hook: fall through to the tx's own write.
 					}
 				}
 			}
@@ -517,7 +507,7 @@ reread:
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        true,
+						Val:        r.life.state == LifecycleAbsent,
 					})
 					recordWipedCodeRead(s, addr, path, Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc})
 				}
@@ -538,7 +528,7 @@ reread:
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        true,
+						Val:        r.life.state == LifecycleAbsent,
 					})
 					// Record the wiped slot read anchored on the destruct version, matching
 					// liveStorage: a later store above the destruct resolves there and
@@ -572,13 +562,8 @@ reread:
 				res.DepIdx(), res.Incarnation(),
 				addr, AccountKey{path, key})
 		}
-		// The predecessor write is in flight (Estimate): wait for it to commit, then
-		// re-read the now-committed cell rather than aborting. waitCommit returns false only
-		// on shutdown; callers with no pause hook (serial/historical) never observe an
-		// Estimate and fall back to the in-flight value.
-		if s.waitFor(res.DepIdx()) {
-			goto reread
-		}
+		// The predecessor write is in flight (Estimate): record the dependency verdict
+		// and fall back to the in-flight value.
 		s.dep = max(s.dep, res.DepIdx())
 		hdr.Source = MapRead
 		s.versionedReads.SetHeader(addr, path, key, hdr)
@@ -660,6 +645,26 @@ reread:
 				r.version = sdVer
 				return
 			}
+		}
+
+		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
+		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
+		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		if path == StoragePath && r.life.state != LifecycleLive {
+			if !commited {
+				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
+					Val:        r.life.state == LifecycleAbsent,
+				})
+				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}},
+					Val:        uint256.Int{},
+				})
+			}
+			r.outcome = outcomeReturnZero
+			r.source = MapRead
+			r.version = r.life.canonicalVer
+			return
 		}
 
 		// A prior tx that bumped Incarnation cleared the old incarnation's storage and
@@ -1720,31 +1725,16 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 
 // ReadStamp is the token the vm's frame slot cache uses to detect state changes
 // between storage reads. journalLen and epoch cover the frame's own writes and
-// reverts; wakeGen covers a dep-wait resume — a lower-txIndex writer may have
-// committed a new value while this worker slept in waitCommit, which no journal
-// entry records. A change in any field invalidates the cached slot on the next
-// lookup, which is what makes the frame caches safe under the dep-wait executor.
-// Disabled under read tracing, which must observe every read.
+// reverts. A change in either field invalidates the cached slot on the next
+// lookup. Disabled under read tracing, which must observe every read.
 type ReadStamp struct {
 	journalLen int
 	epoch      uint64
-	wakeGen    uint64
 }
 
 func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 	if ibs == nil || ibs.journal == nil || dbg.TraceTransactionIO {
 		return ReadStamp{}, false
 	}
-	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch, ibs.wakeGen}, true
-}
-
-// waitFor parks the run until tx commits. On true the caller re-reads, and the self-destruct
-// probe is invalidated because the committed predecessor may have destructed the account.
-func (ibs *IntraBlockState) waitFor(tx int) bool {
-	if ibs.waitCommit == nil || !ibs.waitCommit(tx) {
-		return false
-	}
-	ibs.wakeGen++
-	ibs.sdProbeEpoch++
-	return true
+	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
 }
