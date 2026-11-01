@@ -749,7 +749,7 @@ func (t *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 // executeSystemTx runs a consensus system transaction as a free call (no gas
 // pool, no intrinsic gas): the engine performs the surrounding state effect
 // (reward move), then the executor bumps the sender nonce and makes the call.
-func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) (result *TxResult) {
+func (t *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) (result *TxResult) {
 	result = &TxResult{}
 
 	// Under the parallel executor a panic is a genuine failure, as in TxnExecutor.Execute.
@@ -761,12 +761,12 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 		}()
 	}
 
-	msg, err := txTask.TxMessage()
+	msg, err := t.TxMessage()
 	if err != nil {
 		result.Err = err
 		return result
 	}
-	execResult, err := protocol.ApplySystemTransaction(engine.(rules.SystemTxEngine), evm, ibs, txTask.Header, txTask.Tx(), msg)
+	execResult, err := protocol.ApplySystemTransaction(engine.(rules.SystemTxEngine), evm, ibs, t.Header, t.Tx(), msg)
 	if err != nil {
 		result.Err = err
 		return result
@@ -776,7 +776,7 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 	if !ibs.IsVersioned() {
 		ibs.SoftFinalise()
 	}
-	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+	result.Logs = ibs.GetLogs(t.TxIndex, t.TxHash(), t.BlockNumber(), t.BlockHash())
 
 	return result
 }

@@ -44,7 +44,7 @@ type Option func(*IntraBlockState)
 // to an IBS that executes canonical transactions: a user call run at the same
 // position would pick the overrides up too. Survives Reset.
 func WithStorageOverrides(o StorageOverrider) Option {
-	return func(sdb *IntraBlockState) { sdb.storageOverrideTable = storageOverrideTable(o) }
+	return func(ibs *IntraBlockState) { ibs.storageOverrideTable = storageOverrideTable(o) }
 }
 
 func storageOverrideTable(o StorageOverrider) StorageOverrideTable {
@@ -60,37 +60,37 @@ func storageOverrideTable(o StorageOverrider) StorageOverrideTable {
 // reads the override, prices SSTORE against it and skips writes equal to it;
 // its own writes shadow it. Cleared when the transaction ends (FinalizeTx), at the
 // next SetTxContext and by Reset.
-func (sdb *IntraBlockState) SetStorageOverride(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	if sdb.storageOverrides == nil {
-		sdb.storageOverrides = map[storageOverrideKey]uint256.Int{}
+func (ibs *IntraBlockState) SetStorageOverride(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
+	if ibs.storageOverrides == nil {
+		ibs.storageOverrides = map[storageOverrideKey]uint256.Int{}
 	}
-	sdb.storageOverrides[storageOverrideKey{addr, key}] = value
+	ibs.storageOverrides[storageOverrideKey{addr, key}] = value
 }
 
-func (sdb *IntraBlockState) installStorageOverrides() {
-	sdb.storageOverrides = nil
-	for _, override := range sdb.storageOverrideTable[StorageOverridePosition{sdb.blockNum, sdb.txIndex}] {
-		sdb.SetStorageOverride(override.Address, override.Key, override.Value)
+func (ibs *IntraBlockState) installStorageOverrides() {
+	ibs.storageOverrides = nil
+	for _, override := range ibs.storageOverrideTable[StorageOverridePosition{ibs.blockNum, ibs.txIndex}] {
+		ibs.SetStorageOverride(override.Address, override.Key, override.Value)
 	}
 }
 
-func (sdb *IntraBlockState) storageOverride(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	if len(sdb.storageOverrides) == 0 {
+func (ibs *IntraBlockState) storageOverride(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	if len(ibs.storageOverrides) == 0 {
 		return uint256.Int{}, false
 	}
-	value, ok := sdb.storageOverrides[storageOverrideKey{addr, key}]
+	value, ok := ibs.storageOverrides[storageOverrideKey{addr, key}]
 	return value, ok
 }
 
 // wroteStorage reports whether the current transaction has written the slot, in
 // which case an override must not shadow that write.
-func (sdb *IntraBlockState) wroteStorage(addr accounts.Address, key accounts.StorageKey) bool {
-	if sdb.versionMap != nil {
-		if _, ok := sdb.versionedWrites.GetStorage(addr, key); ok {
+func (ibs *IntraBlockState) wroteStorage(addr accounts.Address, key accounts.StorageKey) bool {
+	if ibs.versionMap != nil {
+		if _, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
 			return true
 		}
 	}
-	stateObject, ok := sdb.stateObjects[addr]
+	stateObject, ok := ibs.stateObjects[addr]
 	if !ok {
 		return false
 	}
