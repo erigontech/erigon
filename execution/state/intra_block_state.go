@@ -2240,6 +2240,9 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 		}
+		if _, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.ValStatus() == ValueDeleted {
+			ibs.recordWriteBalance(addr, newobj.data.Balance)
+		}
 	}
 	return newobj
 }

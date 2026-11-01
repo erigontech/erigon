@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -500,4 +502,49 @@ func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 	})
 	_, ok := writes.GetAddress(params.SystemAddress)
 	require.True(t, ok)
+}
+
+// TestRecreateAfterEmptyRemovalShadowsBalanceDelete pins that an account removed as an
+// EIP-161 empty and re-created by a later tx with no balance write reads present: the
+// re-creation must supersede the removal's ValueDeleted balance.
+func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	delegation := types.AddressToDelegation(accounts.InternAddress(common.Address{0xde}))
+
+	for _, tc := range []struct {
+		name     string
+		recreate func(*IntraBlockState, accounts.Address) error
+	}{
+		{"nonce only", func(ibs *IntraBlockState, addr accounts.Address) error {
+			return ibs.SetNonce(addr, 1, tracing.NonceChangeUnspecified)
+		}},
+		{"delegation then nonce", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if err := ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization); err != nil {
+				return err
+			}
+			return ibs.SetNonce(addr, 1, tracing.NonceChangeAuthorization)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := accounts.InternAddress([20]byte{0xe4})
+			vm := NewVersionMap(nil)
+
+			touch := NewWithVersionMap(&minimalStateReader{}, vm)
+			t.Cleanup(touch.Close)
+			touch.SetTxContext(1, 0)
+			require.NoError(t, touch.TouchAccount(addr))
+			vm.FlushVersionedWrites(finalizedWrites(t, touch, rules), true)
+
+			recreate := NewWithVersionMap(&minimalStateReader{}, vm)
+			t.Cleanup(recreate.Close)
+			recreate.SetTxContext(1, 1)
+			require.NoError(t, tc.recreate(recreate, addr))
+			vm.FlushVersionedWrites(finalizedWrites(t, recreate, rules), true)
+
+			acc, ok := vm.View(2, &minimalStateReader{}).GetAccount(addr)
+			require.True(t, ok, "the re-created account must read present to commitment")
+			require.Equal(t, uint64(1), acc.Nonce)
+		})
+	}
 }
