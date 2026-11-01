@@ -240,7 +240,7 @@ func (f *forkGraphDisk) SetNextEpochState(parentRoot common.Hash, state *state.C
 	f.addPruneMu.Lock()
 	defer f.addPruneMu.Unlock()
 	if f.highestTransitionSlot >= state.Slot() {
-		log.Debug("Ignoring late precomputed epoch state", "slot", state.Slot(), "highestTransitionSlot", f.highestTransitionSlot)
+		recordNextEpochStateOutcome("late", state.Slot())
 		return
 	}
 	f.nextEpochParentRoot = parentRoot

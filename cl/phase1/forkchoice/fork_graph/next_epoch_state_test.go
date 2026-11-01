@@ -78,7 +78,7 @@ func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
 	require.Same(t, advanced, graph.nextEpochState)
 	require.Equal(t, block.Block.ParentRoot, graph.nextEpochParentRoot)
 
-	outcomes := outcomeCounter(t, "hit")
+	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
@@ -89,7 +89,7 @@ func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(root))
-	require.Equal(t, 1.0, outcomes())
+	requireOutcome("hit")
 }
 
 func TestAddChainSegmentUsesPrecomputedEpochStateBeforeEmptySlots(t *testing.T) {
@@ -99,7 +99,7 @@ func TestAddChainSegmentUsesPrecomputedEpochStateBeforeEmptySlots(t *testing.T) 
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	logs := captureLogs(t)
 
-	outcomes := outcomeCounter(t, "hit")
+	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
@@ -110,7 +110,7 @@ func TestAddChainSegmentUsesPrecomputedEpochStateBeforeEmptySlots(t *testing.T) 
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(root))
-	require.Equal(t, 1.0, outcomes())
+	requireOutcome("hit")
 }
 
 func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
@@ -118,7 +118,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(common.Hash{0xff}, advanced)
 
-	outcomes := outcomeCounter(t, "parent_mismatch")
+	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
@@ -128,7 +128,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(root))
-	require.Equal(t, 1.0, outcomes())
+	requireOutcome("parent_mismatch")
 }
 
 func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T) {
@@ -145,7 +145,7 @@ func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	logs := captureLogs(t)
 
-	outcomes := outcomeCounter(t, "diverged")
+	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
@@ -161,7 +161,7 @@ func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T
 	require.Equal(t, wantRewards, gotRewards)
 	require.Equal(t, 1, strings.Count(logs.String(), "Precomputed epoch state diverged"))
 	require.NotContains(t, logs.String(), "Invalid beacon block")
-	require.Equal(t, 1.0, outcomes())
+	requireOutcome("diverged")
 }
 
 func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testing.T) {
@@ -169,7 +169,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testi
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 
-	outcomes := outcomeCounter(t, "no_full_validation")
+	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, false)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
@@ -179,7 +179,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testi
 	root, err := postState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(root))
-	require.Equal(t, 1.0, outcomes())
+	requireOutcome("no_full_validation")
 }
 
 func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.T) {
@@ -190,7 +190,7 @@ func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.
 	blockRoot := common.Hash(mustBlockRoot(t, block))
 	logs := captureLogs(t)
 
-	outcomes := outcomeCounter(t, "invalid")
+	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, true)
 	require.Error(t, err)
 	require.Equal(t, InvalidBlock, result)
@@ -201,7 +201,7 @@ func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.
 	require.Equal(t, 1, strings.Count(logs.String(), "Invalid beacon block"))
 	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"))
 	require.NotContains(t, logs.String(), "Precomputed epoch state diverged")
-	require.Equal(t, 1.0, outcomes())
+	requireOutcome("invalid")
 }
 
 func TestAddChainSegmentCountsMissingPrecomputedEpochStateOnlyAtEpochBoundary(t *testing.T) {
@@ -211,15 +211,15 @@ func TestAddChainSegmentCountsMissingPrecomputedEpochStateOnlyAtEpochBoundary(t 
 	cfg := anchor.BeaconConfig()
 	parentSlot := anchor.Slot()
 	for _, block := range blocks {
-		noEntry := outcomeCounter(t, "no_entry")
+		requireOutcome := outcomeRecorder(t)
 		_, result, err := graph.AddChainSegment(block, true)
 		require.NoError(t, err)
 		require.Equal(t, Success, result)
-		want := 0.0
+		want := ""
 		if cfg.RoundSlotToEpoch(block.Block.Slot) > cfg.RoundSlotToEpoch(parentSlot) {
-			want = 1
+			want = "no_entry"
 		}
-		require.Equal(t, want, noEntry(), "slot %d", block.Block.Slot)
+		requireOutcome(want)
 		parentSlot = block.Block.Slot
 	}
 }
@@ -249,12 +249,16 @@ func TestSetNextEpochStateRejectsPublicationAfterInvalidBlock(t *testing.T) {
 	advanced := precomputedEpochState(t, parent, block)
 	invalid := *block.Block
 	invalid.StateRoot[0] ^= 0xff
+	requireOutcome := outcomeRecorder(t)
 	_, result, err := graph.AddChainSegment(&cltypes.SignedBeaconBlock{Block: &invalid, Signature: block.Signature}, true)
 	require.Error(t, err)
 	require.Equal(t, InvalidBlock, result)
+	requireOutcome("no_entry")
 
+	requireOutcome = outcomeRecorder(t)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	require.Nil(t, graph.nextEpochState)
+	requireOutcome("late")
 }
 
 func TestSetNextEpochStateRejectsLatePublication(t *testing.T) {
@@ -264,14 +268,31 @@ func TestSetNextEpochStateRejectsLatePublication(t *testing.T) {
 	_, result, err := graph.AddChainSegment(block, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, result)
+	requireOutcome := outcomeRecorder(t)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	require.Nil(t, graph.nextEpochState)
+	requireOutcome("late")
 }
 
-func outcomeCounter(t *testing.T, outcome string) func() float64 {
+// outcomeRecorder returns a check that exactly the wanted outcome, or none for "", was counted since the call.
+func outcomeRecorder(t *testing.T) func(want string) {
 	t.Helper()
-	before := nextEpochStateOutcomes.WithLabelValues(outcome).GetValue()
-	return func() float64 { return nextEpochStateOutcomes.WithLabelValues(outcome).GetValue() - before }
+	labels := []string{"hit", "no_entry", "parent_mismatch", "no_full_validation", "diverged", "invalid", "late"}
+	count := func(label string) float64 { return nextEpochStateOutcomes.WithLabelValues(label).GetValue() }
+	before := make(map[string]float64, len(labels))
+	for _, label := range labels {
+		before[label] = count(label)
+	}
+	return func(want string) {
+		t.Helper()
+		for _, label := range labels {
+			wantDelta := 0.0
+			if label == want {
+				wantDelta = 1
+			}
+			require.Equal(t, wantDelta, count(label)-before[label], "outcome %s", label)
+		}
+	}
 }
 
 func mustBlockRoot(t *testing.T, block *cltypes.SignedBeaconBlock) [32]byte {
