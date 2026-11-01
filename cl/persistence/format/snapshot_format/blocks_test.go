@@ -175,5 +175,5 @@ func (p *panicOnCallBlockReader) Withdrawals(number uint64, hash common.Hash) (*
 
 func (p *panicOnCallBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {}
 
-func (p *panicOnCallBlockReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+func (p *panicOnCallBlockReader) CacheBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
 }

@@ -17,6 +17,7 @@
 package execmoduletester
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"testing"
@@ -143,6 +144,80 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	postReExec := checkBalance("after-reset-and-integration-reexec")
 	require.Equal(t, dormantFunds.String(), postReExec.ToBig().String(),
 		"BUG #21138: after reset + integration-path re-exec, genesis-allocated balance dropped (mainnet block 46147)")
+}
+
+// An AuRa genesis with a constructor allocation creates an empty account at the
+// zero address. Re-executing from block 0 must keep it, as the genesis runs with
+// EIP-161 disabled; removing it changes every later state root.
+func TestFromZero_AuraGenesisEmptyZeroAddressRetained(t *testing.T) {
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+	}{
+		{"serial", false},
+		{"parallel", true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			prev := dbg.Exec3Parallel
+			dbg.Exec3Parallel = mode.parallel
+			t.Cleanup(func() { dbg.Exec3Parallel = prev })
+			runAuraGenesisEmptyZeroAddressRetained(t)
+		})
+	}
+}
+
+func runAuraGenesisEmptyZeroAddressRetained(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
+	keyFunds := new(big.Int).Mul(big.NewInt(1_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
+
+	auraCfg := chain.TestChainBerlinConfig.Copy()
+	auraCfg.Aura = &chain.AuRaConfig{}
+	// A constructor that returns a single STOP byte as the runtime code.
+	constructor := []byte{0x60, 0x00, 0x60, 0x00, 0x53, 0x60, 0x01, 0x60, 0x00, 0xf3}
+	gspec := &types.Genesis{
+		Config: auraCfg,
+		Alloc: types.GenesisAlloc{
+			keyAddr:                     types.GenesisAccount{Balance: keyFunds},
+			common.HexToAddress("0xc0"): types.GenesisAccount{Constructor: constructor},
+		},
+	}
+	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
+
+	readZero := func() []byte {
+		var enc []byte
+		var zero common.Address
+		require.NoError(t, emt.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+			v, _, err := tx.GetLatest(kv.AccountsDomain, zero[:], kv.GetLatestOptions{})
+			enc = bytes.Clone(v)
+			return err
+		}))
+		return enc
+	}
+	require.NotEmpty(t, readZero(), "the AuRa genesis must create the zero-address account")
+
+	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
+	gen, err := emt.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		to := common.BytesToAddress([]byte{byte(i + 1), 0xab})
+		tx, txErr := types.SignTx(
+			types.NewTransaction(b.TxNonce(keyAddr), to, uint256.NewInt(1_000_000), params.TxGas, uint256.NewInt(1), nil),
+			*signer, key,
+		)
+		require.NoError(t, txErr)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, emt.InsertChain(gen))
+	require.NotEmpty(t, readZero())
+
+	ctx := context.Background()
+	require.NoError(t, rawdbreset.ResetExec(ctx, emt.DB))
+	require.NoError(t,
+		reExecViaIntegrationPath(t, ctx, emt, gen.TopBlock.NumberU64(), 1*datasize.KB, true /*badBlockHalt*/, log.New()),
+		"re-exec from 0 must reproduce every block's state root")
+	require.NotEmpty(t, readZero(), "re-exec from 0 must keep the empty zero-address account")
 }
 
 // setupOfflineExec rebuilds the exec-stage cfg directly (execmoduletester's own

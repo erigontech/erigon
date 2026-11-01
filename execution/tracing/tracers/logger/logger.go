@@ -188,7 +188,7 @@ func (l *StructLogger) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cost 
 			l.storage[contractAddr] = make(Storage)
 		}
 		// capture SLOAD opcodes and record the read entry in the local storage
-		if op == vm.SLOAD && stackLen >= 1 {
+		if op == vm.SLOAD && stackLen >= 1 && err == nil {
 			var (
 				address = common.Hash(stack[stackLen-1].Bytes32())
 				value   uint256.Int
@@ -197,7 +197,7 @@ func (l *StructLogger) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cost 
 			l.storage[contractAddr][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
-		if op == vm.SSTORE && stackLen >= 2 {
+		if op == vm.SSTORE && stackLen >= 2 && err == nil {
 			var (
 				value   = common.Hash(stack[stackLen-2].Bytes32())
 				address = common.Hash(stack[stackLen-1].Bytes32())
@@ -221,7 +221,7 @@ func (l *StructLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsa
 	if depth != 0 {
 		return
 	}
-	l.output = output
+	l.output = slices.Clone(output)
 	l.err = err
 	if l.cfg.Debug {
 		fmt.Printf("0x%x\n", output)

@@ -33,13 +33,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
 )
 
@@ -60,7 +57,6 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -72,8 +68,6 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	count := uint64(10)
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
-	var blockRoots []common.Hash
-	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
 	require.NoError(t, tx.Commit())
 
 	ethClock := getEthClock(t)
@@ -83,7 +77,6 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -93,8 +86,10 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
 
-	for _, block := range blockRoots {
-		req.Append(block)
+	for _, block := range expBlocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		req.Append(root)
 	}
 	var reqBuf bytes.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&reqBuf, req); err != nil {
@@ -115,14 +110,14 @@ func TestBlocksByRangeHandler(t *testing.T) {
 
 	sr := snappypool.Reader(stream)
 	defer snappypool.PutReader(sr)
-	for i := 0; i < len(blockRoots); i++ {
+	for i := range expBlocks {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
 		if err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)

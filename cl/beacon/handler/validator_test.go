@@ -262,7 +262,7 @@ func (t *validatorTestSuite) TestGetEthV2ValidatorAggregateAttestationUsesCommit
 	dataRoot := common.HexToHash("0x123")
 	attestation := &solid.Attestation{Data: &solid.AttestationData{Slot: 8}}
 	clock.EXPECT().StateVersionByEpoch(uint64(1)).Return(clparams.ElectraVersion)
-	t.mockAggrPool.EXPECT().GetAggregatationByRootAndCommittee(dataRoot, uint64(3)).Return(attestation)
+	t.mockAggrPool.EXPECT().GetAggregatationByRootAndCommittee(dataRoot, uint64(8), uint64(3)).Return(attestation)
 
 	req := httptest.NewRequestWithContext(t.T().Context(), http.MethodGet, "/eth/v2/validator/aggregate_attestation?attestation_data_root="+dataRoot.String()+"&slot=8&committee_index=3", nil)
 	response, err := t.apiHandler.GetEthV2ValidatorAggregateAttestation(httptest.NewRecorder(), req)

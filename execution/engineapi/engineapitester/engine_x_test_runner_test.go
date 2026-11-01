@@ -27,8 +27,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
@@ -108,7 +108,7 @@ func TestVerifyEngineXResult(t *testing.T) {
 		return &engineXResultReaderStub{
 			block: &requests.Block{BlockWithTxHashes: requests.BlockWithTxHashes{Hash: head}},
 			proofs: map[common.Address]*accounts.AccProofResult{
-				accountAddress: engineXAccountProof(7, 2, crypto.Keccak256Hash(code), trie.EmptyRoot),
+				accountAddress: engineXAccountProof(7, 2, crypto.Keccak256Hash(code), empty.RootHash),
 				deletedAddress: engineXAccountProof(0, 0, common.Hash{}, common.Hash{}),
 			},
 		}

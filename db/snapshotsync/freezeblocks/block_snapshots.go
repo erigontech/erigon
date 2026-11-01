@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -157,18 +158,6 @@ func NewBlockRetire(
 
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
-
-// SetCommitGate wraps the retirement's chain DB reads with the given gate so
-// each db.View acquires RLock, serializing against a writer (Aggregator
-// commit+prune path) that briefly holds Lock during MDBX commit. Prevents a
-// retirement RO tx from pinning the freelist and blocking page reclamation.
-// Safe to call with nil — no-op. Must be called before retirement starts.
-func (br *BlockRetire) SetCommitGate(gate *sync.RWMutex) {
-	if gate == nil {
-		return
-	}
-	br.db = kv.NewGatedRoDB(br.db, gate)
-}
 
 func (br *BlockRetire) IO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
@@ -737,6 +726,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		collected := -1
 		collectorLock := sync.Mutex{}
 		collections := sync.NewCond(&collectorLock)
+		failed := false
 		var j int
 
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
@@ -745,26 +735,26 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 			parsers.Go(func() error {
 				valueBuf, err := parse(tv, valueBufs[tx%workers], senders, tx)
-				if err != nil {
-					collectorLock.Lock()
-					defer collectorLock.Unlock()
-					collected = tx
-					collections.Broadcast() // to fail fast on it.
-					return fmt.Errorf("%w, block: %d", err, blockNum)
-				}
 				collectorLock.Lock()
 				defer collectorLock.Unlock()
 				for collected < tx-1 {
 					collections.Wait()
 				}
+				collected = tx
+				defer collections.Broadcast()
+				if failed {
+					return nil
+				}
+				if err != nil {
+					failed = true
+					return fmt.Errorf("%w, block: %d", err, blockNum)
+				}
 
 				// first tx byte => sender address => tx rlp
 				if err := collect(valueBuf); err != nil {
+					failed = true
 					return err
 				}
-				collected = tx
-				collections.Broadcast()
-
 				return nil
 			})
 
@@ -1014,7 +1004,13 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
-	l = append(append(l, l1...), l2...)
+	l = append(l, l1...)
+	for _, fPath := range l2 {
+		if v, err := version.ParseVersion(filepath.Base(fPath)); err == nil && v.GreaterOrEqual(version.V2_0) {
+			continue // positional accessor, not recsplit
+		}
+		l = append(l, fPath)
+	}
 
 	for _, fPath := range l {
 		index, err := recsplit.OpenIndex(fPath)

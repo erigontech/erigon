@@ -77,6 +77,11 @@ func (*ParticipationBitList) Static() bool {
 
 // CopyTo is like a Power Rangers team up episode - we get the bits from another list!
 func (u *ParticipationBitList) CopyTo(target IterableSSZ[byte]) {
+	if participation, ok := target.(*ParticipationBitList); ok {
+		participation.u = append(participation.u[:0], u.u[:u.l]...)
+		participation.l = u.l
+		return
+	}
 	target.Clear()
 	for i := 0; i < u.l; i++ {
 		target.Append(u.u[i])

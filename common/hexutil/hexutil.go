@@ -157,16 +157,6 @@ func MustDecodeU256(input string) uint256.Int {
 	return dec
 }
 
-// MustDecodeBig decodes a hex string with 0x prefix as a quantity.
-// It panics for invalid input.
-func MustDecodeBig(input string) *big.Int {
-	dec, err := DecodeBig(input)
-	if err != nil {
-		panic(err)
-	}
-	return dec
-}
-
 // EncodeBig encodes bigint as a hex string with 0x prefix.
 func EncodeBig(bigint *big.Int) string {
 	if sign := bigint.Sign(); sign == 0 {
@@ -289,9 +279,7 @@ func EncodeTs(number uint64) []byte {
 
 // Encode encodes b as a hex string with 0x prefix.
 func Encode(b []byte) string {
-	enc := make([]byte, len(b)*2+2)
-	copy(enc, "0x")
-	hex.Encode(enc[2:], b)
+	enc, _ := Bytes(b).MarshalText()
 	return string(enc)
 }
 

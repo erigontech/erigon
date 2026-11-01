@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -49,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -193,7 +195,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	defer tx.Rollback()
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
-		return nil, err
+		return nil, unknownBlockAsResourceNotFound(err)
 	}
 	if blockNum == 0 {
 		return []ParityTrace{}, nil
@@ -261,44 +263,40 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks stream.U64, err error) {
 	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
-	var blocksTo stream.U64
+	var fromClause, toClause []kv.IndexKey
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesFromIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			allBlocks = stream.Union[uint64](allBlocks, it, order.Asc, kv.Unlim)
+			fromClause = append(fromClause, kv.IndexKey{Idx: kv.TracesFromIdx, Key: addr[:]})
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it, err := tx.IndexRange(kv.TracesToIdx, addr[:], int(from), int(to), order.Asc, kv.Unlim)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			blocksTo = stream.Union[uint64](blocksTo, it, order.Asc, kv.Unlim)
+			toClause = append(toClause, kv.IndexKey{Idx: kv.TracesToIdx, Key: addr[:]})
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
-	if req.Mode != TraceFilterModeUnion && len(fromAddresses) > 0 && len(toAddresses) > 0 {
-		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
-	} else {
-		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
-	}
-
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks = stream.Range[uint64](from, to)
-		//} else {
-		//allBlocks.RemoveRange(0, from)
-		//allBlocks.RemoveRange(to, uint64(0x100000000))
+		return fromAddresses, toAddresses, stream.Range[uint64](from, to), nil
 	}
 
+	var clauses [][]kv.IndexKey
+	switch {
+	case req.Mode != TraceFilterModeUnion && len(fromClause) > 0 && len(toClause) > 0:
+		clauses = [][]kv.IndexKey{fromClause, toClause}
+	case len(fromClause)+len(toClause) > 0:
+		clauses = [][]kv.IndexKey{append(fromClause, toClause...)}
+	default:
+		return fromAddresses, toAddresses, stream.EmptyU64, nil
+	}
+	allBlocks, err = tx.IndexJoin(kv.IndexQuery{Clauses: clauses, FromTs: int(from), ToTs: int(to), Asc: order.Asc})
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	return fromAddresses, toAddresses, allBlocks, nil
 }
 
@@ -306,13 +304,16 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
+		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+	}
 	if req.FromBlock != nil {
-		if err := rejectPending(*req.FromBlock); err != nil {
+		if err := rejectPendingNumber(*req.FromBlock); err != nil {
 			return err
 		}
 	}
 	if req.ToBlock != nil {
-		if err := rejectPending(*req.ToBlock); err != nil {
+		if err := rejectPendingNumber(*req.ToBlock); err != nil {
 			return err
 		}
 	}
@@ -332,6 +333,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 	fromBlock, toBlock := latest, latest
+	if req.BlockHash != nil {
+		if fromBlock, err = api.resolveFilterBlockHash(ctx, dbtx, *req.BlockHash); err != nil {
+			return err
+		}
+		toBlock = fromBlock
+	}
 	if req.FromBlock != nil {
 		if fromBlock, err = api.resolveFilterBound(ctx, dbtx, *req.FromBlock, latest); err != nil {
 			return err
@@ -349,7 +356,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, dbtx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}
@@ -365,18 +372,44 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 // latest executed block is invalid params, as in eth_getLogs, rather than an
 // empty or clamped result: the txnum index silently clamps a target past
 // execution to the last available txnum.
-func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound rpc.BlockNumberOrHash, latest uint64) (uint64, error) {
-	if number, ok := bound.Number(); ok && number >= 0 && uint64(number) > latest {
+func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound rpc.BlockNumber, latest uint64) (uint64, error) {
+	if bound >= 0 && uint64(bound) > latest {
 		return 0, errBlockRangeIntoFuture
 	}
-	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, bound)
+	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, rpc.BlockNumberOrHashWithNumber(bound))
 	if err != nil {
-		return 0, err
+		return 0, unknownBlockAsResourceNotFound(err)
 	}
 	if blockNum > latest {
 		return 0, errBlockRangeIntoFuture
 	}
 	return blockNum, nil
+}
+
+// resolveFilterBlockHash resolves the block a blockHash filter selects, as
+// eth_getLogs does: only a canonical block of tx, so that a side-chain hash is
+// never answered with the canonical block at its height. The block must also
+// be executed, so that an empty result always belongs to the requested block.
+// An unknown, noncanonical or unexecuted block is not found (-32001); a body
+// below the prune boundary keeps the pruned-history error.
+func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
+	blockNum, err := api.resolveLogsBlockHash(ctx, tx, hash)
+	if err == nil {
+		err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	}
+	var notExecuted *rpchelper.BlockNotExecutedError
+	if errors.Is(err, errBlockHashNotFound) || errors.As(err, &notExecuted) {
+		return 0, &rpc.ResourceNotFoundError{Message: err.Error()}
+	}
+	return blockNum, err
+}
+
+func unknownBlockAsResourceNotFound(err error) error {
+	var unresolvedTag *rpc.CustomError
+	if errors.As(err, &rpc.BlockNotFoundErr{}) || (errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
+		return &rpc.ResourceNotFoundError{Message: err.Error()}
+	}
+	return err
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -465,14 +498,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastRules *chain.Rules
 	var lastBaseFee uint256.Int
 
-	noop := state.NewNoopWriter()
 	isPos := false
 
 	traceFilterTxn := func(blockNum, txNum uint64, txIndex int, txn types.Transaction, msg *types.Message) (*TraceCallResult, error) {
-		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
-		cachedWriter := state.NewCachedWriter(noop, stateCache)
-
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
 		oeConfig, err := parseOeTracerConfig(traceConfig)
@@ -482,7 +510,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.config = oeConfig
 		ot.compat = api.compatibility
 		ot.r = traceResult
-		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Tracer = ot.Tracer().Hooks
 
@@ -490,8 +517,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
-		ibs := state.New(cachedReader)
+		ibs := state.New(state.NewHistoryReaderV3(dbtx, txNum))
 		defer ibs.Close()
+		transactions.VersionedCallState(ibs)
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
@@ -530,10 +558,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
-		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
-			return nil, err
-		}
-		if err := ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+		if err := ethapi.FinalizeCallTx(ibs, evm.ChainRules()); err != nil {
 			return nil, err
 		}
 		return traceResult, nil
@@ -543,7 +568,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFnalTxn, _, blockNumChanged, err := it.Next()
 		if err != nil {
 			return err
 		}
@@ -739,14 +764,17 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedBlockState(ibs)
+	// The block-start system calls come before tx 0, as block execution runs them.
+	ibs.SetTxContext(block.NumberU64(), -1)
 
-	logger := log.New("trace_filtering")
+	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -798,12 +826,14 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
 
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
+	// Withdrawals and the block-end system calls see every tx.
+	ibs.SetTxContext(block.NumberU64(), len(txs))
 
 	// Collect balance diffs for beacon chain withdrawals; prev is read only when stateDiff is requested.
 	wdiffs := make([]withdrawalBalanceDiff, 0, len(block.Withdrawals()))
@@ -911,6 +941,16 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			}
 			defer workerTx.Rollback()
 
+			// Workers pin their own history view. Check the first replay position
+			// here; all jobs in this block read at or after it.
+			startTxNum, err := state.StateHistoryStartTxNum(workerTx)
+			if err != nil {
+				return err
+			}
+			if baseTxNum < startTxNum {
+				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, header.Number.Uint64(), startTxNum)
+			}
+
 			// Per-worker constants: same for every job this worker processes.
 			// blockCtx captures workerTx in its GetHash closure, so it cannot
 			// be shared across workers (each needs its own copy).
@@ -923,7 +963,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			if err != nil {
 				return err
 			}
-			noop := state.NewNoopWriter()
 
 			// traceTxnJob traces one job's transaction, closing its state on every
 			// exit path. A non-nil error aborts this worker and cancels the rest.
@@ -933,6 +972,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
 				workerIbs := state.New(workerReader)
 				defer workerIbs.Close()
+				transactions.VersionedCallState(workerIbs)
 
 				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
 
@@ -940,7 +980,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				ot.config = oeConfig
 				ot.compat = api.compatibility
 				ot.r = traceResult
-				ot.idx = []string{fmt.Sprintf("%d-", job.txIndex)}
 				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
 				ot.traceAddr = []int{}
 
@@ -968,7 +1007,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 				}
 
-				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
+				if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
 					return err
 				}
 
@@ -1041,14 +1080,15 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
-	logger := log.New("trace_filtering")
+	logger := log.New("component", "trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ethapi.CommitCallState(ibs, rules, cachedWriter); err != nil {
 		return nil, err
 	}
 
@@ -1062,15 +1102,27 @@ func (api *TraceAPIImpl) callTransaction(
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
 }
 
-// TraceFilterRequest represents the arguments for trace_filter
+// TraceFilterRequest represents the arguments for trace_filter. As in
+// eth_getLogs, range bounds are block numbers or tags, and BlockHash instead
+// selects a single block by hash.
 type TraceFilterRequest struct {
-	FromBlock   *rpc.BlockNumberOrHash `json:"fromBlock"`
-	ToBlock     *rpc.BlockNumberOrHash `json:"toBlock"`
-	FromAddress []*common.Address      `json:"fromAddress"`
-	ToAddress   []*common.Address      `json:"toAddress"`
-	Mode        TraceFilterMode        `json:"mode,omitempty"`
-	After       *uint64                `json:"after"`
-	Count       *uint64                `json:"count"`
+	BlockHash   *common.Hash      `json:"blockHash"`
+	FromBlock   *rpc.BlockNumber  `json:"fromBlock"`
+	ToBlock     *rpc.BlockNumber  `json:"toBlock"`
+	FromAddress []*common.Address `json:"fromAddress"`
+	ToAddress   []*common.Address `json:"toAddress"`
+	Mode        TraceFilterMode   `json:"mode,omitempty"`
+	After       *uint64           `json:"after"`
+	Count       *uint64           `json:"count"`
+}
+
+// UnmarshalJSON rejects unknown fields, so a misspelled filter member fails
+// instead of silently widening the match.
+func (r *TraceFilterRequest) UnmarshalJSON(data []byte) error {
+	type plain TraceFilterRequest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*plain)(r))
 }
 
 type TraceFilterMode string

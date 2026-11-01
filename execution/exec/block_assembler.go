@@ -170,7 +170,10 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		return err
 	}
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return err
+		}
 		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
 		// first tx observes them across the ResetVersionedIO below.
@@ -223,15 +226,19 @@ func (ba *BlockAssembler) AddTransactions(
 	// SharedDomains become stale when system calls revert storage slots.
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
-	recordTxIO := func() {
+	recordTxIO := func() error {
 		if ba.HasBAL() {
-			writes := ibs.FinalizedWrites(ba.blockRules)
+			writes, err := ibs.FinalizedWrites(ba.blockRules)
+			if err != nil {
+				return err
+			}
 			ibs.MergeTxIOInto(ba.balIO, writes)
 			// Publish this tx's writes to the versionMap so the next tx observes them;
 			// ResetVersionedIO below clears the per-tx write set used for BAL recording.
 			ibs.FlushWritesToVersionMap(writes)
 		}
 		ibs.ResetVersionedIO()
+		return nil
 	}
 	clearTxIO := func() {
 		if !ba.HasBAL() {
@@ -376,7 +383,9 @@ LOOP:
 		// Start executing the transaction
 		logs, err := commitTx(txn, coinbase, vmConfig, ba.cfg.ChainConfig, ibs, ba.AssembledBlock)
 		if err == nil {
-			recordTxIO()
+			if ioErr := recordTxIO(); ioErr != nil {
+				return coalescedLogs, true, ioErr
+			}
 		} else {
 			clearTxIO()
 		}
@@ -399,7 +408,7 @@ LOOP:
 	return coalescedLogs, done, nil
 }
 
-func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
+func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
 	chainReader := NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger)
 
 	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header, ibs); err != nil {
@@ -413,8 +422,8 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 		ibs.ResetVersionedIO()
 	}
-	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
-		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
+	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
+		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
@@ -423,7 +432,10 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
 	if ba.HasBAL() {
-		writes := ibs.FinalizedWrites(ba.blockRules)
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return nil, err
+		}
 		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
 		ibs.MergeTxIOInto(ba.balIO, writes)
 		// Publish finalize-phase writes to the versionMap, mirroring the init and

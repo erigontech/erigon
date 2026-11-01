@@ -19,7 +19,6 @@ package types
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 
@@ -323,11 +322,11 @@ func TestUnregisteredTxTypeStillUnsupported(t *testing.T) {
 	const unknownType = 0x7f
 
 	_, err := UnmarshalTransactionFromBinary([]byte{unknownType, 0x01}, false)
-	require.True(t, errors.Is(err, ErrTxTypeNotSupported))
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
 
 	_, err = UnmarshalTransactionFromJSON([]byte(`{"type":"0x7f"}`))
 	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrTxTypeNotSupported))
+	require.NotErrorIs(t, err, ErrTxTypeNotSupported)
 }
 
 func TestRegisteredTxTypeNilJSONDecoder(t *testing.T) {

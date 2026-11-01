@@ -36,7 +36,10 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, erro
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	txsCh, id := api.filters.SubscribePendingTxs(32, rpchelper.ProtocolHTTP)
+	txsCh, id, err := api.filters.SubscribePendingTxs(32, rpchelper.ProtocolHTTP)
+	if err != nil {
+		return "", err
+	}
 	go func() {
 		for txs := range txsCh {
 			api.filters.AddPendingTxs(id, txs)
@@ -50,7 +53,10 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	ch, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolHTTP)
+	ch, id, err := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolHTTP)
+	if err != nil {
+		return "", err
+	}
 	go func() {
 		for block := range ch {
 			api.filters.AddPendingBlock(id, block.Value)
@@ -240,7 +246,10 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan *rpchelper.Shared[*types.Header], func(), error) {
-			headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
+			headers, id, err := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
+			if err != nil {
+				return nil, nil, err
+			}
 			return headers, func() { api.filters.UnsubscribeHeads(id) }, nil
 		},
 		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
@@ -267,7 +276,10 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan []types.Transaction, func(), error) {
-			txsCh, id := api.filters.SubscribePendingTxs(chanSize, rpchelper.ProtocolWS)
+			txsCh, id, err := api.filters.SubscribePendingTxs(chanSize, rpchelper.ProtocolWS)
+			if err != nil {
+				return nil, nil, err
+			}
 			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }, nil
 		},
 		func(emit func(payload any), txs []types.Transaction) {

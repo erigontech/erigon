@@ -17,8 +17,14 @@
 package hexutil
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -260,4 +266,93 @@ func TestIsValidQuantity(t *testing.T) {
 			checkError(t, test.input, err, test.wantErr)
 		})
 	}
+}
+
+// TestEncodeHexMatchesStdlib compares every hex writer with encoding/hex over lengths that cross
+// each vector block boundary and tail size.
+func TestEncodeHexMatchesStdlib(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	// The long lengths cross the 64 KiB chunks fed to the assembly.
+	lengths := []int{1<<16 - 1, 1 << 16, 1<<16 + 1, 1<<18 + 17}
+	for n := range 301 {
+		lengths = append(lengths, n)
+	}
+	for _, n := range lengths {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(r.Uint32())
+		}
+		want := hex.EncodeToString(src)
+		dst := bytes.Repeat([]byte{0xa5}, 2*n+8)
+		encodeHex(dst, src)
+		require.Equal(t, want+strings.Repeat("\xa5", 8), string(dst), "len %d", n)
+		require.Equal(t, `x"0x`+want+`"`, string(AppendQuoted([]byte("x"), src)), "len %d", n)
+		text, _ := Bytes(src).AppendText([]byte("x"))
+		require.Equal(t, "x0x"+want, string(text), "len %d", n)
+	}
+}
+
+// requireDecodeMatchesStdlib compares the whole of an oversized dst, so a write past the decoded
+// prefix fails too.
+func requireDecodeMatchesStdlib(t *testing.T, src []byte, msgAndArgs ...any) {
+	t.Helper()
+	want, got := bytes.Repeat([]byte{0xa5}, len(src)/2+8), bytes.Repeat([]byte{0xa5}, len(src)/2+8)
+	wn, werr := hex.Decode(want, src)
+	gn, gerr := decodeHex(got, src)
+	require.Equal(t, werr, gerr, msgAndArgs...)
+	require.Equal(t, wn, gn, msgAndArgs...)
+	require.Equal(t, want, got, msgAndArgs...)
+}
+
+// TestDecodeHexMatchesStdlib covers the SIMD block path and its fallbacks: every pair of digits in
+// lower, upper and mixed case at both byte offsets, every length around a block boundary of both
+// parities, and a bad character at each position.
+func TestDecodeHexMatchesStdlib(t *testing.T) {
+	words := make([]byte, 0, 2<<16)
+	for v := range 1 << 16 {
+		words = binary.BigEndian.AppendUint16(words, uint16(v))
+	}
+	lower := []byte(hex.EncodeToString(words))
+	upper := bytes.ToUpper(lower)
+	mixed := slices.Clone(lower)
+	for i := 1; i < len(mixed); i += 2 {
+		mixed[i] = upper[i]
+	}
+	for _, src := range [][]byte{lower, upper, mixed} {
+		requireDecodeMatchesStdlib(t, src)
+		requireDecodeMatchesStdlib(t, append([]byte("00"), src...))
+		for n := 0; n <= 401; n++ {
+			requireDecodeMatchesStdlib(t, src[:n], "len %d", n)
+		}
+	}
+	for _, n := range []int{64, 65, 66, 67, 200, 201} {
+		src := []byte(strings.Repeat("ab", n)[:n])
+		for i := range src {
+			for b := range 256 {
+				bad := slices.Clone(src)
+				bad[i] = byte(b)
+				requireDecodeMatchesStdlib(t, bad, "len %d, byte %#02x at %d", n, b, i)
+			}
+		}
+	}
+	for _, i := range []int{0, 1<<16 - 1, 1 << 16, 1<<16 + 31, 1<<17 + 1, len(mixed) - 1} {
+		bad := slices.Clone(mixed)
+		bad[i] = 'g'
+		requireDecodeMatchesStdlib(t, bad, "bad at %d", i)
+		requireDecodeMatchesStdlib(t, bad[:len(bad)-1], "odd length, bad at %d", i)
+	}
+}
+
+var sinkString string
+
+// TestShortEncodingStaysOnStack checks that a short encoding builds its buffer on the stack:
+// Encode allocates only the string it returns, and MarshalText inlined into a caller nothing.
+func TestShortEncodingStaysOnStack(t *testing.T) {
+	b := bytes.Repeat([]byte{0xab}, 15)
+	require.InDelta(t, 1, testing.AllocsPerRun(100, func() { sinkString = Encode(b) }), 0)
+	n := 0
+	require.InDelta(t, 0, testing.AllocsPerRun(100, func() {
+		text, _ := Bytes(b).MarshalText()
+		n += len(text)
+	}), 0)
 }

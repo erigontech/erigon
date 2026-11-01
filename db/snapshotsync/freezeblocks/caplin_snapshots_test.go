@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -48,8 +50,24 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+type unavailableExecutionBlockReader struct{}
+
+func (unavailableExecutionBlockReader) Transactions(uint64, common.Hash) (*solid.TransactionsSSZ, error) {
+	return nil, snapshot_format.ErrExecutionBodyNotFound
+}
+
+func (unavailableExecutionBlockReader) Withdrawals(uint64, common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
+	panic("Withdrawals should not be called after transactions are unavailable")
+}
+
+func (unavailableExecutionBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {}
+
+func (unavailableExecutionBlockReader) CacheBody(uint64, common.Hash, [][]byte, []*types.Withdrawal) {
+}
 
 // TestDumpBeaconBlocksNoPanic is a higher-level regression test: the production
 // panic occurred inside DumpBeaconBlocks when chooseSegmentEnd was called with
@@ -82,10 +100,10 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 		for slot := uint64(0); slot < snaptype.CaplinMergeLimit; slot += 500 {
 			var root common.Hash
 			binary.BigEndian.PutUint64(root[:], slot+1)
-			if err := beacon_indicies.MarkRootCanonical(ctx, tx, slot, root); err != nil {
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
 				return err
 			}
-			if err := beacon_indicies.WriteParentBlockRoot(ctx, tx, root, prevRoot); err != nil {
+			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
 				return err
 			}
 			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
@@ -142,10 +160,7 @@ func TestFrozenBlobsReportsVisibleSegmentEnd(t *testing.T) {
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
 }
 
-// Blocks run ahead of blobs (blobs only start at Deneb) and the block tip is
-// dumped before it is indexed, so the four watermarks legitimately disagree.
-// The exact numbers below are the equivalence net for the BaseRoSnapshots embed:
-// only IndicesMax may move, from To to To-1, dragging BlocksAvailable with it.
+// Blocks run ahead of blobs (blobs only start at Deneb).
 func TestCaplinWatermarks(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -164,14 +179,52 @@ func TestCaplinWatermarks(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 2, "the unindexed tail segment must not be visible")
 	require.Len(t, view.BlobSidecars(), 1)
 
-	// dirty-backed: counts the unindexed tail, inclusive To-1.
-	require.Equal(t, uint64(3*limit-1), sn.SegmentsMax())
-	// visible-backed, inclusive To-1. BlocksAvailable is min(SegmentsMax, IndicesMax),
-	// so it follows IndicesMax whenever the tip is dumped but not yet indexed.
+	// visible-backed, inclusive To-1: the unindexed tail is not counted, so the archive
+	// backfill walks back over it.
+	require.Equal(t, uint64(2*limit-1), sn.SegmentsMax())
 	require.Equal(t, uint64(2*limit-1), sn.IndicesMax())
 	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
 	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+}
+
+// The archive backfill takes SegmentsMax as the last slot readable from beacon-block
+// snapshots, so blob segments past a block gap or past the last block segment must not raise it.
+func TestCaplinSegmentsMaxIgnoresBlobSidecars(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	for _, tc := range []struct {
+		name   string
+		blocks [][2]uint64
+		blobs  [][2]uint64
+	}{
+		{
+			name:   "blobs past a block gap",
+			blocks: [][2]uint64{{0, limit}, {2 * limit, 3 * limit}},
+			blobs:  [][2]uint64{{0, limit}, {limit, 2 * limit}, {2 * limit, 3 * limit}},
+		},
+		{
+			name:   "blobs past the last block segment",
+			blocks: [][2]uint64{{0, limit}},
+			blobs:  [][2]uint64{{0, 2 * limit}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for _, r := range tc.blocks {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, r[0], r[1], true)
+			}
+			for _, r := range tc.blobs {
+				writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, r[0], r[1], true)
+			}
+
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+		})
+	}
 }
 
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
@@ -274,6 +327,38 @@ func TestReadHeaderReadsSlotFromSegment(t *testing.T) {
 	beyond, _, _, err := sn.ReadHeader(limit, nil)
 	require.NoError(t, err)
 	require.Nil(t, beyond, "a slot past the last segment has no view to read")
+}
+
+func TestBeaconSnapshotReaderPropagatesUnavailableExecutionBody(t *testing.T) {
+	const slot = 42
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
+	block.Block.Slot = slot
+	block.Block.Body.ExecutionPayload.BlockNumber = 42
+	block.Block.Body.ExecutionPayload.BlockHash = common.Hash{0x42}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
+	}))
+
+	dirs := datadir.New(t.TempDir())
+	snapshots := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(snapshots.Close)
+	require.NoError(t, snapshots.OpenFolder())
+	reader := NewBeaconSnapshotReader(snapshots, unavailableExecutionBlockReader{}, &clparams.MainnetBeaconConfig)
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		byRoot, err := reader.ReadBlockByRoot(t.Context(), tx, root)
+		require.ErrorIs(t, err, snapshot_format.ErrExecutionBodyNotFound)
+		require.Nil(t, byRoot)
+
+		bySlot, err := reader.ReadBlockBySlot(t.Context(), tx, slot)
+		require.ErrorIs(t, err, snapshot_format.ErrExecutionBodyNotFound)
+		require.Nil(t, bySlot)
+		return nil
+	}))
 }
 
 func blockSnapshotWord(t *testing.T, block *cltypes.SignedBeaconBlock) []byte {
@@ -486,9 +571,7 @@ func TestBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
 	require.Len(t, view.BeaconBlocks(), 1, "the reindexed segment must be published")
 }
 
-// SegmentsMax is dirty-backed and drives the archive backfill stop condition, so a segment
-// the backfill cannot walk back to must never reach the dirty set: caplin's own gap-filtered
-// scan is what keeps it out.
+// Caplin's own gap-filtered scan keeps a segment past a gap out of the dirty set.
 func TestOpenFolderDropsSegmentsPastGap(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -500,11 +583,19 @@ func TestOpenFolderDropsSegmentsPastGap(t *testing.T) {
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
 
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn))
 
 	view := sn.View()
 	defer view.Close()
 	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
+}
+
+func dirtyBeaconBlocksTo(sn *CaplinSnapshots) (to uint64) {
+	sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(seg *snapshotsync.DirtySegment) bool {
+		to = max(to, seg.To())
+		return true
+	})
+	return to
 }
 
 func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
@@ -553,8 +644,7 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 
 // BaseRoSnapshots.BuildMissedIndices is promoted onto CaplinSnapshots and reopens the
 // folder after indexing. Go embedding has no virtual dispatch, so that reopen must not
-// reach the unfiltered base scan: SegmentsMax drives the archive backfill stop condition
-// and would then advance past a gap the backfill cannot walk back to.
+// reach the unfiltered base scan.
 func TestPromotedBuildMissedIndicesKeepsGapFilter(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -566,11 +656,11 @@ func TestPromotedBuildMissedIndicesKeepsGapFilter(t *testing.T) {
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet", ProduceE2: true}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.OpenFolder())
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax(), "the segment past the gap must not be dirty")
+	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn), "the segment past the gap must not be dirty")
 
 	require.NoError(t, sn.BuildMissedIndices(t.Context(), "test", nil, dirs, nil, log.New()))
 
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax(), "the reopen after indexing must keep the gap filter")
+	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn), "the reopen after indexing must keep the gap filter")
 
 	view := sn.View()
 	defer view.Close()
@@ -591,7 +681,7 @@ func TestCaplinBuildMissingIndicesKeepsGapFilter(t *testing.T) {
 	t.Cleanup(sn.Close)
 	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
 
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+	require.Equal(t, uint64(limit), dirtyBeaconBlocksTo(sn))
 	require.Len(t, caplinIdxFiles(t, dirs), 2, "both segments on disk must end up indexed")
 }
 
@@ -600,4 +690,86 @@ func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
 	salt := make([]byte, 4)
 	binary.BigEndian.PutUint32(salt, 1)
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), salt, 0o600))
+}
+
+// Without a count from the blocks, a slot whose count row is missing from the blob store
+// reads as blobless and freezes as an empty entry.
+func TestDumpBlobSidecarsRangeRequiresBlobCount(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+
+	err := DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, nil, log.LvlDebug, log.New())
+	require.ErrorContains(t, err, "blob count")
+
+	written, err := filepath.Glob(filepath.Join(dirs.Snap, "*blobsidecars*"))
+	require.NoError(t, err)
+	require.Empty(t, written)
+}
+
+// A slot outside every frozen block segment reads as no block, the same as an empty slot, so
+// counting it as blobless would freeze a hole wherever the blob store is pruned.
+func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &clparams.MainnetBeaconConfig))
+	n, err := blobCount(25_000)
+	require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
+	require.Zero(t, n)
+
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	err = DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+	require.ErrorContains(t, err, "no frozen beacon block segment")
+}
+
+func TestOpenBeaconBlocksIgnoresDamagedBlobSegments(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 20_000, 30_000, true, func(uint64) []byte { return nil })
+	blobSeg := snaptype.BlobSidecars.FileName(version.ZeroVersion, 20_000, 30_000)
+	blobIdx := snaptype.IdxFileName(version.V1_1, 20_000, 30_000, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	for _, name := range []string{blobSeg, blobIdx} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), bytes.Repeat([]byte{0xff}, 31), 0o644))
+	}
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenBeaconBlocks())
+	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
+	require.Zero(t, sn.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum()))
+}
+
+func TestRemoveBlobIndexAndTorrents(t *testing.T) {
+	dirs := datadir.New(filepath.Join(t.TempDir(), "dd[1]"))
+	idx := func(v version.Version, from, to uint64) string {
+		return snaptype.IdxFileName(v, from, to, snaptype.CaplinIndexes.BlobSidecarSlot.Name)
+	}
+	seg := snaptype.BlobSidecars.FileName(version.V1_1, 30_000, 40_000)
+	removed := []string{seg + ".torrent", idx(version.V1_1, 30_000, 40_000), idx(version.V1_1, 30_000, 40_000) + ".torrent", idx(version.V1_0, 30_000, 40_000)}
+	kept := []string{
+		seg,
+		snaptype.BlobSidecars.FileName(version.V1_1, 40_000, 50_000) + ".torrent",
+		idx(version.V1_1, 40_000, 50_000),
+		snaptype.BeaconBlocks.FileName(version.V1_1, 30_000, 40_000) + ".torrent",
+	}
+	for _, name := range append(removed, kept...) {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, name), []byte{1}, 0o644))
+	}
+
+	require.NoError(t, removeBlobIndexAndTorrents(dirs.Snap, 30_000, 40_000))
+
+	entries, err := os.ReadDir(dirs.Snap)
+	require.NoError(t, err)
+	var left []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			left = append(left, e.Name())
+		}
+	}
+	require.ElementsMatch(t, kept, left)
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -113,6 +114,12 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	return fv.extendingForkHeadHash
+}
+
+// IsValidated reports whether a payload with this hash already passed validation.
+func (fv *ForkValidator) IsValidated(hash common.Hash) bool {
+	_, ok := fv.validHashes.Get(hash)
+	return ok
 }
 
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
@@ -276,10 +283,10 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
 	fv.extendingForkNotifications.Accumulator.Reset(0)
 	fv.extendingForkNotifications.RecentReceipts.Clear()
-	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
 	if fv.sharedDom != nil &&
-		(criticalError != nil || status == engine_types.InvalidStatus) {
+		(criticalError != nil || status == engine_types.InvalidStatus || status == engine_types.AcceptedStatus) {
 		fv.sharedDom.Close()
 		fv.sharedDom = nil
 	}
@@ -307,7 +314,7 @@ func (fv *ForkValidator) ClearWithUnwind() {
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 ) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)
@@ -319,10 +326,14 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 		sd.TakeCommitmentTime() // discard anything left by an earlier block
 		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
 	}
-	if err := fv.executor.ValidateBlock(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
-		if errors.Is(err, rules.ErrInvalidBlock) {
+	if err := fv.executor.ValidateBlock(sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
+		switch {
+		case errors.Is(err, rules.ErrInvalidBlock):
 			validationError = err
-		} else {
+		case errors.Is(err, stageloop.ErrStateStepHasMoreWork):
+			status = engine_types.AcceptedStatus
+			return
+		default:
 			criticalError = fmt.Errorf("validateAndStorePayload: %w", err)
 			return
 		}

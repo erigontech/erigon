@@ -907,6 +907,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteHeader(tx, header))
 	// Insert the body that corresponds to the receipts
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(rawdb.AppendCanonicalTxNums(tx, 1))
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	var txNum uint64
@@ -974,6 +975,7 @@ func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
 	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	badReceipt := &types.Receipt{
@@ -1025,6 +1027,7 @@ func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
 	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	receipt1 := &types.Receipt{

@@ -560,7 +560,10 @@ Process:
 					ctx,
 					f.rpc,
 					fullRoots,
-					newEnvelopeCommitmentValidator(f.beaconCfg, processBlocks),
+					newEnvelopeValidator(processBlocks, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+						return ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope)
+					}),
+					nil,
 					processBlocks...,
 				)
 				if envErr != nil {
@@ -1216,8 +1219,4 @@ func (f *ForwardBeaconDownloader) GetHighestProcessedSlot() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.highestSlotProcessed
-}
-
-func (f *ForwardBeaconDownloader) Peers() (uint64, error) {
-	return f.rpc.Peers()
 }

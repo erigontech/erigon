@@ -18,11 +18,16 @@
 package machine
 
 import (
+	"errors"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
+
+// ErrInvalidExecutionPayloadBid marks a deterministic execution payload bid validation failure.
+var ErrInvalidExecutionPayloadBid = errors.New("invalid execution payload bid")
 
 type Interface interface {
 	BlockValidator
@@ -48,6 +53,7 @@ type BlockHeaderProcessor interface {
 	ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
 	ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error
+	// ProcessExecutionPayloadBid leaves signature verification to the ProcessBlock batch.
 	ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
 	ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
 	ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error
@@ -70,6 +76,7 @@ type BlockOperationProcessor interface {
 	ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error
 	ProcessBuilderDepositRequest(s abstract.BeaconState, builderDepositRequest *solid.BuilderDepositRequest) error
 	ProcessBuilderExitRequest(s abstract.BeaconState, builderExitRequest *solid.BuilderExitRequest) error
+	// ProcessPayloadAttestation leaves signature verification to the ProcessBlock batch.
 	ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error
 	FullValidate() bool
 }

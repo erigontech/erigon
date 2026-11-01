@@ -11,11 +11,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -51,6 +53,7 @@ type dataColumnSidecarService struct {
 	seenGloasSidecar     *lru.Cache[seenGloasSidecarKey, struct{}] // [New in Gloas:EIP7732]
 	columnSidecarStorage blob_storage.DataColumnStorage
 	emitters             *beaconevents.EventEmitter
+	gossipManager        gossipmgr.Gossip
 
 	// Key by the full sidecar root so an unverified candidate cannot suppress
 	// another candidate for the same block and column.
@@ -79,6 +82,7 @@ func NewDataColumnSidecarService(
 	syncDataManager synced_data.SyncedData,
 	columnSidecarStorage blob_storage.DataColumnStorage,
 	emitters *beaconevents.EventEmitter,
+	gossipManager gossipmgr.Gossip,
 ) DataColumnSidecarService {
 	size := cfg.NumberOfColumns * cfg.SlotsPerEpoch * 4
 	seenSidecar, err := lru.New[seenSidecarKey, struct{}]("seenDataColumnSidecar", int(size))
@@ -98,6 +102,7 @@ func NewDataColumnSidecarService(
 		seenGloasSidecar:     seenGloasSidecar,
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
+		gossipManager:        gossipManager,
 	}
 	s.pendingGloasSidecars = s.newPendingGloasSidecarQueue(ctx)
 	return s
@@ -162,6 +167,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	blockHeader := msg.SignedBlockHeader.Header
+	if msg.Version() != s.cfg.GetCurrentStateVersion(blockHeader.Slot/s.cfg.SlotsPerEpoch) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	seenKey := seenSidecarKey{
 		slot:          blockHeader.Slot,
 		proposerIndex: blockHeader.ProposerIndex,
@@ -186,7 +194,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %w", err)
+			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -214,8 +222,17 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 
-	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot
-	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
+	// One finalized checkpoint for both finality checks below, so that a checkpoint update between
+	// them cannot turn an ignored sidecar into a rejected one.
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that
+	// block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch).
+	// FinalizedSlot() is the last slot of the finalized epoch, so it is not this bound.
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok {
+		return errors.New("finalized checkpoint slot is not representable")
+	}
+	if blockHeader.Slot <= finalizedStartSlot {
 		return ErrIgnore
 	}
 
@@ -237,10 +254,8 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("data column sidecar should be from a higher slot than the parent block, but got %d <= %d", blockHeader.Slot, parentHeader.Slot)
 	}
 
-	// [REJECT] The finalized checkpoint is an ancestor
-	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
-	finalizedSlot := finalizedCheckpoint.Epoch * s.cfg.SlotsPerEpoch
-	if s.forkChoice.Ancestor(blockHeader.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
+	// [REJECT] The finalized checkpoint is an ancestor, clamped to the anchor slot.
+	if s.forkChoice.Ancestor(blockHeader.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
@@ -254,10 +269,14 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
-	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %w", err)
+	// Claim the tuple atomically: columns built from EL blobs may have claimed it during validation.
+	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
+		return ErrIgnore
 	}
-	s.seenSidecar.Add(seenKey, struct{}{})
+	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
+		s.seenSidecar.Remove(seenKey)
+		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
+	}
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
@@ -266,10 +285,59 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	return nil
 }
 
+// PublishColumnsFromEL marks each sidecar as seen and publishes it on its subnet, unless a sidecar
+// for its (slot, proposer, index) was seen already. The sidecars must be on subnets this node subscribes to.
+func (s *dataColumnSidecarService) PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+	if len(sidecars) == 0 {
+		return
+	}
+	header := sidecars[0].SignedBlockHeader.Header
+	// The block may have waited for its parent or the EL while finality moved on; peers would ignore
+	// or reject its columns then.
+	if !s.afterFinalizedCheckpoint(header) {
+		log.Debug("[dataColumnSidecarService] not publishing columns built from EL blobs below finality", "slot", header.Slot)
+		return
+	}
+	forkDigest, err := s.ethClock.ComputeForkDigest(header.Slot / s.cfg.SlotsPerEpoch)
+	if err != nil {
+		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of columns built from EL blobs", "slot", header.Slot, "err", err)
+		return
+	}
+	for _, sidecar := range sidecars {
+		key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
+		if seen, _ := s.seenSidecar.ContainsOrAdd(key, struct{}{}); seen {
+			continue
+		}
+		encoded, err := sidecar.EncodeSSZ(nil)
+		if err == nil {
+			err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
+		}
+		if err != nil {
+			// Unclaimed, a copy from gossip is still processed and relayed.
+			s.seenSidecar.Remove(key)
+			log.Debug("[dataColumnSidecarService] failed to publish a column built from EL blobs", "slot", header.Slot, "index", sidecar.Index, "err", err)
+		}
+	}
+}
+
+// afterFinalizedCheckpoint applies the gossip finality rules for a Fulu sidecar: its slot is after the
+// finalized epoch start and the finalized checkpoint is an ancestor of its block.
+func (s *dataColumnSidecarService) afterFinalizedCheckpoint(header *cltypes.BeaconBlockHeader) bool {
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok || header.Slot <= finalizedStartSlot {
+		return false
+	}
+	return s.forkChoice.Ancestor(header.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root == finalizedCheckpoint.Root
+}
+
 // processGloasMessage handles GLOAS data column sidecar validation
 // Reference: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md
 func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	slot := msg.Slot
+	if msg.Version() != s.cfg.GetCurrentStateVersion(slot/s.cfg.SlotsPerEpoch) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	blockRoot := msg.BeaconBlockRoot
 
 	seenKey := seenGloasSidecarKey{
@@ -307,7 +375,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
-			return fmt.Errorf("failed to get my custody columns: %w", err)
+			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
@@ -350,7 +418,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	}
 
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		return fmt.Errorf("failed to write data column sidecar: %w", err)
+		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
 	s.seenGloasSidecar.Add(seenKey, struct{}{})
 
@@ -373,7 +441,7 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 			return fmt.Errorf("unable to retrieve state: %w", err)
 		}
 
-		domain, err := state.GetDomain(s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot))
+		domain, err := fork.ComputeDomainAtEpoch(s.cfg, s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot), state.GenesisValidatorsRoot())
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %w", err)
 		}

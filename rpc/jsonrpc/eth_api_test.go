@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -617,7 +619,7 @@ func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
 // A pooled transaction is priced at its fee cap, and carries no location.
 func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 	feeCap := uint256.NewInt(1_000_000_000)
-	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(2), feeCap, nil)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(2), feeCap, nil)
 
 	result := newRPCPendingTransaction(txn)
 	require.NotNil(t, result.GasPrice)
@@ -639,6 +641,9 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(ch))
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
 
 	const bn = 2
@@ -800,4 +805,40 @@ func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
 		require.Equal(t, common.BigToHash(big.NewInt(42)), outputs[1], "the second call reads the first call's write")
 		require.Equal(t, common.Hash{}, outputs[2], "slot %d is written by block %d", bn, bn+1)
 	})
+}
+
+func TestHeaderByHashAndNumberServesRepeatedLookupsFromCache(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, ok, err := api._blockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	first, err := api.headerByHashAndNumber(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	api._blockReader = failHeaderReadBlockReader{FullBlockReader: api._blockReader, hash: hash, blockNumber: 1, err: errors.New("unexpected header database read")}
+	second, err := api.headerByHashAndNumber(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.Same(t, first, second)
+}
+
+// A block read leaves the header cache alone: the block cache already serves that header.
+func TestBlockReadDoesNotFillHeaderCache(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, ok, err := api._blockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	block, err := api.blockWithSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	_, cached := api.headersLRU.Get(hash)
+	require.False(t, cached)
 }

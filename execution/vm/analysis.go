@@ -19,82 +19,51 @@
 
 package vm
 
-import (
-	"encoding/binary"
-
-	"github.com/erigontech/erigon/common/bitutil"
-)
-
-// A byte b is a PUSH opcode (PUSH1..PUSH32, 0x60..0x7f) iff b&0xe0 == 0x60, so
-// (b&swarPushHi)^swarPushPat is zero exactly for PUSH bytes and bitutil.HasZero
-// spots eight of them at once.
-const (
-	swarPushHi  = 0xe0e0e0e0e0e0e0e0
-	swarPushPat = 0x6060606060606060
-)
-
-// codeBitmap collects data locations in code.
-func codeBitmap(code []byte) bitvec {
-	// The bitmap is 4 bytes longer than necessary, in case the code
-	// ends with a PUSH32, the algorithm will push zeroes onto the
-	// bitvector outside the bounds of the actual code.
-	bits := make(bitvec, (len(code)+32+63)/64)
-	codeLen := uint64(len(code))
-	pc := uint64(0)
-	for pc < codeLen {
-		// Fast path: only PUSH opcodes contribute data bits. pc is always at an
-		// opcode boundary here, so an 8-byte word with no PUSH opcode is 8 pure
-		// opcodes (e.g. JUMPDEST-heavy code) with nothing to mark — skip it.
-		if pc+8 <= codeLen {
-			w := binary.LittleEndian.Uint64(code[pc : pc+8])
-			t := (w & swarPushHi) ^ swarPushPat
-			if bitutil.HasZero(t) == 0 { // no PUSH byte in this word
-				pc += 8
-				continue
-			}
-		}
-		// This word contains a PUSH (or fewer than 8 bytes remain): walk it
-		// byte-at-a-time with the canonical logic. Advancing at least to the
-		// next 8-byte boundary amortises the peek over >=8 bytes, so push-dense
-		// code is not penalised.
-		wordEnd := pc + 8
-		for pc < codeLen && pc < wordEnd {
+// codeBitmapGeneric collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
+func codeBitmapGeneric(code []byte) bitvec {
+	bits := make(bitvec, (len(code)+63)/64)
+	for pc := 0; pc < len(code); {
+		// Collect the bits of a 64-byte chunk in a register: updating the bitmap in memory
+		// for every opcode makes each iteration wait for the previous store.
+		i := pc / 64
+		end := min(i*64+64, len(code))
+		var w uint64
+		for pc < end {
 			op := OpCode(code[pc])
-			pc++
-			if int8(op) < int8(PUSH1) { // not PUSH (int8(op) > int8(PUSH32) is always false)
-				continue
-			}
-			if op == PUSH1 {
-				bits.set1(pc)
+			if int8(op) < int8(PUSH1) { // not PUSH1..PUSH32, as int8(op) > int8(PUSH32) is always false
+				// Avoid a data-dependent branch: it mispredicts on code mixing JUMPDEST and other opcodes.
+				var j uint64
+				if op == JUMPDEST {
+					j = 1
+				}
+				w |= j << (uint(pc) % 64)
 				pc++
 				continue
 			}
-			numbits := uint64(op - PUSH1 + 1)
-			bits.setN(uint64(1)<<numbits-1, pc)
-			pc += numbits
+			pc += 1 + int(op-PUSH1+1)
+		}
+		bits[i] = w
+	}
+	return bits
+}
+
+// markJumpdestsTail marks the JUMPDESTs of the code tail of less than 32 bytes starting at pc.
+func markJumpdestsTail(code []byte, bits bitvec, pc int) bitvec {
+	for ; pc < len(code); pc++ {
+		if op := OpCode(code[pc]); int8(op) >= int8(PUSH1) {
+			pc += int(op - PUSH1 + 1)
+		} else if op == JUMPDEST {
+			bits[pc/64] |= 1 << (uint(pc) % 64)
 		}
 	}
 	return bits
 }
 
 // bitvec is a bit vector which maps bytes in a program.
-// An unset bit means the byte is an opcode, a set bit means
-// it's data (i.e. argument of PUSHxx).
+// A set bit means the byte is a valid jump destination.
 type bitvec []uint64
 
-func (bits bitvec) set1(pos uint64) {
-	bits[pos/64] |= 1 << (pos % 64)
-}
-
-func (bits bitvec) setN(flag uint64, pc uint64) {
-	shift := pc % 64
-	bits[pc/64] |= flag << shift
-	if shift > 32 {
-		bits[pc/64+1] = flag >> (64 - shift)
-	}
-}
-
-// codeSegment checks if the position is in a code segment.
-func (bits bitvec) codeSegment(pos uint64) bool {
-	return ((bits[pos/64] >> (pos % 64)) & 1) == 0
+// isJumpdest checks if the position is a valid jump destination.
+func (bits bitvec) isJumpdest(pos uint64) bool {
+	return ((bits[pos/64] >> (pos % 64)) & 1) != 0
 }

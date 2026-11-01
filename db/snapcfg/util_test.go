@@ -231,3 +231,18 @@ func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
 	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, 0),
 		"core types must still resolve through the preverified scan")
 }
+
+func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
+	for _, name := range []string{
+		"v1.0-000000-000500-headers",
+		"v1.0-a.b-c-d",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var typed Preverified
+			require.NotPanics(t, func() {
+				typed = Preverified{Items: PreverifiedItems{{Name: name, Hash: "aa"}}}.Typed(nil)
+			})
+			require.Empty(t, typed.Items)
+		})
+	}
+}

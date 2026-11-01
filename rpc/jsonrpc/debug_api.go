@@ -172,7 +172,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 		return StorageRangeResult{}, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -257,7 +257,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -520,9 +520,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, err
 	}
 
-	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
+	startNum, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(startHash, true), tx, api._blockReader)
 	if err != nil {
-		return nil, fmt.Errorf("start block %x not found", startHash)
+		return nil, fmt.Errorf("start block: %w", err)
 	}
 	if startNum > latestBlock {
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
@@ -545,9 +545,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 
 	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
-	endNum, err := api.headerNumberByHash(ctx, tx, *endHash)
+	endNum, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(*endHash, true), tx, api._blockReader)
 	if err != nil {
-		return nil, fmt.Errorf("end block %x not found", *endHash)
+		return nil, fmt.Errorf("end block: %w", err)
 	}
 	if endNum > latestBlock {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
@@ -606,7 +606,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, *blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}

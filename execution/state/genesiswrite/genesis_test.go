@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -622,4 +623,45 @@ func TestSetupGenesis(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	logger := log.New()
+	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+	newGenesis := func(balance int64, code []byte, slotVal common.Hash) *types.Genesis {
+		return &types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{addr: {
+				Balance: big.NewInt(balance),
+				Code:    code,
+				Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): slotVal},
+			}},
+		}
+	}
+	stale := newGenesis(100, []byte{0x60, 0x01}, common.HexToHash("0x0a"))
+	genSpec := newGenesis(5, []byte{0x60, 0x02}, common.HexToHash("0x0b"))
+	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
+	require.NoError(t, err)
+	ibs.Close()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(stale)
+	_, ibs, err = genesiswrite.ComputeGenesisCommitment(ctx, stale, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(genSpec)
+	root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genSpec, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+	require.Equal(t, want.Root(), common.BytesToHash(root))
 }

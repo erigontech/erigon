@@ -115,8 +115,8 @@ type flatCallTracerConfig struct {
 	IncludePrecompiles  bool `json:"includePrecompiles"`  // If true, call tracer includes calls to precompiled contracts
 }
 
-func newCallTracerObject(ctx *tracers.Context, cfg json.RawMessage) (*callTracer, error) {
-	var config callTracerConfig
+func newCallTracerObject(cfg json.RawMessage) (*callTracer, error) {
+	config := defaultCallTracerConfig()
 	if err := json.Unmarshal(cfg, &config); err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	// Create inner call tracer with default configuration, don't forward
 	// the OnlyTopCall or WithLog to inner for now
-	t, err := newCallTracerObject(ctx, json.RawMessage("{}"))
+	t, err := newCallTracerObject(json.RawMessage("{}"))
 	if err != nil {
 		return nil, err
 	}

@@ -289,3 +289,35 @@ func TestBuildOptionsAdvertiseDNSWithBoundTCPAndQUICPorts(t *testing.T) {
 	require.True(t, hasTCP)
 	require.True(t, hasQUIC)
 }
+
+func TestBuildOptionsSkipsQUICTransportWhenDisabled(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	options, err := buildOptions(&P2PConfig{
+		IpAddr:      "127.0.0.1",
+		TCPPort:     0,
+		QUICPort:    0,
+		DisableQUIC: true,
+	}, key)
+	require.NoError(t, err)
+	host, err := libp2p.New(options...)
+	require.NoError(t, err)
+	defer host.Close()
+
+	var hasTCP, hasQUIC bool
+	for _, addr := range host.Network().ListenAddresses() {
+		if _, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+			hasTCP = true
+		}
+		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			hasQUIC = true
+		}
+	}
+	require.True(t, hasTCP)
+	require.False(t, hasQUIC)
+
+	quicDialAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/udp/0/quic-v1")
+	require.NoError(t, err)
+	require.Error(t, host.Network().Listen(quicDialAddr), "no QUIC transport should be registered when DisableQUIC is set")
+}
