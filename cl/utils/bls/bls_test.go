@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"runtime"
-	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -54,7 +53,6 @@ func convertHexToMessage(h string) []byte {
 var aggregateMessage = []byte("aggregate verification message")
 
 var aggregateInputs struct {
-	sync.Mutex
 	publicKeys     []bls.PublicKey
 	publicKeyBytes [][]byte
 	signatures     [][]byte
@@ -65,8 +63,6 @@ var aggregateInputs struct {
 func generateAggregateInputs(t testing.TB, count int) ([]bls.PublicKey, [][]byte, [][]byte) {
 	t.Helper()
 	inputs := &aggregateInputs
-	inputs.Lock()
-	defer inputs.Unlock()
 	for i := len(inputs.publicKeys); i < count; i++ {
 		var ikm [32]byte
 		binary.LittleEndian.PutUint64(ikm[:], uint64(i+1))
