@@ -276,7 +276,8 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
+	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
@@ -365,7 +366,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
 		}
-		if expectedBlobHashes == nil {
+		if expectedBlobHashes == nil && !deriveBlobHashes {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		header.BlobGasUsed = (*uint64)(req.BlobGasUsed)
@@ -435,6 +436,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	if deriveBlobHashes {
+		expectedBlobHashes = []common.Hash{}
+	}
 	txs := make([][]byte, len(req.Transactions))
 	transactions := make([]types.Transaction, len(req.Transactions))
 	var invalidTransactionStatus *engine_types.PayloadStatus
@@ -459,6 +463,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				ValidationError: engine_types.NewStringifiedError(err),
 			}
 			continue
+		}
+		if deriveBlobHashes && transactions[i].Type() == types.BlobTxType {
+			expectedBlobHashes = append(expectedBlobHashes, transactions[i].GetBlobHashes()...)
 		}
 		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
 			invalidTransactionStatus = &engine_types.PayloadStatus{

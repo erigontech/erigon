@@ -201,27 +201,6 @@ func encodeNewPayloadEnvelope(version clparams.StateVersion, payload *engine_typ
 	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newTransactionsSSZ(requests))...)
 }
 
-// blobVersionedHashesFromTxs recomputes the versioned hashes the legacy API
-// received as expectedBlobVersionedHashes. Undecodable transactions yield an
-// empty list; newPayload re-decodes them and reports INVALID itself.
-func blobVersionedHashesFromTxs(txs []hexutil.Bytes) []common.Hash {
-	hashes := []common.Hash{}
-	binaryTxs := make([][]byte, len(txs))
-	for i, tx := range txs {
-		binaryTxs[i] = tx
-	}
-	transactions, err := types.DecodeTransactions(binaryTxs)
-	if err != nil {
-		return hashes
-	}
-	for _, txn := range transactions {
-		if txn.Type() == types.BlobTxType {
-			hashes = append(hashes, txn.GetBlobHashes()...)
-		}
-	}
-	return hashes
-}
-
 // ForkchoiceUpdate is the request body of POST /forkchoice.
 // custody_columns (Optional[Bitvector[CELLS_PER_EXT_BLOB]]) exists since Amsterdam.
 func newOptionalPayloadAttributes(version clparams.StateVersion) *solid.ListSSZ[*engine_types.PayloadAttributes] {

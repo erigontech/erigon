@@ -262,11 +262,9 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 	case clparams.CapellaVersion:
 		status, err = e.NewPayloadV2(r.Context(), payload)
 	case clparams.DenebVersion:
-		status, err = e.NewPayloadV3(r.Context(), payload, blobVersionedHashesFromTxs(payload.Transactions), &parentRoot)
-	case clparams.ElectraVersion, clparams.FuluVersion:
-		status, err = e.NewPayloadV4(r.Context(), payload, blobVersionedHashesFromTxs(payload.Transactions), &parentRoot, executionRequests)
+		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, nil, version, true)
 	default:
-		status, err = e.NewPayloadV5(r.Context(), payload, blobVersionedHashesFromTxs(payload.Transactions), &parentRoot, executionRequests)
+		status, err = e.newPayload(r.Context(), payload, nil, &parentRoot, executionRequests, version, true)
 	}
 	if err != nil {
 		writeEngineProblem(w, err)

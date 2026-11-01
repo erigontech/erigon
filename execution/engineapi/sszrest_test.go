@@ -20,14 +20,18 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -177,18 +181,6 @@ func TestSSZRESTNewPayloadEnvelopeRoundTrip(t *testing.T) {
 			require.Equal(t, payload.BlockHash, outPayload.BlockHash)
 		})
 	}
-}
-
-func TestSSZRESTBlobVersionedHashesFromTxs(t *testing.T) {
-	hashes := blobVersionedHashesFromTxs(nil)
-	require.NotNil(t, hashes)
-	require.Empty(t, hashes)
-
-	// undecodable transactions yield an empty (non-nil) list and no panic;
-	// newPayload re-decodes and reports INVALID itself
-	hashes = blobVersionedHashesFromTxs([]hexutil.Bytes{{0xff, 0xfe}})
-	require.NotNil(t, hashes)
-	require.Empty(t, hashes)
 }
 
 func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
@@ -846,6 +838,112 @@ func TestSSZRESTNewPayloadDispatch(t *testing.T) {
 	require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Contains(t, status.ValidationError.Error().Error(), "invalid block hash")
+}
+
+func TestSSZRESTNewPayloadRejectsExcessTransactionsBeforeDecoding(t *testing.T) {
+	const txCount = 10_000
+	var tx bytes.Buffer
+	require.NoError(t, (&types.LegacyTx{}).MarshalBinary(&tx))
+	txs := make([]hexutil.Bytes, txCount)
+	for i := range txs {
+		txs[i] = tx.Bytes()
+	}
+
+	for _, tc := range []struct {
+		fork      string
+		version   clparams.StateVersion
+		timestamp hexutil.Uint64
+	}{
+		{"cancun", clparams.DenebVersion, 200},
+		{"prague", clparams.ElectraVersion, 300},
+		{"osaka", clparams.FuluVersion, 400},
+		{"amsterdam", clparams.GloasVersion, 500},
+	} {
+		t.Run(tc.fork, func(t *testing.T) {
+			payload := engine_types.NewExecutionPayloadSSZ(tc.version)
+			payload.Timestamp = tc.timestamp
+			payload.GasLimit = 21_000
+			payload.Transactions = txs
+			if tc.version >= clparams.GloasVersion {
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+			}
+			body, err := encodeNewPayloadEnvelope(tc.version, payload, common.Hash{}, nil)
+			require.NoError(t, err)
+			srv := newTestEngineServer(allForksConfig(), true)
+			handler := srv.SSZRESTHandler()
+			var rec *httptest.ResponseRecorder
+			allocs := testing.AllocsPerRun(1, func() {
+				rec = httptest.NewRecorder()
+				handler.ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", tc.fork, body))
+			})
+			require.Equal(t, http.StatusOK, rec.Code)
+			var status engine_types.PayloadStatus
+			require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached: 10000 transactions")
+			require.Less(t, allocs, float64(txCount/10), "rejected payload must not allocate transaction objects")
+		})
+	}
+}
+
+func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		blobHash   common.Hash
+		wantStatus engine_types.EngineStatus
+		wantError  string
+	}{
+		{"valid versioned hash", common.Hash{0x01, 0x01}, engine_types.SyncingStatus, ""},
+		{"invalid versioned hash", common.Hash{0x02, 0x01}, engine_types.InvalidStatus, misc.ErrInvalidVersionedHash.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := prePragueChainConfig()
+			txs := types.Transactions{&types.BlobTx{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x01}},
+				},
+				BlobVersionedHashes: []common.Hash{tc.blobHash},
+			}}
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x01}
+			header.UncleHash = empty.UncleHash
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			header.BlobGasUsed = common.NewUint64(misc.GetBlobGasUsed(1))
+			header.ExcessBlobGas = new(uint64)
+			header.ParentBeaconBlockRoot = &common.Hash{}
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+			payload.SSZVersion = clparams.DenebVersion
+			body, err := encodeNewPayloadEnvelope(clparams.DenebVersion, payload, *header.ParentBeaconBlockRoot, nil)
+			require.NoError(t, err)
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "cancun", body))
+			require.Equal(t, http.StatusOK, rec.Code)
+			var status engine_types.PayloadStatus
+			require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
+			require.Equal(t, tc.wantStatus, status.Status)
+			if tc.wantError != "" {
+				require.EqualError(t, status.ValidationError.Error(), tc.wantError)
+				return
+			}
+			require.Nil(t, status.ValidationError)
+
+			_, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
+			require.ErrorContains(t, err, "nil blob hashes array")
+			response, err := srv.NewPayloadV3(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot)
+			require.NoError(t, err)
+			require.Equal(t, engine_types.InvalidStatus, response.Status)
+			require.EqualError(t, response.ValidationError.Error(), misc.ErrMismatchBlobHashes.Error())
+		})
+	}
 }
 
 // A forkchoice with payload attributes whose timestamp belongs to a different
