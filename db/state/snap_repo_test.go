@@ -705,12 +705,10 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
-			if err != nil {
+			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence); err != nil {
 				t.Fatal(err)
 			}
 			seg3.Close()
-			bti.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				btCount++

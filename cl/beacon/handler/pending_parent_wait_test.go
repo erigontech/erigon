@@ -145,9 +145,12 @@ func pendingParentWaitFixture(t *testing.T, remaining time.Duration) (*ApiHandle
 // ends as soon as the envelope is applied.
 func TestAwaitPendingParentPayloadRetriesUntilTheEnvelopeIsApplied(t *testing.T) {
 	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
-	var retries atomic.Int32
+	var attempts atomic.Int32
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
-		if retries.Add(1) == 1 {
+		if applied.Load() {
+			return time.Time{}
+		}
+		if attempts.Add(1) == 1 {
 			return time.Now().Add(20 * time.Millisecond) // the columns are still missing
 		}
 		applied.Store(true)
@@ -157,7 +160,8 @@ func TestAwaitPendingParentPayloadRetriesUntilTheEnvelopeIsApplied(t *testing.T)
 	start := time.Now()
 	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
 	require.Less(t, time.Since(start), 2*time.Second)
-	require.Equal(t, int32(2), retries.Load())
+	require.True(t, applied.Load())
+	require.Equal(t, int32(2), attempts.Load())
 }
 
 // An apply that keeps failing is retried at its pace until the cutoff, and no longer after it.

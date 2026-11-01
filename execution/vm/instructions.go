@@ -1188,7 +1188,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1249,7 +1249,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1288,7 +1288,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1333,7 +1333,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 

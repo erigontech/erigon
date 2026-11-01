@@ -47,6 +47,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -4441,4 +4442,91 @@ func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
 	handler.mux.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+}
+
+func TestGetExecutionPayloadEnvelopeBySlotOfHeadBlock(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	head := blocks[len(blocks)-1]
+	root, err := head.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, postState.Slot(), head.Block.Slot)
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = head
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/%d", head.Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+// A skipped slot has no canonical block root, while the head state's block_roots ring repeats the parent root there.
+func TestGetExecutionPayloadEnvelopeBySkippedSlotIsNotFound(t *testing.T) {
+	db, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	parent := blocks[len(blocks)-3]
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	skippedSlot := blocks[len(blocks)-2].Block.Slot
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(skippedSlot))
+	}))
+	require.NoError(t, postState.SetBlockRootAt(int(skippedSlot%handler.beaconChainCfg.SlotsPerHistoricalRoot), parentRoot))
+	require.NoError(t, syncedData.OnHeadState(postState))
+	fcu.Envelopes[parentRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[parentRoot] = parent
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/%d", skippedSlot), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+}
+
+func TestGetExecutionPayloadEnvelopeBySlotBeyondUint32IsNotFound(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	head := blocks[len(blocks)-1]
+	root, err := head.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = head
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/%d", uint64(1)<<32+head.Block.Slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopesAcceptsBloblessStatelessContents(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		cfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&cfg)
+	}
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.Hash{3}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BuilderIndex = 3
+	fcu.Blocks = map[common.Hash]*cltypes.SignedBeaconBlock{root: block}
+
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, block.Block.Slot)
+	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	contents.SignedExecutionPayloadEnvelope.Message.BuilderIndex = 3
+	payload := contents.SignedExecutionPayloadEnvelope.Message.Payload
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
+	body, err := json.Marshal(contents)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.OnExecutionPayloadCalled)
+	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
 }

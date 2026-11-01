@@ -411,9 +411,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 		}
-		if r == nil {
-			return nil, err
-		}
 
 		logs, err = appendRPCLogs(logs, r.Logs, filter, header.Time, maxResults)
 		if err != nil {

@@ -910,3 +910,30 @@ func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestAggregatorBtIndexInMemOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		opts := NewTest(datadir.New(t.TempDir())).StepSize(1)
+		if enabled {
+			opts = opts.BtIndexInMem()
+		}
+		agg := opts.MustOpen(t.Context())
+		var budget *btInMemBudget
+		for _, d := range agg.d {
+			if d == nil {
+				continue
+			}
+			if !enabled {
+				require.Nil(t, d.btBudget, "domain=%s", d.Name)
+				continue
+			}
+			require.NotNil(t, d.btBudget, "domain=%s", d.Name)
+			if budget == nil {
+				budget = d.btBudget
+			}
+			require.Same(t, budget, d.btBudget, "one budget for all domains")
+		}
+		agg.Close()
+	}
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -40,7 +41,7 @@ func TestVersionedRead_RecordOnce_DirtyReResolveDoesNotOverwrite(t *testing.T) {
 	defer w.Close()
 	w.txIndex = 0
 	require.NoError(t, w.SetState(addr, key, v1))
-	mvhm.FlushVersionedWrites(w.VersionedWrites(), true, "")
+	mvhm.FlushVersionedWrites(w.VersionedWrites(), true)
 
 	// Reader (tx2) first read: sees the committed v1 and records the dependency.
 	r := NewWithVersionMap(reader, mvhm)
@@ -74,4 +75,30 @@ func TestVersionedRead_RecordOnce_DirtyReResolveDoesNotOverwrite(t *testing.T) {
 		}, false, "")
 	require.Equal(t, VersionInvalid, valid,
 		"final check must catch recorded-v1 vs committed-v2; else a diverged read commits stale (B1)")
+}
+
+// A tx that found an account absent keeps that view when it loads the account later, even after the
+// base reader starts to serve the account that a lower tx created. The tx already acted on the
+// absence (e.g. it charged the gas of a new account), so validation must reject it.
+func TestVersionedRead_RecordOnce_LoadKeepsRecordedAbsence(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0"))
+	reader := newAccountStateReader()
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
+
+	// Tx 0 creates the account, and the base reader serves it, as it does once tx 0 is published.
+	created := &accounts.Account{Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
+	vm.WriteAddress(addr, Version{TxIndex: 0}, created, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, created.Balance, true)
+	reader.accounts[addr] = created
+
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1), "the load must keep the recorded absence, which tx 0's creation invalidates")
 }

@@ -1313,7 +1313,9 @@ func TestDeferredSyncLeavesATipSizedCommitUnsynced(t *testing.T) {
 	t.Cleanup(db.Close)
 	val := make([]byte, 4096)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for i := range 4096 {
+		// These puts dirty 438 MB on 16 KB pages and 657 MB on 4 KB pages, where each value takes a 2-page overflow:
+		// above 256 MB, below the bound.
+		for i := range 80_000 {
 			if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i)), val); err != nil {
 				return err
 			}

@@ -294,10 +294,11 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
+	stagingPath := f.Path + ".tmp"
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, compressCfg, lvl, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", stagingPath, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -368,6 +369,9 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		return fmt.Errorf("compress: %w", err)
 	}
 	if err := removeBlobIndexAndTorrents(snapDir, fromSlot, toSlot); err != nil {
+		return err
+	}
+	if err := os.Rename(stagingPath, f.Path); err != nil {
 		return err
 	}
 	// Generate .idx file, which is the slot => offset mapping.

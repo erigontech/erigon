@@ -29,11 +29,12 @@ import (
 const maxLentCodeBuf = 256 * 1024
 
 type stateGetter struct {
-	sd      *SharedDomains
-	tx      kv.TemporalTx
-	view    cache.ReadView
-	m       kv.GetLatestMetrics
-	codeBuf []byte
+	sd         *SharedDomains
+	tx         kv.TemporalTx
+	view       cache.ReadView
+	m          kv.GetLatestMetrics
+	codeBuf    *[]byte
+	ownCodeBuf []byte
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -48,8 +49,8 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
-	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, *g.codeBuf)
+	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
 	return code, ok, err
 }
 
@@ -59,6 +60,30 @@ func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) 
 
 func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
+}
+
+// AsOfGetter reads keys as of a txNum through sd.mem, the shared state cache, then its tx.
+type AsOfGetter struct {
+	sd   *SharedDomains
+	tx   kv.TemporalTx
+	view cache.ReadView
+}
+
+// AsOfGetter binds the cache view once per tx: building it can read the DB.
+var _ kv.AsOfGetter = (*AsOfGetter)(nil)
+
+func (sd *SharedDomains) AsOfGetter(tx kv.TemporalTx) *AsOfGetter {
+	return &AsOfGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
+}
+
+func (g *AsOfGetter) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if v, ok, err := g.sd.mem.GetAsOf(domain, key, ts); err != nil || ok {
+		return v, ok, err
+	}
+	if v, hit := g.view.GetAsOf(domain, key, ts); hit {
+		return v, len(v) > 0, nil // an empty value is a cached absence
+	}
+	return g.tx.GetAsOf(domain, key, ts)
 }
 
 // TemporalTxStateGetter exposes execution reads over a temporal transaction.

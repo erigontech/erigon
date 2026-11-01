@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -501,6 +502,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	if e.readAheader != nil {
+		defer e.readAheader.CancelWarmup()
+	}
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
@@ -602,6 +606,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	defer roTx.Rollback()
 	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithLocalCacheUnwind())
 	if err != nil {
+		if doms != nil {
+			doms.Close()
+		}
+		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
+			return ValidationResult{ValidationStatus: ExecutionStatusTooFarAway}, nil
+		}
 		return ValidationResult{}, err
 	}
 	// Do not defer doms.Close(): on the success path ownership transfers to

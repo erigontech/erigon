@@ -503,6 +503,26 @@ const defaultUnsettledPreMergeTTL = time.Second
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
 
+// checkTxIndex accepts -1 (the whole block) and txCount (state after the last transaction).
+func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
+	if txIndex < -1 || txIndex > txCount {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNum)}
+	}
+	return nil
+}
+
+func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) error {
+	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := api._txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	return checkTxIndex(blockNum, txIndex, int(maxTxNum-minTxNum)-1)
+}
+
 // checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.wholeBlock })

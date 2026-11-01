@@ -159,6 +159,11 @@ func ExecV3(ctx context.Context,
 	rng execRange, blockSrc blockSource,
 	logger log.Logger,
 ) (out execV3Outcome, execErr error) {
+	defer func() {
+		if cfg.readAheader != nil && (out.verdict != nil || commonerrors.NilIfCanceled(execErr) != nil) {
+			cfg.readAheader.CancelWarmup()
+		}
+	}()
 	isForkValidation := syncMode == stages.ModeForkValidation
 	isApplyingBlocks := syncMode == stages.ModeApplyingBlocks
 	hooks := cfg.vmConfig.Tracer

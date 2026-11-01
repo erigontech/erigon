@@ -113,139 +113,16 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	// Pointers before counters: interleaving them adds a word of padding.
-	internCache *storageKeyCache
-	addrCache   *addressCache
-	internOps   uint32
-	addrOps     uint32
-
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
 
-// evmSizeClass is the Go allocation size class EVM fills. Growing it from the
-// 448-byte class measured within workload noise: a field added here either
-// packs into existing padding or bumps this const, and bumping it is the
+// evmSizeClass is the Go allocation size class EVM fills. A field added here
+// either packs into existing padding or bumps this const, and bumping it is the
 // expected answer to growth someone meant.
 // TestEVMFitsItsSizeClass is therefore a tripwire for the growth nobody meant,
 // not a budget — a build-time assert would also fire in every package that
 // grows an embedded type such as evmtypes.BlockContext.
-const evmSizeClass = 480
-
-// storageKeyCacheSize must comfortably exceed a contract's live slot count,
-// or conflict misses dominate.
-const storageKeyCacheSize = 1024
-
-// storageKeyCacheMinOps delays the table until interning has cost more than
-// zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
-// cannot win the allocation back however well the keys repeat.
-const storageKeyCacheMinOps = 128
-
-// slotIndex masks rather than divides, so the size has to be a power of two.
-var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
-
-// storageKeyCache memoizes InternKey by the source stack word. Interning is a
-// pure function and a live handle keeps its entry alive, so the cache never
-// goes stale and is never cleared. Words are stored beside the handles because
-// that is cheaper than recovering them via handle.Value(); the pointer-free
-// words go last so the GC scan stops at the handles.
-type storageKeyCache struct {
-	handles [storageKeyCacheSize]accounts.StorageKey
-	words   [storageKeyCacheSize]uint256.Int
-}
-
-// slotIndex mixes all four limbs: keccak-derived slots differ across the whole
-// word, array and scalar slots only in the lowest.
-func slotIndex(word *uint256.Int) uint64 {
-	return (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
-}
-
-// A nil handle marks an unused entry; the zero word is a legitimate key.
-func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey {
-	h := accounts.InternKey(word.Bytes32())
-	c.words[i], c.handles[i] = *word, h
-	return h
-}
-
-// internStorageKey returns word interned as a StorageKey, skipping unique.Make
-// for words seen before. Short-lived EVMs intern uncached: the table only earns
-// back its allocation over a few hundred storage ops.
-func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
-	c := evm.internCache
-	if c == nil {
-		if evm.internOps < storageKeyCacheMinOps {
-			evm.internOps++
-			return accounts.InternKey(word.Bytes32())
-		}
-		c = new(storageKeyCache)
-		evm.internCache = c
-		return c.fill(slotIndex(word), word)
-	}
-	i := slotIndex(word)
-	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
-		return h
-	}
-	return c.fill(i, word)
-}
-
-// Address streams are far narrower than storage-key streams — a handful of
-// routers and tokens dominate — so the address table is a quarter of the size
-// and pays its zeroing back sooner.
-const (
-	addressCacheSize   = 256
-	addressCacheMinOps = 32
-)
-
-// AddressCacheSize lets benchmarks outside this package pin the bucket count
-// their hit/miss tiers were chosen against.
-const AddressCacheSize = addressCacheSize
-
-var _ [0]struct{} = [addressCacheSize & (addressCacheSize - 1)]struct{}{}
-
-// addressCache is storageKeyCache for InternAddress; see that type for why the
-// entries never go stale and why the words sit beside the handles. It differs in
-// its key: a stack word may hold anything above the low 20 bytes, so index,
-// compare and stored word all drop those bits and one entry then serves an
-// address whatever the rest of its word holds.
-type addressCache struct {
-	handles [addressCacheSize]accounts.Address
-	words   [addressCacheSize]uint256.Int
-}
-
-// addrIndex mixes only the limbs Bytes20 reads: 0, 1 and the low half of 2.
-func addrIndex(word *uint256.Int) uint64 {
-	return (word[0] ^ word[1] ^ uint64(uint32(word[2]))) & (addressCacheSize - 1)
-}
-
-// fill stores the word with everything above the address cleared, which is also
-// what lets the probe compare three limbs instead of four.
-func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
-	h := accounts.InternAddress(word.Bytes20())
-	c.words[i] = uint256.Int{word[0], word[1], uint64(uint32(word[2])), 0}
-	c.handles[i] = h
-	return h
-}
-
-// internAddress returns the low 20 bytes of word interned as an Address,
-// skipping unique.Make for addresses seen before. Short-lived EVMs intern
-// uncached: the table only earns back its allocation over a few dozen ops.
-func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
-	c := evm.addrCache
-	if c == nil {
-		if evm.addrOps < addressCacheMinOps {
-			evm.addrOps++
-			return accounts.InternAddress(word.Bytes20())
-		}
-		c = new(addressCache)
-		evm.addrCache = c
-		return c.fill(addrIndex(word), word)
-	}
-	i := addrIndex(word)
-	if h := c.handles[i]; h != accounts.NilAddress && c.words[i][0] == word[0] &&
-		c.words[i][1] == word[1] && c.words[i][2] == uint64(uint32(word[2])) {
-		return h
-	}
-	return c.fill(i, word)
-}
+const evmSizeClass = 448
 
 // ZeroUnpricedBaseFee returns blockCtx with the base fee dropped for a call that
 // skips the fee checks and puts no price on gas, so that its fee cap is never
@@ -258,8 +135,8 @@ func ZeroUnpricedBaseFee(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContex
 	return blockCtx
 }
 
-// NewEVM returns a new EVM. The returned EVM is not thread safe and should
-// only ever be used *once*.
+// NewEVM returns an EVM that can be reused with its reset methods.
+// Execution and resets require exclusive access. Cancel and Cancelled may run concurrently.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	evm := &EVM{
 		Context:         blockCtx,
@@ -275,17 +152,23 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 	return evm
 }
 
-// Reset resets the EVM with a new transaction context.Reset
-// This is not threadsafe and should only be done very cautiously.
+// Reset prepares the EVM for a new transaction and clears cancellation.
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
-	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
 }
 
+// ResetBetweenBlocks prepares the EVM for new work and clears cancellation.
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+	evm.ResetForSystemCall(blockCtx, txCtx, ibs, vmConfig, chainRules)
+	evm.abort.Store(false)
+}
+
+// ResetForSystemCall prepares the EVM for another system call while preserving
+// cancellation. System calls within a task share that task's cancellation state.
+func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
@@ -296,16 +179,13 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
 	evm.precompiles = Precompiles(chainRules)
-
-	// ensure the evm is reset to be used again
-	evm.abort.Store(false)
 }
 
-// Cancel cancels any running EVM operation. This may be called concurrently and
-// it's safe to be called multiple times.
+// Cancel requests cancellation without waiting for execution to stop.
+// It is safe to call concurrently and more than once.
 func (evm *EVM) Cancel() { evm.abort.Store(true) }
 
-// Cancelled returns true if Cancel has been called
+// Cancelled reports whether cancellation is currently requested.
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, err error, snapshot int, entryStateReservoir uint64) {
