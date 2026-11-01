@@ -177,6 +177,21 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			}
 		}
 	}()
+	var stopOnce sync.Once
+	stopWorkers := func() {
+		stopOnce.Do(func() {
+			close(jobs)
+			wg.Wait()
+			close(out)
+		})
+	}
+	// Runs before collectorSenders.Close: the result goroutine must exit before the collector is closed.
+	defer func() {
+		cancelWorkers()
+		stopWorkers()
+		for range errCh {
+		}
+	}()
 
 	var minBlockNum uint64 = math.MaxUint64
 	var minBlockHash common.Hash
@@ -306,9 +321,7 @@ Loop:
 		}
 	}
 
-	close(jobs)
-	wg.Wait()
-	close(out)
+	stopWorkers()
 	for recoveryErr := range errCh {
 		if recoveryErr.err != nil {
 			cancelWorkers()
