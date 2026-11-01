@@ -1112,6 +1112,21 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
+		if previous != nil && txn.TxType() == BlobTxnType {
+			if record, found := p.discardReasonsLRU.Peek(hashS); found && record.reason == txpoolcfg.NonceTooDistant {
+				gap := record.nonceGap
+				if gap.checkedGeneration == p.stateGeneration && gap.progressRevision == 0 {
+					id, known := p.senders.getID(gap.sender)
+					var bridge *metaTxn
+					if known {
+						bridge = p.all.get(id, gap.firstMissingNonce)
+					}
+					if bridge == nil || bridge.subPool&NoNonceGaps == 0 {
+						continue
+					}
+				}
+			}
+		}
 		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)

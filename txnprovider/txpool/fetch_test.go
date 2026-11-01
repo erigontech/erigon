@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
@@ -1631,6 +1632,155 @@ func TestFetchRetriesMixedHonestPacketAfterNonceProgressAndQueuedSidecarFailure(
 	)
 	require.Equal(t, int64(6), parses())
 	require.Empty(t, sent)
+}
+
+func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
+	for _, fork := range []string{"Cancun", "Osaka"} {
+		for _, localHandoff := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/local_handoff=%t", fork, localHandoff), func(t *testing.T) {
+				ctx := t.Context()
+				pool, good, _, blobWire, key := newFetchBlobRetryFixture(t, 65)
+				pool.cfg.MaxNonceGap = 64
+				pool.cfg.AccountSlots = 65
+				pool.chainConfig = testforks.Forks[fork]
+				pool.pragueTime = pool.chainConfig.PragueTime
+				pool.osakaTime = pool.chainConfig.OsakaTime
+				if fork == "Osaka" {
+					var err error
+					blobWire, err = good.ConvertToV1()
+					require.NoError(t, err)
+				}
+				sender := crypto.PubkeyToAddress(key.PublicKey)
+				blobHash := good.Hash()
+				otherKey, err := crypto.GenerateKey()
+				require.NoError(t, err)
+				otherSender := crypto.PubkeyToAddress(otherKey.PublicKey)
+				updateP2PRetryNonce(t, pool, otherSender, 0, 2)
+				txn := newTestTxnSlot(1000, 0, 300_000, 300_000, 100_000).Txn.(*types.DynamicFeeTransaction)
+				txn.ChainID = pool.chainID
+				other, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), otherKey)
+				require.NoError(t, err)
+				otherHash := other.Hash()
+				body := EncodePooledTransactions66([][]byte{blobWire, encodeFetchTestTransactions(t, other)[0]}, 1, nil)
+				client, sent, penalties := newFetchTestClient(t)
+				var wg sync.WaitGroup
+				fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+				parses := countFetchTestParses(fetch)
+				reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
+				var local TxnSlots
+				if localHandoff {
+					for nonce := range uint64(65) {
+						slot := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000)
+						slot.Txn.(*types.DynamicFeeTransaction).ChainID = pool.chainID
+						slot.IDHash[0], slot.IDHash[31] = byte(nonce+1), 0xff
+						local.Append(slot, sender[:], true)
+					}
+				}
+				change := &remoteproto.StateChangeBatch{
+					PendingBlockBaseFee: 1, BlockGasLimit: 30_000_000,
+					ChangeBatch: []*remoteproto.StateChange{{
+						BlockHeight: 7, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+						Changes: []*remoteproto.AccountChange{{
+							Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender),
+							Data: accounts.SerialiseV3(&accounts.Account{
+								Nonce: 65, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash,
+							}),
+						}},
+					}},
+				}
+				var handoff bool
+				var handoffReasons []txpoolcfg.DiscardReason
+				var handoffErr error
+				var generationBefore, generationAfter uint64
+				validateRLP := fetch.pooledTxnsParseCtx.validateRlp
+				fetch.pooledTxnsParseCtx.ValidateRLP(func(rlp []byte) error {
+					if err := validateRLP(rlp); err != nil {
+						return err
+					}
+					if handoff {
+						handoff = false
+						generationBefore = pool.stateGeneration
+						if localHandoff {
+							handoffReasons, handoffErr = pool.AddLocalTxns(ctx, local)
+						} else {
+							handoffErr = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+						}
+						generationAfter = pool.stateGeneration
+					}
+					return nil
+				})
+				receiveFetchTestMessages(t, fetch, client,
+					func() *sentryproto.InboundMessage { return reply },
+					func() *sentryproto.InboundMessage {
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.NonceTooDistant}, reasons)
+						require.Contains(t, pool.byHash, string(blobHash[:]))
+						updateP2PRetryNonce(t, pool, sender, 0, 3)
+						require.NotContains(t, pool.byHash, string(blobHash[:]))
+						record, found := pool.discardReasonsLRU.Peek(string(blobHash[:]))
+						require.True(t, found)
+						require.Equal(t, txpoolcfg.NonceTooDistant, record.reason)
+						return reply
+					},
+					func() *sentryproto.InboundMessage {
+						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+						require.Equal(t, int64(2), parses())
+						updateP2PRetryNonce(t, pool, otherSender, 1, 4)
+						return reply
+					},
+					func() *sentryproto.InboundMessage {
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "unrelated sender progress must not requeue the cached blob")
+						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+						return reply
+					},
+					func() *sentryproto.InboundMessage {
+						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+						require.Equal(t, int64(4), parses())
+						updateP2PRetryNonce(t, pool, otherSender, 2, 5)
+						return reply
+					},
+					func() *sentryproto.InboundMessage {
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+						updateP2PRetryNonce(t, pool, otherSender, 3, 6)
+						handoff = true
+						return reply
+					},
+					func() *sentryproto.InboundMessage {
+						require.False(t, handoff)
+						require.NoError(t, handoffErr)
+						if localHandoff {
+							require.Len(t, handoffReasons, 65)
+							for _, reason := range handoffReasons {
+								require.Equal(t, txpoolcfg.Success, reason)
+							}
+							require.Equal(t, generationBefore, generationAfter)
+						} else {
+							require.Greater(t, generationAfter, generationBefore)
+						}
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2, "owner progress during parsing must retain the blob retry")
+						require.Equal(t, [32]byte(blobHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
+						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[1].IDHash)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.NonceTooDistant}, reasons)
+						require.Contains(t, pool.byHash, string(blobHash[:]))
+						return nil
+					},
+				)
+				require.Equal(t, int64(8), parses())
+				require.Empty(t, sent)
+				require.Empty(t, penalties)
+			})
+		}
+	}
 }
 
 func TestFetchSuppressesIdenticalInvalidTransactionBodies(t *testing.T) {
