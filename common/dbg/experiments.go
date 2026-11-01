@@ -143,7 +143,7 @@ var (
 	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead                     = EnvBool("READ_AHEAD", true)
-	ReadAheadWorkers              = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWorkers              = EnvInt("READ_AHEAD_WORKERS", estimate.IOWorkers())
 	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
 	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
@@ -154,14 +154,10 @@ var (
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
-	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
+	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", estimate.IOWorkers())
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
-
-func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
-	return max(gomaxprocs, 1)
-}
 
 func BALCommitmentWarmupReaders() int {
 	if !ReadAhead {

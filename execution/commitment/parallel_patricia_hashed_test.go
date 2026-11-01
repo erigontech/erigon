@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"runtime"
 	"sync/atomic"
 	"testing"
 
@@ -44,10 +45,13 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 	assert.Nil(t, p.rootHash.Load())
 }
 
+// The reader reservation is sized at startup, but a fold can run while the Ps are raised for IO, so it must
+// cover every worker the fold may start then.
 func TestParallelCommitmentReadTxs(t *testing.T) {
-	concurrency := parallelMountConcurrency(defaultParallelCommitmentWorkers)
-
-	require.Equal(t, concurrency+1, ParallelCommitmentReadTxs())
+	reserved := ParallelCommitmentReadTxs()
+	prev := runtime.GOMAXPROCS(defaultParallelCommitmentWorkers)
+	defer runtime.GOMAXPROCS(prev)
+	require.GreaterOrEqual(t, reserved, parallelMountConcurrency(defaultParallelCommitmentWorkers)+1)
 }
 
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {
