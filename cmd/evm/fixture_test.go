@@ -149,4 +149,5 @@ func TestStopWallProfileRemovesOnlyAProfileWithoutSamples(t *testing.T) {
 
 	other := open()
 	require.PanicsWithValue(t, "boom", func() { stopWallProfile(func() error { panic("boom") }, other) })
+	require.ErrorIs(t, other.Close(), os.ErrClosed)
 }

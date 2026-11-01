@@ -400,13 +400,13 @@ func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfi
 func stopWallProfile(stop func() error, f *os.File) {
 	defer func() {
 		r := recover()
+		f.Close()
 		if r == nil {
 			return
 		}
 		if err, ok := r.(runtime.Error); !ok || !strings.Contains(err.Error(), "divide by zero") {
 			panic(r)
 		}
-		f.Close()
 		if err := dir.RemoveFile(f.Name()); err != nil {
 			fmt.Fprintf(os.Stderr, "remove empty fgprof profile: %v\n", err)
 		}
@@ -414,5 +414,4 @@ func stopWallProfile(stop func() error, f *os.File) {
 	if err := stop(); err != nil {
 		fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
 	}
-	f.Close()
 }
