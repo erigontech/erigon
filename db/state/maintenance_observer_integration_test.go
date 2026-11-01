@@ -37,7 +37,7 @@ func TestMaintenanceObserverFilePublication(t *testing.T) {
 	var published uint64
 	var points []state.MaintenancePoint
 	agg.SetMaintenanceObserver(func(ctx context.Context, event state.MaintenanceEvent) {
-		assert.NoError(t, ctx.Err(), "maintenance callbacks must receive a live operation context")
+		require.NoError(t, ctx.Err(), "maintenance callbacks must receive a live operation context")
 		points = append(points, event.Point)
 		if event.Point == state.MaintenanceFilesPublished {
 			published += stepSize

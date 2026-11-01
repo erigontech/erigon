@@ -2245,8 +2245,8 @@ func TestBlobSlots(t *testing.T) {
 		blobTxn.IDHash[0] = uint8(2*i + 1)
 		blobTxn.Nonce = 0
 		txnSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
+		reasons, addErr := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(addErr)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
@@ -2328,8 +2328,8 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 	{
 		var txnSlots TxnSlots
 		txnSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
+		reasons, addErr := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(addErr)
 		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
 	}
 

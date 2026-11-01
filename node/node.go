@@ -395,7 +395,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		defer migrationsDB.Close()
 
 		migrator := migrations.NewMigrator(label)
-		if err := migrator.VerifyVersion(db, dbPath); err != nil {
+		err = migrator.VerifyVersion(db, dbPath)
+		if err != nil {
 			return nil, err
 		}
 		has, err := migrator.HasPendingMigrations(migrationsDB)
@@ -409,7 +410,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err := migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
+			err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger)
+			if err != nil {
 				return nil, err
 			}
 			db.Close()

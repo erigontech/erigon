@@ -381,12 +381,12 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	defer tx.Rollback()
 
 	hash, ok, err := blockReader.CanonicalHash(t.Context(), tx, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, genesisHash, hash)
 
 	block, senders, err := blockReader.BlockWithSenders(t.Context(), tx, genesisHash, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	// should be nil because genesis block does not have transactions
 	assert.Nil(t, block)
 	assert.Nil(t, senders)
@@ -398,7 +398,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 
 	// HasSenders should work for genesis
 	hasSenders, err := blockReader.HasSenders(t.Context(), tx, genesisHash, 0)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, hasSenders) // should be false because genesis block does not have senders
 }
 

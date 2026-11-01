@@ -305,7 +305,7 @@ func TestConnectSemaphoreAcquireRespectsContext(t *testing.T) {
 	select {
 	case err := <-errCh:
 		require.Error(t, err, "Acquire should return an error when context is cancelled")
-		assert.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(5 * time.Second):
 		t.Fatal("Acquire did not unblock after context cancellation")
 	}

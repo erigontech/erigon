@@ -149,7 +149,7 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 			}()
 			select {
 			case <-done:
-				assert.ErrorIs(t, warmupCtx.Err(), context.Canceled, "validation returned with warmup still active")
+				require.ErrorIs(t, warmupCtx.Err(), context.Canceled, "validation returned with warmup still active")
 			case <-time.After(time.Minute):
 				cancel()
 				m.Cancel()

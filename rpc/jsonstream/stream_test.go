@@ -133,7 +133,7 @@ func TestStream_ClosePendingObjects_Object(t *testing.T) {
 
 	// Close pending objects if necessary
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Should have completed the JSON properly
 	assert.Equal(t, `{"name":"John","age":null}`, string(ss.Buffer()))
@@ -155,7 +155,7 @@ func TestStream_ClosePendingObjects_Array(t *testing.T) {
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Should have completed the JSON properly
 	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
@@ -185,7 +185,7 @@ func TestStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Should have completed the JSON properly
 	assert.Equal(t, `{"person":{"name":"John","address":{"city":"New York","zip":null}}}`, string(ss.Buffer()))
@@ -216,7 +216,7 @@ func TestStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Should have completed the JSON properly
 	assert.Equal(t, `[{"person":{"name":"John","address":{"city":"New York","zip":null}}}]`, string(ss.Buffer()))
@@ -234,7 +234,7 @@ func TestStream_BufferAsString(t *testing.T) {
 
 	// Get buffer as a string (should auto-close)
 	result, err := ss.BufferAsString()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, `{"status":"pending","data":null}`, result)
 	assert.True(t, ss.IsComplete())
 }
@@ -377,7 +377,7 @@ func TestStream_NestedIncompleteStructures(t *testing.T) {
 
 			// Flush should complete the structure
 			err := ss.closeAllPendingElements()
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			// Verify the result
 			assert.Equal(t, tc.expected, string(ss.Buffer()))
@@ -395,7 +395,7 @@ func TestStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
 
 	// Call closeAllPending should be a no-op
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, ss.IsComplete())
 }
 
@@ -409,13 +409,13 @@ func TestStream_MultipleFlushCalls(t *testing.T) {
 
 	// The first flush should complete the structure
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, `{"test":null}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 
 	// The second flush should be a no-op
 	err = ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, `{"test":null}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 }
@@ -610,7 +610,7 @@ func TestStream_ErrorHandlingWithoutClosing(t *testing.T) {
 
 	// Flush should propagate the error
 	err := ss.Flush()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Equal(t, "write failed", err.Error())
 }
 
@@ -626,11 +626,11 @@ func TestStream_ErrorHandlingWithClosing(t *testing.T) {
 	ss.Field("longString")
 	ss.WriteString("This string should cause the writer to fail")
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Flush should propagate the error
 	err = ss.Flush()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Equal(t, "write failed", err.Error())
 }
 
@@ -697,7 +697,7 @@ func TestStream_MixedWriteOperations(t *testing.T) {
 	ss.Field("result")
 	ss.WriteRawBytes([]byte(`{"gas":21000}`))
 	assert.Equal(t, 1, ss.Depth())
-	assert.NoError(t, ss.ClosePending(0))
+	require.NoError(t, ss.ClosePending(0))
 
 	assert.Equal(t, `{"result":{"gas":21000}}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
@@ -708,7 +708,7 @@ func TestStream_MixedWriteOperations(t *testing.T) {
 	ss.WriteRawBytes([]byte(`1`))
 	ss.WriteRawBytes([]byte(`2`))
 	assert.Equal(t, 1, ss.Depth())
-	assert.NoError(t, ss.ClosePending(0))
+	require.NoError(t, ss.ClosePending(0))
 
 	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
@@ -762,7 +762,7 @@ func TestStream_IncompleteStructuresWithFlush(t *testing.T) {
 
 			// Flush should complete the structure
 			err := ss.closeAllPendingElements()
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			// Verify the result
 			assert.Equal(t, tc.expected, string(ss.Buffer()))
@@ -785,13 +785,13 @@ func TestStream_BufferAsStringWithErrors(t *testing.T) {
 
 	// Complete the structure and flush
 	err := ss.closeAllPendingElements()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	err = ss.Flush()
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	// Attempt to get buffer as a string, which should propagate the error
 	result, err := ss.BufferAsString()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Equal(t, "", result)
 	assert.Equal(t, "write failed", err.Error())
 }
@@ -832,7 +832,7 @@ func TestStream_ClosePendingPreservesStack(t *testing.T) {
 
 		assert.Equal(t, 2, ss.Depth())
 		err := ss.ClosePending(2) // nothing above depth 2
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 2, ss.Depth()) // stack preserved
 
 		// Can still write inside the tx object
@@ -859,7 +859,7 @@ func TestStream_ClosePendingPreservesStack(t *testing.T) {
 
 		assert.Equal(t, 4, ss.Depth())
 		err := ss.ClosePending(uint(txDepth)) // close everything above tx object
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, txDepth, ss.Depth()) // back to tx object level
 
 		// The tx object is still open; write the error field and close it
@@ -882,7 +882,7 @@ func TestStream_ClosePendingPreservesStack(t *testing.T) {
 		ss.WriteObjectStart() // depth 1
 		depth := ss.Depth()
 		err := ss.ClosePending(uint(depth) + 10) // targetDepth > stack depth: clamped
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, depth, ss.Depth()) // clamped to actual depth, no panic
 	})
 }

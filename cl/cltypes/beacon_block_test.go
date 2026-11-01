@@ -82,7 +82,7 @@ func TestBeaconBody(t *testing.T) {
 	// Test EncodeSSZ and DecodeSSZ
 	_, err := body.EncodeSSZ(nil)
 	require.NoError(t, err)
-	assert.Error(t, body.DecodeSSZ([]byte{1}, int(version)))
+	require.Error(t, body.DecodeSSZ([]byte{1}, int(version)))
 
 	// Test HashSSZ
 	root, err := body.HashSSZ()

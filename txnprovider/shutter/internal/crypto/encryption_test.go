@@ -139,7 +139,7 @@ func TestUnpadding(t *testing.T) {
 		}
 
 		_, err := UnpadMessage(bs)
-		assert.Error(t, err)
+		require.Error(t, err)
 	}
 
 	testCases := []struct {
@@ -276,7 +276,7 @@ func TestC1Malleability(t *testing.T) {
 	message := []byte("secret message")
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	originalSigma, err := RandomSigma(rand.Reader)
-	assert.NoError(t, err, "Could not get random sigma")
+	require.NoError(t, err, "Could not get random sigma")
 	encryptedMessage := Encrypt(
 		message,
 		eonPublicKey,
@@ -303,12 +303,12 @@ func TestC1Malleability(t *testing.T) {
 
 func TestMessageMalleability(t *testing.T) {
 	messageBlock, err := RandomSigma(rand.Reader)
-	assert.NoError(t, err, "could not get random message")
+	require.NoError(t, err, "could not get random message")
 	originalMessage := messageBlock[:]
 
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	sigma, err := RandomSigma(rand.Reader)
-	assert.NoError(t, err, "could not get random sigma")
+	require.NoError(t, err, "could not get random sigma")
 	encryptedMessage := Encrypt(
 		originalMessage,
 		eonPublicKey,

@@ -186,17 +186,17 @@ func TestNoEscape(t *testing.T) {
 	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
 	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
-	assert.ErrorIs(t, err, fs.ErrNotExist)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
-	assert.ErrorIs(t, err, fs.ErrNotExist)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
-	assert.ErrorIs(t, err, fs.ErrNotExist)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
-	assert.ErrorIs(t, err, fs.ErrNotExist)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 
 	// reject escaping snapshots dir
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
-	assert.NotErrorIs(t, err, fs.ErrNotExist)
+	require.NotErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
 	assert.NotErrorIs(t, err, fs.ErrNotExist)
 }

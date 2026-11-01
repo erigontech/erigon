@@ -32,21 +32,21 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		_, tx := mdbxtest.NewTestTx(t)
 		prune, err := Get(tx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, DefaultMode, prune)
 	})
 
 	t.Run("setIfNotExist", func(t *testing.T) {
 		_, tx := mdbxtest.NewTestTx(t)
 		prune, err := Get(tx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, DefaultMode, prune)
 
 		err = setIfNotExist(tx, FullMode)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		prune, err = Get(tx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, FullMode, prune)
 	})
 }
@@ -108,14 +108,14 @@ func TestModeString_LegacyShapes(t *testing.T) {
 func TestParseCLIMode(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
 		mode, err := FromCli(fullModeStr, 0, 0, 0, 0)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, FullMode, mode)
 
 		assert.Equal(t, "full", mode.String())
 	})
 	t.Run("archive", func(t *testing.T) {
 		mode, err := FromCli(archiveModeStr, 0, 0, 0, 0)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, ArchiveMode, mode)
 		assert.Equal(t, archiveModeStr, mode.String())
 	})
@@ -130,13 +130,13 @@ func TestParseCLIMode(t *testing.T) {
 		exp.History = Distance(400500)
 
 		mode, err := FromCli(archiveModeStr, exp.History.toValue(), exp.Blocks.toValue(), 0, 0)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, exp, mode)
 		assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", mode.String())
 	})
 	t.Run("minimal", func(t *testing.T) {
 		mode, err := FromCli(minimalModeStr, 0, 0, 0, 0)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, MinimalMode, mode)
 		assert.Equal(t, minimalModeStr, mode.String())
 	})
@@ -146,7 +146,7 @@ func TestParseCLIMode(t *testing.T) {
 	})
 	t.Run("empty", func(t *testing.T) {
 		mode, err := FromCli("", 0, 0, 0, 0)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		assert.Equal(t, DefaultMode, mode)
 		assert.Equal(t, "archive", mode.String())

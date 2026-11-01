@@ -496,14 +496,14 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, log
 	db := temporaltest.NewTestDB(tb, dirs)
 
 	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
-	assert.NoError(tb, err)
+	require.NoError(tb, err)
 	defer tx.Rollback()
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-	assert.NoError(tb, err)
+	require.NoError(tb, err)
 	defer domains.Close()
 
-	assert.NoError(tb, err)
+	require.NoError(tb, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
@@ -539,9 +539,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, log
 	start := time.Now()
 	result, err := executeParallelWithCheck(pe, tasks, false, validation)
 
-	assert.NoError(tb, err, "error occur during parallel execution")
+	require.NoError(tb, err, "error occur during parallel execution")
 	if result != nil {
-		assert.NoError(tb, result.Err, "block rejected")
+		require.NoError(tb, result.Err, "block rejected")
 	}
 
 	// Need to apply the final write set to storage
@@ -667,11 +667,11 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	db := temporaltest.NewTestDB(tb, dirs)
 
 	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
-	assert.NoError(tb, err)
+	require.NoError(tb, err)
 	defer tx.Rollback()
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-	assert.NoError(tb, err)
+	require.NoError(tb, err)
 	defer domains.Close()
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -692,7 +692,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
-	assert.NoError(tb, err, "error occur during parallel init")
+	require.NoError(tb, err, "error occur during parallel init")
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -720,9 +720,9 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
 	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
-		assert.NoError(tb, err)
+		require.NoError(tb, err)
 		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-		assert.NoError(tb, err)
+		require.NoError(tb, err)
 
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
@@ -759,7 +759,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 		}
 
 		res, err := executeParallelWithCheck(pe, tasks, true, validation)
-		assert.NoError(tb, err, "error during profiling pass")
+		require.NoError(tb, err, "error during profiling pass")
 		cleanup() // cleanup eagerly so pass 2 gets a clean slate
 		allDeps = res.AllDeps
 	}
@@ -779,7 +779,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 
 	start := time.Now()
 	_, err := executeParallelWithCheck(pe, tasks, false, validation)
-	assert.NoError(tb, err, "error during metadata execution pass")
+	require.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
 	for _, task := range tasks {
@@ -1530,7 +1530,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
-	assert.NoError(err)
+	require.NoError(t, err)
 	assert.NotNil(res)
 
 	// Verify that the fallback database query ran and set the correct offset values:
@@ -1634,7 +1634,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
-	assert.NoError(err)
+	require.NoError(t, err)
 	assert.NotNil(res)
 
 	assert.True(res.isPartial)
@@ -1728,7 +1728,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
-	assert.NoError(err)
+	require.NoError(t, err)
 	if assert.NotNil(res) {
 		assert.False(res.receiptsComplete)
 	}
@@ -1801,7 +1801,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	res, err := be.nextResult(context.Background(), pe, txResult1, roTx)
 	// The message must name the block-level tx index (prev tx = TxIndex 1),
 	// not the batch-local task index (0).
-	assert.ErrorContains(err, "missing finalized receipt for tx 1")
+	require.ErrorContains(t, err, "missing finalized receipt for tx 1")
 	assert.Nil(res)
 }
 

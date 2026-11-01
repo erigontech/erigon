@@ -266,15 +266,15 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		tt.mock()
 		err := t.proposerSlashingService.ProcessMessage(context.Background(), nil, tt.msg)
 		if tt.wantErr {
-			t.Error(err)
+			t.Require().Error(err)
 			if tt.errIs != nil {
-				t.ErrorIs(err, tt.errIs)
+				t.Require().ErrorIs(err, tt.errIs)
 			}
 			if tt.errIsNot != nil {
-				t.NotErrorIs(err, tt.errIsNot)
+				t.Require().NotErrorIs(err, tt.errIsNot)
 			}
 		} else {
-			t.NoError(err)
+			t.Require().NoError(err)
 		}
 		t.gomockCtrl.Satisfied()
 	}

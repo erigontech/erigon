@@ -329,7 +329,7 @@ func TestProcessPtcWindowConcurrentSharedCache(t *testing.T) {
 		require.NoError(t, copyErr)
 		want := wants[branchIndex]
 		wg.Go(func() {
-			if !assert.NoError(t, statechange.ProcessPtcWindow(copied)) {
+			if !assert.NoError(t, statechange.ProcessPtcWindow(copied)) { //nolint:testifylint // require must not run outside the test goroutine
 				return
 			}
 			assert.Equal(t, want, ptcWindowValues(copied))

@@ -745,7 +745,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_WithTopic
 
 	// Subscribe to upcoming topics with new fork digest
 	err = s.gm.subscribeUpcomingTopics(newForkDigest)
-	s.NoError(err)
+	s.Require().NoError(err)
 
 	// Verify new topic was created
 	newTopic := composeTopic(newForkDigest, topicName)
@@ -780,7 +780,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_SameForkD
 
 	// Try to subscribe with the same fork digest
 	err = s.gm.subscribeUpcomingTopics(forkDigest)
-	s.NoError(err)
+	s.Require().NoError(err)
 
 	// Verify topic count hasn't changed (same topic, so no new one added)
 	allTopics := s.gm.subscriptions.AllTopics()
@@ -817,7 +817,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_MultipleT
 
 	// Subscribe to upcoming topics
 	err := s.gm.subscribeUpcomingTopics(newForkDigest)
-	s.NoError(err)
+	s.Require().NoError(err)
 
 	// Verify all new topics were created
 	allTopicsAfter := s.gm.subscriptions.AllTopics()
@@ -1084,7 +1084,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DropsWhenQueueF
 	}
 
 	// Occupy the single worker so nothing drains the queue below.
-	s.NoError(s.gm.PublishBackground("occupy", nil, time.Time{}))
+	s.Require().NoError(s.gm.PublishBackground("occupy", nil, time.Time{}))
 	select {
 	case <-hookEntered:
 	case <-time.After(2 * time.Second):
@@ -1166,7 +1166,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PanicLogInclude
 		panic("boom")
 	}
 
-	s.NoError(s.gm.PublishBackground("job-with-context", nil, time.Time{}, "validatorIndex", 42))
+	s.Require().NoError(s.gm.PublishBackground("job-with-context", nil, time.Time{}, "validatorIndex", 42))
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -1205,7 +1205,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToReal
 	defer sub.Cancel()
 
 	payload := []byte("hello")
-	s.NoError(s.gm.PublishBackground(topicName, payload, time.Time{}))
+	s.Require().NoError(s.gm.PublishBackground(topicName, payload, time.Time{}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -1249,7 +1249,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_ClonesPayloadAt
 		<-unblock
 	}
 
-	s.NoError(s.gm.PublishBackground(topicName, payload, time.Time{}))
+	s.Require().NoError(s.gm.PublishBackground(topicName, payload, time.Time{}))
 	select {
 	case <-hookEntered:
 	case <-time.After(2 * time.Second):

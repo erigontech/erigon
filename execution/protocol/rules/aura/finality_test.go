@@ -28,7 +28,7 @@ func TestRollingFinality(t *testing.T) {
 	t.Run("RejectsUnknownSigners", func(t *testing.T) {
 		f := NewRollingFinality([]common.Address{{1}, {2}, {3}})
 		_, err := f.push(common.Hash{}, 0, []common.Address{{0}, {4}})
-		assert.Error(t, err)
+		require.Error(t, err)
 		_, err = f.push(common.Hash{}, 0, []common.Address{{0}, {1}, {4}})
 		assert.Error(t, err)
 	})

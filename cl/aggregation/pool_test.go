@@ -478,7 +478,7 @@ func (t *PoolTestSuite) TestAddAttestationElectraKeepsAggregateOnSignatureError(
 	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 	t.Require().NoError(pool.AddAttestation(t.electraAttestation(5, 1, 0b00001001)))
 
-	t.ErrorIs(pool.AddAttestation(t.electraAttestation(5, 1, 0b00001100)), errBadSignature)
+	t.Require().ErrorIs(pool.AddAttestation(t.electraAttestation(5, 1, 0b00001100)), errBadSignature)
 
 	aggregates := pool.Aggregates()
 	t.Require().Len(aggregates, 1)
@@ -507,9 +507,9 @@ func (t *PoolTestSuite) TestAddAttestationElectraLimitsDataPerCommittee() {
 		att.AggregationBits = solid.BitlistFromBytes(bits, 2048*64)
 		t.Require().NoError(pool.AddAttestation(att))
 	}
-	t.NoError(pool.AddAttestation(t.singleVote(0xff, 8)))
+	t.Require().NoError(pool.AddAttestation(t.singleVote(0xff, 8)))
 	t.Len(pool.Aggregates(), maxDataPerCommittee, "a single vote does not displace stronger data")
-	t.NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 2, 0xff)), "other committees keep their own allowance")
+	t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(5, 2, 0xff)), "other committees keep their own allowance")
 
 	pool.pruneStale() // current slot 1000: everything is pruned and the allowance comes back
 	t.Empty(pool.refused)
@@ -582,7 +582,7 @@ func (t *PoolTestSuite) TestAddAttestationElectraRefusedDataCountsVotersOnce() {
 
 	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 8)))
 	for range 3 {
-		t.ErrorIs(pool.AddAttestation(t.singleVote(0xaa, 8)), ErrIsSuperset)
+		t.Require().ErrorIs(pool.AddAttestation(t.singleVote(0xaa, 8)), ErrIsSuperset)
 	}
 	t.Nil(t.committeeAggregateBits(pool, 0xaa))
 	for source := range maxDataPerCommittee {
@@ -805,10 +805,10 @@ func (t *PoolTestSuite) TestAddAttestationElectraRefusesNewDataWhenEveryDataIsPi
 	}
 	pinnedSources := t.refusedSources(pool)
 
-	t.ErrorIs(pool.AddAttestation(t.singleVote(0xcc, 8)), ErrPoolLimit)
+	t.Require().ErrorIs(pool.AddAttestation(t.singleVote(0xcc, 8)), ErrPoolLimit)
 	late := t.singleVote(0xa8, 9)
 	t.Require().NoError(pool.PinAttestationData(late.Data))
-	t.ErrorIs(pool.AddAttestation(late), ErrPoolLimit)
+	t.Require().ErrorIs(pool.AddAttestation(late), ErrPoolLimit)
 
 	t.Len(pool.Aggregates(), maxDataPerCommittee)
 	t.Equal(pinnedSources, t.refusedSources(pool))
@@ -913,13 +913,13 @@ func (t *PoolTestSuite) TestAddAttestationElectraRefusesAMemberAlreadyCountedFor
 	pool := t.newPinTestPool()
 	t.Require().NoError(pool.AddAttestation(t.singleVote(0xaa, 12)))
 
-	t.ErrorIs(pool.AddAttestation(t.singleVote(0xbb, 12)), ErrVoterAlreadyCounted)
+	t.Require().ErrorIs(pool.AddAttestation(t.singleVote(0xbb, 12)), ErrVoterAlreadyCounted)
 	t.Nil(t.committeeAggregateBits(pool, 0xbb))
-	t.ErrorIs(pool.AddAttestation(t.singleVote(0xaa, 12)), ErrIsSuperset, "the same vote again")
+	t.Require().ErrorIs(pool.AddAttestation(t.singleVote(0xaa, 12)), ErrIsSuperset, "the same vote again")
 
 	t.fillCommitteeWithTwoVoteData(pool) // members 0-7: the committee is full
 	t.Require().NoError(pool.AddAttestation(t.singleVote(0xcc, 9)))
-	t.ErrorIs(pool.AddAttestation(t.singleVote(0xdd, 9)), ErrVoterAlreadyCounted)
+	t.Require().ErrorIs(pool.AddAttestation(t.singleVote(0xdd, 9)), ErrVoterAlreadyCounted)
 	t.NotContains(t.refusedSources(pool), byte(0xdd))
 }
 
@@ -947,7 +947,7 @@ func (t *PoolTestSuite) TestAddAttestationElectraEquivocatingMemberCannotFlushAL
 	t.Require().NoError(pool.AddAttestation(honest))
 	t.Require().NoError(pool.AddAttestation(vote(0xb0, member+1)))
 	for source := range 100 {
-		t.ErrorIs(pool.AddAttestation(vote(byte(source+0x10), member+1)), ErrVoterAlreadyCounted)
+		t.Require().ErrorIs(pool.AddAttestation(vote(byte(source+0x10), member+1)), ErrVoterAlreadyCounted)
 	}
 
 	t.Len(pool.refused[slotCommittee{slot: 5, committee: 1}], 2)
@@ -1073,7 +1073,7 @@ func (t *PoolTestSuite) TestAddAttestationElectraLimitsTotalAggregates() {
 	for i := range limit {
 		t.Require().NoError(pool.AddAttestation(t.electraAttestationWithSource(uint64(i), 0, 1)))
 	}
-	t.ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(uint64(limit), 0, 1)), ErrPoolLimit)
+	t.Require().ErrorIs(pool.AddAttestation(t.electraAttestationWithSource(uint64(limit), 0, 1)), ErrPoolLimit)
 	t.Len(pool.Aggregates(), limit)
 }
 
@@ -1098,7 +1098,7 @@ func (t *PoolTestSuite) TestAddAttestationElectraKeepsFullCommitteeOnSignatureEr
 		errBadSignature := errors.New("bad signature")
 		newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{failAll: errBadSignature} }
 
-		t.ErrorIs(pool.AddAttestation(bad), errBadSignature, "pinned=%t", pinned)
+		t.Require().ErrorIs(pool.AddAttestation(bad), errBadSignature, "pinned=%t", pinned)
 		t.Equal(stored, t.storedSources(pool), "pinned=%t", pinned)
 		t.Equal(refused, t.refusedSources(pool), "pinned=%t", pinned)
 		newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{} }

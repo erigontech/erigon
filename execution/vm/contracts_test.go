@@ -224,7 +224,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
 	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
-	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+	require.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2048; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
@@ -234,7 +234,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
 	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
-	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+	require.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^32; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
@@ -244,7 +244,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
 	_, _, err = RunPrecompiledContract(osakaModExp, in, mdgas.MdGas{Execution: gas}, nil)
-	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
+	require.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^64; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000")

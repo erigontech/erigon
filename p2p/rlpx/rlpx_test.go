@@ -93,7 +93,7 @@ func checkMsgReadWrite(t *testing.T, p1, p2 *Conn, msgCode uint64, msgData []byt
 
 	// Check it was received correctly.
 	msg := <-ch
-	assert.NoError(t, msg.err)
+	require.NoError(t, msg.err)
 	assert.Equal(t, msgCode, msg.code, "wrong message code returned from ReadMsg")
 	assert.Equal(t, msgData, msg.data, "wrong message data returned from ReadMsg")
 }
@@ -443,8 +443,8 @@ func TestReadSnappyRejectsImpossibleDecodedLength(t *testing.T) {
 		errc <- sender.session.writeFrame(sender.conn, 1, binary.AppendUvarint(nil, uint64(maxUint24)))
 	}()
 	_, _, _, err := receiver.Read()
-	assert.NoError(t, <-errc)
-	assert.ErrorIs(t, err, snappy.ErrCorrupt)
+	require.NoError(t, <-errc)
+	require.ErrorIs(t, err, snappy.ErrCorrupt)
 	assert.Zero(t, cap(receiver.snappyReadBuffer))
 }
 
