@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -196,6 +197,36 @@ func (r *Reader) MadvRandom() {
 }
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
+
+// ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
+func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
+	if pr != nil {
+		r.probe(v, pr)
+	}
+	return r.inner.Contains(v)
+}
+
+func (r *Reader) probe(v uint64, pr *mmap.Probe) {
+	f := r.inner
+	h := v + f.Seed
+	h ^= h >> 33
+	h *= 0xff51afd7ed558ccd
+	h ^= h >> 33
+	h *= 0xc4ceb9fe1a85ec53
+	h ^= h >> 33
+	hi, _ := bits.Mul64(h, uint64(f.SegmentCountLength))
+	h0 := uint32(hi)
+	h1 := h0 + f.SegmentLength
+	h2 := h1 + f.SegmentLength
+	h1 ^= uint32(h>>18) & f.SegmentLengthMask
+	h2 ^= uint32(h) & f.SegmentLengthMask
+	for _, i := range [3]uint32{h0, h1, h2} {
+		if int(i) < len(f.Fingerprints) {
+			pr.Touch(unsafe.Pointer(&f.Fingerprints[i]))
+		}
+	}
+}
+
 func (r *Reader) Close() {
 	if r == nil {
 		return
@@ -311,6 +342,14 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 	}
 	r.m = m[:offset]
 	return r, offset, nil
+}
+
+func (r *ReaderSharded) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
+	s := &r.shards[v>>56]
+	if s.inner == nil {
+		return false
+	}
+	return s.ContainsHashProbe(v, pr)
 }
 
 func (r *ReaderSharded) ContainsHash(v uint64) bool {

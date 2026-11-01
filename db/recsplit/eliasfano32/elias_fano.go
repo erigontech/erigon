@@ -272,9 +272,15 @@ func (ef *EliasFano) build() bool {
 }
 
 func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
+	return ef.getProbe(i, nil)
+}
+
+func (ef *EliasFano) getProbe(i uint64, pr *mmap.Probe) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
 	if ef.l != 0 {
 		lowerPos := i * ef.l
 		idx64, shift := lowerPos/64, lowerPos%64
+		mmap.Populate(unsafe.Pointer(&ef.lowerBits[idx64]))
+		pr.Touch(unsafe.Pointer(&ef.lowerBits[idx64]))
 		lower = ef.lowerBits[idx64] >> shift
 		if shift > 0 {
 			lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -285,9 +291,15 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 	jumpInsideSuperQ := (i % superQ) / q
 	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
+	mmap.Populate(unsafe.Pointer(&ef.jump[jumpSuperQ]))
+	pr.Touch(unsafe.Pointer(&ef.jump[jumpSuperQ]))
+	mmap.Populate(unsafe.Pointer(&ef.jump[idx64]))
+	pr.Touch(unsafe.Pointer(&ef.jump[idx64]))
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
 	currWord = jump / 64
+	mmap.Populate(unsafe.Pointer(&ef.upperBits[currWord]))
+	pr.Touch(unsafe.Pointer(&ef.upperBits[currWord]))
 	window = ef.upperBits[currWord] & (uint64(0xffffffffffffffff) << (jump % 64))
 	d := int(i & qMask)
 
@@ -301,6 +313,12 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 	val = (currWord*64+uint64(sel)-i)<<ef.l | (lower & ef.lowerBitsMask)
 
 	return
+}
+
+// GetProbe is Get with pr touching the pages it reads.
+func (ef *EliasFano) GetProbe(i uint64, pr *mmap.Probe) uint64 {
+	val, _, _, _, _ := ef.getProbe(i, pr)
+	return val
 }
 
 func (ef *EliasFano) Get(i uint64) uint64 {
