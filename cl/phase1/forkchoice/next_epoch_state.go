@@ -78,6 +78,7 @@ func (f *ForkChoiceStore) precomputeNextEpochState(ctx context.Context, nextEpoc
 	if err := transition.DefaultMachine.ProcessSlots(nextState, nextEpochStart); err != nil {
 		return fmt.Errorf("advance state to slot %d: %w", nextEpochStart, err)
 	}
+	// Hash here, off f.mu, so the boundary block import does not rehash the post-epoch state.
 	if _, err := nextState.HashSSZ(); err != nil {
 		return fmt.Errorf("hash state at slot %d: %w", nextEpochStart, err)
 	}
