@@ -188,18 +188,25 @@ func TestAllInOneConfigs(t *testing.T) {
 }
 
 // TestConfigureFollower: a follower turns off the chain's other drivers and
-// sources, and refuses head moves on request.
+// sources, and refuses head moves on request; a sequencer keeps a txpool
+// without gossip or blobs.
 func TestConfigureFollower(t *testing.T) {
-	n, e := l1Configs(t, 1)
-	require.NoError(t, configureFollowerNode(n))
-	configureFollowerEth(e)
-	require.False(t, e.InternalCL)
-	require.True(t, e.NoEngineAPI)
-	require.True(t, e.Snapshot.NoDownloader)
-	require.True(t, e.TxPool.Disable)
-	require.Contains(t, e.SetHeadRefusal, "only driver")
-
-	n, _ = l1Configs(t, 1)
+	for _, sequencer := range []bool{false, true} {
+		n, e := l1Configs(t, 1)
+		require.NoError(t, configureFollowerNode(n))
+		configureFollowerEth(e, sequencer)
+		require.False(t, e.InternalCL)
+		require.True(t, e.NoEngineAPI)
+		require.True(t, e.Snapshot.NoDownloader)
+		require.Equal(t, !sequencer, e.TxPool.Disable)
+		require.Contains(t, e.SetHeadRefusal, "only driver")
+		if !sequencer {
+			continue
+		}
+		require.True(t, e.TxPool.NoGossip)
+		require.Equal(t, uint64(0), *e.Builder.MaxBlobsPerBlock)
+	}
+	n, _ := l1Configs(t, 1)
 	n.Http.API = append(n.Http.API, "testing")
 	require.ErrorIs(t, configureFollowerNode(n), eez.ErrConfig)
 }

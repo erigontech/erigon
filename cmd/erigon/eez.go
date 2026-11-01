@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/eez/l1"
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	eezrules "github.com/erigontech/erigon/eez/rules"
+	"github.com/erigontech/erigon/eez/sequencer"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/node/debug"
@@ -88,13 +89,18 @@ func configureFollowerNode(cfg *nodecfg.Config) error {
 
 // configureFollowerEth turns off every other driver and source of the
 // chain: consensus layer, engine API, head moves on request, txpool and
-// snapshot downloader.
-func configureFollowerEth(cfg *ethconfig.Config) {
+// snapshot downloader. A sequencer keeps the txpool, without gossip or blob
+// transactions.
+func configureFollowerEth(cfg *ethconfig.Config, sequencer bool) {
 	cfg.InternalCL = false
 	cfg.NoEngineAPI = true
 	cfg.SetHeadRefusal = setHeadRefusal
-	cfg.TxPool.Disable = true
+	cfg.TxPool.Disable = !sequencer
 	cfg.Snapshot.NoDownloader = true
+	if sequencer {
+		cfg.TxPool.NoGossip = true
+		cfg.Builder.MaxBlobsPerBlock = new(uint64(0))
+	}
 }
 
 // allInOneConfigs returns the configuration of the EEZ chain cfg.Chain that
@@ -235,6 +241,32 @@ func sentryPeers(backend *eth.Ethereum) func(context.Context) (uint64, error) {
 	}
 }
 
+// newSequencer returns the sequencer of the chain of backend, producing on
+// f from the backend's txpool.
+func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, cfg *eez.SequencerConfig, logger log.Logger) (*sequencer.Service, error) {
+	pool := backend.TxPool()
+	if pool == nil {
+		return nil, errors.New("the sequencer needs the txpool")
+	}
+	chainConfig := backend.ChainConfig()
+	l2 := chainConfig.L2.(*config.L2Config)
+	timing := sequencer.Timing{
+		L1:    time.Duration(l2.L1BlockTime) * time.Second,
+		L2:    time.Duration(l2.BlockInterval) * time.Second,
+		Proof: cfg.ProofTime,
+		Slack: cfg.SubmissionSlack,
+	}
+	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth}, f, pool, logger)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
+	}
+	genesis, err := chain.HeaderByNumber(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), logger), nil
+}
+
 // dialL1 connects to the L1 node of cfg.
 func dialL1(ctx context.Context, cfg *eez.Config, dirs datadir.Dirs, logger log.Logger) (l1.ChainReader, error) {
 	if cfg.L1KV != "" {
@@ -318,16 +350,35 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		}
 		fc.Fetcher = fetcher
 	}
+	var seq *sequencer.Service
+	if cfg.Sequencer != nil {
+		// Run hands heads only once started, after seq is set.
+		fc.OnHead = func(h l1.Header) { seq.Head(h) }
+	}
 	f, err := follower.New(reader, chain, chainConfig, fc, logger)
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Sequencer != nil {
+		if seq, err = newSequencer(ctx, backend, chain, f, cfg.Sequencer, logger); err != nil {
+			return nil, err
+		}
+	}
 	api.Attach(f)
+	if seq != nil {
+		api.AttachSequencer(seq.Sequencer())
+	}
 	svc := follower.NewService(f, func(err error) {
 		logger.Crit("[eez] follower halted, stopping the node", "err", err)
 		go stop.Close()
 	})
 	n.RegisterLifecycle(svc)
+	if seq != nil {
+		// Registered after the follower, it stops before it.
+		n.RegisterLifecycle(seq)
+		logger.Info("[eez] sequencer mode", "feeRecipient", cfg.Sequencer.FeeRecipient, "proofTime", cfg.Sequencer.ProofTime,
+			"submissionSlack", cfg.Sequencer.SubmissionSlack, "maxDepth", cfg.Sequencer.MaxDepth)
+	}
 	l1Source := cmp.Or(cfg.L1RPC, cfg.L1KV)
 	if cfg.AllInOne() {
 		l1Source = "in-process"

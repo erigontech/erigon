@@ -113,7 +113,7 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 	if standalone {
 		ethCfg.ExtraAPIs = append(ethCfg.ExtraAPIs, eezAPI.API())
-		configureFollowerEth(ethCfg)
+		configureFollowerEth(ethCfg, eezCfg.Sequencer != nil)
 	} else if eezCfg != nil {
 		if l2NodeCfg, l2EthCfg, err = allInOneConfigs(ctx, nodeCfg, ethCfg, eezCfg, logger); err != nil {
 			return err

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/l1test"
@@ -665,4 +667,182 @@ func TestAllInOneBinary(t *testing.T) {
 		return call(t.Context(), l1URL, "eth_blockNumber", &head) == nil && head > restarted
 	})
 	stop()
+}
+
+// proc is an erigon process of a binary test.
+type proc struct {
+	t      *testing.T
+	url    string
+	output bytes.Buffer
+	exited chan error
+	cmd    *exec.Cmd
+}
+
+// start runs bin with args, its HTTP-RPC on httpPort.
+func start(t *testing.T, bin, httpPort string, args ...string) *proc {
+	t.Helper()
+	n := &proc{t: t, url: "http://127.0.0.1:" + httpPort, exited: make(chan error, 1)}
+	n.cmd = exec.CommandContext(t.Context(), bin, append(args, "--http.port", httpPort, "--authrpc.port", freePort(t),
+		"--private.api.addr", "127.0.0.1:"+freePort(t), "--torrent.port", freePort(t), "--mcp.disable")...)
+	n.cmd.Stdout, n.cmd.Stderr = &n.output, &n.output
+	require.NoError(t, n.cmd.Start())
+	go func() { n.exited <- n.cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = n.cmd.Process.Kill()
+		if t.Failed() {
+			t.Logf("%s:\n%s", args, n.output.String())
+		}
+	})
+	return n
+}
+
+// waitFor polls ok until it holds, failing when the process exits first.
+func (n *proc) waitFor(what string, ok func() bool) {
+	n.t.Helper()
+	deadline := time.Now().Add(3 * time.Minute)
+	for !ok() {
+		select {
+		case err := <-n.exited:
+			n.t.Fatalf("erigon exited before %s: %v", what, err)
+		case <-time.After(250 * time.Millisecond):
+		}
+		require.True(n.t, time.Now().Before(deadline), what)
+	}
+}
+
+// enode returns the node's enode URL on the loopback interface.
+func (n *proc) enode(p2pPort string) string {
+	n.t.Helper()
+	var info struct {
+		Enode string `json:"enode"`
+	}
+	n.waitFor("admin_nodeInfo", func() bool { return call(n.t.Context(), n.url, "admin_nodeInfo", &info) == nil && info.Enode != "" })
+	id, _, ok := strings.Cut(strings.TrimPrefix(info.Enode, "enode://"), "@")
+	require.True(n.t, ok, info.Enode)
+	return "enode://" + id + "@127.0.0.1:" + p2pPort
+}
+
+// TestSequencerBinary is T-SEQ-3 between Erigon nodes: the erigon binary
+// named by EEZ_ERIGON produces the chain of a fresh devnet genesis on the L1
+// heads of a composed L1, takes a transaction into its pool and a block, and
+// serves eth/69 to its trusted peer; an Erigon follower with the sequencer's
+// RPC takes its blocks as its head. The sequencer, first producer of the
+// chain, derives from L1 alone, reports itself as the source of its head and
+// refuses debug_setHead.
+func TestSequencerBinary(t *testing.T) {
+	bin := os.Getenv("EEZ_ERIGON")
+	if bin == "" {
+		t.Skip("EEZ_ERIGON names no erigon binary")
+	}
+	c := derivertest.NewComposer(t)
+	server, err := l1test.NewServer(c.L1, log.New())
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+	l1Server := httptest.NewServer(server)
+	t.Cleanup(l1Server.Close)
+	// Each head's slot fires at once: its timestamp is the proof window
+	// past.
+	go func() {
+		for {
+			head, err := c.L1.Head(context.Background())
+			if err != nil {
+				return
+			}
+			n := head.Number + 1
+			hash := common.BigToHash(new(big.Int).SetUint64(1<<32 + n))
+			if c.L1.Append(&recording.Block{Header: l1.Header{Number: n, Hash: hash, ParentHash: head.Hash, Time: uint64(time.Now().Unix()) - 8}}) != nil {
+				return
+			}
+			select {
+			case <-t.Context().Done():
+				return
+			case <-time.After(4 * time.Second):
+			}
+		}
+	}()
+
+	l2 := networks.Devnet.Config.L2.(*config.L2Config)
+	raw, err := os.ReadFile(filepath.Join("..", "networks", "devnet-genesis.json"))
+	require.NoError(t, err)
+	var genesis map[string]any
+	require.NoError(t, json.Unmarshal(raw, &genesis))
+	genesis["timestamp"] = hexutil.Uint64(time.Now().Unix() - 20).String()
+	raw, err = json.Marshal(genesis)
+	require.NoError(t, err)
+	genesisFile := filepath.Join(t.TempDir(), "genesis.json")
+	require.NoError(t, os.WriteFile(genesisFile, raw, 0o644))
+	seqDir, followerDir := t.TempDir(), t.TempDir()
+	for _, dir := range []string{seqDir, followerDir} {
+		out, err := exec.CommandContext(t.Context(), bin, "init", "--eez.enabled", "--datadir", dir,
+			"--eez.l1.chainid", strconv.FormatUint(l2.L1ChainID, 10), "--eez.registry", l2.Registry.Hex(),
+			"--eez.registry.deployblock", strconv.FormatUint(l2.RegistryDeployBlock, 10), "--eez.rollupid", strconv.FormatUint(l2.RollupID, 10),
+			"--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s", genesisFile).CombinedOutput()
+		require.NoError(t, err, "%s", out)
+	}
+
+	seqHTTP, seqP2P, followerP2P := freePort(t), freePort(t), freePort(t)
+	f := start(t, bin, freePort(t), "--eez.enabled", "--chain=eez-devnet", "--datadir", followerDir, "--eez.l1.rpc", l1Server.URL,
+		"--eez.l1.poll=200ms", "--eez.sync.l1only=true", "--eez.sequencer.rpc", "http://127.0.0.1:"+seqHTTP, "--http.api=eth,eez,admin",
+		"--port", followerP2P, "--nat=none", "--nodiscover")
+	s := start(t, bin, seqHTTP, "--eez.enabled", "--chain=eez-devnet", "--datadir", seqDir, "--eez.l1.rpc", l1Server.URL,
+		"--eez.l1.poll=200ms", "--eez.sync.l1only=true", "--eez.sequencer", "--eez.proof.time=4s", "--eez.submission.slack=1500ms",
+		"--eez.sequencer.maxdepth=0", "--http.api=eth,debug,eez,admin", "--port", seqP2P, "--nat=none", "--nodiscover",
+		"--trustedpeers", f.enode(followerP2P))
+
+	var tx hexutil.Bytes = c.Transfer(bob, 7)
+	s.waitFor("the transaction enters the pool", func() bool {
+		var hash common.Hash
+		return call(t.Context(), s.url, "eth_sendRawTransaction", &hash, tx) == nil
+	})
+	var receipt *struct {
+		BlockNumber hexutil.Uint64 `json:"blockNumber"`
+		BlockHash   common.Hash    `json:"blockHash"`
+	}
+	txHash := crypto.Keccak256Hash(tx)
+	s.waitFor("a produced block holds the transaction", func() bool {
+		return call(t.Context(), s.url, "eth_getTransactionReceipt", &receipt, txHash) == nil && receipt != nil
+	})
+	f.waitFor("the follower takes the sequencer's block", func() bool {
+		h, err := blockHash(t.Context(), f.url, hexutil.Uint64(receipt.BlockNumber).String())
+		return err == nil && h == receipt.BlockHash
+	})
+	f.waitFor("the follower's head reaches the sequencer's", func() bool {
+		var n hexutil.Uint64
+		return call(t.Context(), f.url, "eth_blockNumber", &n) == nil && n > receipt.BlockNumber
+	})
+	// A peer is listed once its eth handshake passes; the sequencer speaks
+	// eth/68 and eth/69 only, and dials its trusted peer as a static one.
+	s.waitFor("the follower is a trusted eth/69 peer", func() bool {
+		var peers []struct {
+			Caps    []string `json:"caps"`
+			Network struct {
+				Trusted bool `json:"trusted"`
+				Static  bool `json:"static"`
+			} `json:"network"`
+		}
+		return call(t.Context(), s.url, "admin_peers", &peers) == nil && len(peers) == 1 &&
+			peers[0].Network.Trusted && peers[0].Network.Static && slices.Contains(peers[0].Caps, "eth/69")
+	})
+	var status struct {
+		Live hexutil.Uint64 `json:"live"`
+		Sync hexutil.Uint64 `json:"sync"`
+	}
+	require.NoError(t, call(t.Context(), s.url, "eez_sequencerStatus", &status))
+	require.Positive(t, status.Live)
+	require.Positive(t, status.Sync)
+	var followerStatus struct {
+		HeadSource string `json:"headSource"`
+	}
+	require.NoError(t, call(t.Context(), s.url, "eez_followerStatus", &followerStatus))
+	require.Equal(t, "sequencer", followerStatus.HeadSource)
+	var ignored any
+	require.ErrorContains(t, call(t.Context(), s.url, "debug_setHead", &ignored, hexutil.Uint64(0)), "only driver")
+
+	require.NoError(t, s.cmd.Process.Signal(os.Interrupt))
+	select {
+	case err := <-s.exited:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Minute):
+		t.Fatal("the sequencer did not stop")
+	}
 }

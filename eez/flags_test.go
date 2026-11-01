@@ -156,11 +156,36 @@ func TestConfigFromCLI(t *testing.T) {
 		require.ErrorContains(t, err, "--eez.port "+port+" is out of range", port)
 	}
 
-	// init needs no L1 source; a running node needs exactly one.
+	cfg, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s")
+	require.NoError(t, err)
+	require.Equal(t, &SequencerConfig{ProofTime: 5 * time.Second, SubmissionSlack: 100 * time.Millisecond, MaxDepth: 64}, cfg.Sequencer)
+	require.NoError(t, cfg.CheckNode())
+	cfg, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=4s",
+		"--eez.submission.slack=1500ms", "--eez.sequencer.maxdepth=0", "--eez.sequencer.feerecipient=0x5fbdb2315678afecb367f032d93f642f64180aa3")
+	require.NoError(t, err)
+	require.Equal(t, &SequencerConfig{ProofTime: 4 * time.Second, SubmissionSlack: 1500 * time.Millisecond, FeeRecipient: registry}, cfg.Sequencer)
+	for _, args := range [][]string{
+		{"--eez.enabled", "--eez.sequencer"},
+		{"--eez.enabled", "--eez.proof.time=5s"},
+		{"--eez.enabled", "--eez.sequencer.maxdepth=8"},
+		{"--eez.enabled", "--eez.sequencer", "--eez.proof.time=5s", "--eez.sequencer.feerecipient=0x12"},
+	} {
+		_, err := parse(t, args...)
+		require.ErrorIs(t, err, ErrConfig, "%v", args)
+	}
+
+	// init needs no L1 source; a running node needs exactly one, and a
+	// sequencer runs on its own node and follows no other.
 	for _, args := range [][]string{
 		{"--eez.enabled"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.chain=eez-devnet"},
+		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s", "--eez.sequencer.rpc=http://seq:8545"},
+		{
+			"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s",
+			"--eez.p2p.listen=/ip4/0.0.0.0/tcp/9100", "--eez.sequencer.address=0x5fbdb2315678afecb367f032d93f642f64180aa3",
+		},
+		{"--eez.enabled", "--eez.chain=eez-devnet", "--eez.sequencer", "--eez.proof.time=5s"},
 	} {
 		cfg, err := parse(t, args...)
 		require.NoError(t, err, "%v", args)
