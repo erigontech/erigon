@@ -956,7 +956,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		// the read side (readSelfDestructMemo→resolved) already treats it as a
 		// destruct, so this single lifecycle authority must too, or the two disagree
 		// on a validated destruct and a wiped-slot read never settles.
-		if (v.loadFlag() == FlagDone || v.loadFlag() == FlagValidated) && v.Value {
+		if v.settled() && v.Value {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}
@@ -965,7 +965,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 	if !wiped {
 		return LifecycleLive, Version{}, 0, 0
 	}
-	if latest.loadFlag() == FlagDone || latest.loadFlag() == FlagValidated {
+	if latest.settled() {
 		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
 	} else {
 		canonicalVer = Version{TxIndex: destroyedAt, Incarnation: wipeInc}
@@ -1048,7 +1048,7 @@ func (vm *VersionMap) selfDestructInRange(addr accounts.Address, lo, hi int, tar
 		if k < lo {
 			return false
 		}
-		if (v.loadFlag() == FlagDone || v.loadFlag() == FlagValidated) && v.Value == target {
+		if v.settled() && v.Value == target {
 			ver = Version{TxIndex: k, Incarnation: v.incarnation}
 			found = true
 			return false
@@ -1158,7 +1158,8 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 	if !ok || !eq(ci.Value, value) || ci.valStatus != valStatus {
 		return false
 	}
-	return ci.loadFlag() == flag || (ci.loadFlag() == FlagDone && flag == FlagEstimate)
+	f := ci.loadFlag()
+	return f == flag || (f == FlagDone && flag == FlagEstimate)
 }
 
 // flushAllNoOp reports whether every write this tx made to addr is already present, so the
@@ -2027,6 +2028,12 @@ type WriteCell[T any] struct {
 }
 
 func (c *WriteCell[T]) loadFlag() statusFlag { return statusFlag(c.flag.Load()) }
+
+// settled reports Done or Validated from one load: a mark can move the flag between two loads.
+func (c *WriteCell[T]) settled() bool {
+	f := c.loadFlag()
+	return f == FlagDone || f == FlagValidated
+}
 
 // Per-T pools for *WriteCell[T], spanning VersionMap lifetimes: a cell freed by
 // Delete/DeleteAll in block N is recycled into block N+1's first write. Slice-valued
