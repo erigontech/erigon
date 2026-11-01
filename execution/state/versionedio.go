@@ -2143,7 +2143,7 @@ func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int)
 }
 
 func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
-	val, res, ok := liveStorage(vm, addr, key, txIndex)
+	val, res, ok := liveStorageValue(vm, addr, key, txIndex)
 	if ok && res.Status() != MVReadResultNone {
 		return val, true
 	}

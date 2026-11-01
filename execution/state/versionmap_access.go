@@ -93,7 +93,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 // value resolves. A slot with no cell in this map falls back to base — a cross-block
 // batch's touched union spans earlier blocks whose storage writes are not in this map.
 func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	if val, res, ok := liveStorage(view.vm, addr, key, view.txIdx()); ok && res.Status() != MVReadResultNone {
+	if val, res, ok := liveStorageValue(view.vm, addr, key, view.txIdx()); ok && res.Status() != MVReadResultNone {
 		return val, true
 	}
 	if sr, ok := view.base.(StorageBaseReader); ok && sr != nil {

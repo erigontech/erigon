@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
@@ -40,7 +41,20 @@ func newDepsTest(t *testing.T, txs types.Transactions) *depsTest {
 	t.Helper()
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), chainSpec.Config)
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000)
+		for _, txn := range txs {
+			sender, _ := txn.GetSender()
+			addr := sender.Value()
+			if err := putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	pe, roTx := newResumeTestExec(t, db, chainSpec.Config)
 	workersCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	pe.workersCtx = workersCtx
@@ -92,7 +106,6 @@ func TestValueTransferWaitsForRecipientPredecessor(t *testing.T) {
 	}{
 		{"shared_recipient", []accounts.Address{a, b, c}, []accounts.Address{f, d, d}},
 		{"self_transfer", []accounts.Address{a, b, b}, []accounts.Address{a, b, b}},
-		{"recipient_then_sender", []accounts.Address{a, b, d}, []accounts.Address{f, d, e}},
 		{"sender_then_recipient", []accounts.Address{a, d, c}, []accounts.Address{f, e, d}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,4 +142,17 @@ func TestRecipientDependencyNeedsValueAndRecipient(t *testing.T) {
 			require.True(t, s.be.selfLoopDispatched[1])
 		})
 	}
+}
+
+// A sender charged at validation is charged after every lower tx, so it need not wait
+// for an earlier transfer to it.
+func TestChargedSenderDoesNotWaitForTransferToIt(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xa0"))
+	b := accounts.InternAddress(common.HexToAddress("0xb1"))
+	d := accounts.InternAddress(common.HexToAddress("0xd3"))
+	e := accounts.InternAddress(common.HexToAddress("0xe4"))
+	f := accounts.InternAddress(common.HexToAddress("0xf5"))
+	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b, d}, []accounts.Address{f, d, e}))
+	require.False(t, s.be.execTasks.isBlocked(2))
+	require.True(t, s.be.selfLoopDispatched[2])
 }

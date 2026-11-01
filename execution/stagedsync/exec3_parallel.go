@@ -117,8 +117,8 @@ type parallelExecutor struct {
 	// the explicit ordered halt the exec loop calls once it has produced up to the
 	// coalesce block.
 	cancelWorkers context.CancelFunc
-	// runSem holds the idle worker contexts; runWG tracks in-flight task goroutines
-	// for teardown.
+	// runSem holds the idle worker contexts; runWG tracks task goroutines, busy or
+	// idle, for teardown.
 	runSem chan *exec.WorkerContext
 	// execSem decouples the CPU-parallelism gate (sized to the worker count) from the
 	// WorkerContext-object pool (runSem). A worker resting mid-EVM on a dependency
@@ -128,8 +128,10 @@ type parallelExecutor struct {
 	execSem chan struct{}
 	// slotTxs keeps a released slot's roTx for the next acquire, so a task does not
 	// open and close one; like applyTx it lives for one exec loop.
-	slotTxs    chan kv.TemporalTx
-	runWG      sync.WaitGroup
+	slotTxs chan kv.TemporalTx
+	runWG   sync.WaitGroup
+	// idleGo hands a task to a finished task goroutine, so its grown stack is reused.
+	idleGo     chan func()
 	workersCtx context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
 	results        chan *exec.TxResult
@@ -470,7 +472,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	execErr := func() (err error) {
 		defer func() {
-			if rec := recover(); rec != nil {
+			rec := recover()
+			switch {
+			case rec != nil:
 				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
 				// Surface the panic as the loop's error; otherwise execImpl returns
 				// nil with sd.mem partly folded and the caller mistakes an internal
@@ -478,10 +482,34 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				if err == nil {
 					err = fmt.Errorf("apply loop panic: %v", rec)
 				}
-			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+			case err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})):
 				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
-			} else {
+			default:
 				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
+			}
+			// Any non-clean exit (panic or an error return before the channel-close
+			// drain) can leave the exec loop blocked on a mustDeliver send into a full
+			// applyResults; mustDeliver ignores ctx, so the cancel alone cannot release
+			// it. The exec loop can equally be blocked sending into commitResults while
+			// the calculator is blocked sending into a full rootResults (which this loop
+			// stopped consuming), so draining only applyResults leaves both producers
+			// stuck and neither channel closes. Drain both to EOF concurrently so the
+			// calculator and exec loop wind down and close their channels, else pe.wait()
+			// hangs. A clean exit already drained to the close.
+			if rec != nil || err != nil {
+				pe.cancelExecLoop(&stopCause{kind: stopOperational, err: err})
+				var drainWG sync.WaitGroup
+				drainWG.Go(func() {
+					for range applyResults {
+					}
+				})
+				if rootResults != nil {
+					drainWG.Go(func() {
+						for range rootResults {
+						}
+					})
+				}
+				drainWG.Wait()
 			}
 		}()
 
@@ -1368,10 +1396,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				return err
 			}
 			addresses := make([]common.Address, 0, 2)
-			if txTask, ok := t.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(0) {
-				sender = accounts.NilAddress
-			}
-			if !sender.IsNil() {
+			txTask, ok := t.Task.(*exec.TxTask)
+			chargedAtValidation := ok && txTask.ChargesSenderAtValidation(0)
+			if !sender.IsNil() && !chargedAtValidation {
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
@@ -1382,6 +1409,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 					executor.execTasks.clearPending(i)
 				}
 				prevAccountTx[address] = i
+			}
+			// A sender charged at validation does not wait for its previous tx, but a later
+			// transfer to it still waits for its charge.
+			if chargedAtValidation && !sender.IsNil() {
+				prevAccountTx[sender.Value()] = i
 			}
 		}
 
@@ -1642,6 +1674,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 	pe.workersCtx = workersCtx
+	pe.idleGo = make(chan func())
 
 	// The pool runs one worker beyond the configured count, except for a count
 	// of one (--exec.serial), which must run one transaction at a time.
@@ -1810,6 +1843,30 @@ type balTx struct {
 // concurrency is bounded by execSem.
 const elasticWorkerCap = 4096
 
+// goReused runs f on an idle task goroutine when there is one, so f starts on an
+// already grown stack instead of growing a new one.
+func (pe *parallelExecutor) goReused(f func()) {
+	// If a goroutine is idle and waiting for a task, send f to it by this channel.
+	// If none is idle, start a new goroutine.
+	select {
+	case pe.idleGo <- f:
+		return
+	default:
+	}
+	idle, done := pe.idleGo, pe.workersCtx.Done()
+	pe.runWG.Go(func() {
+		for {
+			f()
+			f = nil
+			select {
+			case f = <-idle:
+			case <-done:
+				return
+			}
+		}
+	})
+}
+
 // dispatchRunSelfLoop runs one task on a worker context, looping until its result
 // is stable-valid: execute, flush its writes to the versionMap so downstream workers
 // read them speculatively, validate its own read-set, and — when valid but a
@@ -1817,7 +1874,7 @@ const elasticWorkerCap = 4096
 // re-validate. Only a stable-valid result is sent to the exec loop, which commits it
 // in order. The context is released while parked so dependencies can run.
 func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
-	pe.runWG.Go(func() {
+	pe.goReused(func() {
 		// The roTx is bound to the execution slot, not the goroutine: opened on slot
 		// acquire, rolled back on release. This bounds concurrent roTxs to the slot
 		// count rather than the far larger parked-goroutine count, so idle parked
@@ -2138,10 +2195,10 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				// A same-writer re-publication names no blocker: the value tiebreaker
-				// may forgive it, and parking would wait on a writer that did not
-				// invalidate this read. If the value did change, re-executing at once is
-				// right — the new value is already published.
+				// A same-writer re-publication (same TxIndex, new incarnation) names no
+				// blocker: parking would wait on a writer that will just re-publish, so
+				// re-execute at once — the new value is already published. Only a different
+				// writer that moved the version is a blocker to wait for.
 				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
 					// Invariant: a read can only be invalidated by a PREDECESSOR write.
 					// A blocker >= this task is a forward dependency (a future write
@@ -2752,8 +2809,12 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		WriteHeader: state.WriteHeader{Address: sender, Path: state.BalancePath, Version: version, Reason: tracing.BalanceDecreaseGasBuy},
 		Val:         u256.Sub(acc.Balance, charge),
 	})
+	nonceReason := tracing.NonceChangeEoACall
+	if msg.To().IsNil() {
+		nonceReason = tracing.NonceChangeContractCreator
+	}
 	ws.SetNonce(sender, &state.VersionedWrite[uint64]{
-		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: tracing.NonceChangeEoACall},
+		WriteHeader: state.WriteHeader{Address: sender, Path: state.NoncePath, Version: version, NonceReason: nonceReason},
 		Val:         acc.Nonce + 1,
 	})
 	return ws, acc, nil
