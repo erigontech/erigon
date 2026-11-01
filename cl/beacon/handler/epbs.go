@@ -1005,7 +1005,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	claimed := err == nil
 	retry := executionPayloadEnvelopeRetry{}
 	retrying := false
-	retryClaimed := false
+	var retryClaimed bool
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			lookupRequired := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired)
