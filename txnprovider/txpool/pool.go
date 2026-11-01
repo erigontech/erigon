@@ -168,7 +168,7 @@ type TxPool struct {
 	frameValidationGate     chan struct{}
 	remoteFrames            remoteFrameQueue
 	frameReservations       map[common.Address]frameReservation
-	frameBalanceChanges     map[common.Address]struct{}
+	frameAccountsToRefresh  map[common.Address]struct{}
 	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
@@ -269,7 +269,7 @@ func New(
 		blobs:                   newBlobStore(),
 		frameValidationGate:     make(chan struct{}, 1),
 		remoteFrames:            remoteFrames,
-		frameBalanceChanges:     make(map[common.Address]struct{}),
+		frameAccountsToRefresh:  make(map[common.Address]struct{}),
 		frameRejections:         frameRejections,
 		senderLastActivity:      make(map[uint64]uint64),
 	}
@@ -1980,6 +1980,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	p.releaseFrame(mt.TxnSlot.frameValidation)
+	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && frame.UsesLegacyNonce() {
+		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+	}
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	delete(p.byHash, hashStr)
 	p.deletedTxns = append(p.deletedTxns, mt)
@@ -2297,7 +2300,7 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 // reservations cover their fees.
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
 	sender := p.senders.senderID2Addr[senderID]
-	delete(p.frameBalanceChanges, sender)
+	delete(p.frameAccountsToRefresh, sender)
 	reserved := p.frameReservations[sender]
 	if senderBalance.Gt(&reserved.cost) {
 		senderBalance.Sub(&senderBalance, &reserved.cost)
@@ -2436,13 +2439,13 @@ func announceFirstPending(announcements *Announcements, mt *metaTxn) {
 // for the first time.
 func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) error {
 	for {
-		if err := p.refreshFramePayers(cacheView); err != nil {
+		if err := p.refreshFrameAccounts(cacheView); err != nil {
 			return err
 		}
 		p.promoteSubPools(pendingBaseFee, pendingBlobFee, announcements, logger)
-		// Capacity eviction can release a frame reservation and make ordinary
-		// transactions eligible. Recheck those payers before finishing promotion.
-		if len(p.frameBalanceChanges) == 0 {
+		// Eviction can release payer funds or break a sender's nonce chain.
+		// Refresh affected accounts before finishing promotion.
+		if len(p.frameAccountsToRefresh) == 0 {
 			return nil
 		}
 	}

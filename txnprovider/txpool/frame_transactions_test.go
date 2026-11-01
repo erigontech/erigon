@@ -378,6 +378,82 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 	}
 }
 
+func TestFramePoolDiscardRefreshesSenderNonceChain(t *testing.T) {
+	for _, action := range []string{"revalidation rejected", "expired", "parked pool overflow"} {
+		t.Run(action, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			payer := common.Address{0x44}
+			backend.payer = payer
+			tx := &types.FrameTransaction{
+				ChainID: *uint256.NewInt(1), NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+				Frames: []types.Frame{
+					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, 100), Limits: mdgas.MdGas{Execution: 5_000}},
+					{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 100}},
+					{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 100}},
+				},
+				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2)},
+			}
+			var encoded bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&encoded))
+			frame := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+			ordinary := newTestTxnSlot(1, 0, 1, 2, 21_000)
+			ordinary.IDHash[0] = 0x77
+			var ordinaryRLP bytes.Buffer
+			require.NoError(t, ordinary.Txn.MarshalBinary(&ordinaryRLP))
+			ordinary.Rlp = ordinaryRLP.Bytes()
+			ordinary.Size = uint32(ordinaryRLP.Len())
+			var txns TxnSlots
+			txns.Append(frame, sender[:], true)
+			txns.Append(ordinary, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Equal(t, 2, pool.pending.Len())
+
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, payer)
+			change.ChangeBatch[0].BlockHeight = 1
+			switch action {
+			case "revalidation rejected":
+				backend.valid = false
+			case "expired":
+				change.ChangeBatch[0].BlockTime = 101
+			case "parked pool overflow":
+				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 2, 0, 0
+				backend.err = context.DeadlineExceeded
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			wantSelected := 0
+			if action == "parked pool overflow" {
+				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+				backend.err = nil
+				otherSender := common.Address{0x55}
+				var other TxnSlots
+				other.Append(framePoolSlot(t, otherSender, 1, 2, uint256.Int{1}), otherSender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, other)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				wantSelected = 1
+			}
+			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+			if action == "parked pool overflow" {
+				require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]), "the queued pool has zero capacity")
+			} else {
+				mt := pool.byHash[string(ordinary.IDHash[:])]
+				require.NotNil(t, mt)
+				require.Equal(t, QueuedSubPool, mt.currentSubPool, "nonce 1 cannot execute without nonce 0")
+				require.Zero(t, mt.subPool&NoNonceGaps)
+			}
+			var selected TxnsRlp
+			_, count, err := pool.best(ctx, 10, &selected, 1, nil,
+				mdgas.FullMdGas{MdGas: mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}}, nil, 1_000_000)
+			require.NoError(t, err)
+			require.Equal(t, wantSelected, count)
+			require.NotContains(t, selected.ParsedTxn, ordinary.Txn)
+		})
+	}
+}
+
 func TestFramePoolSharedBalanceReplacements(t *testing.T) {
 	ctx, pool, payer := keyedFramePoolEnv(t)
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether

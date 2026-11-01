@@ -337,7 +337,7 @@ func (p *TxPool) reserveFrame(v *protocol.FrameValidation) {
 		r.paymasters++
 	}
 	p.frameReservations[v.Payer] = r
-	p.frameBalanceChanges[v.Payer] = struct{}{}
+	p.frameAccountsToRefresh[v.Payer] = struct{}{}
 }
 
 func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
@@ -354,18 +354,18 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	} else {
 		p.frameReservations[v.Payer] = r
 	}
-	p.frameBalanceChanges[v.Payer] = struct{}{}
+	p.frameAccountsToRefresh[v.Payer] = struct{}{}
 }
 
-// Reservation changes can affect another sender's ordinary transactions. Defer
-// their eligibility update until promotion has a current state view and no
-// sender-index iteration is in progress.
-func (p *TxPool) refreshFramePayers(cacheView kvcache.CacheView) error {
-	for len(p.frameBalanceChanges) > 0 {
-		for payer := range p.frameBalanceChanges {
-			senderID, ok := p.senders.getID(payer)
+// Frame removal and payer reservations can change ordinary transaction eligibility.
+// Defer refreshes until promotion has a current state view and no sender-index
+// iteration is in progress.
+func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
+	for len(p.frameAccountsToRefresh) > 0 {
+		for address := range p.frameAccountsToRefresh {
+			senderID, ok := p.senders.getID(address)
 			if !ok || !p.all.hasTxns(senderID) {
-				delete(p.frameBalanceChanges, payer)
+				delete(p.frameAccountsToRefresh, address)
 				continue
 			}
 			nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
