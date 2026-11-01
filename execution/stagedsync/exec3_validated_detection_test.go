@@ -250,4 +250,16 @@ func TestMarkReadersDirty(t *testing.T) {
 			})
 		}
 	}
+	for _, written := range []state.AccountPath{state.BalancePath, state.NoncePath} {
+		t.Run(fmt.Sprintf("a reader of balance and nonce is flagged by a write %d", written), func(t *testing.T) {
+			be := newDetExecutor(t, 4)
+			rs := state.ReadSet{}
+			rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			rs.SetHeader(addr, state.NoncePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+			be.indexReads(2, rs)
+			be.markReadersDirty(1, writes[written])
+			require.True(t, be.revalidate[2])
+		})
+	}
 }
