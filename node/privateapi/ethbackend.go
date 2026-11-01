@@ -63,7 +63,8 @@ import (
 // 4.0.0 - remove BorTxnLookup and BorEvents
 // 4.1.0 - add FrozenBlocks function
 // 4.2.0 - add BlockBody function
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 2, Patch: 0}
+// 5.0.0 - replace AAValidation with FrameValidation
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
