@@ -157,6 +157,24 @@ type parallelExecutor struct {
 	currentChangeSetHash common.Hash
 }
 
+// drainToClose empties both channels until their producers close them.
+// mustDeliver ignores ctx, so after a non-clean exit the exec loop and the
+// calculator stay blocked on full channels and pe.wait() hangs without it.
+func drainToClose(applyResults <-chan applyResult, rootResults <-chan commitmentResult) {
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range applyResults {
+		}
+	})
+	if rootResults != nil {
+		wg.Go(func() {
+			for range rootResults {
+			}
+		})
+	}
+	wg.Wait()
+}
+
 // stopKind classifies why the executor was asked to stop. It maps directly
 // to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
 type stopKind uint8
@@ -461,29 +479,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			default:
 				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
 			}
-			// Any non-clean exit (panic or an error return before the channel-close
-			// drain) can leave the exec loop blocked on a mustDeliver send into a full
-			// applyResults; mustDeliver ignores ctx, so the cancel alone cannot release
-			// it. The exec loop can equally be blocked sending into commitResults while
-			// the calculator is blocked sending into a full rootResults (which this loop
-			// stopped consuming), so draining only applyResults leaves both producers
-			// stuck and neither channel closes. Drain both to EOF concurrently so the
-			// calculator and exec loop wind down and close their channels, else pe.wait()
-			// hangs. A clean exit already drained to the close.
 			if rec != nil || err != nil {
 				pe.cancelExecLoop(&stopCause{kind: stopOperational, err: err})
-				var drainWG sync.WaitGroup
-				drainWG.Go(func() {
-					for range applyResults {
-					}
-				})
-				if rootResults != nil {
-					drainWG.Go(func() {
-						for range rootResults {
-						}
-					})
-				}
-				drainWG.Wait()
+				drainToClose(applyResults, rootResults)
 			}
 		}()
 

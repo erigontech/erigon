@@ -442,70 +442,59 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
-// TestApplyLoopDrainsBlockedProducerOnNonCleanExit reproduces chfast's hang: a
-// non-clean apply-loop exit (a panic through the BAL sink, or an early error
-// return such as a failed roTx open) unwinds the loop while the exec loop is
-// blocked on a mustDeliver send into a full applyResults. mustDeliver ignores
-// ctx, so the deferred cancel+drain must empty applyResults to EOF to release
-// the producer; without the drain pe.wait() hangs forever. Both exit kinds must
-// drain — an early error return is not special-cased to the panic path.
+// After a non-clean apply-loop exit, the exec loop is blocked on a mustDeliver
+// send into a full applyResults and the calculator on a send into a full
+// rootResults. drainToClose must release both, so both can close their channels.
 func TestApplyLoopDrainsBlockedProducerOnNonCleanExit(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		panic bool
-	}{
-		{"panic", true},
-		{"error return", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			const buf = 4
-			applyResults := make(chan applyResult, buf)
-			consumers := newResultStream()
-			consumers.register("applyResults", applyResults)
+	const buf = 4
+	applyResults := make(chan applyResult, buf)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+	rootResults := make(chan commitmentResult, buf)
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+	execDone, calcDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(execDone)
+		for i := range buf * 4 {
+			_ = consumers.publish(context.Background(), i, true)
+		}
+		consumers.close()
+	}()
+	go func() {
+		defer close(calcDone)
+		for range buf * 4 {
+			rootResults <- commitmentResult{}
+		}
+		close(rootResults)
+	}()
 
-			producerDone := make(chan struct{})
-			go func() {
-				defer close(producerDone)
-				for i := range buf * 4 {
-					_ = consumers.publish(ctx, i, true) // mustDeliver: blocks once the buffer fills
-				}
-				consumers.close()
-			}()
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, rootResults)
+	}()
+	for name, done := range map[string]chan struct{}{"exec loop": execDone, "calculator": calcDone, "drain": drained} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s stranded: drainToClose did not empty both channels to close", name)
+		}
+	}
+}
 
-			loopErr := func() (err error) {
-				defer func() {
-					rec := recover()
-					if rec != nil {
-						err = fmt.Errorf("apply loop panic: %v", rec)
-					}
-					if rec != nil || err != nil {
-						cancel()
-						for range applyResults {
-						}
-					}
-				}()
-				if !tc.panic {
-					return fmt.Errorf("apply loop: open roTx")
-				}
-				n := 0
-				for range applyResults {
-					if n++; n == 2 {
-						panic("bal sink: injected fault")
-					}
-				}
-				return nil
-			}()
-
-			require.Error(t, loopErr)
-			select {
-			case <-producerDone:
-			case <-time.After(5 * time.Second):
-				t.Fatal("producer stranded on a mustDeliver send: apply loop did not drain applyResults")
-			}
-		})
+func TestApplyLoopDrainToCloseWithoutCalculator(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	applyResults <- 0
+	close(applyResults)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, nil)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drainToClose blocked on a nil rootResults")
 	}
 }
 
