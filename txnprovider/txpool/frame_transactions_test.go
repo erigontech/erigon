@@ -313,7 +313,7 @@ func TestFramePoolSharesOrdinaryBalance(t *testing.T) {
 }
 
 func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
-	for _, action := range []string{"replacement", "mined", "expired", "revalidation failure", "revalidation payer change", "pool overflow"} {
+	for _, action := range []string{"replacement", "mined", "expired", "revalidation rejected", "revalidation payer change", "pool overflow"} {
 		t.Run(action, func(t *testing.T) {
 			ctx, pool, payer := keyedFramePoolEnv(t)
 			backend := pool.ethBackend.(*frameValidationBackend)
@@ -355,8 +355,8 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 				mined.Append(frame, sender[:], false)
 			case "expired":
 				change.ChangeBatch[0].BlockTime = 101
-			case "revalidation failure":
-				backend.err = errors.New("validation unavailable")
+			case "revalidation rejected":
+				backend.valid = false
 				change = newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 			case "revalidation payer change":
 				backend.payer = common.Address{3}
@@ -825,7 +825,7 @@ func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 }
 
-func TestFramePoolRevalidationErrorAdvancesHead(t *testing.T) {
+func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	frame := framePoolSlot(t, common.Address{2}, 1, 2, uint256.Int{1})
@@ -838,27 +838,31 @@ func TestFramePoolRevalidationErrorAdvancesHead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 	require.Equal(t, 1, pool.queued.Len())
+	reservation := pool.frameReservations[sender]
 
-	backend.err = errors.New("validation backend unavailable")
-	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
-	change := &remoteproto.StateChangeBatch{
-		PendingBlockBaseFee: 1, BlockGasLimit: 1_000_000,
-		ChangeBatch: []*remoteproto.StateChange{{
-			BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
-			Changes: []*remoteproto.AccountChange{{
-				Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender), Data: accounts.SerialiseV3(&account),
-			}},
-		}},
-	}
+	backend.err = context.DeadlineExceeded
+	change := newBlockChangeForAccounts(common.Hash{1}, 1, sender)
+	change.ChangeBatch[0].BlockHeight = 1
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, uint64(1), pool.lastSeenBlock.Load())
-	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
-	require.Empty(t, pool.frameReservations)
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
 	require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+	require.Equal(t, 1, pool.pending.Len())
+
+	backend.err = nil
+	change = newBlockChangeForAccounts(common.Hash{2}, 1)
+	change.ChangeBatch[0].BlockHeight = 2
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Len(t, backend.calls, 3, "parked transactions must be retried without another dependency change")
+	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
+	require.Equal(t, 2, pool.pending.Len())
 }
 
 func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
-	for _, failure := range []string{"backend error", "invalid prefix", "payer balance"} {
+	for _, failure := range []string{"invalid prefix", "payer balance"} {
 		t.Run(failure, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			backend := pool.ethBackend.(*frameValidationBackend)
@@ -872,8 +876,6 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			require.NoError(t, err)
 
 			switch failure {
-			case "backend error":
-				backend.err = errors.New("validation backend unavailable")
 			case "invalid prefix":
 				backend.valid = false
 			case "payer balance":
@@ -901,7 +903,7 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 				return nil
 			}))
 
-			backend.err, backend.valid, backend.balance = nil, true, 1_000_000
+			backend.valid, backend.balance = true, 1_000_000
 			txns.Txns[0] = framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 			reasons, err = pool.AddLocalTxns(ctx, txns)
 			require.NoError(t, err)

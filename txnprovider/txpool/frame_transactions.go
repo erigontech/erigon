@@ -170,8 +170,8 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {
 	validation, err := p.simulateFrame(ctx, txn, generation, stateBlockHash)
 	if err != nil {
-		// Backend failures do not establish invalidity. A retryable per-transaction
-		// discard lets the rest of the batch or block update continue.
+		// Backend failures do not establish invalidity. Callers reject new
+		// transactions for retry or keep admitted ones parked.
 		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
 		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
 	}
@@ -455,6 +455,11 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 	defer cancel()
 	for _, mt := range pending {
 		result := p.simulateFrameResult(validationCtx, mt.TxnSlot, generation, stateBlockHash)
+		if result.reason == txpoolcfg.FrameValidationUnavailable {
+			// Keep admitted transactions parked. The next block update retries
+			// them even without further dependency changes.
+			continue
+		}
 		p.lock.Lock()
 		if generation != p.stateGeneration {
 			// The newer block update also picks up parked transactions.
@@ -472,11 +477,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 			p.reserveFrame(validation)
 			p.queued.Add(mt, "frame revalidated", p.logger)
 		} else {
-			reason := txpoolcfg.FrameStateChanged
-			if result.reason == txpoolcfg.FrameValidationUnavailable {
-				reason = result.reason
-			}
-			p.discardLocked(mt, reason)
+			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 		}
 		p.lock.Unlock()
 	}
