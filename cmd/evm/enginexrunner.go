@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"runtime/pprof"
 	"slices"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 )
@@ -397,13 +399,30 @@ func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfi
 				cpuFile.Close()
 			}
 			if stopFgprof != nil {
-				if err := stopFgprof(); err != nil {
-					fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
-				}
-				if wallFile != nil {
-					wallFile.Close()
-				}
+				stopWallProfile(stopFgprof, wallFile)
 			}
 		}
 	}
+}
+
+// stopWallProfile removes the profile of a request that ended before fgprof's first tick:
+// fgprof v0.9.5 divides by its zero sample rate there, and such a profile has no samples.
+func stopWallProfile(stop func() error, f *os.File) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		if err, ok := r.(runtime.Error); !ok || !strings.Contains(err.Error(), "divide by zero") {
+			panic(r)
+		}
+		f.Close()
+		if err := dir.RemoveFile(f.Name()); err != nil {
+			fmt.Fprintf(os.Stderr, "remove empty fgprof profile: %v\n", err)
+		}
+	}()
+	if err := stop(); err != nil {
+		fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
+	}
+	f.Close()
 }
