@@ -50,6 +50,10 @@ func (f *chainFetcher) FetchHeadersBackwards(_ context.Context, hash common.Hash
 	return p2p.FetcherResponse[[]*types.Header]{Data: headers}, nil
 }
 
+func (f *chainFetcher) FetchHeaders(context.Context, uint64, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
+}
+
 func (f *chainFetcher) FetchBodies(_ context.Context, headers []*types.Header, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
 	bodies := make([]*types.Body, len(headers))
 	for i, h := range headers {

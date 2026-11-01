@@ -300,7 +300,7 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
-	isPlain := txn != nil && txn.GetValue().IsZero() && len(txn.GetAuthorizations()) == 0 &&
+	isPlain := txn != nil && len(txn.GetAuthorizations()) == 0 &&
 		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.FrameTxType
 	if !isPlain {
 		return false
