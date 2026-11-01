@@ -499,14 +499,14 @@ func (l *Log) decodeStoredFields(b []byte) error {
 	// An encoded topic is 33 bytes, so the count is bounded by bytes already in memory.
 	l.Topics = make([]common.Hash, 0, len(topics)/(1+length.Hash))
 	for len(topics) > 0 {
-		var h []byte
-		if h, topics, err = rlp.SplitString(topics); err != nil {
+		var topic []byte
+		if topic, topics, err = rlp.SplitString(topics); err != nil {
 			return fmt.Errorf("read Topics: %w", err)
 		}
-		if len(h) != length.Hash {
-			return fmt.Errorf("read Topics: input value has wrong size %d, want %d", len(h), length.Hash)
+		if len(topic) != length.Hash {
+			return fmt.Errorf("read Topics: input value has wrong size %d, want %d", len(topic), length.Hash)
 		}
-		l.Topics = append(l.Topics, common.Hash(h))
+		l.Topics = append(l.Topics, common.Hash(topic))
 	}
 
 	data, b, err := rlp.SplitString(b)
