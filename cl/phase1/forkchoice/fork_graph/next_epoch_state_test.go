@@ -34,16 +34,18 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func firstEpochBoundaryBlock(t *testing.T) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
+type fixture func() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState)
+
+func firstEpochBoundaryBlock(t *testing.T, getFixture fixture) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
 	t.Helper()
-	blocks, parentState, _ := tests.GetBellatrixRandom()
+	blocks, parentState, _ := getFixture()
 	for _, block := range blocks {
 		if block.Block.Slot/parentState.BeaconConfig().SlotsPerEpoch > parentState.Slot()/parentState.BeaconConfig().SlotsPerEpoch {
 			return parentState, block
 		}
 		require.NoError(t, transition.TransitionState(parentState, block, nil, false))
 	}
-	t.Fatal("Bellatrix fixture has no epoch-boundary block")
+	t.Fatal("fixture has no epoch-boundary block")
 	return nil, nil
 }
 
@@ -58,16 +60,16 @@ func precomputedEpochState(t *testing.T, parent *state.CachingBeaconState, block
 	return advanced
 }
 
-func newEpochBoundaryGraph(t *testing.T) (*forkGraphDisk, *state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
+func newEpochBoundaryGraph(t *testing.T, getFixture fixture) (*forkGraphDisk, *state.CachingBeaconState, *cltypes.SignedBeaconBlock) {
 	t.Helper()
-	parent, block := firstEpochBoundaryBlock(t)
+	parent, block := firstEpochBoundaryBlock(t, getFixture)
 	graph, err := NewForkGraphDisk(parent, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
 	return graph.(*forkGraphDisk), parent, block
 }
 
 func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	beforeTarget := *block.Block
@@ -88,8 +90,27 @@ func TestAddChainSegmentUsesMatchingPrecomputedEpochState(t *testing.T) {
 	require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(root))
 }
 
+func TestAddChainSegmentUsesPrecomputedEpochStateBeforeEmptySlots(t *testing.T) {
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetElectraRandom)
+	advanced := precomputedEpochState(t, parent, block)
+	require.Less(t, advanced.Slot(), block.Block.Slot)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
+	logs := captureLogs(t)
+
+	postState, result, err := graph.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	require.Same(t, advanced, postState)
+	require.Nil(t, graph.nextEpochState)
+	require.NotContains(t, logs.String(), "Precomputed epoch state diverged")
+
+	root, err := postState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(block.Block.StateRoot), common.Hash(root))
+}
+
 func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(common.Hash{0xff}, advanced)
 
@@ -105,7 +126,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateForWrongParent(t *testing.T) {
 }
 
 func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	normalState, err := parent.Copy()
 	require.NoError(t, err)
 	wantRewards := &eth2.BlockRewardsCollector{}
@@ -136,7 +157,7 @@ func TestAddChainSegmentFallsBackFromCorruptedPrecomputedEpochState(t *testing.T
 }
 
 func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 
@@ -152,7 +173,7 @@ func TestAddChainSegmentDropsPrecomputedEpochStateWithoutFullValidation(t *testi
 }
 
 func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	block.Block.StateRoot[0] ^= 0xff
@@ -172,7 +193,7 @@ func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.
 }
 
 func TestSetNextEpochStateRejectsLatePublication(t *testing.T) {
-	graph, parent, block := newEpochBoundaryGraph(t)
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
 
 	_, result, err := graph.AddChainSegment(block, true)
