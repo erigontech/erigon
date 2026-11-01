@@ -56,7 +56,7 @@ func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string)
 // emitTouchedUpdates folds writes into the version map's touched union and emits the
 // commitment updates the calculator would produce from it, keyed by plain key. base is
 // the committed-base reader for untouched fields (nil when the version map holds them).
-func emitTouchedUpdates(t *testing.T, vm *state.VersionMap, lastTxNum uint64, base state.BaseReader, writes state.WriteSetView) map[string]commitment.Update {
+func emitTouchedUpdates(t *testing.T, vm *state.VersionMap, lastTxNum uint64, base state.StateReader, writes state.WriteSetView) map[string]commitment.Update {
 	t.Helper()
 	cc := &commitmentCalculator{}
 	cc.accumulateTouched(writes)

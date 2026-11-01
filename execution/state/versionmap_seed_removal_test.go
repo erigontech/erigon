@@ -114,12 +114,12 @@ func TestSeedAddresses(t *testing.T) {
 
 	// The marker is ValueUnknown, so the authoritative value defers to the base: a
 	// base-present account keeps its untouched base nonce, not the seed's zeroed marker.
-	ex, ok := NewVersionedAccountView(existing, 6, vm, reader).GetAccount()
-	require.True(t, ok)
+	ex := NewVersionedAccountView(existing, 6, vm, reader).Account()
+	require.NotNil(t, ex)
 	require.Equal(t, uint64(9), ex.Nonce, "a base-present account's untouched nonce resolves from the base")
 
-	cr, ok := NewVersionedAccountView(created, 6, vm, reader).GetAccount()
-	require.True(t, ok)
+	cr := NewVersionedAccountView(created, 6, vm, reader).Account()
+	require.NotNil(t, cr)
 	require.Equal(t, uint64(1), cr.Nonce, "a created account composes from its field cells")
 }
 
@@ -150,16 +150,10 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 
 	// Compose after funding (BAL index 2 → TxIndex 1) but before the code deploy (index 5
 	// → TxIndex 4): the funded, still-codeless account the CREATE2 collision check must see.
-	acc, ok := NewVersionedAccountView(proxy, 3, vm, reader).GetAccount()
-	require.True(t, ok, "the funded proxy exists before the deploying tx")
+	acc := NewVersionedAccountView(proxy, 3, vm, reader).Account()
+	require.NotNil(t, acc, "the funded proxy exists before the deploying tx")
 	require.Equal(t, *uint256.NewInt(256_000), acc.Balance)
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "reads before the deploy must not see the later CREATE2 code")
-}
-
-type errAccountBase struct{ err error }
-
-func (b errAccountBase) ReadAccountData(accounts.Address) (*accounts.Account, error) {
-	return nil, b.err
 }
 
 func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
@@ -170,7 +164,7 @@ func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(0)
 	boom := errors.New("boom")
-	require.ErrorIs(t, vm.SeedEmptyRemovals(bal, true, false, errAccountBase{boom}), boom)
+	require.ErrorIs(t, vm.SeedEmptyRemovals(bal, true, false, &failingBaseReader{err: boom}), boom)
 }
 
 // TestSeedEmptyRemovals_DrainThenRefund pins the removal at an interior index: an

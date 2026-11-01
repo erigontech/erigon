@@ -6,15 +6,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type AccountBaseReader interface {
-	ReadAccountData(accounts.Address) (*accounts.Account, error)
-}
-
-type BaseReader interface {
-	AccountBaseReader
-	ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error)
-}
-
 // VersionedAccountView is an accounts.AccountView composing each account field on
 // demand from the versionMap at a fixed txIndex, falling back to a lazily-loaded
 // base. A consumer reading only one field pays for only that cell; the base is
@@ -23,14 +14,14 @@ type VersionedAccountView struct {
 	addr  accounts.Address
 	txIdx int
 	vm    *VersionMap
-	base  AccountBaseReader
+	base  StateReader
 
 	baseLoaded bool
 	baseAcc    *accounts.Account
 	baseErr    error
 }
 
-func NewVersionedAccountView(addr accounts.Address, txIdx int, vm *VersionMap, base AccountBaseReader) *VersionedAccountView {
+func NewVersionedAccountView(addr accounts.Address, txIdx int, vm *VersionMap, base StateReader) *VersionedAccountView {
 	return &VersionedAccountView{addr: addr, txIdx: txIdx, vm: vm, base: base}
 }
 
@@ -143,12 +134,8 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 			return code.Bytes, nil
 		}
 	}
-	// Code bytes live beyond the minimal AccountBaseReader (GetAccount never needs
-	// them); a base that can serve them implements ReadAccountCode.
-	if cr, ok := v.base.(interface {
-		ReadAccountCode(accounts.Address) ([]byte, error)
-	}); ok {
-		return cr.ReadAccountCode(v.addr)
+	if v.base != nil {
+		return v.base.ReadAccountCode(v.addr)
 	}
 	return nil, nil
 }
@@ -210,16 +197,6 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	return v.compose()
 }
 
-// AccountForCommitment composes the account with data-only existence: present
-// unless its record is gone from the whole cascade, ignoring the lifecycle
-// destroyed() verdict exec reads. The caller applies the ValueDeleted removal.
-func (v *VersionedAccountView) AccountForCommitment() *accounts.Account {
-	if !v.recordExists() {
-		return nil
-	}
-	return v.compose()
-}
-
 // compose overlays the version-map field cells on the base record, reading raw
 // cells (no destroyed() gate) — the caller has already decided existence, so a
 // destroyed-but-preserved account (EIP-8246 no-burn) keeps its surviving fields.
@@ -246,18 +223,6 @@ func (v *VersionedAccountView) compose() *accounts.Account {
 		}
 	}
 	return &acc
-}
-
-// GetAccount returns the account composed at txIdx and whether it exists there, in
-// comma-ok form. A false ok means the account is deleted/absent (self-destructed with
-// no revival, or removed as an EIP-161 empty via the self-destruct-encoded write), so
-// the caller removes rather than writes its leaf — no separate emptiness check needed.
-func (v *VersionedAccountView) GetAccount() (accounts.Account, bool) {
-	acc := v.Account()
-	if acc == nil {
-		return accounts.Account{}, false
-	}
-	return *acc, true
 }
 
 var _ accounts.AccountView = (*VersionedAccountView)(nil)

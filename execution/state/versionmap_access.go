@@ -41,7 +41,7 @@ func (vm *VersionMap) BaseTxNum() uint64             { return vm.baseTxNum.Load(
 type VersionMapView struct {
 	vm    *VersionMap
 	txNum uint64
-	base  BaseReader
+	base  StateReader
 	err   error
 }
 
@@ -51,7 +51,7 @@ func (view *VersionMapView) Err() error { return view.err }
 
 // View pins a read of vm at the given global txNum. base is the cascade tail —
 // predecessor version maps then the shared domain — supplying fields no cell covers.
-func (vm *VersionMap) View(txNum uint64, base BaseReader) *VersionMapView {
+func (vm *VersionMap) View(txNum uint64, base StateReader) *VersionMapView {
 	return &VersionMapView{vm: vm, txNum: txNum, base: base}
 }
 
@@ -74,15 +74,15 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 		return accounts.Account{}, false
 	}
 	av := NewVersionedAccountView(addr, txIdx, view.vm, view.base)
-	acc := av.AccountForCommitment()
+	exists := av.recordExists()
 	if err := av.Err(); err != nil {
 		view.err = cmp.Or(view.err, err)
 		return accounts.Account{}, false
 	}
-	if acc == nil {
+	if !exists {
 		return accounts.Account{}, false
 	}
-	return *acc, true
+	return *av.compose(), true
 }
 
 // GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok
@@ -114,7 +114,7 @@ func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
 	return state != LifecycleLive
 }
 
-func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base AccountBaseReader) error {
+func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base StateReader) error {
 	ws := &WriteSet{}
 	var interior []*WriteSet
 	var candidates []uint32
@@ -137,11 +137,11 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 		candidates = append(candidates, maxIdx)
 		for _, idx := range candidates {
 			av := NewVersionedAccountView(addr, int(idx), vm, base)
-			acc, ok := av.GetAccount()
+			acc := av.Account()
 			if err := av.Err(); err != nil {
 				return err
 			}
-			if !ok || !acc.Balance.IsZero() || acc.Nonce != 0 || !acc.CodeHash.IsEmpty() {
+			if acc == nil || !acc.Balance.IsZero() || acc.Nonce != 0 || !acc.CodeHash.IsEmpty() {
 				continue
 			}
 			if idx == maxIdx {
@@ -177,29 +177,15 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses(bal types.BlockAccessList) {
 	for i := range bal {
-		vm.seedOneAddress(&bal[i])
+		minIdx := balNextChangeIndex(&bal[i], 0)
+		if minIdx == 0 {
+			continue
+		}
+		addr := accounts.InternAddress(bal[i].Address)
+		if acc := NewVersionedAccountView(addr, int(minIdx), vm, nil).Account(); acc != nil {
+			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
+		}
 	}
-}
-
-func (vm *VersionMap) seedOneAddress(ac *types.AccountChanges) {
-	minIdx := balMinChangeIndex(ac)
-	if minIdx == 0 {
-		return // only reads, nothing created
-	}
-	addr := accounts.InternAddress(ac.Address)
-	// Compose the existence marker from the BAL field cells alone (nil base → no DB
-	// read); a touched-empty account composes to nil and is left for the withhold.
-	acc, ok := NewVersionedAccountView(addr, int(minIdx), vm, nil).GetAccount()
-	if !ok {
-		return
-	}
-	vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, &acc)
-}
-
-// balMinChangeIndex is the lowest 1-based change index across an account's BAL entries,
-// i.e. the index at which it first appears this block, or 0 if it only has reads.
-func balMinChangeIndex(ac *types.AccountChanges) uint32 {
-	return balNextChangeIndex(ac, 0)
 }
 
 func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {

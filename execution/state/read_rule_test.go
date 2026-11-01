@@ -17,12 +17,6 @@ import (
 // read must suppress the committed base for such an account's storage and surface only
 // writes made at or above the destruct (a revival's own data).
 
-// committedBase serves a prior block's committed account + storage as the version map's
-// base cascade tail.
-func committedBase(addr accounts.Address, acc *accounts.Account, storage map[accounts.StorageKey]uint256.Int) *storageReader {
-	return &storageReader{addr: addr, account: acc, storage: storage}
-}
-
 // XB1: an account committed in block N with storage S=V is touched-empty-removed
 // (EIP-161) in block N+1. The read of S in N+1 must wipe to 0 (committed base
 // suppressed), and the account must read absent.
@@ -31,7 +25,7 @@ func TestReadRule_XB1_RemovedAccountWipesCommittedStorage(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x58})
 	slot := accounts.InternKey([32]byte{0x01})
 	committed := accounts.NewAccount() // empty (bal 0, nonce 0, no code) -> EIP-161-removable
-	base := committedBase(addr, &committed, map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)})
+	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}}
 
 	vm := NewVersionMap(nil)
 	ws := &WriteSet{}
@@ -59,7 +53,7 @@ func TestReadRule_XB2_NonRemovalTouchKeepsCommittedStorage(t *testing.T) {
 	slot := accounts.InternKey([32]byte{0x01})
 	committed := accounts.NewAccount()
 	committed.Balance = *uint256.NewInt(100) // non-empty: not removable
-	base := committedBase(addr, &committed, map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)})
+	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}}
 
 	vm := NewVersionMap(nil)
 	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(101), true) // touched, not removed
@@ -77,7 +71,7 @@ func TestReadRule_XB3_RemovedThenRevivedWipesCommittedStorage(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x5a})
 	slot := accounts.InternKey([32]byte{0x01})
 	committed := accounts.NewAccount()
-	base := committedBase(addr, &committed, map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)})
+	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}}
 
 	vm := NewVersionMap(nil)
 	ws := &WriteSet{}
@@ -104,7 +98,7 @@ func TestReadRule_A1_BurnSelfDestructWipesCommittedStorage(t *testing.T) {
 	slot := accounts.InternKey([32]byte{0x01})
 	committed := accounts.NewAccount()
 	committed.Balance = *uint256.NewInt(50)
-	base := committedBase(addr, &committed, map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)})
+	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}}
 
 	vm := NewVersionMap(nil)
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
@@ -123,7 +117,7 @@ func TestReadRule_B3_PostRemovalWriteVisibleBaseSuppressed(t *testing.T) {
 	slotS := accounts.InternKey([32]byte{0x01}) // committed, not rewritten
 	slotT := accounts.InternKey([32]byte{0x02}) // written by the revival
 	committed := accounts.NewAccount()
-	base := committedBase(addr, &committed, map[accounts.StorageKey]uint256.Int{slotS: *uint256.NewInt(9)})
+	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slotS: *uint256.NewInt(9)}}
 
 	vm := NewVersionMap(nil)
 	ws := &WriteSet{}
@@ -175,7 +169,7 @@ func TestReadRule_A3_EIP8246PreserveSuppressesCommittedFieldsAndStorage(t *testi
 	committed.Balance = *uint256.NewInt(100)
 	committed.Nonce = 3
 	committed.CodeHash = accounts.InternCodeHash(common.HexToHash("0x31537ad3f3619e1f93aac0ddfdb0d8a0013bd170b427d81dd5abbee4f3f5248e"))
-	base := committedBase(addr, &committed, map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)})
+	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}}
 
 	vm := NewVersionMap(nil)
 	sd := Version{TxIndex: 0}

@@ -115,8 +115,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 				u.CodeHash = empty.CodeHash
 			}
 		} else {
-			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash}
-			u.DeleteStorageSubtree = true
+			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
 		}
 		if _, ok := cc.destructed[addr]; ok || view.WasDestroyed(addr) {
 			u.DeleteStorageSubtree = true
@@ -127,9 +126,6 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		address := addr.Value()
 		for slot := range slots {
 			slotVal := slot.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, address[:])
-			copy(composite[20:], slotVal[:])
 			var u commitment.Update
 			val, ok := view.GetStorage(addr, slot)
 			if ok && !val.IsZero() {
@@ -140,7 +136,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 			} else {
 				u.Flags = commitment.DeleteUpdate
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyDirect(string(address[:])+string(slotVal[:]), &u)
 		}
 	}
 	return view.Err()
