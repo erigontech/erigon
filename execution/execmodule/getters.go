@@ -392,11 +392,17 @@ func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash)
 	}
 	// Forkchoice commits canonical hashes ahead of the Execution stage during catch-up.
 	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
-	if err != nil || blockNumber == nil {
-		return false, err
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read block number %w", err)
+	}
+	if blockNumber == nil {
+		return false, nil
 	}
 	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
-	return executedTo >= *blockNumber, err
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read execution progress %w", err)
+	}
+	return executedTo >= *blockNumber, nil
 }
 
 func (e *ExecModule) CurrentHeader(ctx context.Context) (*types.Header, error) {

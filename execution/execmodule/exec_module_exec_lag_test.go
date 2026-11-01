@@ -134,3 +134,11 @@ func TestValidateChainAcceptsCanonicalUnexecutedBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 }
+
+func TestValidateChainExecutesCanonicalUnexecutedBlockWithinLimit(t *testing.T) {
+	m, chainPack := execmoduletester.NewWithExecLag(t, 3, 1, execmoduletester.WithLoopBlockLimit(5))
+
+	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[3].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+}
