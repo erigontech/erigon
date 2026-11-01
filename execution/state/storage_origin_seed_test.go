@@ -98,3 +98,55 @@ func TestStorageCommittedReadSeedsOrigin(t *testing.T) {
 	require.Equal(t, originIndex, res.DepIdx())
 	require.Equal(t, committed, got)
 }
+
+// A state reused across the txs of a block must publish each origin once:
+// FinalizedWrites hands the tx's origin cells to the versionMap, so the next
+// tx does not publish them again.
+func TestFinalizedWritesHandsOverOrigins(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xA0, 0xb8})
+	key := accounts.InternKey([32]byte{0x03})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	committed := *uint256.NewInt(11)
+
+	reader := &storageReader{
+		addr:    addr,
+		account: &acc,
+		storage: map[accounts.StorageKey]uint256.Int{key: committed},
+	}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetTxContext(100, 0)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	_, err = ibs.FinalizedWrites(nil)
+	require.NoError(t, err)
+
+	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
+	got, ok := ibs.versionMap.LoadOriginStorage(addr, key)
+	require.True(t, ok)
+	require.Equal(t, committed, got)
+}
+
+// The account origin must reach the versionMap before FinalizedWrites releases
+// the tx's origin cells.
+func TestFinalizedWritesHandsOverAccountOrigin(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xA0, 0xb8})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(11)
+
+	ibs := NewWithVersionMap(&storageReader{addr: addr, account: &acc}, NewVersionMap(nil))
+	ibs.SetTxContext(100, 0)
+
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	_, err = ibs.FinalizedWrites(nil)
+	require.NoError(t, err)
+
+	require.True(t, ibs.versionedOrigins.IsEmpty(), "published origins must not be kept for the next tx")
+	got, ok := ibs.versionMap.LoadOriginAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, acc.Nonce, got.Nonce)
+	require.Equal(t, acc.Balance, got.Balance)
+}

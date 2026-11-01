@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
@@ -439,7 +440,7 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
-				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
 			}),
 		},
@@ -1664,6 +1665,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast)
 		case integrity.InvertedIndex:
 			return integrity.E3EfFiles(ctx, db, failFast, fromStep)
+		case integrity.HistoryVi:
+			return integrity.HistoryValueAccessorFiles(ctx, db, failFast, fromStep, logger)
 		case integrity.HistoryNoSystemTxs:
 			return integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader)
 		case integrity.StateProgress:
@@ -1694,7 +1697,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 				return nil
 			}
 			scCopy := sc
-			scCopy.SampleRatio /= 100 // it's very slow check
+			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
 			if !commitmentHistoryEnabled {
@@ -1706,7 +1709,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 				return err
 			}
 			scCopy := sc
-			scCopy.SampleRatio /= 100 // it's very slow check
+			scCopy.SampleRatio /= 10_000 // it's very slow check
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
@@ -2884,6 +2887,13 @@ func doMeta(ctx context.Context, cliCtx *cli.Command) error {
 		}
 
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
+	} else if v, _ := version.ParseVersion(filepath.Base(fname)); strings.HasSuffix(fname, ".vi") && v.GreaterOrEqual(version.V2_0) {
+		idx, err := posidx.Open(fname)
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
+		log.Info("meta", "format", "positional", "empty", idx.Empty())
 	} else if strings.HasSuffix(fname, ".kvi") || strings.HasSuffix(fname, ".idx") || strings.HasSuffix(fname, ".efi") || strings.HasSuffix(fname, ".vi") {
 		idx, err := recsplit.OpenIndex(fname)
 		if err != nil {

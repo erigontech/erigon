@@ -24,6 +24,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -104,10 +106,36 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), finalizeErr: tc.engineErr(cause)}
 			se, task := newSerialFinalizeTestExec(t, engine)
 
-			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
+			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
 
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
+}
+
+func TestWarmTxsHashesSkipsAuthListAboveGasLimit(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	chainID := uint256.NewInt(1)
+	signer := types.LatestSignerForChainID(chainID)
+	to := common.Address{1}
+	setCode := func(gasLimit uint64, auths int) *types.Message {
+		txn, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{GasLimit: gasLimit, To: &to},
+				ChainID:  *chainID,
+				FeeCap:   *uint256.NewInt(1),
+			},
+			Authorizations: make([]types.Authorization, auths),
+		}, *signer, key)
+		require.NoError(t, err)
+		block := types.NewBlock(&types.Header{GasLimit: 60_000_000}, []types.Transaction{txn}, nil, nil, nil, nil)
+		warmTxsHashes(block, chainID)
+		msg, err := block.Transactions()[0].AsMessage(*signer, nil, &chain.Rules{IsPrague: true})
+		require.NoError(t, err)
+		return msg
+	}
+	require.NotNil(t, setCode(1_000_000, 100).RecoveredAuthorities(), "a list the gas limit can pay for is warmed")
+	require.Nil(t, setCode(21_000, 1_000).RecoveredAuthorities(), "a list above the gas limit is left to the executor")
 }

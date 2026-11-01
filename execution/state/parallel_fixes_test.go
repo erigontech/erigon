@@ -543,7 +543,7 @@ func TestValueTiebreaker_ValidatedBalanceRevivalDoesNotHideDestruct(t *testing.T
 		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5}},
 		Val:         *uint256.NewInt(1),
 	})
-	vm.FlushVersionedWrites(credit, false, "")
+	vm.FlushVersionedWrites(credit, false)
 	vm.MarkWritesValidated(credit, nil)
 
 	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))

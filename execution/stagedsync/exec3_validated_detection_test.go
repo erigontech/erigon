@@ -66,7 +66,7 @@ func TestValidated_ReaderReExecutedWhenWriterChangesAfterReaderCommits(t *testin
 	// W (tx0) writes key=v1, Validated at (0,0).
 	wWrites := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, v1).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, wWrites)
-	be.versionMap.FlushVersionedWrites(wWrites, false, "")
+	be.versionMap.FlushVersionedWrites(wWrites, false)
 	be.versionMap.MarkWritesValidated(wWrites, nil)
 
 	// R (tx1) early-broke on W's Validated value, recorded the dep at (0,0), and
@@ -105,7 +105,7 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	// Base: addr live with a balance at (0,0), Validated.
 	baseW := newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, baseBal).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, baseW)
-	be.versionMap.FlushVersionedWrites(baseW, false, "")
+	be.versionMap.FlushVersionedWrites(baseW, false)
 	be.versionMap.MarkWritesValidated(baseW, nil)
 
 	// R (tx2) read addr.BALANCE at (0,0) while live, recorded the dep, committed early.
@@ -120,7 +120,7 @@ func TestValidated_CrossPathLifecycleWriteReExecutesReader(t *testing.T) {
 	// W1 (tx1) self-destructs addr — writes SelfDestructPath only, never BalancePath.
 	sdW := newWS().selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, true).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 1, Incarnation: 0}, sdW)
-	be.versionMap.FlushVersionedWrites(sdW, false, "")
+	be.versionMap.FlushVersionedWrites(sdW, false)
 	be.versionMap.MarkWritesValidated(sdW, nil)
 
 	be.revalidateCommittedDependents(1, nil)
@@ -145,7 +145,7 @@ func TestValidated_ReaderCommittingAfterWriterChange(t *testing.T) {
 	// W (tx0) Validated at (0,0)=v1.
 	wWrites := newWS().stor(addr, key, state.Version{TxIndex: 0, Incarnation: 0}, v1).build()
 	be.blockIO.RecordWrites(state.Version{TxIndex: 0, Incarnation: 0}, wWrites)
-	be.versionMap.FlushVersionedWrites(wWrites, false, "")
+	be.versionMap.FlushVersionedWrites(wWrites, false)
 	be.versionMap.MarkWritesValidated(wWrites, nil)
 
 	// R executed against v1 and recorded the dep at (0,0) — but hasn't committed yet.

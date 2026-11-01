@@ -94,7 +94,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 
 	// Flush TX 88 writes to versionMap
 	writes88 := ibs88.VersionedWrites()
-	vm.FlushVersionedWrites(writes88, true, "")
+	vm.FlushVersionedWrites(writes88, true)
 
 	// Verify TX 88 wrote empty code hash to versionMap
 	ch, rr, ok := vm.ReadCodeHash(addr, 89)
@@ -173,7 +173,7 @@ func TestSetCodeParallel_ValidatedFloorNotSuppressed(t *testing.T) {
 	ibs17.SetVersion(0)
 	require.NoError(t, ibs17.SetCode(addr, delegationCodeB, tracing.CodeChangeAuthorization))
 	writes17 := ibs17.VersionedWrites()
-	vm.FlushVersionedWrites(writes17, false, "")
+	vm.FlushVersionedWrites(writes17, false)
 	vm.MarkWritesValidated(writes17, nil)
 
 	ch, rr, ok := vm.ReadCodeHash(addr, 46)

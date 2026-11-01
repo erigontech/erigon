@@ -729,7 +729,7 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 // single-block fork-validation step runs, so the exec loop executes nothing
 // and produces no blockResult. Treating that as pending work returns a
 // spurious ErrLoopExhausted, which the stage loop reports as
-// "unexpected state step has more work".
+// "state step has more work".
 func TestApplyLoopCloseIsClean(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -946,7 +946,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	// The dep-order path flushes an invalidated tx with complete = its validity,
 	// i.e. false (writes stored as Estimate, not Done).
 	const complete = false
-	vm.FlushVersionedWrites(invalidTxWrites, complete, "")
+	vm.FlushVersionedWrites(invalidTxWrites, complete)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.

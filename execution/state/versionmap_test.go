@@ -165,7 +165,7 @@ func TestFlushMVWrite(t *testing.T) {
 			WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: ver},
 			Val:         valueFor(AddressPath, ver.TxIndex, int(ver.Incarnation)).(*accounts.Account),
 		})
-		mvh.FlushVersionedWrites(ws, true, "")
+		mvh.FlushVersionedWrites(ws, true)
 	}
 
 	flushAddress(ap1, Version{0, 0, 0, 1})
@@ -537,7 +537,7 @@ func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
 	published := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(published, false, "")
+	vm.FlushVersionedWrites(published, false)
 
 	// Completing that same version with a different value is exactly the divergence a
 	// read-side value check would have caught. The write side rejects it outright, so
@@ -564,7 +564,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 
 	// TX 10 reads should see FlagDone → MVReadResultDone.
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
@@ -577,7 +577,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	writes2 := newWriteSet(
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Key: accounts.NilKey, Version: Version{TxIndex: 7, Incarnation: 2}}, Val: uint64(5)},
 	)
-	vm.FlushVersionedWrites(writes2, false, "")
+	vm.FlushVersionedWrites(writes2, false)
 
 	// TX 10 reads NoncePath should see FlagEstimate → MVReadResultDependency.
 	_, res2, _ := readFor(vm, addr, NoncePath, accounts.NilKey, 10)
@@ -598,7 +598,7 @@ func TestMarkWritesComplete_FlagFlipPreservesValue(t *testing.T) {
 	writes := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
 	)
-	vm.FlushVersionedWrites(writes, false, "")
+	vm.FlushVersionedWrites(writes, false)
 
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
 	require.Equal(t, MVReadResultDependency, res.Status(), "estimate flush reads back as a dependency")
@@ -960,7 +960,7 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	ws := &WriteSet{}
 	ws.SetBalance(sender, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sender, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postBalance})
 	ws.SetNonce(sender, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}}, Val: postNonce})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
 		"tx 0 should validate (no prior writes to conflict with)")
@@ -1169,7 +1169,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}},
 		Val:         1,
 	})
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 	// The read-once fast path serves the repeat probe from the recorded read —
 	// consistent with the absence the EVM already consumed, never a silent
 	// adoption of the fresh cell — and commit-time validation catches the
@@ -1524,4 +1524,154 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
+}
+
+// storageWriteSet is the write set of a run of the tx at index 1 that writes val to addr's slot.
+func storageWriteSet(addr accounts.Address, slot accounts.StorageKey, incarnation Incarnation, val uint64, status valueStatus) *WriteSet {
+	ws := &WriteSet{}
+	ws.SetStorage(addr, slot, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: slot, Version: Version{TxIndex: 1, Incarnation: incarnation}, valStatus: status},
+		Val:         *uint256.NewInt(val),
+	})
+	return ws
+}
+
+// On a BAL block a net-zero storage write is not materialized, so a later reader resolves the
+// floor. A cell that an earlier run of the tx left with a changed value must go too, whether it is
+// still an estimate or already validated: the reader would wait for it forever, or take its stale
+// value. A slot the access list seeds at the tx keeps the access list's value.
+func TestFlushNetZeroRerunClearsEarlierRunsCell(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	low := accounts.InternAddress([20]byte{0xaa})
+	high := accounts.InternAddress([20]byte{0xff})
+	slot := accounts.InternKey(common.Hash{0x04})
+	otherSlot := accounts.InternKey(common.Hash{0x05})
+	at := func(index uint32, val uint64) []*types.StorageChange {
+		return []*types.StorageChange{{Index: index, Value: *uint256.NewInt(val)}}
+	}
+	lowBalance := types.AccountChanges{Address: low.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}
+	seeded := types.BlockAccessList{lowBalance, {Address: addr.Value(), StorageChanges: []types.SlotChanges{
+		{Slot: accounts.InternKey(common.Hash{0x03}), Changes: at(2, 7)},
+		{Slot: slot, Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(6)}, {Index: 2, Value: *uint256.NewInt(42)}}},
+	}}}
+	for _, test := range []struct {
+		name         string
+		bal          types.BlockAccessList
+		earlier      string
+		earlierValue uint64
+		otherWrite   bool
+		wantIdx      int
+		wantVal      uint64
+	}{
+		{name: "no earlier cell", wantIdx: originIndex, wantVal: 5},
+		{name: "no earlier cell, account in the access list", bal: types.BlockAccessList{lowBalance, {Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}, wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell is an estimate", earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell is validated", earlier: "validated", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell, the access list seeds another slot of the account", bal: types.BlockAccessList{lowBalance, {Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: otherSlot, Changes: at(2, 42)}}}}, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell, the access list seeds the slot at another tx", bal: types.BlockAccessList{lowBalance, {Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: at(3, 42)}}}}, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "earlier cell, the access list seeds the slot of other accounts", bal: types.BlockAccessList{{Address: low.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: at(2, 42)}}}, {Address: high.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: at(2, 42)}}}}, earlier: "estimate", wantIdx: originIndex, wantVal: 5},
+		{name: "cell from the block access list", bal: seeded, wantIdx: 1, wantVal: 42},
+		{name: "cell from the block access list, another slot written", bal: seeded, otherWrite: true, wantIdx: 1, wantVal: 42},
+		{name: "cell from the block access list, validated", bal: seeded, earlier: "validated", earlierValue: 42, wantIdx: 1, wantVal: 42},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			bal := test.bal
+			if bal == nil {
+				bal = types.BlockAccessList{lowBalance}
+			}
+			require.NoError(t, bal.Validate())
+			vm := NewVersionMap(bal)
+			vm.StoreOriginStorage(addr, slot, *uint256.NewInt(5))
+			if test.earlier != "" {
+				first := storageWriteSet(addr, slot, 0, test.earlierValue, ValueChanged)
+				vm.FlushVersionedWrites(first, false)
+				if test.earlier == "validated" {
+					vm.MarkWritesValidated(first, func(accounts.Address) bool { return false })
+				}
+			}
+
+			rerun := storageWriteSet(addr, slot, 1, 5, ValueUnchanged)
+			if test.otherWrite {
+				rerun.SetStorage(addr, otherSlot, &VersionedWrite[uint256.Int]{
+					WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: otherSlot, Version: Version{TxIndex: 1, Incarnation: 1}, valStatus: ValueChanged},
+					Val:         *uint256.NewInt(1),
+				})
+			}
+			vm.FlushVersionedWrites(rerun, false)
+
+			val, res, ok := vm.ReadStorage(addr, slot, 2)
+			require.True(t, ok)
+			require.Equal(t, MVReadResultDone, res.Status())
+			require.Equal(t, test.wantIdx, res.DepIdx())
+			require.Equal(t, *uint256.NewInt(test.wantVal), val)
+		})
+	}
+}
+
+// Origin storage is written once per cold slot by every tx that reads it, so seeding a
+// slot must not box its key and value.
+func TestVersionMapStoreOriginStorageAllocations(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	keys := make([]accounts.StorageKey, 2000)
+	for i := range keys {
+		keys[i] = accounts.InternKey(uint256.NewInt(uint64(i + 1)).Bytes32())
+	}
+	i := 0
+	perNewSlot := testing.AllocsPerRun(1000, func() {
+		vm.StoreOriginStorage(addr, keys[i], *uint256.NewInt(uint64(i)))
+		i++
+	})
+	require.Less(t, perNewSlot, 1.5, "seeding a new slot allocates %v times", perNewSlot)
+
+	perSeededSlot := testing.AllocsPerRun(1000, func() {
+		vm.StoreOriginStorage(addr, keys[0], *uint256.NewInt(7))
+	})
+	require.Zero(t, perSeededSlot, "re-seeding a slot allocates %v times", perSeededSlot)
+
+	v, ok := vm.LoadOriginStorage(addr, keys[0])
+	require.True(t, ok)
+	require.Equal(t, uint64(0), v.Uint64(), "origin storage is write-once")
+}
+
+var newVersionMapSink *VersionMap
+
+// One VersionMap is built per RPC call and most never seed an origin slot, so the
+// origin storage table must not be allocated up front.
+func TestNewVersionMapAllocations(t *testing.T) {
+	allocs := testing.AllocsPerRun(1000, func() {
+		newVersionMapSink = NewVersionMap(nil)
+	})
+	require.LessOrEqual(t, allocs, 1.0, "NewVersionMap allocates %v times", allocs)
+
+	_, ok := newVersionMapSink.LoadOriginStorage(getAddress(1), accounts.InternKey(uint256.NewInt(1).Bytes32()))
+	require.False(t, ok)
+}
+
+// A net-zero re-run that resets a cell to the access list's value must not leave the version under
+// which an earlier run published another value there: a reader of that value would stay valid.
+func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}}}}})
+	for incarnation, val := range []uint64{42, 9} {
+		ws := storageWriteSet(addr, slot, Incarnation(incarnation), val, ValueChanged)
+		vm.FlushVersionedWrites(ws, false)
+		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+	}
+	reads := ReadSet{}
+	reads.SetStorage(addr, slot, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: *uint256.NewInt(9)})
+	require.Equal(t, VersionValid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
+
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
+
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, reads, validateEqualVersion, false, ""))
+	val, res, ok := vm.ReadStorage(addr, slot, 2)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, 1, res.DepIdx())
+	require.Equal(t, *uint256.NewInt(42), val)
 }
