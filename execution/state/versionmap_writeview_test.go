@@ -216,11 +216,10 @@ func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
 	require.Equal(t, 2, seen)
 }
 
-// An account the tx creates and self-destructs folds to the uniform balance-deleted
-// removal verdict — whether it was absent before the tx, funded at base, funded by an
-// earlier tx of the block, or left empty by an earlier tx. The removal is encoded as
-// data (so commitment reads it absent without lifecycle re-derivation), not dropped;
-// WithoutVanished leaves that verdict in place.
+// An account the tx creates and self-destructs publishes no writes when it was absent
+// before the tx. When it was funded at base, funded by an earlier tx of the block, or
+// left empty by an earlier tx, it folds to the balance-deleted removal verdict, which
+// WithoutVanished leaves in place.
 func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
@@ -342,9 +341,8 @@ func TestVersionMapWriteView_IteratorsDoNotAllocatePerElement(t *testing.T) {
 	}
 }
 
-// The version map is the sole value source: a net-zero (ValueUnchanged) write publishes
-// the version-map value even when the write-set value it carries differs, and
-// StorageChanges filters the net-zero write from the leaf set.
+// A net-zero (ValueUnchanged) write publishes the write-set value it carries, not the
+// version-map value, and StorageChanges filters the net-zero write from the leaf set.
 func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) {
 	t.Parallel()
 

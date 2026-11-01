@@ -6,10 +6,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// AccountBaseReader supplies the committed base account for fields the versionMap
-// has no cell for. It is the only capability the view needs from its base, so any
-// StateReader satisfies it — as does a lighter domain-only reader the commitment
-// calculator holds, which avoids forcing a full StateReader at the call site.
 type AccountBaseReader interface {
 	ReadAccountData(accounts.Address) (*accounts.Account, error)
 }

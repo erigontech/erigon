@@ -118,7 +118,7 @@ type commitmentCalculator struct {
 	// roTx is a persistent read-only transaction living for the calculator's lifetime.
 	roTx kv.TemporalTx
 
-	// lastBlockResult is the most recent block boundary, so computeAndPublish
+	// lastBlockResult is the most recent block boundary, so compute
 	// knows which block to compute for.
 	lastBlockResult *blockResult
 
@@ -599,11 +599,6 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	}
 }
 
-// checkpointStepsFromBAL emits a commitment checkpoint at each unfrozen step
-// edge interior to the block, applying the per-tx BAL up to that edge. A txNum's
-// BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
-// gives the state as of the edge. The returned root is discarded (no header to
-// verify mid-block). Runs before the block-end compute so that builds on it.
 func (cc *commitmentCalculator) balVersionMap(req *blockRequest) (*state.VersionMap, error) {
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
@@ -615,6 +610,11 @@ func (cc *commitmentCalculator) balVersionMap(req *blockRequest) (*state.Version
 	return vm, err
 }
 
+// checkpointStepsFromBAL emits a commitment checkpoint at each unfrozen step
+// edge interior to the block, applying the per-tx BAL up to that edge. A txNum's
+// BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
+// gives the state as of the edge. The returned root is discarded (no header to
+// verify mid-block). Runs before the block-end compute so that builds on it.
 func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) error {
 	ss := cc.doms.StepSize()
 	if ss == 0 {
@@ -765,6 +765,13 @@ type computeMode struct {
 // handOffUpdates returns the filled buffer for the caller to compute against and
 // rotates the spare into cc.updates. The compute drains the returned buffer
 // synchronously, so it is idle again by the next rotation.
+func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
+	filled := cc.updates
+	cc.updates, cc.spare = cc.spare, filled
+	cc.updates.Reset()
+	return filled
+}
+
 func (cc *commitmentCalculator) prefetchKey(ctx context.Context, plainKey []byte) {
 	if cc.prefetch == nil {
 		cc.prefetch = exec.StartBranchPrefetch(ctx, cc.db, dbg.TrieBALWarmupers)
@@ -779,13 +786,6 @@ func (cc *commitmentCalculator) finishPrefetch() {
 	_ = cc.prefetch.WaitBufferFree(0)
 	cc.prefetch.CloseAndWait()
 	cc.prefetch = nil
-}
-
-func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
-	filled := cc.updates
-	cc.updates, cc.spare = cc.spare, filled
-	cc.updates.Reset()
-	return filled
 }
 
 // compute is the shared prologue/compute/footer for every calculator commitment

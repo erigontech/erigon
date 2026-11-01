@@ -1701,7 +1701,7 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
 	// versionMap is the block's map; with the per-tx access list recorded at publish,
-	// the commitment calculator reads this tx's final writes from it (WritesAtTxNum)
+	// the commitment calculator reads this tx's final writes from it (VersionMap.View)
 	// rather than from a retained write-set.
 	versionMap *state.VersionMap
 	rules      *chain.Rules
