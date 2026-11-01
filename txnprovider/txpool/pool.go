@@ -2106,19 +2106,20 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 	return p.blobs.get(blobHashes)
 }
 
+// minedBlobReorgDepth bounds the mined-blob cache when finality stalls: two epochs.
+const minedBlobReorgDepth = 64
+
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
 func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
-	// Remove blobs in the finalized block and older, loop through all entries
-	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
-		// delete individual hashes
-		for _, mt := range p.minedBlobTxnsByBlock[finalizedBlock] {
-			delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+	// Remove blobs of finalized blocks, and of blocks too deep to reorg.
+	for b, mts := range p.minedBlobTxnsByBlock {
+		if (finalizedBlock > 0 && b <= finalizedBlock) || b+minedBlobReorgDepth < minedBlock {
+			for _, mt := range mts {
+				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+			}
+			delete(p.minedBlobTxnsByBlock, b)
 		}
-		// delete the map entry for this block num
-		delete(p.minedBlobTxnsByBlock, finalizedBlock)
-		// move on to older blocks, if present
-		finalizedBlock--
 	}
 
 	// Add mined blobs
@@ -2139,9 +2140,18 @@ func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, 
 				if err != nil {
 					return err
 				}
-				withRlp := *txn
-				withRlp.Rlp = bytes.Clone(rlp)
-				txn = &withRlp
+				if rlp != nil {
+					// A fresh parse points the blobs into the new buffer, so the flushed one can be freed.
+					parseCtx := NewTxnParseContext(p.chainID)
+					parseCtx.WithSender(false)
+					fresh := &TxnSlot{}
+					if _, err := parseCtx.ParseTransaction(bytes.Clone(rlp), 0, fresh, nil, false, true, nil); err != nil {
+						p.logger.Warn("[txpool] processMinedFinalizedBlobs: parseTransaction", "hash", hex.EncodeToString(txn.IDHash[:]), "err", err)
+					} else {
+						fresh.SenderID, fresh.Traced = txn.SenderID, txn.Traced
+						txn = fresh
+					}
+				}
 			}
 		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
 			txn = cached.TxnSlot

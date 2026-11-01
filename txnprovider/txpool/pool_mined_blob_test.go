@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"testing"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testforks"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -103,13 +105,24 @@ func newMinedBlobReorgTest(t *testing.T) *minedBlobReorgTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	chainConfig := *testforks.Forks["Cancun"]
+	chainConfig.ChainID = uint256.NewInt(5)
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig), testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		kvcache.New(kvcache.DefaultCoherentConfig), &chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
-	r := &minedBlobReorgTest{ctx: ctx, pool: pool, sender: common.Address{1}, blobTxn: makeBlobTxn()}
+	r := &minedBlobReorgTest{ctx: ctx, pool: pool, sender: common.Address{1}}
 	require.NoError(t, pool.OnNewBlock(ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	r.blobTxn.Nonce = 2
+	// The slot must match its rlp, because a flushed txn is parsed again from its db row.
+	wrapped := types.MakeWrappedBlobTxn(chainConfig.ChainID)
+	wrapped.Tx.Nonce = 2
+	wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(200_000)
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	parseCtx := NewTxnParseContext(*chainConfig.ChainID)
+	parseCtx.WithSender(false)
+	_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &r.blobTxn, nil, false, true, nil)
+	require.NoError(t, err)
 	var local TxnSlots
 	local.Append(&r.blobTxn, r.sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, local)
@@ -200,4 +213,29 @@ func TestMinedBlobTxnSurvivesReorgThatMinesItAgain(t *testing.T) {
 	r.reorgOneBlock(t, 0x12, false)
 	require.Contains(t, r.pool.byHash, r.hash)
 	require.Len(t, r.pool.byHash[r.hash].TxnSlot.BlobBundles, 2)
+}
+
+// A flushed txn is cached from its db row, so its blobs must not keep the pooled buffer alive.
+func TestMinedFlushedBlobTxnDoesNotShareBlobs(t *testing.T) {
+	r := newMinedBlobReorgTest(t)
+	_, err := r.pool.flush(r.ctx)
+	require.NoError(t, err)
+	pooledBlob := r.pool.byHash[r.hash].TxnSlot.BlobBundles[0].Blob
+	r.mine(t, 1, 3)
+
+	cached := r.pool.minedBlobTxnsByHash[r.hash].TxnSlot
+	want := cached.BlobBundles[0].Blob[0]
+	pooledBlob[0] ^= 0xff
+	require.Equal(t, want, cached.BlobBundles[0].Blob[0], "the cached txn shares blobs with the pooled copy")
+}
+
+func TestMinedBlobCacheIsBoundedWithoutFinality(t *testing.T) {
+	r := newMinedBlobReorgTest(t)
+	r.mine(t, 1, 3)
+	require.Contains(t, r.pool.minedBlobTxnsByHash, r.hash)
+	for height := 2; height <= 2+minedBlobReorgDepth; height++ {
+		require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(byte(height), 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	require.NotContains(t, r.pool.minedBlobTxnsByHash, r.hash)
+	require.NotContains(t, r.pool.minedBlobTxnsByBlock, uint64(1))
 }
