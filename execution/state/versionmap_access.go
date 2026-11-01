@@ -130,6 +130,9 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
+		if balProvesNonEmpty(ac) {
+			continue
+		}
 		acc, ok := NewVersionedAccountView(addr, int(maxIdx), vm, base).GetAccount()
 		if !ok || !isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) {
 			continue
@@ -139,6 +142,29 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 	if !ws.IsEmpty() {
 		vm.FlushVersionedWrites(ws, true)
 	}
+}
+
+// balProvesNonEmpty reports whether the account's last balance, nonce or code change
+// already makes it non-empty, so no committed-base read is needed.
+func balProvesNonEmpty(ac *types.AccountChanges) bool {
+	if c := lastChange(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }); c != nil && !c.Value.IsZero() {
+		return true
+	}
+	if c := lastChange(ac.NonceChanges, func(c *types.NonceChange) uint32 { return c.Index }); c != nil && c.Value != 0 {
+		return true
+	}
+	c := lastChange(ac.CodeChanges, func(c *types.CodeChange) uint32 { return c.Index })
+	return c != nil && len(c.Bytecode) > 0
+}
+
+func lastChange[T any](changes []*T, index func(*T) uint32) *T {
+	var last *T
+	for _, c := range changes {
+		if last == nil || index(c) > index(last) {
+			last = c
+		}
+	}
+	return last
 }
 
 // balMaxChangeIndex is the highest 1-based change index across an account's BAL

@@ -62,3 +62,21 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	require.True(t, ok, "a balance-zeroed account with a non-zero base nonce is NOT empty and survives")
 	require.Equal(t, uint64(5), acc.Nonce)
 }
+
+// An account whose last BAL change sets a non-zero balance, nonce or code cannot be empty,
+// so seeding needs no committed-base read for it.
+func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	funded, nonced, coded := addr("0xf1"), addr("0xf2"), addr("0xf3")
+	bal := types.BlockAccessList{
+		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}, {Index: 1, Value: uint256.Int{}}}},
+		{Address: nonced.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}},
+		{Address: coded.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}}},
+	}
+	reader := &countingAccountReader{}
+
+	vm := NewVersionMap(bal)
+	vm.SeedEmptyRemovals(bal, true, false, reader)
+	require.Zero(t, reader.reads)
+}
