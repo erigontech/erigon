@@ -164,6 +164,7 @@ func (s *Sequencer) Run(ctx context.Context, events <-chan Event) {
 				return
 			}
 			if err := s.Handle(ctx, e); err != nil && ctx.Err() == nil {
+				loadMetrics().triggerFailed.Inc()
 				s.logger.Error("[eez] sequencer trigger failed", "event", "eez.sequencer.advance.failed", "err", err)
 			}
 		}
@@ -290,6 +291,9 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 	s.status.Produced[kind]++
 	s.status.Last = h
 	s.statusMu.Unlock()
+	m := loadMetrics()
+	m.produced[kind].Inc()
+	m.head.SetUint64(h.Number.Uint64())
 	return h, nil
 }
 
@@ -312,8 +316,8 @@ func (s *Sequencer) paused(head *types.Header) bool {
 // offGridSkip records a Sync block skipped off the grid; a run of them is a
 // stall.
 func (s *Sequencer) offGridSkip(why string, ctx ...any) {
-	s.offGrid++
-	s.setOffGrid(s.offGrid)
+	s.setOffGrid(s.offGrid + 1)
+	loadMetrics().offGridSkips.Inc()
 	s.logger.Warn("[eez] Sync block skipped off the grid: "+why, append([]any{"event", "eez.sequencer.sync_slot.off_grid_skipped"}, ctx...)...)
 	if s.offGrid >= offGridStall {
 		s.logger.Error("[eez] consecutive Sync blocks skipped off the grid, production is not advancing", "event", "eez.sequencer.sync_slot.off_grid_stalled",

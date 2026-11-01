@@ -39,10 +39,12 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	"github.com/erigontech/erigon/eez/seqsig"
+	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/types"
 	erigonrpc "github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // TestRender is T-NET-9 on the field set: a 0x76 transaction renders the
@@ -296,4 +298,40 @@ func TestFollowerStatus(t *testing.T) {
 		"hash":    unsettled.Hash().Hex(),
 	}}, fields["signedHeads"])
 	require.Equal(t, "signed_head", fields["headSource"])
+}
+
+type noTxns struct{}
+
+func (noTxns) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+// TestSequencerStatus serves eez_sequencerStatus for a sequencer that
+// produced a slot.
+func TestSequencerStatus(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	api := eezrpc.NewAPI()
+	_, err := api.SequencerStatus(t.Context())
+	require.ErrorIs(t, err, eezrpc.ErrNoSequencer)
+
+	_, chain := derivertest.NewL2(t)
+	f, err := follower.New(c.L1, chain, derivertest.Config(), follower.DefaultConfig, log.New())
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+	timing := sequencer.Timing{L1: 12 * time.Second, L2: 2 * time.Second, Proof: 4 * time.Second, Slack: 1500 * time.Millisecond}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: timing}, f, noTxns{}, log.New())
+	require.NoError(t, err)
+	genesis, err := chain.HeaderByNumber(t.Context(), 0)
+	require.NoError(t, err)
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: genesis.Time + 12}))
+	api.AttachSequencer(s)
+
+	status, err := api.SequencerStatus(t.Context())
+	require.NoError(t, err)
+	head, err := chain.Head(t.Context())
+	require.NoError(t, err)
+	want := &eezrpc.SequencerStatus{Live: 3, Future: 2, Sync: 1, SyncHeight: 6, LastProduced: &eezrpc.BlockRef{Number: 6, Hash: head.Hash()}}
+	require.Equal(t, want, status)
 }
