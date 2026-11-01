@@ -18,12 +18,16 @@ package jsonstream
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"math/bits"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -222,4 +226,61 @@ func BenchmarkWriteHexBytes(b *testing.B) {
 			})
 		}
 	}
+}
+
+func hexqFieldWith(s *Stream, name string, v uint64, appendHex func([]byte, uint64) []byte) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = appendHex(append(buf, '"'), v)
+	s.commit(append(buf, '"'), start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
+func hexqSpreadField(x uint32) uint64 {
+	y := uint64(x)
+	y = (y | y<<16) & 0x0000ffff0000ffff
+	y = (y | y<<8) & 0x00ff00ff00ff00ff
+	y = (y | y<<4) & 0x0f0f0f0f0f0f0f0f
+	letters := ((y + 0x0606060606060606) >> 4) & 0x0101010101010101
+	return y + 0x3030303030303030 + letters*39
+}
+
+func hexqSWARField(dst []byte, v uint64) []byte {
+	nibbles := max((bits.Len64(v)+3)/4, 1)
+	var digits [16]byte
+	binary.BigEndian.PutUint64(digits[:8], hexqSpreadField(uint32(v>>32)))
+	binary.BigEndian.PutUint64(digits[8:], hexqSpreadField(uint32(v)))
+	return append(append(dst, '0', 'x'), digits[16-nibbles:]...)
+}
+
+// BenchmarkQuantityFields writes a log-shaped object of quantity fields, the hot path of ethjson.Quantity.
+func BenchmarkQuantityFields(b *testing.B) {
+	names := []string{"blockNumber", "transactionIndex", "logIndex", "gasUsed", "cumulativeGasUsed", "effectiveGasPrice", "type", "status", "timestamp", "nonce"}
+	values := []uint64{0x18db848, 0x95, 0x1a3, 0x5208, 0x1c9c380, 0x3b9aca00, 2, 1, 0x6720a1b3, 0x2c}
+	run := func(b *testing.B, field func(*Stream, string, uint64)) {
+		s := New(io.Discard)
+		for b.Loop() {
+			s.Reset(io.Discard)
+			s.WriteObjectStart()
+			for i, n := range names {
+				field(s, n, values[i])
+			}
+			s.WriteObjectEnd()
+		}
+	}
+	b.Run("pr", func(b *testing.B) { run(b, HexUint64Field) })
+	b.Run("strconv", func(b *testing.B) {
+		run(b, func(s *Stream, n string, v uint64) {
+			hexqFieldWith(s, n, v, func(d []byte, v uint64) []byte { return strconv.AppendUint(append(d, "0x"...), v, 16) })
+		})
+	})
+	b.Run("loopIndirect", func(b *testing.B) {
+		run(b, func(s *Stream, n string, v uint64) { hexqFieldWith(s, n, v, hexutil.AppendUint64) })
+	})
+	b.Run("swar", func(b *testing.B) {
+		run(b, func(s *Stream, n string, v uint64) { hexqFieldWith(s, n, v, hexqSWARField) })
+	})
 }
