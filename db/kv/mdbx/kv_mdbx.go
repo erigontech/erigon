@@ -973,6 +973,7 @@ func (db *MdbxKV) Defrag(opts mdbx.DefragOptions) (*mdbx.DefragResult, error) {
 	defer db.trackTxEnd()
 	return db.env.Defrag(opts)
 }
+
 func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }

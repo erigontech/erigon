@@ -332,7 +332,7 @@ func TestDefragIfBloated(t *testing.T) {
 	dbDir := filepath.Join(t.TempDir(), "chaindata")
 	writeTestDB(t, dbDir, 0)
 	db := openTestDB(dbDir)
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		for i := testRows - deleted; i < testRows; i++ {
 			if err := tx.Delete(testTable, u64Key(uint64(i))); err != nil {
@@ -351,7 +351,12 @@ func TestDefragIfBloated(t *testing.T) {
 		require.Equal(t, uint64(testRows-deleted), n)
 		return tx.Put(testTable, u64Key(testRows), testVal)
 	}))
-	// mdbx cuts the file on the commit after defrag, not inside it.
+	data, free, err := envPageUsage(db.(*mdbx.MdbxKV).Env())
+	require.NoError(t, err)
+	require.False(t, bloated(data, free), "defrag left the used pages bloated: data %s, free %s", data.HR(), free.HR())
+	// Windows cannot cut a file while the env maps it, so the space comes back at reopen.
+	db.Close()
+	db = openTestDB(dbDir)
 	require.Less(t, dataFileStat(t, dbDir).Size(), before.Size())
 }
 
