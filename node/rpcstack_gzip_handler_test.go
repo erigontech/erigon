@@ -332,7 +332,7 @@ func TestHTTPHandlerStackCompressionDisabled(t *testing.T) {
 					f.Flush()
 				}
 			})
-			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, nil, tc.compression, 0, false))
+			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, nil, tc.compression, true, 0, false))
 			defer srv.Close()
 
 			req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, nil)
@@ -562,22 +562,28 @@ func TestHTTPHandlerStackLoopbackCompression(t *testing.T) {
 		name       string
 		loopback   bool
 		remoteAddr string
+		header     string
 		wantEnc    string
 	}{
-		{"skip, ipv4 loopback", false, "127.0.0.1:5000", ""},
-		{"skip, ipv4 loopback range", false, "127.1.2.3:5000", ""},
-		{"skip, ipv6 loopback", false, "[::1]:5000", ""},
-		{"skip, ipv4-mapped loopback", false, "[::ffff:127.0.0.1]:5000", ""},
-		{"skip, remote ipv4", false, "192.0.2.1:5000", "gzip"},
-		{"skip, remote ipv6", false, "[2001:db8::1]:5000", "gzip"},
-		{"skip, unparsable addr", false, "@", "gzip"},
-		{"keep, ipv4 loopback", true, "127.0.0.1:5000", "gzip"},
+		{"skip, ipv4 loopback", false, "127.0.0.1:5000", "", ""},
+		{"skip, ipv4 loopback range", false, "127.1.2.3:5000", "", ""},
+		{"skip, ipv6 loopback", false, "[::1]:5000", "", ""},
+		{"skip, ipv4-mapped loopback", false, "[::ffff:127.0.0.1]:5000", "", ""},
+		{"skip, remote ipv4", false, "192.0.2.1:5000", "", "gzip"},
+		{"skip, remote ipv6", false, "[2001:db8::1]:5000", "", "gzip"},
+		{"skip, unparsable addr", false, "@", "", "gzip"},
+		{"skip, loopback behind proxy (X-Forwarded-For)", false, "127.0.0.1:5000", "X-Forwarded-For", "gzip"},
+		{"skip, loopback behind proxy (Forwarded)", false, "127.0.0.1:5000", "Forwarded", "gzip"},
+		{"keep, ipv4 loopback", true, "127.0.0.1:5000", "", "gzip"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := NewHTTPHandlerStack(inner, nil, []string{"*"}, true, 0, false, WithLoopbackCompression(tc.loopback))
+			handler := NewHTTPHandlerStack(inner, nil, []string{"*"}, true, tc.loopback, 0, false)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 			req.RemoteAddr = tc.remoteAddr
 			req.Header.Set("Accept-Encoding", "gzip")
+			if tc.header != "" {
+				req.Header.Set(tc.header, "203.0.113.7")
+			}
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
@@ -589,20 +595,6 @@ func TestHTTPHandlerStackLoopbackCompression(t *testing.T) {
 			require.Equal(t, body, got)
 		})
 	}
-}
-
-// Without the option the stack keeps compressing loopback clients, which the
-// tests driving it through httptest.NewServer rely on.
-func TestHTTPHandlerStackLoopbackCompressionDefault(t *testing.T) {
-	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(bytes.Repeat([]byte("x"), 4096))
-	})
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
-	req.RemoteAddr = "127.0.0.1:5000"
-	req.Header.Set("Accept-Encoding", "gzip")
-	rec := httptest.NewRecorder()
-	NewHTTPHandlerStack(inner, nil, []string{"*"}, true, 0, false).ServeHTTP(rec, req)
-	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 }
 
 func TestHTTPHandlerStackLoopbackCompressionOverTCP(t *testing.T) {
@@ -621,7 +613,7 @@ func TestHTTPHandlerStackLoopbackCompressionOverTCP(t *testing.T) {
 		{"loopback compression on", true, "gzip"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, []string{"*"}, true, 0, false, WithLoopbackCompression(tc.loopback)))
+			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, []string{"*"}, true, tc.loopback, 0, false))
 			defer srv.Close()
 
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, nil)

@@ -398,7 +398,7 @@ var (
 	}
 	HttpCompressionLoopbackFlag = cli.BoolFlag{
 		Name:  "http.compression.loopback",
-		Usage: "Also compress HTTP-RPC responses to clients connecting from a loopback address (127.0.0.1, ::1). Off by default: on loopback compression only costs CPU and latency. Enable it when a reverse proxy on the same host forwards remote clients without compressing itself",
+		Usage: "Also compress HTTP-RPC responses to clients connecting from a loopback address (127.0.0.1, ::1). Off by default: on loopback compression only costs CPU and latency. Requests with an X-Forwarded-For or Forwarded header are treated as remote. Enable it when a reverse proxy on the same host sets neither header and does not compress itself",
 		Value: false,
 	}
 	WsCompressionFlag = cli.BoolFlag{

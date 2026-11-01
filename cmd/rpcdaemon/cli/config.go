@@ -712,8 +712,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	} else {
 		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
 	}
-	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true,
-		node.WithLoopbackCompression(cfg.HttpCompressionLoopback))
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, cfg.HttpCompressionLoopback, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		// With a CORS list, NewWSOriginHandler checks origins; the handshake validator only keeps
@@ -900,7 +899,7 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 }
 
 func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurrencyLimit int64) http.Handler {
-	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, rpcConcurrencyLimit, true)
+	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, false, rpcConcurrencyLimit, true)
 }
 
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
@@ -966,7 +965,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	// so execution-engine DB operations use blocking Acquire instead of fail-fast TryAcquire.
 	// Compression is always off here: engine responses (getBlobs, getPayload) are multi-MB and
 	// latency-critical, and gzip costs far more time than the transfer it saves.
-	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, 0, false)
+	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, false /* compression */, false, 0, false)
 
 	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, nil, jwtSecret)
 	if err != nil {

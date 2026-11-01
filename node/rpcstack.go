@@ -43,15 +43,11 @@ import (
 // NewHTTPHandlerStack returns wrapped http-related handlers.
 // When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
 // (503 if inflight > limit) to prevent goroutine pile-up under load.
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool, opts ...HTTPHandlerOption) http.Handler {
-	o := httpHandlerOptions{loopbackCompression: true}
-	for _, opt := range opts {
-		opt(&o)
-	}
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression, compressLoopback bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
-		if o.loopbackCompression {
+		if compressLoopback {
 			handler = newGzipHandler(handler)
 		} else {
 			handler = newSkipLoopbackCompressionHandler(handler, newGzipHandler(handler))
@@ -63,29 +59,25 @@ func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compr
 	return handler
 }
 
-type httpHandlerOptions struct {
-	loopbackCompression bool
-}
-
-type HTTPHandlerOption func(*httpHandlerOptions)
-
-// WithLoopbackCompression sets whether loopback clients get compressed responses
-// (default true). On loopback compression only costs CPU and latency, but a
-// reverse proxy on the same host makes remote clients look local too.
-func WithLoopbackCompression(enabled bool) HTTPHandlerOption {
-	return func(o *httpHandlerOptions) { o.loopbackCompression = enabled }
-}
-
 // newSkipLoopbackCompressionHandler decides per request, not per listener, so a
 // server bound to 0.0.0.0 still skips compression for local clients.
 func newSkipLoopbackCompressionHandler(plain, compressed http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isLoopbackAddress(r.RemoteAddr) {
+		if isLocalClient(r) {
 			plain.ServeHTTP(w, r)
 			return
 		}
 		compressed.ServeHTTP(w, r)
 	})
+}
+
+// isLocalClient treats a loopback request carrying a forwarding header as remote:
+// it comes from a reverse proxy on the same host. A faked header only turns
+// compression back on, so it needs no trust check.
+func isLocalClient(r *http.Request) bool {
+	return isLoopbackAddress(r.RemoteAddr) &&
+		r.Header.Get("X-Forwarded-For") == "" &&
+		r.Header.Get("Forwarded") == ""
 }
 
 func isLoopbackAddress(addr string) bool {
