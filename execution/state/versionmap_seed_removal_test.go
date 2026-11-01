@@ -62,3 +62,54 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	require.True(t, ok, "a balance-zeroed account with a non-zero base nonce is NOT empty and survives")
 	require.Equal(t, uint64(5), acc.Nonce)
 }
+
+// TestSeedAddresses pins the AddressPath seeding. The BAL carries no address record, so a
+// block-created account (absent in the committed base) is seeded with field cells only;
+// the address read resolves existence from the AddressPath cell plus the base — not the
+// field cells — so without seeding it reads the created account as absent, which makes the
+// EIP-161 withhold path stamp a spurious removal. SeedAddresses seeds the AddressPath (from
+// the base when present, created otherwise) so the read resolves present.
+func TestSeedAddresses(t *testing.T) {
+	t.Parallel()
+
+	created := accounts.InternAddress(common.HexToAddress("0xc0ffee")) // absent in base, created this block
+	existing := accounts.InternAddress(common.HexToAddress("0xe5157")) // present in base, only touched
+	const baseTxNum = 0
+
+	bal := types.BlockAccessList{
+		{
+			Address:      created.Value(),
+			NonceChanges: []*types.NonceChange{{Index: 3, Value: 1}},
+			CodeChanges:  []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+		},
+		{
+			Address:        existing.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}},
+		},
+	}
+
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	existingBase := accounts.NewAccount()
+	existingBase.Nonce = 9
+	reader.accounts[existing] = &existingBase // `created` is intentionally absent from the base
+
+	vm := NewVersionMap(bal)
+	vm.SetBaseTxNum(baseTxNum)
+
+	// Without seeding the BAL leaves only field cells, so the created account's address
+	// read is absent even though it exists — the bug SeedAddresses fixes.
+	if _, _, ok := vm.ReadAddress(created, 5); ok {
+		t.Fatal("precondition: a BAL-created account's AddressPath read should be absent before SeedAddresses")
+	}
+
+	vm.SeedAddresses(bal, []AccountBaseReader{reader})
+
+	acc, _, ok := vm.ReadAddress(created, 5)
+	require.True(t, ok, "SeedAddresses seeds the AddressPath so a BAL-created account reads present")
+	require.NotNil(t, acc)
+	require.Equal(t, uint64(1), acc.Nonce)
+
+	ex, _, ok := vm.ReadAddress(existing, 5)
+	require.True(t, ok, "a base-present account is published as its origin and reads present")
+	require.Equal(t, uint64(9), ex.Nonce)
+}
