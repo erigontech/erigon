@@ -224,6 +224,39 @@ func TestAddChainSegmentCountsMissingPrecomputedEpochStateOnlyAtEpochBoundary(t 
 	}
 }
 
+func TestAddChainSegmentKeepsPrecomputedEpochStateOnMissingSegment(t *testing.T) {
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
+	advanced := precomputedEpochState(t, parent, block)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
+	orphanBlock := *block.Block
+	orphanBlock.ParentRoot = common.Hash{0xee}
+	orphan := *block
+	orphan.Block = &orphanBlock
+
+	_, result, err := graph.AddChainSegment(&orphan, true)
+	require.NoError(t, err)
+	require.Equal(t, MissingSegment, result)
+	require.Same(t, advanced, graph.nextEpochState)
+
+	postState, result, err := graph.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	require.Same(t, advanced, postState)
+}
+
+func TestSetNextEpochStateRejectsPublicationAfterInvalidBlock(t *testing.T) {
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
+	advanced := precomputedEpochState(t, parent, block)
+	invalid := *block.Block
+	invalid.StateRoot[0] ^= 0xff
+	_, result, err := graph.AddChainSegment(&cltypes.SignedBeaconBlock{Block: &invalid, Signature: block.Signature}, true)
+	require.Error(t, err)
+	require.Equal(t, InvalidBlock, result)
+
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
+	require.Nil(t, graph.nextEpochState)
+}
+
 func TestSetNextEpochStateRejectsLatePublication(t *testing.T) {
 	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
