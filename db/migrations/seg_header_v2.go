@@ -175,7 +175,8 @@ func withWritePerm(path string, fn func(*os.File) error) error {
 		return err
 	}
 	origMode := info.Mode()
-	if err := os.Chmod(path, origMode|0200); err != nil { // 0200 = owner-write bit
+	err = os.Chmod(path, origMode|0o200) // 0o200 = owner-write bit
+	if err != nil {
 		return err
 	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
