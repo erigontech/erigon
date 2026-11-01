@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -41,6 +42,11 @@ func valueTransfers(senders, recipients []accounts.Address) types.Transactions {
 // newDepsTest seeds every sender and recipient as a funded account; a recipient in withCode
 // also has code.
 func newDepsTest(t *testing.T, txs types.Transactions, withCode ...accounts.Address) *depsTest {
+	t.Helper()
+	return newTracedDepsTest(t, txs, nil, withCode...)
+}
+
+func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hooks, withCode ...accounts.Address) *depsTest {
 	t.Helper()
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
@@ -83,6 +89,7 @@ func newDepsTest(t *testing.T, txs types.Transactions, withCode ...accounts.Addr
 			TxIndex:         i,
 			Config:          chainSpec.Config,
 			Txs:             txs,
+			Hooks:           hooks,
 		}
 	}
 	require.NoError(t, pe.processRequest(context.Background(), &execRequest{blockNum: 1, tasks: tasks}, roTx))
@@ -192,6 +199,17 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p}))
 	require.True(t, s.be.execTasks.isBlocked(2))
 	require.False(t, s.be.selfLoopDispatched[2])
+	// A tracer that follows balances or gas keeps the transfer frame, so the transfer still waits.
+	for name, hooks := range map[string]*tracing.Hooks{
+		"balance_hook": {OnBalanceChange: func(accounts.Address, uint256.Int, uint256.Int, tracing.BalanceChangeReason) {}},
+		"gas_hook":     {OnGasChange: func(uint64, uint64, tracing.GasChangeReason) {}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newTracedDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, d, d}), hooks)
+			require.True(t, s.be.execTasks.isBlocked(2))
+			require.False(t, s.be.selfLoopDispatched[2])
+		})
+	}
 }
 
 // The run peeks at the recipient's code at block start; validation credits only a recipient that

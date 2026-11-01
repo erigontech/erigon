@@ -1358,6 +1358,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
 				if to := *tx.GetTo(); chargedAtValidation && to != executor.coinbase.Value() &&
+					!txTask.Hooks.HasGasChangeHook() && (txTask.Hooks == nil || txTask.Hooks.OnBalanceChange == nil) &&
 					!slices.Contains(vm.ActivePrecompiles(txTask.Rules()), accounts.InternAddress(to)) && codeless(to) {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
