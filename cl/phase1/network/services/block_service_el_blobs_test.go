@@ -226,6 +226,24 @@ func TestBlockAboveBlobLimitDoesNotTakeTheELColumnsImport(t *testing.T) {
 	require.Equal(t, []*cltypes.SignedBeaconBlock{valid}, started)
 }
 
+// A block the importer would skip, e.g. one without blobs, does not take the import of its proposer and slot from a
+// block with blobs.
+func TestBlockWithoutBlobsDoesNotTakeTheELColumnsImport(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	empty, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 0)
+	withBlobs, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	require.Equal(t, blockGossipKey(empty), blockGossipKey(withBlobs))
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	b.startELColumnsImportOnce(t.Context(), empty)
+	b.startELColumnsImportOnce(t.Context(), withBlobs)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{withBlobs}, started)
+}
+
 func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
 	service, _, _, root, job := parkUnknownParentBlockForRetry(t, false)
 	started := 0
