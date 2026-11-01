@@ -182,17 +182,30 @@ func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T)
 	require.Equal(t, http.StatusNotFound, endpointErr.Code)
 }
 
-func TestGetExecutionPayloadEnvelopeReturnsNotFoundForPreGloasBlockWithPrunedExecutionBody(t *testing.T) {
-	handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
-	handler.beaconChainCfg.GloasForkEpoch = 3
-	handler.blockReader = executionBodyPrunedBlockReader{MockBlockReader: handler.blockReader.(*tests.MockBlockReader)}
-	rebuilder := &apiEnvelopeRebuilder{}
-	handler.envelopeRebuilder = rebuilder
+func TestGetExecutionPayloadEnvelopeChecksGloasForkBeforeReadingBlock(t *testing.T) {
+	t.Run("pre-Gloas block with pruned execution body", func(t *testing.T) {
+		handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+		handler.beaconChainCfg.GloasForkEpoch = 3
+		handler.blockReader = executionBodyPrunedBlockReader{MockBlockReader: handler.blockReader.(*tests.MockBlockReader)}
+		rebuilder := &apiEnvelopeRebuilder{}
+		handler.envelopeRebuilder = rebuilder
 
-	response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
-	require.Nil(t, response)
-	require.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
-	require.Zero(t, rebuilder.prepareCalls)
+		response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+		require.Nil(t, response)
+		require.Equal(t, http.StatusNotFound, beaconhttp.WrapEndpointError(err).Code)
+		require.Zero(t, rebuilder.prepareCalls)
+	})
+	t.Run("first slot of the Gloas fork epoch", func(t *testing.T) {
+		handler, root, envelope, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+		handler.beaconChainCfg.GloasForkEpoch = 2
+		rebuilder := &apiEnvelopeRebuilder{envelope: envelope}
+		handler.envelopeRebuilder = rebuilder
+
+		response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+		require.NoError(t, err)
+		require.Same(t, envelope, response.Data)
+		require.Equal(t, 1, rebuilder.prepareCalls)
+	})
 }
 
 func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
