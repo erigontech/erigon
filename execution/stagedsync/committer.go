@@ -566,14 +566,19 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
+	vm, err := cc.balVersionMap(req)
+	if err != nil {
+		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		return
+	}
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
-	if err := cc.checkpointStepsFromBAL(ctx, req); err != nil {
+	if err := cc.checkpointStepsFromBAL(ctx, req, vm); err != nil {
 		cc.fail(ctx, br, err)
 		return
 	}
-	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, math.MaxUint32, targetOf(br))
+	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, targetOf(br))
 	if err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
@@ -608,7 +613,19 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 // BAL index is txNum-firstTxNum, so applying changes at index <= edge-firstTxNum
 // gives the state as of the edge. The returned root is discarded (no header to
 // verify mid-block). Runs before the block-end compute so that builds on it.
-func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest) error {
+func (cc *commitmentCalculator) balVersionMap(req *blockRequest) (*state.VersionMap, error) {
+	vm := state.NewVersionMap(req.bal)
+	vm.SetBaseTxNum(req.firstTxNum)
+	vm.SeedAddresses(req.bal)
+	base := &committedAccountReader{&asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: req.firstTxNum, dr: cc.asOfReader.dr}}
+	err := vm.SeedEmptyRemovals(req.bal,
+		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
+		cc.chainConfig.Aura != nil,
+		base)
+	return vm, err
+}
+
+func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap) error {
 	ss := cc.doms.StepSize()
 	if ss == 0 {
 		return nil
@@ -618,7 +635,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 			continue
 		}
 		stepBr := &blockResult{BlockNum: req.blockNum, BlockHash: req.blockHash, lastTxNum: edge}
-		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, uint32(edge-req.firstTxNum), targetOf(stepBr))
+		_, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, uint32(edge-req.firstTxNum), targetOf(stepBr))
 		if err != nil {
 			return fmt.Errorf("BAL-driven step-checkpoint at txNum %d: %w", edge, err)
 		}
@@ -636,7 +653,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // computes the root at t. Shared by the block-end compute-ahead and the mid-block step
 // checkpoints so the two can't drift. The BAL supplies the touched-key set; every value
 // (and the seeded EIP-161 removal) is read from the version map view.
-func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
+func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, vm *state.VersionMap, maxTxIndex uint32, t commitTarget) ([]byte, func() error, error) {
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr}
 	if cc.balUpdates == nil {
 		cc.balUpdates = cc.updates.NewEmpty()
@@ -650,7 +667,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	balUpdates := cc.balUpdates
 	cc.clearTouched()
 	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex))
-	err := cc.emitTouched(req.versionMap.View(t.lastTxNum, &committedAccountReader{reader}), balUpdates)
+	err := cc.emitTouched(vm.View(t.lastTxNum, &committedAccountReader{reader}), balUpdates)
 	cc.clearTouched()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)

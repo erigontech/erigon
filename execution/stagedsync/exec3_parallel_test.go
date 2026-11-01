@@ -593,7 +593,7 @@ func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile b
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
 
 	// TODO get results back
 
@@ -1503,7 +1503,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1586,7 +1586,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1680,7 +1680,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1776,7 +1776,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
@@ -1825,7 +1825,7 @@ func TestParallelNextResultDropsUnmaterializedNetZeroWrite(t *testing.T) {
 	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
 	pending := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
 	pe, roTx := newResumeTestExec(t, db, config)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil)
 	be.tasks = []*execTask{eTask, pending}
 	be.results = []*execResult{nil, nil}
 	be.execTasks.setInProgress(0)
@@ -1893,7 +1893,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
 	t.Run("scheduleNextPending", func(t *testing.T) {
-		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil, nil)
+		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil)
 		pe := &parallelExecutor{
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},

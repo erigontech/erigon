@@ -18,7 +18,6 @@ package stagedsync
 
 import (
 	"errors"
-
 	"testing"
 
 	"github.com/holiman/uint256"

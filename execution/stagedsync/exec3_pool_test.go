@@ -167,7 +167,7 @@ func TestPoolReexecSignalRequeuesParkedTask(t *testing.T) {
 	pe := &parallelExecutor{}
 	pe.workersCtx = t.Context()
 	pe.pool = newTaskPool(pe, nil)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
 	be.pool = pe.pool
 	pt := &poolTask{be: be, tv: &taskVersion{execTask: &execTask{index: 0}}, next: psReexec, parked: true}
 	be.poolTasks = []*poolTask{pt}
@@ -220,7 +220,7 @@ func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
 	pe.workersCtx = t.Context()
 	pe.results = make(chan *exec.TxResult, 8)
 	pe.pool = newTaskPool(pe, nil)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
 	be.pool = pe.pool
 	be.wakeAt = map[int][]*poolTask{}
 	be.committedFrontier.Store(-1)

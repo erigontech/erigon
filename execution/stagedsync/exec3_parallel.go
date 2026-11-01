@@ -138,34 +138,6 @@ type parallelExecutor struct {
 	currentChangeSetHash common.Hash
 }
 
-// blockVMBuilder builds and registers a block's version map.
-type blockVMBuilder interface {
-	buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) (*state.VersionMap, error)
-}
-
-// buildBlockVersionMap builds the block's version map, seeds its EIP-161 removals,
-// and registers it in the prev-block chain at construction — before the block
-// executes — so a later block's seed resolves accounts created by earlier
-// dispatched-but-unsealed blocks. Safe because exec is block-ordered: a worker
-// reads only blocks before its own, already sealed; only the seed reads an
-// unsealed earlier block, through the version map's own locking.
-func (pe *parallelExecutor) buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) (*state.VersionMap, error) {
-	vm := state.NewVersionMap(bal)
-	vm.SetBaseTxNum(firstTxNum)
-	if len(bal) > 0 {
-		vm.SeedAddresses(bal)
-		base := state.PrevBlockBase(committedBase, pe.prevBlocks, blockNum)
-		if err := vm.SeedEmptyRemovals(bal,
-			blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(blockNum),
-			pe.cfg.chainConfig.Aura != nil,
-			base); err != nil {
-			return nil, fmt.Errorf("seed EIP-161 removals of block %d: %w", blockNum, err)
-		}
-	}
-	pe.prevBlocks.PushHead(blockNum, lastTxNum, vm)
-	return vm, nil
-}
-
 // stopKind classifies why the executor was asked to stop. It maps directly
 // to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
 type stopKind uint8
@@ -375,7 +347,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	// prevBlocks must exist before pe.run(): workers read it from their own goroutines.
 	pe.prevBlocks = state.NewPrevBlockList()
-	pe.vmBuilder = pe
 
 	// Register the fan-out consumers and maxBlockNum BEFORE run() starts the execLoop
 	// goroutine: execLoop's exit path (closeApplyChannels) reads pe.consumers, so
@@ -1111,7 +1082,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							pe.Lock()
 							delete(pe.blockExecutors, br.BlockNum)
 							pe.Unlock()
-							pe.scheduleNextPending(ctx)
+							if err := pe.scheduleNextPending(ctx); err != nil {
+								return err
+							}
 						}
 					}
 				default:
@@ -1234,7 +1207,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if startCatchup {
 					sizeCutPending = true
 				}
-				pe.scheduleNextPending(ctx)
+				if err := pe.scheduleNextPending(ctx); err != nil {
+					return err
+				}
 			}
 
 			// No need to wait for the apply loop before scheduling the next block: its
@@ -1249,8 +1224,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// the exec loop (single-writer); lazily installed on first apply otherwise.
 				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
-				blockExecutor.execStarted = time.Now()
-				blockExecutor.scheduleExecution(ctx, pe)
+				if err := pe.startBlock(ctx, blockExecutor); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1294,7 +1270,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted, execRequest.versionMap)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -1376,10 +1352,24 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		scheduleable.execStarted = time.Now()
-		scheduleable.scheduleExecution(ctx, pe)
+		return pe.startBlock(ctx, scheduleable)
 	}
 
+	return nil
+}
+
+func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
+	if len(be.accessList) > 0 {
+		base := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx)), be.blockNum)
+		if err := be.versionMap.SeedEmptyRemovals(be.accessList,
+			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
+			pe.cfg.chainConfig.Aura != nil,
+			base); err != nil {
+			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
+		}
+	}
+	be.execStarted = time.Now()
+	be.scheduleExecution(ctx, pe)
 	return nil
 }
 
@@ -1549,11 +1539,11 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	}
 }
 
-func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
+func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
 		pe.Unlock()
-		return
+		return nil
 	}
 	var nextNum uint64
 	first := true
@@ -1567,10 +1557,9 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 	pe.Unlock()
 	if next == nil || !next.execStarted.IsZero() {
 		// Already running (or scheduled).
-		return
+		return nil
 	}
-	next.execStarted = time.Now()
-	next.scheduleExecution(ctx, pe)
+	return pe.startBlock(ctx, next)
 }
 
 // processSingleResult routes one worker result to its block executor's
@@ -1853,9 +1842,6 @@ type blockRequest struct {
 	lastTxNum  uint64
 	blockTime  uint64
 	bal        types.BlockAccessList
-	// versionMap is the block's shared version map, constructed once by the dispatcher
-	// and read post-seal by the commitment calculator via GetAccount.
-	versionMap *state.VersionMap
 }
 
 // calcMode is the commitment calculator's per-block strategy.
@@ -2522,15 +2508,13 @@ type execRequest struct {
 	consumers  *resultStream
 	profile    bool
 	exhausted  *ErrLoopExhausted
-	// versionMap is the same shared instance handed to the commitment calculator on
-	// the block request; nil on paths that let the executor build its own.
-	versionMap *state.VersionMap
 }
 
 type blockExecutor struct {
 	sync.Mutex
-	blockNum  uint64
-	blockHash common.Hash
+	blockNum   uint64
+	blockHash  common.Hash
+	accessList types.BlockAccessList
 
 	tasks   []*execTask
 	results []*execResult
@@ -2653,13 +2637,9 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 	return be.consumers.publish(ctx, r, mustDeliver)
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted, versionMap *state.VersionMap) *blockExecutor {
-	// Prefer the shared version map the dispatcher built (also handed to the commitment
-	// calculator); build one internally only when a caller supplies none. Either way
-	// baseTxNum is set when the first task is appended.
-	if versionMap == nil {
-		versionMap = state.NewVersionMap(accessList)
-	}
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+	versionMap := state.NewVersionMap(accessList)
+	versionMap.SeedAddresses(accessList)
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2668,6 +2648,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
 		versionMap:          versionMap,
+		accessList:          accessList,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
@@ -3573,8 +3554,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// The version map is registered in the prev-block chain at construction
-		// (buildBlockVersionMap), not here; the apply loop drops it on commit.
+		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,

@@ -658,12 +658,6 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		})
 	}
 
-	// Seed the block's version map from its BAL, as exec does before dispatching the
-	// block; the BAL-driven fold reads every value from it via the view's GetAccount.
-	vm := state.NewVersionMap(bList)
-	vm.SetBaseTxNum(firstTxNum - 1)
-	require.NoError(t, vm.SeedEmptyRemovals(bList, false, false, nil))
-
 	// Drive compute-ahead. The block-end stateRoot is a dummy: the step checkpoints
 	// are written before the block-end root check, so a mismatch there still
 	// exercises the mid-block checkpoint under test (we assert on the checkpoint,
@@ -674,7 +668,6 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		lastTxNum:  lastTxNum,
 		stateRoot:  common.Hash{0xde, 0xad},
 		bal:        bList,
-		versionMap: vm,
 	})
 
 	require.NoError(t, doms.Flush(ctx, tx))
@@ -745,10 +738,6 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 					Address:      [20]byte(addrBytes),
 					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
 				}}
-				vm := state.NewVersionMap(bal)
-				vm.SetBaseTxNum(i - 1)
-				require.NoError(t, vm.SeedEmptyRemovals(bal, false, false, nil))
-
 				// stateRoot is deliberately wrong, so a processed request publishes
 				// ErrWrongTrieRoot and a dropped one publishes nothing at all.
 				send := func() {
@@ -758,7 +747,6 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 						lastTxNum:  i,
 						stateRoot:  common.Hash{0xba, 0xd5, 0x00, 0x71},
 						bal:        bal,
-						versionMap: vm,
 					}
 					in <- newTestBlockResult(i, common.Hash{0x01}, i, false)
 					close(reqs)
