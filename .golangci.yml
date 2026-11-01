@@ -160,6 +160,7 @@ linters:
         - suite-method-signature
         - suite-subtest-run
         - nil-compare
+        - require-error
     modernize:
       # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
       disable:

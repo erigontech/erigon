@@ -1518,7 +1518,6 @@ func TestShanghaiValidateTxn(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	asrt := assert.New(t)
 	tests := map[string]struct {
 		expected   txpoolcfg.DiscardReason
 		dataLen    int
@@ -1580,23 +1579,23 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			tx, err := coreDB.BeginTemporalRw(ctx)
-			asrt.NoError(err)
+			require.NoError(t, err)
 			defer tx.Rollback()
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-			asrt.NoError(err)
+			require.NoError(t, err)
 			defer sd.Close()
 			cache := kvcache.NewLatestBatchCache()
 			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
-			asrt.NoError(err)
+			require.NoError(t, err)
 
 			sndr := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts.SerialiseV3(&sndr)
 			txNum := uint64(0)
 			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
-			asrt.NoError(err)
+			require.NoError(t, err)
 
 			err = sd.Flush(ctx, tx)
-			asrt.NoError(err)
+			require.NoError(t, err)
 
 			var to *common.Address
 			if !test.creation {
@@ -1619,12 +1618,12 @@ func TestShanghaiValidateTxn(t *testing.T) {
 				Senders: Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 			}
 			err = pool.senders.registerNewSenders(&txns, logger)
-			asrt.NoError(err)
+			require.NoError(t, err)
 			view, err := cache.View(ctx, tx)
-			asrt.NoError(err)
+			require.NoError(t, err)
 			pool.blockGasLimit.Store(30_000_000)
 			reason, err := pool.validateTx(txn, false, view)
-			asrt.NoError(err)
+			require.NoError(t, err)
 
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
