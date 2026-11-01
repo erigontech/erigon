@@ -96,7 +96,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, jus
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
-			activeBalance := uint64(0)
+			var activeBalance uint64
 			if cachedState, ok := f.checkpointStates.Load(justifiedCheckpoint); ok {
 				activeBalance = cachedState.(*checkpointState).unslashedActiveBalance
 			} else {
