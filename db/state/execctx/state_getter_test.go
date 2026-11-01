@@ -183,21 +183,12 @@ func (tx *codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOp
 // resolve those hashes from committed state rather than from the batch.
 func commitCodeAccounts(t *testing.T, db kv.TemporalRwDB, addrs, codes [][]byte) {
 	t.Helper()
-	ctx := t.Context()
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
 	for i := range codes {
-		acc := accounts.SerialiseV3(&accounts.Account{
+		commitAccount(t, db, nil, addrs[i], accounts.SerialiseV3(&accounts.Account{
 			Nonce:    1,
 			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
-		})
-		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addrs[i], acc, 5, nil))
+		}), 5)
 	}
-	require.NoError(t, sd.Commit(ctx, rwTx))
 }
 
 // A caller-owned buffer outlives each getter, so a later getter decodes into it
