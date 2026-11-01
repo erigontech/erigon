@@ -14,16 +14,9 @@ type AccountBaseReader interface {
 	ReadAccountData(accounts.Address) (*accounts.Account, error)
 }
 
-// StorageBaseReader supplies a committed slot value for slots the versionMap has no
-// cell for — the storage counterpart of AccountBaseReader, used by VersionMapView's
-// cross-block fallback where the touched union spans earlier blocks' writes.
-type StorageBaseReader interface {
-	ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error)
-}
-
 type BaseReader interface {
 	AccountBaseReader
-	StorageBaseReader
+	ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error)
 }
 
 // VersionedAccountView is an accounts.AccountView composing each account field on
