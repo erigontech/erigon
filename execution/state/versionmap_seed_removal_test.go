@@ -199,3 +199,32 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	require.True(t, ok, "funded again at index 2: present at block end")
 	require.Equal(t, *uint256.NewInt(7), acc.Balance)
 }
+
+// TestSeedEmptyRemovals_DrainThenRecreateWithoutBalance pins that a re-creation with no
+// balance change (CREATE2 onto a drained address) supersedes the interior removal, as
+// createObject does for a worker.
+func TestSeedEmptyRemovals_DrainThenRecreateWithoutBalance(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a2"))
+	bal := types.BlockAccessList{{
+		Address:        addr.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x00}}},
+	}}
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	base := accounts.NewAccount()
+	base.Balance = *uint256.NewInt(5)
+	reader.accounts[addr] = &base
+
+	vm := NewVersionMap(bal)
+	vm.SetBaseTxNum(0)
+	require.NoError(t, vm.SeedEmptyRemovals(bal, true, false, reader))
+
+	_, ok := vm.View(1, reader).GetAccount(addr)
+	require.False(t, ok, "drained to empty at index 1")
+	acc, ok := vm.View(2, reader).GetAccount(addr)
+	require.True(t, ok, "re-created at index 2: present at block end")
+	require.Equal(t, uint64(1), acc.Nonce)
+}

@@ -18,6 +18,7 @@ package state
 
 import (
 	"cmp"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -150,6 +151,12 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 			rm := &WriteSet{}
 			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
 			interior = append(interior, rm)
+			next := balNextChangeIndex(ac, idx)
+			if !slices.ContainsFunc(ac.BalanceChanges, func(c *types.BalanceChange) bool { return c.Index == next }) {
+				live := &WriteSet{}
+				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
+				interior = append(interior, live)
+			}
 		}
 	}
 	for _, rm := range interior {
@@ -192,9 +199,13 @@ func (vm *VersionMap) seedOneAddress(ac *types.AccountChanges) {
 // balMinChangeIndex is the lowest 1-based change index across an account's BAL entries,
 // i.e. the index at which it first appears this block, or 0 if it only has reads.
 func balMinChangeIndex(ac *types.AccountChanges) uint32 {
+	return balNextChangeIndex(ac, 0)
+}
+
+func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 	var m uint32
 	upd := func(idx uint32) {
-		if idx != 0 && (m == 0 || idx < m) {
+		if idx > after && (m == 0 || idx < m) {
 			m = idx
 		}
 	}
