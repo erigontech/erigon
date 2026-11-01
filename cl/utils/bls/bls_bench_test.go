@@ -2,16 +2,25 @@ package bls_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/stretchr/testify/require"
 )
 
+// aggregateBenchmarkSizes adds the 32768-key case only outside short mode: building its inputs takes seconds.
+func aggregateBenchmarkSizes(sizes ...int) []int {
+	if testing.Short() {
+		return sizes
+	}
+	return append(sizes, 32768)
+}
+
 func BenchmarkVerifyAggregate(b *testing.B) {
-	message := []byte("aggregate verification benchmark")
-	_, publicKeys, signatures := generateAggregateInputs(b, 32768, message)
-	sizes := []int{1, 128, 2048, 32768}
+	message := aggregateMessage
+	sizes := aggregateBenchmarkSizes(1, 128, 2048)
+	_, publicKeys, signatures := generateAggregateInputs(b, slices.Max(sizes))
 
 	bls.SetEnabledCaching(true)
 	b.Cleanup(func() { bls.SetEnabledCaching(false) })
@@ -36,9 +45,10 @@ func BenchmarkVerifyAggregate(b *testing.B) {
 }
 
 func BenchmarkSignatureVerifyAggregate(b *testing.B) {
-	message := []byte("aggregate verification benchmark")
-	publicKeys, _, signatures := generateAggregateInputs(b, 32768, message)
-	for _, size := range []int{1, 128, 513, 2048, 32768} {
+	message := aggregateMessage
+	sizes := aggregateBenchmarkSizes(1, 128, 513, 2048)
+	publicKeys, _, signatures := generateAggregateInputs(b, slices.Max(sizes))
+	for _, size := range sizes {
 		b.Run(fmt.Sprintf("keys=%d", size), func(b *testing.B) {
 			signature := aggregateSignature(b, signatures[:size])
 			keys := publicKeys[:size]

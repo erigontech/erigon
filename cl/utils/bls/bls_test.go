@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -50,21 +51,33 @@ func convertHexToMessage(h string) []byte {
 	return b
 }
 
-func generateAggregateInputs(t testing.TB, count int, message []byte) ([]bls.PublicKey, [][]byte, [][]byte) {
+var aggregateMessage = []byte("aggregate verification message")
+
+var aggregateInputs struct {
+	sync.Mutex
+	publicKeys     []bls.PublicKey
+	publicKeyBytes [][]byte
+	signatures     [][]byte
+}
+
+// generateAggregateInputs returns the first count keys and their signatures over aggregateMessage.
+// The inputs are shared across tests and benchmarks, because signing thousands of keys takes seconds.
+func generateAggregateInputs(t testing.TB, count int) ([]bls.PublicKey, [][]byte, [][]byte) {
 	t.Helper()
-	publicKeys := make([]bls.PublicKey, count)
-	publicKeyBytes := make([][]byte, count)
-	signatures := make([][]byte, count)
-	for i := range count {
+	inputs := &aggregateInputs
+	inputs.Lock()
+	defer inputs.Unlock()
+	for i := len(inputs.publicKeys); i < count; i++ {
 		var ikm [32]byte
 		binary.LittleEndian.PutUint64(ikm[:], uint64(i+1))
 		privateKey, err := bls.NewPrivateKeyFromIKM(ikm[:])
 		require.NoError(t, err)
-		publicKeys[i] = privateKey.PublicKey()
-		publicKeyBytes[i] = bls.CompressPublicKey(publicKeys[i])
-		signatures[i] = privateKey.Sign(message).Bytes()
+		publicKey := privateKey.PublicKey()
+		inputs.publicKeys = append(inputs.publicKeys, publicKey)
+		inputs.publicKeyBytes = append(inputs.publicKeyBytes, bls.CompressPublicKey(publicKey))
+		inputs.signatures = append(inputs.signatures, privateKey.Sign(aggregateMessage).Bytes())
 	}
-	return publicKeys, publicKeyBytes, signatures
+	return inputs.publicKeys[:count:count], inputs.publicKeyBytes[:count:count], inputs.signatures[:count:count]
 }
 
 func aggregateSignature(t testing.TB, signatures [][]byte) *bls.Signature {
@@ -107,9 +120,9 @@ func TestSignatureVerifyAggregate(t *testing.T) {
 		afterTwoChunks = 1025
 		largeAggregate = 4096
 	)
-	message := []byte("aggregate verification message")
+	message := aggregateMessage
 	wrongMessage := []byte("wrong aggregate verification message")
-	publicKeys, _, signatures := generateAggregateInputs(t, largeAggregate, message)
+	publicKeys, _, signatures := generateAggregateInputs(t, largeAggregate)
 	singleSignature := aggregateSignature(t, signatures[:1])
 	smallSignature := aggregateSignature(t, signatures[:smallCount])
 	beforeChunkSignature := aggregateSignature(t, signatures[:beforeChunk])
@@ -152,9 +165,9 @@ func TestSignatureVerifyAggregateWorkerBufferReuse(t *testing.T) {
 	previousMaxProcs := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previousMaxProcs) })
 
-	message := []byte("aggregate verification message")
+	message := aggregateMessage
 	wrongMessage := []byte("wrong aggregate verification message")
-	publicKeys, _, signatures := generateAggregateInputs(t, 2049, message)
+	publicKeys, _, signatures := generateAggregateInputs(t, 2049)
 	for _, count := range []int{1025, 2049} {
 		t.Run(fmt.Sprintf("keys=%d", count), func(t *testing.T) {
 			signature := aggregateSignature(t, signatures[:count])
@@ -166,8 +179,8 @@ func TestSignatureVerifyAggregateWorkerBufferReuse(t *testing.T) {
 }
 
 func TestSignatureVerifyAggregateBatchInputs(t *testing.T) {
-	message := []byte("aggregate verification message")
-	publicKeys, _, signatures := generateAggregateInputs(t, 513, message)
+	message := aggregateMessage
+	publicKeys, _, signatures := generateAggregateInputs(t, 513)
 	negativePublicKey := bls.PublicKey(new(blst.P1).Sub((*blst.P1Affine)(publicKeys[0])).ToAffine())
 	negatedSignature := negativeSignature(t, signatures[0])
 
@@ -201,8 +214,8 @@ func TestSignatureVerifyAggregateBatchInputs(t *testing.T) {
 }
 
 func TestSignatureVerifyAggregatePreservesKeyMultiplicityAndOrder(t *testing.T) {
-	message := []byte("aggregate verification message")
-	publicKeys, _, signatures := generateAggregateInputs(t, 2, message)
+	message := aggregateMessage
+	publicKeys, _, signatures := generateAggregateInputs(t, 2)
 	aggregated := aggregateSignature(t, [][]byte{signatures[0], signatures[0], signatures[1]})
 
 	repeatedKeys := []bls.PublicKey{publicKeys[0], publicKeys[0], publicKeys[1]}
@@ -212,8 +225,8 @@ func TestSignatureVerifyAggregatePreservesKeyMultiplicityAndOrder(t *testing.T) 
 }
 
 func TestVerifyAggregateRejectsCancellingPublicKeys(t *testing.T) {
-	message := []byte("aggregate verification message")
-	publicKeys, publicKeyBytes, _ := generateAggregateInputs(t, 1, message)
+	message := aggregateMessage
+	publicKeys, publicKeyBytes, _ := generateAggregateInputs(t, 1)
 	negativePublicKey := new(blst.P1).Sub((*blst.P1Affine)(publicKeys[0])).ToAffine().Compress()
 
 	valid, err := bls.VerifyAggregate(
@@ -226,8 +239,8 @@ func TestVerifyAggregateRejectsCancellingPublicKeys(t *testing.T) {
 }
 
 func TestVerifyAggregateEmptyPublicKeys(t *testing.T) {
-	message := []byte("aggregate verification message")
-	_, publicKeyBytes, signatures := generateAggregateInputs(t, 1, message)
+	message := aggregateMessage
+	_, publicKeyBytes, signatures := generateAggregateInputs(t, 1)
 
 	valid, err := bls.VerifyAggregate(signatures[0], message, nil)
 	require.NoError(t, err)
