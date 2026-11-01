@@ -1647,13 +1647,15 @@ mainloop:
 				log.Debug("rejecting column response with a signature that differs from the stored block", "pid", result.pid)
 				if slices.ContainsFunc(result.sidecars, invalidFuluSidecar) {
 					d.rpc.BanPeerForInvalidData(ctx, result.pid)
-				} else {
-					d.rpc.BanPeer(result.pid)
+					continue
 				}
-				continue
+				d.rpc.BanPeer(result.pid)
 			}
 			var wg sync.WaitGroup
 			for i, sidecar := range result.sidecars {
+				if unverifiedSignatureMismatch && sidecar.Version() < clparams.GloasVersion {
+					continue
+				}
 				wg.Go(func() {
 					slot, blockRoot := resolved[i].slot, resolved[i].blockRoot
 					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion

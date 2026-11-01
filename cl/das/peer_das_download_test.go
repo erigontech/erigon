@@ -164,7 +164,11 @@ func newColumnResponseRPCWithPeerAndForkEpoch(t *testing.T, cfg *clparams.Beacon
 		}
 		encoded[i] = wire.Bytes()
 	}
+	return newColumnResponseRPCFromWire(t, cfg, clock, peerEnodeID, custodyGroupCount, encoded)
+}
 
+func newColumnResponseRPCFromWire(t *testing.T, cfg *clparams.BeaconChainConfig, clock eth_clock.EthereumClock, peerEnodeID string, custodyGroupCount uint64, encoded [][]byte) (*rpc.BeaconRpcP2P, *maliciousColumnSentinel) {
+	t.Helper()
 	syncnets := [1]byte{}
 	metadata := &cltypes.Metadata{Syncnets: &syncnets, CustodyGroupCount: &custodyGroupCount}
 	var metadataWire bytes.Buffer
@@ -536,6 +540,82 @@ func TestRunDownloadBansPeerForInvalidProofBehindSignatureMismatch(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestRunDownloadBansPeerForInvalidGloasSidecarBesideFuluSignatureMismatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	currentSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	fuluBlock, fuluRoot, _, fuluColumns := recoverableFuluDataAtSlot(t, &cfg, cfg.FuluForkEpoch*cfg.SlotsPerEpoch)
+	fuluMetadata, err := newBlobRecoveryMetadata(fuluBlock, fuluRoot)
+	require.NoError(t, err)
+	mismatchedHeader := *fuluColumns[0].SignedBlockHeader
+	mismatchedHeader.Signature[0] ^= 1
+	fuluColumns[0].SignedBlockHeader = &mismatchedHeader
+	require.False(t, invalidFuluSidecar(fuluColumns[0]))
+	gloasBlock, gloasRoot, gloasColumns := recoverableGloasColumns(t, &cfg, currentSlot)
+	gloasColumns[1].KzgProofs.Get(0)[0] ^= 1
+	require.False(t, VerifyDataColumnSidecarKZGProofsWithCommitments(gloasColumns[1], gloasBlock.GetBlobKzgCommitments()))
+
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-currentSlot*cfg.SecondsPerSlot, common.Hash{}, &cfg)
+	var wire bytes.Buffer
+	for i, chunk := range []struct {
+		sidecar *cltypes.DataColumnSidecar
+		epoch   uint64
+	}{{fuluColumns[0], cfg.FuluForkEpoch}, {gloasColumns[1], cfg.GloasForkEpoch}} {
+		sidecar := chunk.sidecar
+		if i > 0 {
+			require.NoError(t, wire.WriteByte(0))
+		}
+		digest, err := clock.ComputeForkDigest(chunk.epoch)
+		require.NoError(t, err)
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, sidecar, digest[:]...))
+	}
+	rpcClient, sentinel := newColumnResponseRPCFromWire(t, &cfg, clock, "", cfg.NumberOfColumns, [][]byte{wire.Bytes()})
+
+	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasMixedFork", 1)
+	require.NoError(t, err)
+	gloasDataCache.Add(gloasRoot, &gloasBlockData{
+		BlobKzgCommitments:      gloasBlock.GetBlobKzgCommitments(),
+		SignedBeaconBlockHeader: gloasBlock.SignedBeaconBlockHeader(),
+	})
+	d := &peerdas{
+		rpc:            rpcClient,
+		beaconConfig:   &cfg,
+		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		gloasDataCache: gloasDataCache,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: fuluRoot, slot: fuluBlock.GetSlot()}:   {0: true},
+			{blockRoot: gloasRoot, slot: gloasBlock.GetSlot()}: {1: true},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{fuluRoot: fuluMetadata},
+		validatedBlobCount: map[common.Hash]uint32{fuluRoot: 0},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatalf("an invalid Gloas sidecar beside a Fulu signature mismatch was not hard-banned, soft bans: %d", sentinel.softBans.Load())
+	}
+	cancel()
+	<-done
 }
 
 func TestRunDownloadAcceptsGloasSidecarWithRecoveryMetadata(t *testing.T) {
