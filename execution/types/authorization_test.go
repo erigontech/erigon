@@ -17,14 +17,13 @@
 package types
 
 import (
-	"github.com/stretchr/testify/require"
-
 	"errors"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
