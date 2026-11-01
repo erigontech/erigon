@@ -144,7 +144,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 // predecessor maps → shared domain): an account absent in the view removes its leaf
 // (and subtree), a present one writes its full account; a storage slot cleared to zero
 // removes its leaf, a non-zero one writes it.
-func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) {
+func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) error {
 	for addr := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update
@@ -185,4 +185,5 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}
 	}
+	return view.Err()
 }

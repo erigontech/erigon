@@ -17,6 +17,8 @@
 package stagedsync
 
 import (
+	"errors"
+
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -213,9 +215,53 @@ func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
 	cc.accumulateTouched(state.NewVersionMapWriteView(wsA, vmA, txIdx))
 	cc.accumulateTouched(state.NewVersionMapWriteView(wsB, vmB, txIdx))
 	u := newTestUpdates()
-	cc.emitTouched(vmB.View(T, &testStorageBase{}), u)
+	require.NoError(t, cc.emitTouched(vmB.View(T, &testStorageBase{}), u))
 
 	got := collectUpdates(t, u)[string(av[:])]
 	require.Equal(t, *uint256.NewInt(7), got.Balance)
 	require.True(t, got.DeleteStorageSubtree, "a destruct in an earlier batch block must reset the storage subtree")
+}
+
+type errStorageBase struct {
+	accErr, storErr error
+}
+
+func (b *errStorageBase) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, b.accErr
+}
+
+func (b *errStorageBase) ReadStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	return uint256.Int{}, false, b.storErr
+}
+
+// TestEmitTouched_BaseReadErrorFailsTheFold pins that a failed base read fails the fold
+// instead of emitting a delete for the account or slot it could not read.
+func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	ver := state.Version{TxIndex: txIdx}
+	addr := accounts.InternAddress([20]byte{0xe1})
+	slot := accounts.InternKey([32]byte{0x2})
+	boom := errors.New("boom")
+
+	t.Run("account", func(t *testing.T) {
+		vm := state.NewVersionMap(nil)
+		vm.SetBaseTxNum(0)
+		cc := &commitmentCalculator{}
+		cc.accumulateTouched(newWS().nonce(addr, ver, 1).build())
+		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{accErr: boom}), newTestUpdates())
+		require.ErrorIs(t, err, boom)
+	})
+
+	t.Run("storage", func(t *testing.T) {
+		ws := newWS().bal(addr, ver, *uint256.NewInt(1)).stor(addr, slot, ver, *uint256.NewInt(1)).build()
+		vm := state.NewVersionMap(nil)
+		vm.SetBaseTxNum(0)
+		vm.FlushVersionedWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
+		cc := &commitmentCalculator{}
+		cc.accumulateTouched(ws)
+		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{storErr: boom}), newTestUpdates())
+		require.ErrorIs(t, err, boom)
+	})
 }

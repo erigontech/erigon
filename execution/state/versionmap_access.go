@@ -17,6 +17,8 @@
 package state
 
 import (
+	"cmp"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -55,7 +57,12 @@ type VersionMapView struct {
 	vm    *VersionMap
 	txNum uint64
 	base  AccountBaseReader
+	err   error
 }
+
+// Err reports the first base read error of any read through the view; a read that
+// hit one reports absent, so the caller must check Err before trusting the results.
+func (view *VersionMapView) Err() error { return view.err }
 
 // View pins a read of vm at the given global txNum. base is the cascade tail —
 // predecessor version maps then the shared domain — supplying fields no cell covers.
@@ -81,7 +88,12 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if _, balRes, balOk := view.vm.ReadBalance(addr, txIdx); balOk && balRes.ValStatus() == ValueDeleted {
 		return accounts.Account{}, false
 	}
-	acc := NewVersionedAccountView(addr, txIdx, view.vm, view.base).AccountForCommitment()
+	av := NewVersionedAccountView(addr, txIdx, view.vm, view.base)
+	acc := av.AccountForCommitment()
+	if err := av.Err(); err != nil {
+		view.err = cmp.Or(view.err, err)
+		return accounts.Account{}, false
+	}
 	if acc == nil {
 		return accounts.Account{}, false
 	}
@@ -97,7 +109,12 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 		return val, true
 	}
 	if sr, ok := view.base.(StorageBaseReader); ok && sr != nil {
-		if val, ok, err := sr.ReadStorage(addr, key); err == nil && ok {
+		val, ok, err := sr.ReadStorage(addr, key)
+		if err != nil {
+			view.err = cmp.Or(view.err, err)
+			return uint256.Int{}, false
+		}
+		if ok {
 			return val, true
 		}
 	}
@@ -118,7 +135,7 @@ func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
 // touched account whose block-end state — its seeded cells composed with the committed
 // base for untouched fields — is empty and removable, it stamps a self-destruct removal
 // cell at the account's last-changed index. Mirrors exec's encodeExistingEmptyRemovals.
-func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base AccountBaseReader) {
+func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base AccountBaseReader) error {
 	ws := &WriteSet{}
 	for i := range bal {
 		ac := &bal[i]
@@ -130,7 +147,11 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
-		acc, ok := NewVersionedAccountView(addr, int(maxIdx), vm, base).GetAccount()
+		av := NewVersionedAccountView(addr, int(maxIdx), vm, base)
+		acc, ok := av.GetAccount()
+		if err := av.Err(); err != nil {
+			return err
+		}
 		if !ok || !isEmptyForEIP161(acc.Balance, acc.Nonce, acc.CodeHash) {
 			continue
 		}
@@ -139,6 +160,7 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 	if !ws.IsEmpty() {
 		vm.FlushVersionedWrites(ws, true)
 	}
+	return nil
 }
 
 // SeedAddresses marks each BAL account as existing at its creating tx, so the address

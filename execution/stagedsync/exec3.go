@@ -825,7 +825,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// Built and registered via the executor's factory (buildBlockVersionMap);
 			// committedBase is the chain tail for untouched fields.
 			committedBase := state.NewReaderV3(te.doms.AsGetter(execRoTx))
-			blockVersionMap := te.vmBuilder.buildBlockVersionMap(b.NumberU64(), blockStartTxNum, inputTxNum-1, dbBAL, committedBase)
+			blockVersionMap, err := te.vmBuilder.buildBlockVersionMap(b.NumberU64(), blockStartTxNum, inputTxNum-1, dbBAL, committedBase)
+			if err != nil {
+				return err
+			}
 
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum

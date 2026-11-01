@@ -662,7 +662,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// block; the BAL-driven fold reads every value from it via the view's GetAccount.
 	vm := state.NewVersionMap(bList)
 	vm.SetBaseTxNum(firstTxNum - 1)
-	vm.SeedEmptyRemovals(bList, false, false, nil)
+	require.NoError(t, vm.SeedEmptyRemovals(bList, false, false, nil))
 
 	// Drive compute-ahead. The block-end stateRoot is a dummy: the step checkpoints
 	// are written before the block-end root check, so a mismatch there still
@@ -747,7 +747,7 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 				}}
 				vm := state.NewVersionMap(bal)
 				vm.SetBaseTxNum(i - 1)
-				vm.SeedEmptyRemovals(bal, false, false, nil)
+				require.NoError(t, vm.SeedEmptyRemovals(bal, false, false, nil))
 
 				// stateRoot is deliberately wrong, so a processed request publishes
 				// ErrWrongTrieRoot and a dropped one publishes nothing at all.

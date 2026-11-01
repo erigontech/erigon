@@ -140,7 +140,7 @@ type parallelExecutor struct {
 
 // blockVMBuilder builds and registers a block's version map.
 type blockVMBuilder interface {
-	buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) *state.VersionMap
+	buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) (*state.VersionMap, error)
 }
 
 // buildBlockVersionMap builds the block's version map, seeds its EIP-161 removals,
@@ -149,19 +149,21 @@ type blockVMBuilder interface {
 // dispatched-but-unsealed blocks. Safe because exec is block-ordered: a worker
 // reads only blocks before its own, already sealed; only the seed reads an
 // unsealed earlier block, through the version map's own locking.
-func (pe *parallelExecutor) buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) *state.VersionMap {
+func (pe *parallelExecutor) buildBlockVersionMap(blockNum, firstTxNum, lastTxNum uint64, bal types.BlockAccessList, committedBase state.StateReader) (*state.VersionMap, error) {
 	vm := state.NewVersionMap(bal)
 	vm.SetBaseTxNum(firstTxNum)
 	if len(bal) > 0 {
 		vm.SeedAddresses(bal)
 		base := state.PrevBlockBase(committedBase, pe.prevBlocks, blockNum)
-		vm.SeedEmptyRemovals(bal,
+		if err := vm.SeedEmptyRemovals(bal,
 			blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(blockNum),
 			pe.cfg.chainConfig.Aura != nil,
-			base)
+			base); err != nil {
+			return nil, fmt.Errorf("seed EIP-161 removals of block %d: %w", blockNum, err)
+		}
 	}
 	pe.prevBlocks.PushHead(blockNum, lastTxNum, vm)
-	return vm
+	return vm, nil
 }
 
 // stopKind classifies why the executor was asked to stop. It maps directly

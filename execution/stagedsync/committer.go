@@ -650,8 +650,11 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	balUpdates := cc.balUpdates
 	cc.clearTouched()
 	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex))
-	cc.emitTouched(req.versionMap.View(t.lastTxNum, &committedAccountReader{reader}), balUpdates)
+	err := cc.emitTouched(req.versionMap.View(t.lastTxNum, &committedAccountReader{reader}), balUpdates)
 	cc.clearTouched()
+	if err != nil {
+		return nil, nil, fmt.Errorf("base read: %w", err)
+	}
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
 
@@ -681,9 +684,13 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	// Recompute block r the raw-view way (emitTouched over the version map) to
 	// cross-check against the BAL-driven root.
 	cc.asOfReader.txNum = r.lastTxNum + 1
-	cc.emitTouched(cc.curVersionMap.View(r.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
+	err := cc.emitTouched(cc.curVersionMap.View(r.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
 	cc.clearTouched()
 	incUpdates := cc.handOffUpdates()
+	if err != nil {
+		cc.fail(ctx, r, fmt.Errorf("shadow incremental base read: %w", err))
+		return
+	}
 	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, targetOf(r), incUpdates, cc.asOfReader)
 	if err != nil {
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental compute: %w", err))
@@ -785,9 +792,16 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
-	cc.emitTouched(cc.curVersionMap.View(t.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
+	emitErr := cc.emitTouched(cc.curVersionMap.View(t.lastTxNum, &committedAccountReader{cc.asOfReader}), cc.updates)
 	if !m.midBlock {
 		cc.clearTouched()
+	}
+	if emitErr != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %sbase read failed: %w", m.label, emitErr),
+		})
+		return
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()

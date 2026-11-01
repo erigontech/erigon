@@ -17,6 +17,8 @@
 package state
 
 import (
+	"errors"
+
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -52,7 +54,7 @@ func TestSeedEmptyRemovals(t *testing.T) {
 
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(baseTxNum)
-	vm.SeedEmptyRemovals(bal, true, false, reader)
+	require.NoError(t, vm.SeedEmptyRemovals(bal, true, false, reader))
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
 	_, ok := vm.View(1, reader).GetAccount(emptied)
@@ -153,4 +155,21 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 	require.True(t, ok, "the funded proxy exists before the deploying tx")
 	require.Equal(t, *uint256.NewInt(256_000), acc.Balance)
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "reads before the deploy must not see the later CREATE2 code")
+}
+
+type errAccountBase struct{ err error }
+
+func (b errAccountBase) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, b.err
+}
+
+func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress([20]byte{0xe2})
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	vm := NewVersionMap(bal)
+	vm.SetBaseTxNum(0)
+	boom := errors.New("boom")
+	require.ErrorIs(t, vm.SeedEmptyRemovals(bal, true, false, errAccountBase{boom}), boom)
 }
