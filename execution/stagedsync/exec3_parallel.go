@@ -1282,19 +1282,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
 	prevAccountTx := map[common.Address]int{}
-	// codeless reports whether addr exists without code before the block, the state a charged
-	// transfer's run checks before it leaves the recipient credit to validation.
-	var reader state.StateReader
-	codeless := func(addr common.Address) bool {
-		if applyTx == nil {
-			return false
-		}
-		if reader == nil {
-			reader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
-		}
-		acc, err := reader.ReadAccountByPlainAddr(addr)
-		return err == nil && acc != nil && acc.CodeHash.IsEmpty()
-	}
+	var blockStart state.StateReader
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -1359,9 +1347,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				addresses = append(addresses, sender.Value())
 			}
 			if tx := t.Tx(); tx != nil && !tx.GetValue().IsZero() && tx.GetTo() != nil {
-				if to := *tx.GetTo(); chargedAtValidation && to != executor.coinbase.Value() &&
-					!txTask.Hooks.HasGasChangeHook() && (txTask.Hooks == nil || txTask.Hooks.OnBalanceChange == nil) &&
-					!slices.Contains(vm.ActivePrecompiles(txTask.Rules()), accounts.InternAddress(to)) && codeless(to) {
+				if chargedAtValidation && blockStart == nil {
+					blockStart = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), execRequest.blockNum)
+				}
+				if to := *tx.GetTo(); chargedAtValidation && protocol.RecipientCreditedAtValidation(sender, accounts.InternAddress(to),
+					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
 				} else {
