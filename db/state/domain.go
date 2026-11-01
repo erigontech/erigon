@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -1960,6 +1961,8 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	return dt.valsC, err
 }
 
+var osPageSize = os.Getpagesize()
+
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) ([]byte, kv.Step, bool, error) {
 	if dt == nil {
 		return nil, 0, false, nil
@@ -2022,6 +2025,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
 	if foundStep.LastTxNum(dt.stepSize) >= dt.files.EndTxNum() {
+		if len(v) > osPageSize {
+			_ = mmap.MadviseWillNeed(v) // one readahead for a multi-page value instead of a fault per page
+		}
 		return v, foundStep, true, nil
 	}
 
