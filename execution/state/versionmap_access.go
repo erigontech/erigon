@@ -17,6 +17,8 @@
 package state
 
 import (
+	"sync"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -139,6 +141,91 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 	if !ws.IsEmpty() {
 		vm.FlushVersionedWrites(ws, true)
 	}
+}
+
+// SeedAddresses establishes each BAL account's AddressPath at construction so the
+// existence read resolves without a first-access base lookup in exec. An account present
+// in the committed base publishes that base as its origin; one absent from the base is
+// created this block, so its composed record is seeded as an AddressPath cell at its first
+// change index — without it the address read (which resolves existence from AddressPath +
+// base, not the field cells the BAL seeds) reads the created account as absent and the
+// EIP-161 withhold path stamps a spurious removal.
+// The base lookups are independent per account, so with more than one base reader
+// (each bound to its own tx) they fan out across goroutines; the version-map writes
+// they drive are per-account and so stay concurrency-safe.
+func (vm *VersionMap) SeedAddresses(bal types.BlockAccessList, bases []AccountBaseReader) {
+	if len(bal) == 0 || len(bases) == 0 {
+		return
+	}
+	if len(bases) == 1 {
+		for i := range bal {
+			vm.seedOneAddress(&bal[i], bases[0])
+		}
+		return
+	}
+	idx := make(chan int, len(bases))
+	var wg sync.WaitGroup
+	for _, b := range bases {
+		wg.Add(1)
+		go func(base AccountBaseReader) {
+			defer wg.Done()
+			for i := range idx {
+				vm.seedOneAddress(&bal[i], base)
+			}
+		}(b)
+	}
+	for i := range bal {
+		idx <- i
+	}
+	close(idx)
+	wg.Wait()
+}
+
+func (vm *VersionMap) seedOneAddress(ac *types.AccountChanges, base AccountBaseReader) {
+	addr := accounts.InternAddress(ac.Address)
+	baseAcc, err := base.ReadAccountData(addr)
+	if err != nil {
+		return
+	}
+	if baseAcc != nil {
+		SeedOrigin(vm, addr, baseAcc)
+		return
+	}
+	minIdx := balMinChangeIndex(ac)
+	if minIdx == 0 {
+		return // only reads, nothing created
+	}
+	acc, ok := NewVersionedAccountView(addr, int(balMaxChangeIndex(ac)), vm, base).GetAccount()
+	if !ok {
+		return
+	}
+	vm.WriteAddress(addr, Version{TxIndex: int(minIdx) - 1}, &acc, true)
+}
+
+// balMinChangeIndex is the lowest 1-based change index across an account's BAL entries,
+// i.e. the index at which it first appears this block, or 0 if it only has reads.
+func balMinChangeIndex(ac *types.AccountChanges) uint32 {
+	var m uint32
+	upd := func(idx uint32) {
+		if idx != 0 && (m == 0 || idx < m) {
+			m = idx
+		}
+	}
+	for _, c := range ac.BalanceChanges {
+		upd(c.Index)
+	}
+	for _, c := range ac.NonceChanges {
+		upd(c.Index)
+	}
+	for _, c := range ac.CodeChanges {
+		upd(c.Index)
+	}
+	for _, sc := range ac.StorageChanges {
+		for _, c := range sc.Changes {
+			upd(c.Index)
+		}
+	}
+	return m
 }
 
 // balMaxChangeIndex is the highest 1-based change index across an account's BAL
