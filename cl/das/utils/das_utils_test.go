@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 )
 
 // testMatrix builds the full extended matrix of blobCount distinct dense blobs (sparse ones recover
@@ -143,8 +144,8 @@ func TestComputeBlobsCellsFailsOnInvalidBlob(t *testing.T) {
 	require.ErrorContains(t, err, "blob 2")
 }
 
-// Building the columns of a head block must not queue behind recovery rows, so it ignores the recovery slots.
 func TestComputeBlobsCellsDoesNotWaitForRecoverySlots(t *testing.T) {
+	kzg.InitKZGCtx() // the lazy setup is slow, mostly under -race, and must not count against the timeout below
 	for range cap(rowRecoverySlots) {
 		rowRecoverySlots <- struct{}{}
 	}
