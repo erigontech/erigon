@@ -204,3 +204,46 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 		})
 	}
 }
+
+func TestDeferredAccountsReachReadersAtMerge(t *testing.T) {
+	t.Parallel()
+
+	sd := &TemporalMemBatch{
+		stepSize:          16,
+		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		inMemHistoryReads: true,
+	}
+	for d := range sd.domains {
+		sd.domains[d] = map[string][]dataWithTxNum{}
+	}
+	latest := func(k string) string {
+		v, _, ok := sd.GetLatest(kv.AccountsDomain, []byte(k))
+		if !ok {
+			return "absent"
+		}
+		return string(v)
+	}
+
+	sd.putLatest(kv.AccountsDomain, "a", []byte("a1"), 1)
+	sd.DeferAccounts(true)
+	require.False(t, sd.putLatest(kv.AccountsDomain, "a", []byte("a5"), 5))
+	require.True(t, sd.putLatest(kv.AccountsDomain, "a", []byte("a5'"), 5))
+	sd.putLatest(kv.AccountsDomain, "b", []byte("b6"), 6)
+
+	require.Equal(t, "a1", latest("a"), "readers see the state before the block")
+	require.Equal(t, "absent", latest("b"))
+	v, _, ok := sd.PendingLatest(kv.AccountsDomain, []byte("a"))
+	require.True(t, ok)
+	require.Equal(t, "a5'", string(v), "the writer sees its own writes")
+
+	sd.MergePendingAccounts()
+	require.Equal(t, "a5'", latest("a"))
+	require.Equal(t, "b6", latest("b"))
+	before, ok, err := sd.GetAsOf(kv.AccountsDomain, []byte("a"), 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "a1", string(before), "the merge keeps the earlier version for history reads")
+	_, _, ok = sd.PendingLatest(kv.AccountsDomain, []byte("a"))
+	require.False(t, ok)
+}
