@@ -237,7 +237,7 @@ func (db *updateProbeDB) Update(ctx context.Context, f func(tx kv.RwTx) error) e
 	return db.RwDB.Update(ctx, f)
 }
 
-func newCgcTestLocalNode(t *testing.T) *enode.LocalNode {
+func newCgcTestLocalNode(t testing.TB) *enode.LocalNode {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
