@@ -34,12 +34,8 @@ func commitmentStopFilePath(dirs datadir.Dirs) string {
 func readCommitmentStopFile(dirs datadir.Dirs) (map[string]bool, error) {
 	path := commitmentStopFilePath(dirs)
 	var domains map[string]bool
-	found, err := readPBTMarker(path, &domains)
-	if err != nil {
+	if _, err := readPBTMarker(path, &domains); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	if !found {
-		return nil, nil
 	}
 	return domains, nil
 }
