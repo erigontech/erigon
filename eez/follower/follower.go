@@ -106,6 +106,9 @@ type Config struct {
 	PeerCount        func(ctx context.Context) (uint64, error)
 	PeerRefresh      time.Duration
 	OverlayPeerCount func() int
+	// OnHead, when set, receives every new L1 head from Run; it must not
+	// block.
+	OnHead func(l1.Header)
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -644,6 +647,9 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 	switch e := e.(type) {
 	case l1.NewHead:
 		f.target = max(f.target, e.Head.Number)
+		if f.cfg.OnHead != nil {
+			f.cfg.OnHead(e.Head)
+		}
 	case l1.Reorg:
 		f.logger.Info("[eez] L1 reorg", "event", "eez.l1_watcher.reorg.detected", "ancestor", e.Ancestor.Number, "oldHead", e.OldHead.Number)
 		if err := f.rewind(ctx, e.Ancestor.Number); err != nil {

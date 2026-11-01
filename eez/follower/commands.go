@@ -119,6 +119,13 @@ func (f *Follower) HeadTo(ctx context.Context, ancestor common.Hash) error {
 	})
 }
 
+// Head returns the header of the head block.
+func (f *Follower) Head(ctx context.Context) (*types.Header, error) { return f.chain.Head(ctx) }
+
+// Settled returns the block the latest derived settlement ended at, as of
+// Run's latest step.
+func (f *Follower) Settled() uint64 { return f.Status().Cursor }
+
 func (f *Follower) requireHead(ctx context.Context, hash common.Hash) error {
 	head, err := f.chain.Head(ctx)
 	if err != nil {
