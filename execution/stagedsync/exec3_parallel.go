@@ -391,6 +391,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// via its own Updates buffer.
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
 	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
+	pe.rs.Domains().DeferAccounts(true)
+	defer pe.rs.Domains().DeferAccounts(false)
 	// Restore the caller's InMemHistoryReads on exit; forcing it false breaks
 	// post-exec callers (forkchoice GetAsOf, RPC reads) that need in-mem history.
 	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
@@ -563,6 +565,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			select {
 			case applyResult, ok := <-applyResults:
 				if !ok {
+					pe.domains().MergePendingAccounts()
 					// Exec loop closed the channel — batch complete. Drain calculator
 					// results, then exit. Skip the drain if rootResults already closed
 					// (ranging a nil channel hangs forever).
@@ -678,6 +681,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					pe.domains().MergePendingAccounts()
 					built := balBuilder
 					balBuilder = nil
 					if finalized {

@@ -1844,6 +1844,35 @@ func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
+type pendingAccounts interface {
+	DeferAccounts(on bool)
+	MergePendingAccounts()
+	PendingLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool)
+}
+
+// DeferAccounts routes accounts writes to a writer-only buffer until MergePendingAccounts.
+func (sd *SharedDomains) DeferAccounts(on bool) {
+	if p, ok := sd.mem.(pendingAccounts); ok {
+		p.DeferAccounts(on)
+	}
+}
+
+func (sd *SharedDomains) MergePendingAccounts() {
+	if p, ok := sd.mem.(pendingAccounts); ok {
+		p.MergePendingAccounts()
+	}
+}
+
+// GetLatestForWrite is GetLatest for the writer: it also sees the writer-only buffer.
+func (sd *SharedDomains) GetLatestForWrite(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
+	if p, ok := sd.mem.(pendingAccounts); ok {
+		if v, step, ok := p.PendingLatest(domain, k); ok {
+			return v, step, nil
+		}
+	}
+	return sd.GetLatest(domain, tx, k)
+}
+
 func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	return sd.domainPut(domain, roTx, k, v, txNum, prevVal)
 }
@@ -1877,7 +1906,7 @@ func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, k 
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, roTx, k)
+		prevVal, _, err = sd.GetLatestForWrite(domain, roTx, k)
 		if err != nil {
 			return nil, err
 		}
@@ -1898,7 +1927,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, tx, k)
+		prevVal, _, err = sd.GetLatestForWrite(domain, tx, k)
 		if err != nil {
 			return err
 		}
