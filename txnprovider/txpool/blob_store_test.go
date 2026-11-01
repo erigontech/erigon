@@ -50,6 +50,18 @@ func TestBlobStoreAliasing(t *testing.T) {
 	require.Nil(pool.GetBlobs([]common.Hash{h})[0].Blob)
 }
 
+func TestBlobStoreRemoveDropsCells(t *testing.T) {
+	s := newBlobStore()
+	h, owner := common.Hash{0x42}, common.Hash{0xa}
+	s.put(h, owner, PoolBlobBundle{Blob: []byte("A"), Cells: &[goethkzg.CellsPerExtBlob]*goethkzg.Cell{}})
+
+	s.remove(common.Hash{0xb}, []common.Hash{h})
+	require.Equal(t, 1, s.cells.Len(), "cells dropped by a txn that does not own the blob")
+
+	s.remove(owner, []common.Hash{h})
+	require.Zero(t, s.cells.Len(), "cells kept after the owning txn left the pool")
+}
+
 func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 	pool, _ := newGetBlobsTestPool(t, 1)
 
@@ -60,7 +72,7 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 	for i := range hashes {
 		hashes[i] = common.Hash{byte(i), byte(i >> 8), 0x01}
 		owners[i] = common.Hash{byte(i), 0x02}
-		bundles[i] = PoolBlobBundle{Blob: []byte{byte(i)}}
+		bundles[i] = PoolBlobBundle{Blob: []byte{byte(i)}, Cells: &[goethkzg.CellsPerExtBlob]*goethkzg.Cell{}}
 	}
 
 	var wg sync.WaitGroup
@@ -70,7 +82,6 @@ func TestGetBlobsConcurrentReadWrite(t *testing.T) {
 		wg.Go(func() {
 			for !stop.Load() {
 				for i := w; i < numBlobs; i += 4 {
-					pool.blobs.putCells(hashes[i], &[goethkzg.CellsPerExtBlob]*goethkzg.Cell{})
 					pool.blobs.put(hashes[i], owners[i], bundles[i])
 				}
 				for i := w; i < numBlobs; i += 4 {

@@ -1219,8 +1219,8 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
 		if p.isAmsterdam() {
-			for i, h := range blobHashes {
-				p.blobs.putCells(h, cells[i])
+			for i := range txn.BlobBundles {
+				txn.BlobBundles[i].Cells = cells[i]
 			}
 		}
 	} else {
@@ -1922,6 +1922,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.totalBlobsInPool.Store(t + uint64(len(blobHashes)))
 		for i, b := range blobHashes {
 			p.blobs.put(b, mt.TxnSlot.IDHash, mt.TxnSlot.BlobBundles[i])
+			mt.TxnSlot.BlobBundles[i].Cells = nil
 		}
 	}
 

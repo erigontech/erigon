@@ -83,6 +83,8 @@ func TestValidationCellsServedByGetBlobs(t *testing.T) {
 	bundles := pool.GetBlobs(slot.GetBlobHashes())
 	require.Len(t, bundles, 2)
 	for i, bundle := range bundles {
+		require.Nil(t, slot.BlobBundles[i].Cells, "pooled txn still holds the cells of blob %d", i)
+		require.Nil(t, pool.blobs.bundles[slot.GetBlobHashes()[i]].bundle.Cells, "blob store entry holds the cells of blob %d", i)
 		require.NotNil(t, bundle.Cells, "cells served for blob %d", i)
 		want, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
 		require.NoError(t, err)
@@ -107,4 +109,13 @@ func TestValidationCachesNoCellsBeforeAmsterdam(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 	require.Zero(t, pool.blobs.cells.Len(), "cells cached before Amsterdam, where no getBlobs version serves them")
+}
+
+func TestValidationCachesNoCellsForRejectedTxn(t *testing.T) {
+	ctx, pool, _, txns := newPoolWithBlobTxn(t, "Amsterdam")
+	pool.pendingBlobFee.Store(1_000_000)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow}, reasons)
+	require.Zero(t, pool.blobs.cells.Len(), "cells cached for a txn the pool rejected")
 }

@@ -43,11 +43,11 @@ func newBlobStore() *blobStore {
 	return &blobStore{bundles: make(map[common.Hash]blobStoreEntry), cells: cells}
 }
 
-func (s *blobStore) putCells(blobHash common.Hash, cells *[goethkzg.CellsPerExtBlob]*goethkzg.Cell) {
-	s.cells.Add(blobHash, cells)
-}
-
 func (s *blobStore) put(blobHash, txnHash common.Hash, bundle PoolBlobBundle) {
+	if bundle.Cells != nil {
+		s.cells.Add(blobHash, bundle.Cells)
+		bundle.Cells = nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bundles[blobHash] = blobStoreEntry{bundle: bundle, txnHash: txnHash}
@@ -62,6 +62,7 @@ func (s *blobStore) remove(txnHash common.Hash, blobHashes []common.Hash) {
 	for _, h := range blobHashes {
 		if e, ok := s.bundles[h]; ok && e.txnHash == txnHash {
 			delete(s.bundles, h)
+			s.cells.Remove(h)
 		}
 	}
 }
