@@ -390,6 +390,26 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 // this covers the partial-unwind round trip the ValidateChain parent-link
 // comment guards.
 func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
+	validateForkPayloadOffNonTipCanonicalBlock(t)
+}
+
+// With READ_AHEAD_WAIT on, validation that unwinds must not wait for the warmup
+// suspension it holds itself.
+func TestValidateForkPayloadOffNonTipCanonicalBlockWithReadAheadWait(t *testing.T) {
+	prevWait, prevParallel := dbg.ReadAheadWait, dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.ReadAheadWait, dbg.Exec3Parallel = prevWait, prevParallel })
+	dbg.ReadAheadWait = true
+	for name, parallel := range map[string]bool{"parallel": true, "serial": false} {
+		t.Run(name, func(t *testing.T) {
+			dbg.Exec3Parallel = parallel
+			hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
+			defer hang.Stop()
+			validateForkPayloadOffNonTipCanonicalBlock(t)
+		})
+	}
+}
+
+func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
