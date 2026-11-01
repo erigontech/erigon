@@ -675,7 +675,7 @@ func TestNoBump_CompleteFlushKeepsEqualValueVersion(t *testing.T) {
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 100, true)
 	require.Equal(t, Incarnation(0), cell(vm).incarnation, "an equal value at commit keeps the version")
-	require.Equal(t, FlagDone, cell(vm).flag)
+	require.Equal(t, FlagDone, cell(vm).loadFlag())
 
 	vm = NewVersionMap(nil)
 	flush(vm, 0, 100, false)
