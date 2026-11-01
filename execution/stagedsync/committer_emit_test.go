@@ -186,3 +186,36 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 		require.Contains(t, got, acctKey, "the account is still emitted")
 	})
 }
+
+// TestEmitTouched_BatchKeepsEarlierBlockDestruct pins the cross-block storage reset: an
+// account destroyed in an earlier batch block and funded again in a later one keeps
+// DeleteStorageSubtree, although the later block's version map has no destruct for it.
+func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	const T = txIdx + 1
+	ver := state.Version{TxIndex: txIdx}
+	addr := accounts.InternAddress([20]byte{0xd5})
+	av := addr.Value()
+
+	wsA := newWS().selfDestruct(addr, ver, true).bal(addr, ver, uint256.Int{}).build()
+	vmA := state.NewVersionMap(nil)
+	vmA.SetBaseTxNum(0)
+	vmA.FlushVersionedWrites(wsA, true)
+
+	wsB := newWS().bal(addr, ver, *uint256.NewInt(7)).build()
+	vmB := state.NewVersionMap(nil)
+	vmB.SetBaseTxNum(0)
+	vmB.FlushVersionedWrites(wsB, true)
+
+	cc := &commitmentCalculator{}
+	cc.accumulateTouched(state.NewVersionMapWriteView(wsA, vmA, txIdx))
+	cc.accumulateTouched(state.NewVersionMapWriteView(wsB, vmB, txIdx))
+	u := newTestUpdates()
+	cc.emitTouched(vmB.View(T, &testStorageBase{}), u)
+
+	got := collectUpdates(t, u)[string(av[:])]
+	require.Equal(t, *uint256.NewInt(7), got.Balance)
+	require.True(t, got.DeleteStorageSubtree, "a destruct in an earlier batch block must reset the storage subtree")
+}
