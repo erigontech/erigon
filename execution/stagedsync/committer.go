@@ -1516,6 +1516,9 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 	}
 	if cc.hasActivationBlock && shouldStopHexShadow(cc.activationBlock, cc.hexStopWindow, cc.finalizedBlockNum, t.blockNum) {
 		cc.stopShadowDomain(kv.CommitmentDomain)
+		if cc.logger != nil {
+			cc.logger.Info("["+cc.logPrefix+"] hex shadow commitment stopped: binary-trie activation block is finalized", "activation", cc.activationBlock, "finalized", cc.finalizedBlockNum, "block", t.blockNum)
+		}
 	}
 }
 
@@ -1925,13 +1928,17 @@ func (r *asOfStateReader) BindsWorkerTx() bool { return true }
 
 const binaryShadowStoppedRemedy = "convert this datadir with integration commitment convert-pbt --keep-hex --output.datadir=<new dir>, then run integration commitment attach-pbt --from=<new dir>"
 
-func CheckBinaryShadowRunning(tx kv.Getter, config *chain.Config) error {
-	if config == nil || !config.IsBinaryTrieScheduled() {
+func CheckBinaryShadowRunning(tx kv.Getter, config *chain.Config, logger log.Logger) error {
+	if config == nil {
 		return nil
 	}
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
 	if err != nil || !stopped {
 		return err
+	}
+	if !config.IsBinaryTrieScheduled() {
+		logger.Warn("binary commitment domain is stopped; a node given binaryTrieTime will refuse to start until it is rebuilt: " + binaryShadowStoppedRemedy)
+		return nil
 	}
 	return fmt.Errorf("binary commitment domain is stopped and binaryTrieTime %d is scheduled, so every block from the fork on would fail: %s",
 		*config.BinaryTrieTime, binaryShadowStoppedRemedy)
