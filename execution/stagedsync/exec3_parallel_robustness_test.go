@@ -442,27 +442,28 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
-// After a non-clean apply-loop exit, the exec loop is blocked on a mustDeliver
-// send into a full applyResults and the calculator on a send into a full
-// rootResults. drainToClose must release both, so both can close their channels.
+// After a non-clean apply-loop exit, the exec loop is blocked publishing into
+// commitResults while the calculator, its consumer, is blocked on a full
+// rootResults. Only a concurrent drain of applyResults and rootResults releases both.
 func TestApplyLoopDrainsBlockedProducerOnNonCleanExit(t *testing.T) {
-	const buf = 4
-	applyResults := make(chan applyResult, buf)
+	applyResults := make(chan applyResult, 4)
+	commitResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult, 1)
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
-	rootResults := make(chan commitmentResult, buf)
+	consumers.register("commitResults", commitResults)
 
 	execDone, calcDone := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(execDone)
-		for i := range buf * 4 {
+		for i := range 16 {
 			_ = consumers.publish(context.Background(), i, true)
 		}
 		consumers.close()
 	}()
 	go func() {
 		defer close(calcDone)
-		for range buf * 4 {
+		for range commitResults {
 			rootResults <- commitmentResult{}
 		}
 		close(rootResults)
