@@ -108,6 +108,7 @@ func TestBuildFilesClosesBatchValuesWhenCollationTxFails(t *testing.T) {
 	writeDupSortStepBacklog(t, db, d, 16, 2, 8, 3)
 	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer roTx.Rollback()
 	comps, err := d.collateValuesBatch(t.Context(), 0, 2, roTx)
 	roTx.Rollback()
 	require.NoError(t, err)
