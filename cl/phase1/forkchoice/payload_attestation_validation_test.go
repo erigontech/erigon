@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -364,6 +365,139 @@ func TestPayloadAttestationValidationContextsBoundPendingRoots(t *testing.T) {
 	for range maxPendingValidationContextBuilds {
 		<-results
 	}
+}
+
+func TestPayloadAttestationValidationContextViewsCurrentState(t *testing.T) {
+	f, graph, blockState, root, publicKeys := newPayloadAttestationValidationContextTestStore(t, []uint64{1, 0}, 2)
+	graph.currentStateRoot = root
+	beforeCopies := currentStateCopyCount(t)
+
+	validationContext, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
+
+	require.NoError(t, err)
+	domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), blockState.Slot()))
+	require.NoError(t, err)
+	require.Equal(t, blockState.Slot(), validationContext.slot)
+	require.Equal(t, common.BytesToHash(domain), validationContext.domain)
+	require.Equal(t, map[uint64][]int{0: {1}, 1: {0}}, validationContext.positions)
+	require.Equal(t, map[uint64]common.Bytes48{0: publicKeys[0], 1: publicKeys[1]}, validationContext.publicKeys)
+	require.Zero(t, currentStateCopyCount(t)-beforeCopies)
+	require.Empty(t, graph.stateRoots())
+}
+
+func TestPayloadAttestationValidationContextBuildsFromReplayedState(t *testing.T) {
+	f, graph, blockState, root, publicKeys := newPayloadAttestationValidationContextTestStore(t, []uint64{0, 1}, 2)
+	graph.currentStateRoot = common.Hash{0xff}
+
+	validationContext, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
+
+	require.NoError(t, err)
+	domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), blockState.Slot()))
+	require.NoError(t, err)
+	require.Equal(t, blockState.Slot(), validationContext.slot)
+	require.Equal(t, common.BytesToHash(domain), validationContext.domain)
+	require.Equal(t, map[uint64][]int{0: {0}, 1: {1}}, validationContext.positions)
+	require.Equal(t, map[uint64]common.Bytes48{0: publicKeys[0], 1: publicKeys[1]}, validationContext.publicKeys)
+	require.Equal(t, []common.Hash{root}, graph.stateRoots())
+}
+
+func TestPayloadAttestationValidationContextIgnoresSlotMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		replay bool
+	}{
+		{name: "current state"},
+		{name: "replayed state", replay: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, graph, blockState, root, _ := newPayloadAttestationValidationContextTestStore(t, []uint64{0}, 1)
+			graph.currentStateRoot = root
+			if test.replay {
+				graph.currentStateRoot = common.Hash{0xff}
+			}
+
+			_, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot()+1)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorIs(t, err, errPayloadAttestationSlotMismatch)
+		})
+	}
+}
+
+func TestPayloadAttestationValidationContextIgnoresReplayError(t *testing.T) {
+	f, graph, blockState, root, _ := newPayloadAttestationValidationContextTestStore(t, []uint64{0}, 1)
+	replayErr := errors.New("state pruned")
+	graph.getStateErr = replayErr
+
+	_, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, replayErr)
+}
+
+func TestPayloadAttestationValidationContextKeepsDuplicatePTCPositions(t *testing.T) {
+	f, _, blockState, root, publicKeys := newPayloadAttestationValidationContextTestStore(t, []uint64{0, 1, 0}, 2)
+
+	validationContext, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
+
+	require.NoError(t, err)
+	require.Equal(t, []int{0, 2}, validationContext.positions[0])
+	require.Len(t, validationContext.publicKeys, 2)
+	require.Equal(t, publicKeys[0], validationContext.publicKeys[0])
+}
+
+func TestPayloadAttestationValidationContextRejectsOutOfRangeValidator(t *testing.T) {
+	f, _, blockState, root, _ := newPayloadAttestationValidationContextTestStore(t, []uint64{0, 2}, 2)
+
+	_, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
+
+	require.ErrorContains(t, err, "PTC validator 2 is out of range")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func newPayloadAttestationValidationContextTestStore(
+	t *testing.T,
+	ptc []uint64,
+	validatorCount int,
+) (*ForkChoiceStore, *getFinalizedExecutionHashForkGraph, *state.CachingBeaconState, common.Hash, []common.Bytes48) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.GloasForkEpoch = 0
+	cfg.PtcSize = uint64(len(ptc))
+	blockState := state.New(&cfg)
+	blockState.SetVersion(clparams.GloasVersion)
+	const slot = uint64(5)
+	require.NoError(t, blockState.SetSlot(slot))
+	ptcWindow := solid.NewUint64VectorOfVectors(int(3*cfg.SlotsPerEpoch), len(ptc))
+	ptcVector := ptcWindow.Get(int(cfg.SlotsPerEpoch + slot%cfg.SlotsPerEpoch))
+	for position, validatorIndex := range ptc {
+		ptcVector.Set(position, validatorIndex)
+	}
+	blockState.SetPtcWindow(ptcWindow)
+	publicKeys := make([]common.Bytes48, validatorCount)
+	for validatorIndex := range validatorCount {
+		publicKeys[validatorIndex][0] = byte(validatorIndex + 1)
+		validator := solid.NewValidatorFromParameters(
+			publicKeys[validatorIndex],
+			common.Hash{},
+			cfg.MaxEffectiveBalance,
+			false,
+			0,
+			0,
+			cfg.FarFutureEpoch,
+			cfg.FarFutureEpoch,
+		)
+		require.NoError(t, blockState.AddValidator(validator, cfg.MaxEffectiveBalance))
+	}
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	root := common.Hash{0xaa}
+	graph := &getFinalizedExecutionHashForkGraph{
+		states: map[common.Hash]*state.CachingBeaconState{root: blockState},
+	}
+	store := &ForkChoiceStore{forkGraph: graph, payloadAttestationContexts: contexts}
+	return store, graph, blockState, root, publicKeys
 }
 
 func TestPayloadAttestationValidationContextPositions(t *testing.T) {
