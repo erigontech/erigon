@@ -197,10 +197,12 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
 	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
+	var putKeySize, putValueSize int
 	if p := sd.pending[domain]; p != nil {
-		return sd.putPending(p, key, valWithStep)
+		sameTxNumUpdate, putKeySize, putValueSize = sd.putPending(p, key, valWithStep)
+	} else {
+		sameTxNumUpdate, putKeySize, putValueSize = sd.putLatestLocked(domain, key, valWithStep)
 	}
-	sameTxNumUpdate, putKeySize, putValueSize := sd.putLatestLocked(domain, key, valWithStep)
 	sd.updatePutMetrics(domain, putKeySize, putValueSize)
 	return sameTxNumUpdate
 }
@@ -259,21 +261,25 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	return sameTxNumUpdate, putKeySize, putValueSize
 }
 
-func (sd *TemporalMemBatch) putPending(p map[string][]dataWithTxNum, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool) {
+func (sd *TemporalMemBatch) putPending(p map[string][]dataWithTxNum, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
 	old, ok := p[key]
 	switch {
 	case !ok:
 		p[key] = []dataWithTxNum{valWithStep}
+		return false, len(key), len(valWithStep.data)
 	case old[len(old)-1].txNum == valWithStep.txNum:
+		putValueSize = len(valWithStep.data) - len(old[len(old)-1].data)
 		old[len(old)-1] = valWithStep
-		return true
+		return true, 0, putValueSize
 	case sd.inMemHistoryReads:
 		p[key] = append(old, valWithStep)
+		return false, 0, len(valWithStep.data)
 	default:
+		putValueSize = len(valWithStep.data) - len(old[len(old)-1].data)
 		old[0] = valWithStep
 		p[key] = old[:1]
+		return false, 0, putValueSize
 	}
-	return false
 }
 
 var deferredDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
