@@ -17,8 +17,13 @@
 package state_test
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -68,12 +73,37 @@ func TestMmapAdviceAcrossFilePhases(t *testing.T) {
 	keys := mkAddrs(0x10, 12)
 
 	writeStepsKeys(t, db, agg, keys, 0, 32)
-	require.NoError(t, agg.BuildFiles(db, 32*stepSize, unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 32, unboundedFinalityCtx, false))
+	require.Eventually(t, func() bool { return !agg.HasBackgroundFilesBuild2() }, time.Minute, 10*time.Millisecond)
 	requireAllRandom(t, snapDir, "build")
+	built := snapFiles(t, snapDir, ".kv")
 
+	for _, ext := range []string{".kvi", ".bt", ".kvei", ".vi", ".efi"} {
+		for _, f := range snapFiles(t, snapDir, ext) {
+			require.NoError(t, os.Remove(f))
+		}
+	}
+	db, agg = reopenAggregator(t, db, agg, stepSize)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
+	require.NoError(t, agg.OpenFolder(db))
+	require.Empty(t, snapFiles(t, snapDir, ".kvi"))
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	require.NotEmpty(t, snapFiles(t, snapDir, ".kvi"), "indexing rebuilt no accessor")
 	requireAllRandom(t, snapDir, "indexing")
 
 	require.NoError(t, agg.MergeLoop(t.Context()))
+	require.NotEmpty(t, slices.DeleteFunc(snapFiles(t, snapDir, ".kv"), func(f string) bool { return slices.Contains(built, f) }), "merge produced no file")
 	requireAllRandom(t, snapDir, "merge")
+}
+
+func snapFiles(t *testing.T, snapDir, ext string) []string {
+	t.Helper()
+	var files []string
+	require.NoError(t, filepath.WalkDir(snapDir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(path) == ext {
+			files = append(files, path)
+		}
+		return err
+	}))
+	return files
 }

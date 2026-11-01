@@ -158,3 +158,29 @@ func TestMadviseSubPageMapping(t *testing.T) {
 	require.Equal(t, "normal", got, "advice on a sub-page mapping must take effect")
 	require.Equal(t, 1, n, "advising a whole mapping must not split its VMA")
 }
+
+// smaps reports the resolved path, so a snapshot dir behind a symlink must still match.
+func TestNonRandomUnderSymlinkedDir(t *testing.T) {
+	real := filepath.Join(t.TempDir(), "real")
+	require.NoError(t, os.Mkdir(real, 0o700))
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(real, link))
+	path := filepath.Join(link, "f.kv")
+	require.NoError(t, os.WriteFile(path, make([]byte, 1024*1024), 0o600))
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+	h, err := mmap.OpenRo(f, 1024*1024)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, h.Unmap()) }()
+	require.NoError(t, mmap.MadviseNormal(h))
+
+	bad, err := syscheck.NonRandomUnder(link)
+	require.NoError(t, err)
+	if runtime.GOOS != "linux" {
+		require.Empty(t, bad, "VmFlags is a Linux-only interface, so nothing is observable here")
+		return
+	}
+	require.Len(t, bad, 1)
+}

@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -35,8 +36,8 @@ import (
 // Mapping is one file-backed VMA of this process and its readahead hint.
 type Mapping struct {
 	Path       string `json:"path"`
-	Start      uint64 `json:"start"`
-	End        uint64 `json:"end"`
+	Start      uint64 `json:"-"` // load addresses stay off the unauthenticated endpoint
+	End        uint64 `json:"-"`
 	Random     bool   `json:"random"`     // VM_RAND_READ — MADV_RANDOM
 	Sequential bool   `json:"sequential"` // VM_SEQ_READ  — MADV_SEQUENTIAL
 	// RssBytes is what this mapping holds in page cache. The VMA spans the whole
@@ -98,7 +99,18 @@ func NonRandomUnder(pathPrefix string) ([]PathGroup, error) {
 	if err != nil {
 		return nil, err
 	}
+	if pathPrefix, err = resolvePrefix(pathPrefix); err != nil {
+		return nil, err
+	}
 	return nonRandomGroups(all, pathPrefix), nil
+}
+
+// resolvePrefix follows symlinks, because smaps reports the resolved path of a mapping.
+func resolvePrefix(pathPrefix string) (string, error) {
+	if pathPrefix == "" {
+		return "", nil
+	}
+	return filepath.EvalSymlinks(pathPrefix)
 }
 
 // LogNonRandomFileMappings logs every file-backed mapping under pathPrefix that is
@@ -112,6 +124,12 @@ func LogNonRandomFileMappings(logger log.Logger, pathPrefix string) {
 	if all == nil {
 		return
 	}
+	resolved, err := resolvePrefix(pathPrefix)
+	if err != nil {
+		logger.Warn("[mmap] cannot resolve the path prefix", "prefix", pathPrefix, "err", err)
+		return
+	}
+	pathPrefix = resolved
 	var checked int
 	for _, m := range all {
 		if pathPrefix == "" || strings.HasPrefix(m.Path, pathPrefix) {

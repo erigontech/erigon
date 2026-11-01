@@ -228,3 +228,11 @@ func TestNonRandomGroupsRanksByRss(t *testing.T) {
 	require.Equal(t, "/usr/bin/erigon", got[2].Path)
 	require.Equal(t, "normal=132kB", got[2].Advices())
 }
+
+// The endpoint is unauthenticated, so it must not reveal the address-space layout.
+func TestMappingJSONHasNoAddresses(t *testing.T) {
+	b, err := json.Marshal(Mapping{Path: "/data/snapshots/f.kv", Start: 0x55d0f4a00000, End: 0x55d0f4a21000})
+	require.NoError(t, err)
+	require.NotContains(t, string(b), "start")
+	require.NotContains(t, string(b), "end")
+}
