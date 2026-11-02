@@ -20,6 +20,7 @@
 package protocol
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -88,6 +89,8 @@ func ExecuteBlockEphemerally(
 	blockNum := block.NumberU64()
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	blockRules := blockContext.Rules(chainConfig)
+	_, noopWriter := stateWriter.(*state.NoopWriter)
+	writesState := stateWriter != nil && !noopWriter
 	// endPhase writes the finished phase to stateWriter and publishes it to the version map for the next one.
 	endPhase := func() error {
 		writes, err := ibs.FinalizedWrites(blockRules)
@@ -95,8 +98,10 @@ func ExecuteBlockEphemerally(
 			return err
 		}
 		ibs.FlushWritesToVersionMap(writes)
-		if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
-			return err
+		if writesState {
+			if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+				return err
+			}
 		}
 		ibs.ResetVersionedIO()
 		return nil
@@ -151,7 +156,7 @@ func ExecuteBlockEphemerally(
 		}
 
 		if err != nil {
-			if !vmConfig.StatelessExec {
+			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
 			ibs.ResetVersionedIO()
