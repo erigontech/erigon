@@ -87,7 +87,7 @@ jobs:
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
+              sim-limit: ".*/.*fork_(Osaka|BPO[12]-|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
               shard: osaka
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
@@ -95,7 +95,7 @@ jobs:
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
+              sim-limit: ".*/.*fork_(Osaka|BPO[12]-|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
               shard: osaka
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
