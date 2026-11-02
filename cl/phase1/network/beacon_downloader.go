@@ -65,10 +65,11 @@ type ForwardBeaconDownloader struct {
 	httpPreferred         atomic.Bool // set after first HTTP fallback success; skips P2P probing
 	onRequestComplete     func(response *peerAndBlocks, empty bool)
 
-	mu                 sync.Mutex
-	gloasLookahead     *cltypes.SignedBeaconBlock
-	gloasLookaheadPeer string
-	gloasNextUnscanned uint64
+	mu                   sync.Mutex
+	gloasLookahead       *cltypes.SignedBeaconBlock
+	gloasLookaheadPeer   string
+	gloasNextUnscanned   uint64
+	gloasTipImportFailed common.Hash
 }
 
 const forwardRequestRetryInterval = 300 * time.Millisecond
@@ -164,16 +165,17 @@ var (
 
 const maxConcurrentForwardBeaconRequests = 2
 
-func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
+// RequestMore downloads another batch and reports whether a held Gloas tip has no completed successor slot to request.
+func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip bool) {
 	requestCtx, cancelRequests := context.WithTimeout(ctx, forwardBeaconRequestTimeout)
 	defer cancelRequests()
 	f.restartGloasScanAtHead()
 
 	count := uint64(32)
-	requestStart, _ := f.nextRequestStart(true)
+	requestStart, hadGloasPending := f.nextRequestStart(true)
 	if f.capAtCurrentSlot(requestStart, 1) == 0 {
 		waitForForwardRequestRetry(ctx)
-		return
+		return hadGloasPending
 	}
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
@@ -221,7 +223,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 			if completedHTTPCount > 0 {
 				f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount))
 			}
-			return
+			return f.atGloasTip()
 		default:
 			// HTTP failed — fall back to P2P probing.
 			f.httpPreferred.Store(false)
@@ -449,15 +451,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if len(responses) == 0 {
 						if hadGloasPending {
 							answeredEmpty.Store(true)
-						}
-						if hadGloasPending && completedReqCount > 0 {
-							emptyResponse = &emptyRangeResult{
-								lastSlot: lastSlotInRange(reqSlot, completedReqCount),
-								apply:    func() { f.advanceGloasScanPast(lastSlotInRange(reqSlot, completedReqCount)) },
+							if completedReqCount > 0 {
+								emptyResponse = &emptyRangeResult{
+									lastSlot: lastSlotInRange(reqSlot, completedReqCount),
+									apply:    func() { f.advanceGloasScanPast(lastSlotInRange(reqSlot, completedReqCount)) },
+								}
 							}
-							return
-						}
-						if hadGloasPending {
 							return
 						}
 						failures := int(consecutiveFailures.Add(1))
@@ -482,7 +481,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				})
 			case <-noRequestableRange:
 				waitForForwardRequestRetry(ctx)
-				return
+				return f.atGloasTip()
 			case <-requestCtx.Done():
 				// No blocks received in time — return to let stale detection run.
 				stopProbes()
@@ -494,8 +493,8 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					break Loop
 				}
-				if answeredEmpty.Load() && f.AtGloasTip() {
-					return
+				if answeredEmpty.Load() && f.atGloasTip() {
+					return true
 				}
 				time.Sleep(forwardBeaconResponsePoll)
 			}
@@ -556,53 +555,7 @@ Process:
 		fullRoots := determineFullGloasRoots(processBlocks, processCount)
 		processBlocks = processBlocks[:processCount]
 		if len(fullRoots) > 0 {
-			// When blocks came from HTTP fallback, P2P is known-broken for this
-			// batch — skip the 30s P2P envelope timeout and fetch directly via HTTP.
-			if pid == "http-fallback" && f.httpFallbackURL != "" {
-				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-				httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
-				if httpResult.fetched > 0 {
-					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
-				}
-			} else {
-				var envErr error
-				envelopes, envErr = requestEnvelopesFranticallyWithValidator(
-					ctx,
-					f.rpc,
-					fullRoots,
-					newEnvelopeCommitmentValidator(f.beaconCfg, processBlocks),
-					processBlocks...,
-				)
-				if envErr != nil {
-					log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
-				}
-				for _, block := range processBlocks {
-					root, err := block.Block.HashSSZ()
-					if err != nil {
-						continue
-					}
-					if envelope := envelopes[root]; envelope != nil {
-						if err := ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope); err != nil {
-							delete(envelopes, root)
-						}
-					}
-				}
-				// HTTP fallback for envelopes when P2P returned incomplete results
-				if f.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
-					if envelopes == nil {
-						envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-					}
-					httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
-					if httpResult.fetched > 0 {
-						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
-					}
-				}
-			}
-			log.Debug("[ForwardBeaconDownloader] envelope fetch result",
-				"fullRoots", len(fullRoots), "received", len(envelopes),
-				"batchBlocks", len(processBlocks),
-				"firstSlot", processBlocks[0].Block.Slot,
-				"lastSlot", processBlocks[len(processBlocks)-1].Block.Slot)
+			envelopes = f.fetchGloasEnvelopes(ctx, pid, processBlocks, fullRoots)
 			retained := retainBlocksBeforeMissingGloasEnvelope(processBlocks, fullRoots, envelopes)
 			if len(retained) < len(processBlocks) {
 				log.Debug("[ForwardBeaconDownloader] retaining frontier before missing GLOAS envelope",
@@ -684,6 +637,7 @@ Process:
 	} else {
 		f.clearGloasScan()
 	}
+	return false
 }
 
 func waitForForwardRequestRetry(ctx context.Context) {
@@ -747,8 +701,7 @@ func (f *ForwardBeaconDownloader) restartGloasScanAtHead() {
 	}
 }
 
-// AtGloasTip reports whether a Gloas block is held for its successor and every completed slot after it was scanned.
-func (f *ForwardBeaconDownloader) AtGloasTip() bool {
+func (f *ForwardBeaconDownloader) atGloasTip() bool {
 	if f.currentSlot == nil {
 		return false
 	}
@@ -758,50 +711,92 @@ func (f *ForwardBeaconDownloader) AtGloasTip() bool {
 	return f.gloasLookahead != nil && f.gloasNextUnscanned >= currentSlot
 }
 
-// ImportHeldGloasTip processes the held Gloas block, with its envelope when one arrives within envelopeTimeout, and
-// reports whether processing reached it.
-func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration) bool {
-	f.mu.Lock()
-	tip := f.gloasLookahead
-	if tip == nil || f.process == nil {
-		f.mu.Unlock()
-		return false
-	}
-	f.mu.Unlock()
-
-	root, err := tip.Block.HashSSZ()
-	if err != nil {
-		return false
-	}
-	blocks := []*cltypes.SignedBeaconBlock{tip}
+func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
+	ctx context.Context,
+	pid string,
+	blocks []*cltypes.SignedBeaconBlock,
+	fullRoots [][32]byte,
+) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	if f.rpc != nil {
-		envelopeCtx, cancel := context.WithTimeout(ctx, envelopeTimeout)
-		envelopes, _ = requestEnvelopesFranticallyWithValidator(
-			envelopeCtx, f.rpc, [][32]byte{root}, newEnvelopeCommitmentValidator(f.beaconCfg, blocks), blocks...,
-		)
-		cancel()
-	}
-	if len(envelopes) == 0 && f.httpFallbackURL != "" {
+	if pid == "http-fallback" && f.httpFallbackURL != "" {
 		envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-		envelopeCtx, cancel := context.WithTimeout(ctx, envelopeTimeout)
-		fetchEnvelopesFromBeaconAPI(envelopeCtx, f.httpFallbackURL, blocks, [][32]byte{root}, envelopes, f.beaconCfg)
-		cancel()
+		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, fullRoots, envelopes, f.beaconCfg)
+		if httpResult.fetched > 0 {
+			log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
+		}
+	} else {
+		if f.rpc != nil {
+			var envErr error
+			envelopes, envErr = requestEnvelopesFranticallyWithValidator(
+				ctx,
+				f.rpc,
+				fullRoots,
+				newEnvelopeCommitmentValidator(f.beaconCfg, blocks),
+				blocks...,
+			)
+			if envErr != nil {
+				log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
+			}
+		}
+		for _, block := range blocks {
+			root, err := block.Block.HashSSZ()
+			if err != nil {
+				continue
+			}
+			if envelope := envelopes[root]; envelope != nil {
+				if err := ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope); err != nil {
+					delete(envelopes, root)
+				}
+			}
+		}
+		if f.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
+			if envelopes == nil {
+				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+			}
+			httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, fullRoots, envelopes, f.beaconCfg)
+			if httpResult.fetched > 0 {
+				log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
+			}
+		}
 	}
+	log.Debug("[ForwardBeaconDownloader] envelope fetch result",
+		"fullRoots", len(fullRoots), "received", len(envelopes),
+		"batchBlocks", len(blocks),
+		"firstSlot", blocks[0].Block.Slot,
+		"lastSlot", blocks[len(blocks)-1].Block.Slot)
+	return envelopes
+}
+
+// ImportHeldGloasTip processes the held Gloas block with the envelope that arrives within envelopeTimeout and reports
+// its root and whether processing reached it. A tip whose import failed is not tried again.
+func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration) (common.Hash, bool) {
+	f.mu.Lock()
+	tip, tipPeer, failedRoot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipImportFailed
+	f.mu.Unlock()
+	if tip == nil {
+		return common.Hash{}, false
+	}
+	root, err := tip.Block.HashSSZ()
+	if err != nil || root == failedRoot {
+		return root, false
+	}
+
+	blocks := []*cltypes.SignedBeaconBlock{tip}
+	envelopeCtx, cancel := context.WithTimeout(ctx, envelopeTimeout)
+	envelopes := f.fetchGloasEnvelopes(envelopeCtx, tipPeer, blocks, [][32]byte{root})
+	cancel()
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.gloasLookahead != tip {
-		return false
-	}
 	highestSlotProcessed, err := f.process(f.highestSlotProcessed, blocks, envelopes)
 	if err != nil || highestSlotProcessed < tip.Block.Slot {
-		return false
+		f.gloasTipImportFailed = root
+		return root, false
 	}
 	f.highestSlotProcessed = highestSlotProcessed
 	f.highestSlotUpdateTime = time.Now()
 	f.clearGloasScan()
-	return true
+	return root, true
 }
 
 func (f *ForwardBeaconDownloader) advanceGloasScanPast(lastSlot uint64) {
