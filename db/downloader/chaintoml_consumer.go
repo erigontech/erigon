@@ -138,20 +138,17 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q", info.Name, ChainTomlFileName)
 	}
 
-	filePath := ChainTomlPath(downloadDir)
+	filePath := ChainTomlPath(snapDir)
 	if added {
+		filePath = ChainTomlPath(downloadDir)
 		t.DownloadAll()
 		select {
 		case <-t.Complete().On():
 		case <-dlCtx.Done():
 			return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
 		}
-	} else {
-		filePath = ChainTomlPath(snapDir)
 	}
 
-	// Read the downloaded chain.toml file. The validation above guarantees
-	// the torrent wrote to this path.
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
