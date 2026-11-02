@@ -362,23 +362,23 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 	// Filter by fork before fetching bodies: retrieval can re-execute blocks
 	// to recover missing block access lists.
 	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(blockHashes))
-	hashes := make([]common.Hash, 0, len(blockHashes))
-	positions := make([]int, 0, len(blockHashes))
+	matchingHashes := make([]common.Hash, 0, len(blockHashes))
+	responsePositions := make([]int, 0, len(blockHashes))
 	for i, hash := range blockHashes {
 		header := e.chainRW.GetHeaderByHash(r.Context(), hash)
 		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
 			continue
 		}
-		hashes = append(hashes, hash)
-		positions = append(positions, i)
+		matchingHashes = append(matchingHashes, hash)
+		responsePositions = append(responsePositions, i)
 	}
-	if len(hashes) > 0 {
-		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), hashes)
+	if len(matchingHashes) > 0 {
+		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), matchingHashes)
 		if err != nil {
 			writeEngineProblem(w, err)
 			return
 		}
-		for i, position := range positions {
+		for i, position := range responsePositions {
 			if i < len(bodies) {
 				entries[position] = bodies[i]
 			}
@@ -414,8 +414,8 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 	// Pin each body to the header used for fork filtering, even if the canonical
 	// chain changes between reads.
 	entries := make([]*engine_types.ExecutionPayloadBodyV2, 0, count)
-	hashes := make([]common.Hash, 0, count)
-	positions := make([]int, 0, count)
+	matchingHashes := make([]common.Hash, 0, count)
+	responsePositions := make([]int, 0, count)
 	for i := range count {
 		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
 		if header == nil {
@@ -426,16 +426,16 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 		if forkNameAtTime(e.config, header.Time) != forkName {
 			continue
 		}
-		hashes = append(hashes, header.Hash())
-		positions = append(positions, len(entries)-1)
+		matchingHashes = append(matchingHashes, header.Hash())
+		responsePositions = append(responsePositions, len(entries)-1)
 	}
-	if len(hashes) > 0 {
-		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), hashes)
+	if len(matchingHashes) > 0 {
+		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), matchingHashes)
 		if err != nil {
 			writeEngineProblem(w, err)
 			return
 		}
-		for i, position := range positions {
+		for i, position := range responsePositions {
 			if i < len(bodies) {
 				entries[position] = bodies[i]
 			}
@@ -525,12 +525,12 @@ func (e *EngineServer) handleSSZGetBlobsV4(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	hashes, indices, err := decodeBlobsV4Request(body)
+	hashes, cellMask, err := decodeBlobsV4Request(body)
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	resp, err := e.GetBlobsV4(r.Context(), hashes, indices[:])
+	resp, err := e.GetBlobsV4(r.Context(), hashes, cellMask[:])
 	if err != nil {
 		writeBlobsProblem(w, err)
 		return
@@ -539,7 +539,7 @@ func (e *EngineServer) handleSSZGetBlobsV4(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	out, err := encodeBlobsV4Response(resp, indices)
+	out, err := encodeBlobsV4Response(resp, cellMask)
 	if err != nil {
 		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
 		return

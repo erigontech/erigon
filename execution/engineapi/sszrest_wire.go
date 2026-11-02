@@ -511,14 +511,14 @@ func encodeBlobsV2Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error)
 
 func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCustodyBitvectorBytes]byte, error) {
 	hashes := solid.NewHashList(sszMaxGetBlobHashes)
-	var indices [sszCustodyBitvectorBytes]byte
-	if err := ssz2.UnmarshalSSZStrict(buf, 0, hashes, indices[:]); err != nil {
-		return nil, indices, err
+	var cellMask [sszCustodyBitvectorBytes]byte
+	if err := ssz2.UnmarshalSSZStrict(buf, 0, hashes, cellMask[:]); err != nil {
+		return nil, cellMask, err
 	}
 	if hashes.Length() > sszMaxGetBlobHashes {
-		return nil, indices, fmt.Errorf("too many blob hashes: %d", hashes.Length())
+		return nil, cellMask, fmt.Errorf("too many blob hashes: %d", hashes.Length())
 	}
-	return hashListValues(hashes), indices, nil
+	return hashListValues(hashes), cellMask, nil
 }
 
 type sszBlobV4Entry struct {
@@ -542,21 +542,21 @@ func (e sszBlobV4Entry) EncodingSizeSSZ() int {
 	return 1 + 4 + 8 + solid.NewTransactionsSSZFromTransactions(e.cells).EncodingSizeSSZ() + solid.NewTransactionsSSZFromTransactions(e.proofs).EncodingSizeSSZ()
 }
 
-func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, indices [sszCustodyBitvectorBytes]byte) ([]byte, error) {
+func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, cellMask [sszCustodyBitvectorBytes]byte) ([]byte, error) {
 	if len(blobs) > sszMaxGetBlobHashes {
 		return nil, fmt.Errorf("too many blob entries: %d", len(blobs))
 	}
-	selected := 0
-	for _, b := range indices {
-		selected += bits.OnesCount8(b)
+	selectedCount := 0
+	for _, b := range cellMask {
+		selectedCount += bits.OnesCount8(b)
 	}
 	entries := make([]sszBlobV4Entry, len(blobs))
 	for i, blob := range blobs {
 		if blob == nil {
 			continue
 		}
-		if len(blob.BlobCells) != selected || len(blob.Proofs) != selected {
-			return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), selected)
+		if len(blob.BlobCells) != selectedCount || len(blob.Proofs) != selectedCount {
+			return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), selectedCount)
 		}
 		entry := &entries[i]
 		entry.available = true
@@ -564,13 +564,13 @@ func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, indices [sszCustody
 		entry.proofs = make([][]byte, sszCellsPerExtBlob)
 		// JSON-RPC returns selected indices in ascending order. Available SSZ blobs
 		// retain all 128 positions; unrequested or missing cell/proof pairs stay empty.
-		j := 0
+		selectedIndex := 0
 		for index := range sszCellsPerExtBlob {
-			if indices[index/8]&(1<<(index%8)) == 0 {
+			if cellMask[index/8]&(1<<(index%8)) == 0 {
 				continue
 			}
-			cell, proof := blob.BlobCells[j], blob.Proofs[j]
-			j++
+			cell, proof := blob.BlobCells[selectedIndex], blob.Proofs[selectedIndex]
+			selectedIndex++
 			if cell == nil && proof == nil {
 				continue
 			}
