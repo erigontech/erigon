@@ -208,3 +208,39 @@ func TestApplyWrites_SelfDestructWithoutCommittedAccountSkipsStorageWalk(t *test
 	require.NoError(t, err)
 	assert.Equal(t, []byte{0x42}, v, "self-destruct of an address without a committed account walked its storage prefix")
 }
+
+// A same-tx create+destruct that keeps a non-zero EIP-8246 balance takes the absent-account path
+// without the storage walk and still writes a balance-only account.
+func TestApplyWrites_SelfDestructWithoutCommittedAccountKeepsPreservedBalance(t *testing.T) {
+	assertWas := dbg.AssertEnabled
+	dbg.AssertEnabled = false // the assert panics on the orphan slot this test plants
+	t.Cleanup(func() { dbg.AssertEnabled = assertWas })
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x5DEAD"))
+	av := addr.Value()
+	slot := common.HexToHash("0x02")
+	storageKey := append(append([]byte{}, av[:]...), slot[:]...)
+	domains.SetTxNum(1)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{0x42}, 1, nil))
+
+	ver := Version{TxIndex: 1}
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(5)})
+
+	domains.SetTxNum(2)
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
+	require.NoError(t, err)
+	require.NotEmpty(t, enc, "the preserved balance must keep an account record")
+	var acc accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+	assert.Equal(t, uint64(5), acc.Balance.Uint64())
+	assert.Zero(t, acc.Nonce)
+	assert.True(t, acc.CodeHash.IsEmpty(), "a destructed account keeps no code")
+	v, _, err := domains.GetLatest(kv.StorageDomain, tx, storageKey)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0x42}, v, "self-destruct of an address without a committed account walked its storage prefix")
+}
