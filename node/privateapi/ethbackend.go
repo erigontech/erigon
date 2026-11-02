@@ -516,6 +516,7 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	}
 
 	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
+	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
