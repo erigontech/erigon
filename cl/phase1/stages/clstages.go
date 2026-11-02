@@ -102,8 +102,7 @@ type Args struct {
 	targetEpoch, seenEpoch uint64
 	targetSlot, seenSlot   uint64
 
-	hasDownloaded   bool
-	hasHTTPFallback bool
+	hasDownloaded bool
 	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
 	headUnpublished bool
 	// atForwardSyncTip is set while ForwardSync showed, less than an epoch ago, that no block follows the highest seen block.
@@ -194,8 +193,7 @@ func MetaCatchingUp(args Args) StageName {
 	}
 	// ForwardSync can work without peers via the beacon API HTTP fallback,
 	// so allow it even when peers == 0.
-	heldAtForwardSyncTip := args.atForwardSyncTip && (args.peers > 0 || args.headUnpublished || !args.hasHTTPFallback)
-	if args.seenEpoch < args.targetEpoch && !heldAtForwardSyncTip {
+	if args.seenEpoch < args.targetEpoch && !args.atForwardSyncTip {
 		return ForwardSync
 	}
 	// ChainTipSync relies on gossip for real-time updates, skip it without peers.
@@ -283,7 +281,6 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 		// the ArgsFunc is run after every stage. It is passed into the transition function, and the same args are passed into the next stage.
 		ArgsFunc: func(ctx context.Context, cfg *Cfg) (args Args) {
 			var err error
-			args.hasHTTPFallback = len(clparams.ConfigurableCheckpointsURLs) > 0
 			args.peers, err = cfg.rpc.Peers()
 			if err != nil {
 				log.Error("failed to get sentinel peer count", "err", err)
