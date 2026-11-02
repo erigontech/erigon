@@ -1337,8 +1337,9 @@ func TestSimulateV1HistoricalBasePartialAccountWriteKeepsNonce(t *testing.T) {
 }
 
 // An account the simulation deletes stays deleted in later simulated blocks, also when the
-// canonical chain deleted it after the base block, so it is absent at head: no code, and no
-// storage from the base for a contract later created at the same address.
+// canonical chain deleted it after the base block, so it is absent at head: no code, no storage
+// from the base for a contract later created at the same address, and the same state roots as
+// a chain that ran the simulated calls.
 func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -1354,36 +1355,44 @@ func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 	selfdestruct := append(append([]byte{0x73}, beneficiary[:]...), 0xff)
 	codeSize := append(append([]byte{0x73}, doomed[:]...), 0x3b, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3)
 	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
-	gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
-		bank:    {Balance: funds},
-		doomed:  {Code: selfdestruct, Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
-		probe:   {Code: codeSize, Balance: big.NewInt(0)},
-		factory: {Code: factoryCode, Balance: big.NewInt(0)},
-	}}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
-	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
-	cp, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
-		to := beneficiary
-		if i == 1 {
-			to = doomed
-		}
-		txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), to, uint256.NewInt(0), 100_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+	newChain := func(recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+			bank:    {Balance: funds},
+			doomed:  {Code: selfdestruct, Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+			probe:   {Code: codeSize, Balance: big.NewInt(0)},
+			factory: {Code: factoryCode, Balance: big.NewInt(0)},
+		}}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		cp, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 200_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
 		require.NoError(t, err)
-		b.AddTx(txn)
-	})
-	require.NoError(t, err)
+		return m, cp
+	}
+	m, cp := newChain(beneficiary, doomed)
 	require.NoError(t, m.InsertChain(cp))
+	_, oracle := newChain(beneficiary, doomed, probe, factory, doomed)
+	wants := oracle.Blocks[1:]
 
-	gas := hexutil.Uint64(200_000)
-	call := func(to common.Address) SimulatedBlock {
-		return SimulatedBlock{Calls: []ethapi.CallArgs{{From: &bank, To: &to, Gas: &gas}}}
+	blocks := make([]SimulatedBlock, 0, len(wants))
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		txn := want.Transactions()[0]
+		gas := hexutil.Uint64(txn.GetGasLimit())
+		nonce := hexutil.Uint64(txn.GetNonce())
+		blocks = append(blocks, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{Time: (*hexutil.Uint64)(&header.Time), GasLimit: &gasLimit, FeeRecipient: &header.Coinbase, PrevRandao: &header.MixDigest},
+			Calls:          []ethapi.CallArgs{{From: &bank, To: txn.GetTo(), Gas: &gas, Nonce: &nonce, GasPrice: (*hexutil.U256)(txn.GetFeeCap())}},
+		})
 	}
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: []SimulatedBlock{
-		call(doomed), call(probe), call(factory), call(doomed),
-	}}, rpc.BlockNumberOrHashWithNumber(1))
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: blocks, Validation: true}, rpc.BlockNumberOrHashWithNumber(1))
 	require.NoError(t, err)
-	require.Len(t, result, 4)
+	require.Len(t, result, len(wants))
 	word := func(block int) *big.Int {
 		require.Len(t, result[block].Calls, 1)
 		require.Nil(t, result[block].Calls[0].Error)
@@ -1393,4 +1402,7 @@ func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 	}
 	require.Zero(t, word(1).Sign(), "the destroyed account has no code")
 	require.Zero(t, word(3).Sign(), "the contract created at its address sees none of its storage")
+	for i, want := range wants {
+		require.Equal(t, want.Root(), result[i].StateRoot, "block %d", want.NumberU64())
+	}
 }
