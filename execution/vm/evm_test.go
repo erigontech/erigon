@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -251,4 +252,27 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 			require.Equal(t, want, &got.BaseFee)
 		})
 	}
+}
+
+// A speculative run whose state recorded a read dependency is discarded, so the executor that
+// opts in stops it at the next jump; any other caller keeps running.
+func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	vm := state.NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x00}}},
+	}})
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+
+	_, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, ibs.HadInvalidRead(), "reading a contract an unflushed earlier tx deploys is a dependency")
+	require.False(t, evm.Cancelled(), "an EVM that did not opt in must keep running")
+	evm.SetAbortOnDependency(true)
+	require.True(t, evm.Cancelled())
 }
