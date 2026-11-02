@@ -387,6 +387,27 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			coverWordsByPatternsWorker(trace, ch, out, ac, inputSize, outputSize, posMap)
 		})
 	}
+	chClosed, workersDone := false, false
+	defer func() { // on an early return, unblock and wait for the workers
+		if workersDone {
+			return
+		}
+		if !chClosed {
+			close(ch)
+		}
+		stopped := make(chan struct{})
+		go func() { wg.Wait(); close(stopped) }()
+		for {
+			select {
+			case _, ok := <-out:
+				if !ok {
+					out = nil
+				}
+			case <-stopped:
+				return
+			}
+		}
+	}()
 	curBatch := make([]*CompressionWord, 0, coverBatchSize) // consecutive words accumulating for the next batch
 	var freeList []*CompressionWord                         // written words available for reuse
 	t := time.Now()
@@ -506,6 +527,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		ch <- curBatch // flush the final partial batch
 	}
 	close(ch)
+	chClosed = true
 	// Drain the out queue if necessary
 	if inCount > outCount {
 		for compressionQueue.Len() > 0 && compressionQueue[0].order == outCount {
@@ -540,6 +562,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		return err
 	}
 	wg.Wait()
+	workersDone = true
 	if lvl < log.LvlTrace {
 		log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "took", time.Since(t))
 	}

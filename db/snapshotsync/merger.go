@@ -201,12 +201,20 @@ func (m *Merger) Merge(
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	in := make(map[snaptype.Enum][]*DirtySegment)
-	out := make(map[snaptype.Enum][]*DirtySegment)
 	mergedFileNames := make([]string, 0, 16)
+	var in map[snaptype.Enum][]*DirtySegment
+	defer func() { // segments of a range that failed before integration
+		for _, segs := range in {
+			for _, s := range segs {
+				s.close()
+			}
+		}
+	}()
 
 	for _, r := range mergeRanges {
 		mergedFileNames = mergedFileNames[:0]
+		in = make(map[snaptype.Enum][]*DirtySegment)
+		out := make(map[snaptype.Enum][]*DirtySegment)
 		toMerge, err := m.filesByRange(v, r.From(), r.To())
 		if err != nil {
 			return err
@@ -245,7 +253,6 @@ func (m *Merger) Merge(
 			}
 		}
 
-		// TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
 		toMergeFileNames := make([]string, 0, 16)
 		for _, segments := range toMerge {
 			for _, segment := range segments {
@@ -257,8 +264,9 @@ func (m *Merger) Merge(
 				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
+		m.integrateMergedDirtyFiles(snapshots, in, out)
+		in = nil
 	}
-	m.integrateMergedDirtyFiles(snapshots, in, out)
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
 	return nil
 }

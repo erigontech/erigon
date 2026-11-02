@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -269,6 +270,43 @@ func TestMergeSnapshots(t *testing.T) {
 	// defer d.Close()
 	// a = d.Count()
 	// require.Equal(10, a)
+}
+
+func TestMergeKeepsFinishedRangesOnLaterFailure(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for i := range uint64(4) {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	errSecond := errors.New("second range failed")
+	merges := 0
+	onMerge := func([]string) error {
+		if merges++; merges == 2 {
+			return errSecond
+		}
+		return nil
+	}
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}, s.Dir(), false, onMerge, nil)
+	require.ErrorIs(err, errSecond)
+
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		ok := false
+		s.dirty[snT.Enum()].Scan(func(seg *DirtySegment) bool {
+			ok = ok || seg.from == 0 && seg.to == 20_000
+			return true
+		})
+		require.True(ok, "merged %s [0, 20000) must be integrated, not left open and untracked", snT.Name())
+	}
 }
 
 func TestMergeSkipsPreClaimedRange(t *testing.T) {

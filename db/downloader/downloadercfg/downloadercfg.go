@@ -335,7 +335,9 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		if err != nil {
 			return err
 		}
-		snapcfg.SetToml(chainName, haveToml, true)
+		if err := snapcfg.SetToml(chainName, haveToml, true); err != nil {
+			return fmt.Errorf("%s: %w", preverifiedPath, err)
+		}
 	} else {
 		// Fetch the snapshot hashes from the web
 		err := snapcfg.LoadRemotePreverified(ctx, chainName, forceChainTomlURL)
