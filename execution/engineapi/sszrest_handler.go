@@ -315,7 +315,7 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
 		return
 	}
-	e.logger.Debug("[SSZ-REST] handled get payload", "fork", forkName, "payloadId", decodedID)
+	e.logger.Info("[SSZ-REST] handled get payload", "fork", forkName, "payloadId", decodedID)
 	w.Header().Set("Cache-Control", "no-store")
 	writeSSZBytes(w, out)
 }
@@ -608,7 +608,7 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 
 func (e *EngineServer) handleSSZIdentity(w http.ResponseWriter, r *http.Request) {
 	if clientVersion := r.Header.Get("X-Engine-Client-Version"); clientVersion != "" {
-		e.logger.Debug("[SSZ-REST] client version", "version", clientVersion)
+		e.logger.Info("[SSZ-REST] client version", "version", clientVersion)
 	}
 	versions, err := e.GetClientVersionV1(r.Context(), nil)
 	if err != nil {
