@@ -7389,6 +7389,8 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions.
 
+Within each sender, ordinary transactions and frame transactions with nonce keys `[0]` use the decimal account nonce as the entry key. Frame transactions with nonzero nonce keys use the `0x`-prefixed transaction hash, so a keyed sequence and an account nonce can share the same number without overwriting either entry. `txpool_contentFrom` and `txpool_inspect` use the same keys.
+
 **Parameters**
 
 None
@@ -7433,7 +7435,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e
 
 ## **txpool_inspect**
 
-Returns a text summary of every transaction in the pool, organized like `txpool_content` by sub-pool, sender address and nonce, for quick inspection without the full transaction objects.
+Returns a text summary of every transaction in the pool, organized like `txpool_content` by sub-pool, sender address and transaction key, for quick inspection without the full transaction objects.
 
 Each entry has the form `<to>: <value> wei + <gas limit> gas × <gas price> wei`, or `contract creation: ...` when the transaction has no recipient. For EIP-1559 and later transaction types the price shown is the fee cap (`maxFeePerGas`), as Geth reports it.
 
@@ -7451,9 +7453,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_inspect","params":[],"id":"1"}
 
 | Type | Description |
 | --- | --- |
-| Object | Transaction summaries organized by sub-pool, sender and nonce |
-| pending | Object: sender address → nonce → summary string |
-| queued | Object: sender address → nonce → summary string |
+| Object | Transaction summaries organized by sub-pool, sender and transaction key |
+| pending | Object: sender address → transaction key → summary string |
+| queued | Object: sender address → transaction key → summary string |
 
 ## **txpool_status**
 

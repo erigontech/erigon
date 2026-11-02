@@ -53,9 +53,18 @@ func NewTxPoolAPI(base *BaseAPI, pool txpoolproto.TxpoolClient) *TxPoolAPIImpl {
 func flattenTxs(txs []types.Transaction) map[string]*ethapi.RPCTransaction {
 	dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 	for _, txn := range txs {
-		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn)
+		dump[txPoolTransactionKey(txn)] = newRPCPendingTransaction(txn)
 	}
 	return dump
+}
+
+// Keyed sequences can match account nonces. Hash keys keep those entries distinct,
+// while transactions in the account-nonce domain retain their decimal nonce keys.
+func txPoolTransactionKey(txn types.Transaction) string {
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
+		return txn.Hash().Hex()
+	}
+	return strconv.FormatUint(txn.GetNonce(), 10)
 }
 
 func (api *TxPoolAPIImpl) Content(ctx context.Context) (TxPoolContent, error) {
@@ -176,7 +185,7 @@ func (api *TxPoolAPIImpl) Inspect(ctx context.Context) (map[string]map[string]ma
 func inspectTxs(txs []types.Transaction) map[string]string {
 	dump := make(map[string]string, len(txs))
 	for _, txn := range txs {
-		dump[strconv.FormatUint(txn.GetNonce(), 10)] = inspectTx(txn)
+		dump[txPoolTransactionKey(txn)] = inspectTx(txn)
 	}
 	return dump
 }

@@ -27,27 +27,27 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// TxPoolContent is txpool_content's answer: sub-pool, then sender, then nonce. A map result
+// TxPoolContent is txpool_content's answer: sub-pool, then sender, then transaction key. A map result
 // reaches the reflection encoder whatever its values implement, so the transactions inside
 // only get their marshaller once the map has one.
 type TxPoolContent map[string]map[string]map[string]*ethapi.RPCTransaction
 
-// TxPoolContentFrom is txpool_contentFrom's answer: sub-pool, then nonce.
+// TxPoolContentFrom is txpool_contentFrom's answer: sub-pool, then transaction key.
 type TxPoolContentFrom map[string]map[string]*ethapi.RPCTransaction
 
 func (c TxPoolContent) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	return writeSortedMap(w, c, func(w *jsonstream.Stream, senders map[string]map[string]*ethapi.RPCTransaction) error {
-		return writeSortedMap(w, senders, writeNonceMap)
+		return writeSortedMap(w, senders, writeTxPoolTransactions)
 	})
 }
 
 func (c TxPoolContentFrom) MarshalFastJSONTo(w *jsonstream.Stream) error {
-	return writeSortedMap(w, c, writeNonceMap)
+	return writeSortedMap(w, c, writeTxPoolTransactions)
 }
 
 // A nil transaction writes itself as null, so the map's values go straight to the marshaller.
-func writeNonceMap(w *jsonstream.Stream, byNonce map[string]*ethapi.RPCTransaction) error {
-	return writeSortedMap(w, byNonce, func(w *jsonstream.Stream, txn *ethapi.RPCTransaction) error {
+func writeTxPoolTransactions(w *jsonstream.Stream, txns map[string]*ethapi.RPCTransaction) error {
+	return writeSortedMap(w, txns, func(w *jsonstream.Stream, txn *ethapi.RPCTransaction) error {
 		return txn.MarshalFastJSONTo(w)
 	})
 }
