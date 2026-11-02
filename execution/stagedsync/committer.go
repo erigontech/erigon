@@ -65,6 +65,8 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // every blockResult. It owns its own commitment.Updates buffer and reads
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
+	probeApply time.Duration
+	probeTxs   int
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
@@ -370,7 +372,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
+			t0 := time.Now()
 			cc.state.ApplyWrites(r.writes)
+			cc.probeApply += time.Since(t0)
+			cc.probeTxs++
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -450,7 +455,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			residual := stageWall - execActive - commitActive + overlap - gap
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
-				"overlap", overlap, "gap", gap, "residual", residual)
+				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs)
+			cc.probeApply, cc.probeTxs = 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
