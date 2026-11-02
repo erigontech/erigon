@@ -13,6 +13,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -235,6 +236,9 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// deployers maps each address the access list gives non-empty code to the tx indices
+	// that set it, ascending; nil when the block deploys no code.
+	deployers map[common.Address][]int
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -325,6 +329,16 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
 		bal:    changes,
+	}
+	for _, acc := range changes {
+		for _, c := range acc.CodeChanges {
+			if len(c.Bytecode) > 0 && c.Index > 0 {
+				if vm.deployers == nil {
+					vm.deployers = map[common.Address][]int{}
+				}
+				vm.deployers[acc.Address] = append(vm.deployers[acc.Address], int(c.Index)-1)
+			}
+		}
 	}
 	vm.WriteChanges(changes)
 	return vm
@@ -756,17 +770,9 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 // unflushedDeployer returns the earlier tx the access list shows deploying code at addr while
 // that tx is neither sealed nor validated, or -1. Until it flushes, addr has no account cell.
 func (vm *VersionMap) unflushedDeployer(addr accounts.Address, txIdx int) int {
-	if !vm.HasBAL {
-		return -1
-	}
-	address := addr.Value()
-	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
-	if i == len(vm.bal) || vm.bal[i].Address != address {
-		return -1
-	}
 	k := -1
-	for _, c := range vm.bal[i].CodeChanges {
-		if idx := int(c.Index) - 1; idx >= 0 && idx < txIdx && len(c.Bytecode) > 0 {
+	for _, idx := range vm.deployers[addr.Value()] {
+		if idx < txIdx {
 			k = idx
 		}
 	}
