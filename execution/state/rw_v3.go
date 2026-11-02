@@ -186,6 +186,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					return err
 				}
 				if len(committed) == 0 {
+					// A system-contract predeploy can have code without an account record.
+					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+						return err
+					}
 					if err := assertNoCommittedStorage(domains, roTx, address[:], "selfDestruct"); err != nil {
 						return err
 					}

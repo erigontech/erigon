@@ -292,3 +292,24 @@ func TestApplyWrites_SelfDestructPreservedBalanceDeletesCommittedStorage(t *test
 	require.NoError(t, err)
 	assert.Empty(t, v, "committed storage must be deleted")
 }
+
+// A system-contract predeploy can have code with no account record, so skipping the storage walk of
+// an address without an account must still delete its code.
+func TestApplyWrites_SelfDestructWithoutCommittedAccountDeletesCode(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x5DEAD"))
+	av := addr.Value()
+	domains.SetTxNum(1)
+	require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, av[:], []byte{0x60, 0x01}, 1, nil))
+
+	ver := Version{TxIndex: 1}
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+
+	domains.SetTxNum(2)
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+
+	c, _, err := domains.GetLatest(kv.CodeDomain, tx, av[:])
+	require.NoError(t, err)
+	assert.Empty(t, c, "self-destruct left the code of an address without an account record")
+}
