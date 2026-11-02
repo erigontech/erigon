@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -207,23 +206,18 @@ func TestForwardSyncKeepsSyncingWhenTipEnvelopeIsRejected(t *testing.T) {
 	require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
 }
 
+// The marker holds for less than an epoch after it was recorded, and only while no newer block is seen.
 func TestForwardSyncTipMarkerExpires(t *testing.T) {
 	f := newForwardSyncTipFixture(t, 2, true)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
 
-	fixtureClock := f.cfg.ethClock
-	clockAtSlot := func(slot uint64) eth_clock.EthereumClock {
-		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-		clock.EXPECT().GetCurrentSlot().Return(slot)
-		clock.EXPECT().GetSlotTime(slot).Return(fixtureClock.GetSlotTime(slot))
-		clock.EXPECT().GetCurrentEpoch().Return(slot / f.cfg.beaconCfg.SlotsPerEpoch)
-		return clock
-	}
+	clock := &steppedClock{EthereumClock: f.cfg.ethClock, slotsPerEpoch: f.cfg.beaconCfg.SlotsPerEpoch}
+	f.cfg.ethClock = clock
 	expirySlot := f.currentSlot + f.cfg.beaconCfg.SlotsPerEpoch
 	argsAt := func(slot uint64) Args {
-		f.cfg.ethClock = clockAtSlot(slot)
+		clock.slot.Store(slot)
 		return ConsensusClStages().ArgsFunc(ctx, f.cfg)
 	}
 	require.True(t, argsAt(expirySlot-1).atForwardSyncTip)

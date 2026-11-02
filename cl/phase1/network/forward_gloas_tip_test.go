@@ -232,6 +232,7 @@ func TestForwardBeaconDownloaderImportsHeldGloasTipWithoutEnvelope(t *testing.T)
 	require.Equal(t, 1, processed)
 }
 
+// P2P and the beacon API share one envelope budget.
 func TestForwardBeaconDownloaderBoundsHeldGloasTipEnvelopeFetch(t *testing.T) {
 	cfg := gloasFromGenesisConfig()
 	tip, _, root := makeFullGloasTipAndEnvelope(t, cfg, 10)
@@ -329,41 +330,31 @@ func TestForwardBeaconDownloaderFetchesHeldGloasTipEnvelopeFromHTTPAfterP2P(t *t
 	require.NotNil(t, processedEnvelopes[root])
 }
 
-// In HTTP-preferred mode an empty beacon API answer reports the tip, paced like a P2P retry so that a tip that cannot
-// be imported does not make the caller loop without a pause.
-func TestForwardBeaconDownloaderHTTPPreferredReportsGloasTip(t *testing.T) {
-	cfg := gloasFromGenesisConfig()
-	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
-	server := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(server.Close)
-	downloader := newHeldTipDownloader(t, cfg, nil, tip, "http-fallback")
-	downloader.SetCurrentSlotSampler(func() uint64 { return 12 })
-	downloader.SetHTTPFallbackURL(server.URL)
-	downloader.httpPreferred.Store(true)
+// In HTTP-preferred mode every empty beacon API answer waits like a P2P retry, so a tip that cannot be imported, or a
+// gap that is scanned again and again, does not flood the beacon API. At the current slot the answer reports the tip.
+func TestForwardBeaconDownloaderHTTPPreferredPacesEmptyAnswers(t *testing.T) {
+	for _, test := range []struct {
+		currentSlot uint64
+		wantAtTip   bool
+	}{{currentSlot: 12, wantAtTip: true}, {currentSlot: 100}} {
+		t.Run(fmt.Sprint(test.currentSlot), func(t *testing.T) {
+			tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+			server := httptest.NewServer(http.NotFoundHandler())
+			t.Cleanup(server.Close)
+			downloader := newHeldTipDownloader(t, gloasFromGenesisConfig(), nil, tip, "http-fallback")
+			downloader.SetCurrentSlotSampler(func() uint64 { return test.currentSlot })
+			downloader.SetHTTPFallbackURL(server.URL)
+			downloader.httpPreferred.Store(true)
 
-	start := time.Now()
-	require.True(t, requestMoreWithin(t, downloader))
-	require.GreaterOrEqual(t, time.Since(start), forwardRequestRetryInterval)
+			start := time.Now()
+			require.Equal(t, test.wantAtTip, requestMoreWithin(t, downloader))
+			require.GreaterOrEqual(t, time.Since(start), forwardRequestRetryInterval)
+			require.Greater(t, downloader.gloasNextUnscanned, uint64(11))
+		})
+	}
 }
 
-// Far from the current slot, an empty beacon API answer is paced too, so a gap that is scanned again and again does not
-// flood the beacon API.
-func TestForwardBeaconDownloaderHTTPPreferredPacesEmptyAnswerBeforeTip(t *testing.T) {
-	cfg := gloasFromGenesisConfig()
-	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
-	server := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(server.Close)
-	downloader := newHeldTipDownloader(t, cfg, nil, tip, "http-fallback")
-	downloader.SetCurrentSlotSampler(func() uint64 { return 100 })
-	downloader.SetHTTPFallbackURL(server.URL)
-	downloader.httpPreferred.Store(true)
-
-	start := time.Now()
-	require.False(t, requestMoreWithin(t, downloader))
-	require.GreaterOrEqual(t, time.Since(start), forwardRequestRetryInterval)
-	require.Greater(t, downloader.gloasNextUnscanned, uint64(11))
-}
-
+// The P2P requests fail, and the HTTP fallback answers empty for the slots after the tip.
 func TestForwardBeaconDownloaderHTTPFallbackReportsGloasTip(t *testing.T) {
 	previousInterval, previousDelay := forwardBeaconRequestInterval, forwardBeaconFallbackDelay
 	forwardBeaconRequestInterval, forwardBeaconFallbackDelay = time.Millisecond, time.Millisecond
