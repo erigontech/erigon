@@ -4,10 +4,10 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
@@ -171,7 +171,11 @@ func (pt *poolTask) bumpInc(p *taskPool) bool {
 
 func (pt *poolTask) waitThen(t, next int) bool {
 	pt.next = next
-	return !pt.be.requeueAt(pt.tv.index, t, pt)
+	parked := pt.be.requeueAt(pt.tv.index, t, pt)
+	if poolRerunTrace && parked {
+		fmt.Fprintf(os.Stderr, "[pool] park tx=%d until=%d next=%d frontier=%d\n", pt.tv.index, t, next, pt.be.frontier())
+	}
+	return !parked
 }
 
 var poolNamedReruns = dbg.EnvInt("POOL_NAMED_RERUNS", 3)
@@ -180,7 +184,7 @@ var poolRerunTrace = dbg.EnvBool("POOL_RERUN_TRACE", false)
 
 func traceRerun(path string, tx, waitFor int, err error) {
 	if poolRerunTrace {
-		log.Info("[pool] rerun", "path", path, "tx", tx, "waitFor", waitFor, "err", err)
+		fmt.Fprintf(os.Stderr, "[pool] rerun path=%s tx=%d waitFor=%d err=%v\n", path, tx, waitFor, err)
 	}
 }
 
@@ -211,6 +215,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 		case psRecheck:
 			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
+				traceRerun("recheck", tv.index, blocker, nil)
 				if !pt.rerunAfter(blocker) {
 					return
 				}
@@ -292,6 +297,7 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	if pt.pending {
 		pt.pending = false
 		pt.mu.Unlock()
+		traceRerun("pending", pt.tv.index, pt.tv.index-1, nil)
 		return pt.rerunAfter(pt.tv.index - 1)
 	}
 	pt.parked = true
