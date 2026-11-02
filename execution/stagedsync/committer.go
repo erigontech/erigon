@@ -66,6 +66,8 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
 	probeApply time.Duration
+	probeCkpt  time.Duration
+	probeCkptN int
 	probeArr   []time.Time
 	probeDone  []time.Time
 	probeTxs   int
@@ -395,7 +397,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// Checkpoint commitment at a mid-block step edge without advancing
 			// lastComputedBlock or resetting block flags — the block-end fold still
 			// needs the pre-edge dirty keys.
+			tc := time.Now()
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
+			cc.probeCkpt += time.Since(tc)
+			cc.probeCkptN++
 		}
 
 	case *blockResult:
@@ -463,8 +468,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
-				"arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
+				"ckpt", cc.probeCkpt, "ckptN", cc.probeCkptN, "arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
 			cc.probeArr, cc.probeDone = cc.probeArr[:0], cc.probeDone[:0]
+			cc.probeCkpt, cc.probeCkptN = 0, 0
 			cc.probeApply, cc.probeTxs = 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
