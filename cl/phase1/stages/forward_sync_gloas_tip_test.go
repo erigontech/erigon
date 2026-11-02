@@ -181,7 +181,6 @@ func TestForwardSyncAsksForSuccessorAfterAnswerWithTip(t *testing.T) {
 	require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
 }
 
-// A tip that fork choice rejects, here because its parent is unknown, does not end ForwardSync.
 func TestForwardSyncKeepsSyncingWhenForkChoiceRejectsGloasTip(t *testing.T) {
 	f := newForwardSyncTipFixture(t, 2, false)
 	orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
@@ -195,7 +194,6 @@ func TestForwardSyncKeepsSyncingWhenForkChoiceRejectsGloasTip(t *testing.T) {
 	require.Zero(t, f.cfg.forwardSyncTipRoot)
 }
 
-// The tip's envelope passes the bid check but fork choice rejects it: ForwardSync does not end at the tip.
 func TestForwardSyncKeepsSyncingWhenTipEnvelopeIsRejected(t *testing.T) {
 	f := newForwardSyncTipFixture(t, 2, false)
 	badEnvelope := *f.envelope
@@ -209,7 +207,6 @@ func TestForwardSyncKeepsSyncingWhenTipEnvelopeIsRejected(t *testing.T) {
 	require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
 }
 
-// The marker holds for less than an epoch after it was recorded, and only while no newer block is seen.
 func TestForwardSyncTipMarkerExpires(t *testing.T) {
 	f := newForwardSyncTipFixture(t, 2, true)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

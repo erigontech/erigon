@@ -225,11 +225,8 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 			if completedHTTPCount > 0 {
 				f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount))
 			}
-			if f.scanReachedCurrentSlot() {
-				waitForForwardRequestRetry(ctx)
-				return true
-			}
-			return false
+			waitForForwardRequestRetry(ctx)
+			return f.scanReachedCurrentSlot()
 		default:
 			// HTTP failed — fall back to P2P probing.
 			f.httpPreferred.Store(false)
