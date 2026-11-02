@@ -52,13 +52,13 @@ type testEngine struct {
 	headerWait  <-chan struct{}
 }
 
-type countingBlockReader struct {
+type recordingBlockReader struct {
 	*tests.MockBlockReader
-	readBlockByRootCalls int
+	readRoots []common.Hash
 }
 
-func (r *countingBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
-	r.readBlockByRootCalls++
+func (r *recordingBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	r.readRoots = append(r.readRoots, blockRoot)
 	return r.MockBlockReader.ReadBlockByRoot(ctx, tx, blockRoot)
 }
 
@@ -127,11 +127,11 @@ func TestRebuildSkipsUnavailableDatabaseStateBeforeCallingEL(t *testing.T) {
 	for _, test := range []struct {
 		name           string
 		change         func(*testing.T, *rebuildFixture)
-		wantBlockReads int
+		readsOnlyBlock bool
 	}{
 		{
 			name:           "missing signature",
-			wantBlockReads: 1,
+			readsOnlyBlock: true,
 			change: func(t *testing.T, fixture *rebuildFixture) {
 				require.NoError(t, fixture.db.Update(t.Context(), func(tx kv.RwTx) error {
 					return tx.Delete(kv.ExecutionPayloadEnvelopeSignatures, dbutils.BlockBodyKey(fixture.block.Block.Slot, fixture.root))
@@ -190,15 +190,15 @@ func TestRebuildSkipsUnavailableDatabaseStateBeforeCallingEL(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newRebuildFixture(t)
 			test.change(t, fixture)
-			reader := &countingBlockReader{MockBlockReader: fixture.reader}
+			reader := &recordingBlockReader{MockBlockReader: fixture.reader}
 			fixture.rebuilder.beaconDB = reader
 			rebuilt, err := fixture.rebuild(t, t.Context())
 			require.NoError(t, err)
 			require.Nil(t, rebuilt)
 			require.Zero(t, fixture.engine.headerCalls)
 			require.Zero(t, fixture.engine.bodyCalls)
-			if test.wantBlockReads != 0 {
-				require.Equal(t, test.wantBlockReads, reader.readBlockByRootCalls)
+			if test.readsOnlyBlock {
+				require.Equal(t, []common.Hash{fixture.root}, reader.readRoots)
 			}
 		})
 	}
