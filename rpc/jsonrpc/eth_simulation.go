@@ -604,17 +604,6 @@ func (w diffTrackingWriter) CreateContract(address accounts.Address) error {
 	return nil
 }
 
-func (w diffTrackingWriter) trackWrites(writes *state.WriteSet) {
-	for h := range writes.AllHeaders() {
-		if _, ok := w.touchedKeys[h.Address]; !ok {
-			w.touchedKeys[h.Address] = storageKeys{}
-		}
-		if h.Path == state.StoragePath {
-			w.touchedKeys[h.Address] = append(w.touchedKeys[h.Address], h.Key)
-		}
-	}
-}
-
 // simOverrideReader serves overridden accounts from a separate state that holds the
 // overrides, so a versioned state sees them as pre-state: the version map cannot hold
 // writes below the system-call index, and versioned reads skip cached state objects.
@@ -788,8 +777,7 @@ func (s *simulator) simulateBlock(
 			intraBlockState.MergeTxIOInto(balIO, writes)
 		}
 		intraBlockState.FlushWritesToVersionMap(writes)
-		stateWriter.trackWrites(writes)
-		if err := state.ApplyWrites(writes, sharedDomains, tx, blockNumber, minTxNum, nil, rules, false); err != nil {
+		if err := intraBlockState.WriteFlushedTo(writes, stateWriter); err != nil {
 			return fmt.Errorf("apply simulated writes: %w", err)
 		}
 		intraBlockState.ResetVersionedIO()
