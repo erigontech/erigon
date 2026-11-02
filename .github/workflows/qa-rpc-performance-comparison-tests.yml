@@ -579,13 +579,14 @@ jobs:
             echo "- **Client:** $CLIENT"
             echo "- **Result:** $TEST_RESULT"
             echo
-            echo "## Test Output"
+            echo "<details><summary>Test Output</summary>"
+            echo
             echo '```'
           } > "$SUMMARY_FILE"
 
           cat "$LOG_FILE" >> "$SUMMARY_FILE"
 
-          echo '```' >> "$SUMMARY_FILE"
+          printf '\n```\n\n</details>\n' >> "$SUMMARY_FILE"
 
           cat "$SUMMARY_FILE"
           cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
