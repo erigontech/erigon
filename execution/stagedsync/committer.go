@@ -384,7 +384,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
-			cc.accumulateTouched(r.writes, base)
+			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
+				cc.accumulateTouched(r.writes, base)
+			}
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from

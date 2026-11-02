@@ -1023,3 +1023,30 @@ func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
 	require.Zero(t, rejected, "a rejected root must leave no branch record in the commitment domain")
 	require.False(t, pending, "the rejected round's output must be released")
 }
+
+func TestHandleMessage_ComputedAheadBlockSkipsTouchedUnion(t *testing.T) {
+	defer func(p bool) { dbg.BALShadowCompute = p }(dbg.BALShadowCompute)
+	for _, shadow := range []bool{false, true} {
+		dbg.BALShadowCompute = shadow
+		ctx := context.Background()
+		db, _, doms := setupStepTest(t)
+
+		in := make(chan applyResult, 64)
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+
+		addr := accounts.InternAddress([20]byte{0xe3})
+		ws := &state.WriteSet{}
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
+		cc.computedAhead[1] = true
+		cc.handleMessage(ctx, recordTx(newRawViewVM(2), 1, common.Hash{0x01}, 2, &chain.Rules{}, ws))
+		cc.Stop()
+
+		if shadow {
+			require.Contains(t, cc.touchedAccounts, addr, "shadow mode cross-checks the compute-ahead root against the touched union")
+		} else {
+			require.Empty(t, cc.touchedAccounts, "a computed-ahead block's touched union is discarded at its blockResult")
+		}
+	}
+}
