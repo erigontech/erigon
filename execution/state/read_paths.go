@@ -10,6 +10,7 @@ package state
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -278,6 +279,14 @@ func (ibs *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
 }
 
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
+	if depTrace {
+		before := s.dep
+		defer func() {
+			if s.dep > before {
+				fmt.Fprintf(os.Stderr, "[dep] tx=%d dep=%d path=%v addr=%x key=%x outcome=%v\n", s.txIndex, s.dep, path, addr, key, r.outcome)
+			}
+		}()
+	}
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
 		if err != nil {
@@ -1734,3 +1743,5 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
 }
+
+var depTrace = dbg.EnvBool("IBS_DEP_TRACE", false)
