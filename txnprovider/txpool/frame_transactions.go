@@ -221,7 +221,11 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 			result = frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
 		}
 		if result.reason == txpoolcfg.Success {
-			txn.frameValidation = result.validation
+			// A pooled slot's validation must match its active reservation.
+			// Revalidation updates both together; duplicate admission must preserve them.
+			if pooled := p.byHash[string(txn.IDHash[:])]; pooled == nil || pooled.TxnSlot != txn {
+				txn.frameValidation = result.validation
+			}
 			continue
 		}
 		reasons[i] = result.reason

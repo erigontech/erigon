@@ -819,6 +819,75 @@ func TestFramePoolRevalidationReleasesLock(t *testing.T) {
 	require.Equal(t, 1, pool.pending.Len())
 }
 
+func TestFramePoolUnwindPooledBlobPreservesReservation(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.balance = common.Ether
+	pool.pendingBlobFee.Store(1)
+
+	blobTxn, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
+	require.NoError(t, err)
+	blob := blobTxn.(*types.BlobTxWrapper)
+	wrapper := &types.FrameTxWrapper{
+		FrameTransaction: &types.FrameTransaction{
+			ChainID: *uint256.NewInt(1), NonceKeys: []uint256.Int{{1}}, SenderAddress: sender,
+			Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
+			Fees:                types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2), BlobFeeCap: *uint256.NewInt(10)},
+			BlobVersionedHashes: blob.Tx.BlobVersionedHashes,
+		},
+		WrapperVersion: 1, Blobs: blob.Blobs, Commitments: blob.Commitments, Proofs: blob.Proofs,
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, wrapper.MarshalBinaryWrapped(&encoded))
+	frame := &TxnSlot{}
+	parser := NewTxnParseContext(*uint256.NewInt(1))
+	parser.WithSender(false)
+	_, err = parser.ParseTransaction(encoded.Bytes(), 0, frame, nil, false, true, nil)
+	require.NoError(t, err)
+
+	failRevalidation := false
+	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+		if failRevalidation {
+			failRevalidation = false
+			return nil, context.DeadlineExceeded
+		}
+		reply, validationErr := backend.FrameValidation(ctx, req)
+		if validationErr != nil {
+			return nil, validationErr
+		}
+		cost := new(uint256.Int).SetBytes(reply.MaxCost)
+		cost.AddUint64(cost, frame.Txn.GetBlobGas()*pool.pendingBlobFee.Load())
+		reply.MaxCost = cost.Bytes()
+		return reply, nil
+	}}
+	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	ordinary.IDHash[0] = 2
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	txns.Append(ordinary, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	reservation := pool.frameReservations[sender]
+
+	// Unwind must tolerate a blob transaction that is still pooled.
+	var unwind TxnSlots
+	unwind.Append(&TxnSlot{Txn: frame.Txn, IDHash: frame.IDHash}, sender[:], false)
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.PendingBlobFeePerGas = 2
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	failRevalidation = true
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, unwind, TxnSlots{}))
+	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
+
+	var mined TxnSlots
+	mined.Append(frame, sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, sender), TxnSlots{}, TxnSlots{}, mined))
+	require.Empty(t, pool.frameReservations, "mining the only frame must release its reservation exactly")
+	require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+}
+
 func TestFramePoolUnwindPreservesLocalFlag(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
