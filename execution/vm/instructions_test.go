@@ -294,8 +294,17 @@ func TestMulModAcrossModuli(t *testing.T) {
 		callContext.Stack.push(*uint256.MustFromBig(x))
 		opMulmod(0, evm, callContext)
 		got := callContext.Stack.popCopy()
-		require.Equal(t, want, got.ToBig(), "call %d", i)
+		require.Zero(t, want.Cmp(got.ToBig()), "call %d", i)
 	}
+
+	cached := callContext.mulmodModulus
+	callContext.Stack.push(*uint256.MustFromBig(m1))
+	callContext.Stack.push(*uint256.MustFromBig(y))
+	callContext.Stack.push(uint256.Int{})
+	opMulmod(0, evm, callContext)
+	got := callContext.Stack.popCopy()
+	require.True(t, got.IsZero())
+	require.Equal(t, cached, callContext.mulmodModulus, "a zero product must not replace the cached modulus")
 }
 
 // getResult is a convenience function to generate the expected values

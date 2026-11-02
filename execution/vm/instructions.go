@@ -378,6 +378,10 @@ func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, nil
 	}
 	if *z != scope.mulmodModulus {
+		if x.IsZero() || y.IsZero() {
+			z.Clear()
+			return pc, nil, nil
+		}
 		scope.mulmodModulus, scope.mulmodReciprocal = *z, uint256.Reciprocal(z)
 	}
 	z.MulModWithReciprocal(x, y, z, &scope.mulmodReciprocal)
