@@ -7,6 +7,7 @@
 package engineapi
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -366,6 +368,34 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	writeSSZBytes(w, out)
 }
 
+func (e *EngineServer) getSSZBodies(ctx context.Context, headers []*types.Header, forkName string) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(headers))
+	matchingHashes := make([]common.Hash, 0, len(headers))
+	responsePositions := make([]int, 0, len(headers))
+	// Filter by fork before fetching bodies: retrieval can re-execute blocks
+	// to recover missing block access lists.
+	for i, header := range headers {
+		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
+			continue
+		}
+		// Pin each body to the header used for fork filtering, even if the canonical
+		// chain changes between reads.
+		matchingHashes = append(matchingHashes, header.Hash())
+		responsePositions = append(responsePositions, i)
+	}
+	if len(matchingHashes) == 0 {
+		return entries, nil
+	}
+	bodies, err := e.chainRW.GetPayloadBodiesByHash(ctx, matchingHashes)
+	if err != nil {
+		return nil, err
+	}
+	for i, position := range responsePositions {
+		entries[position] = bodies[i]
+	}
+	return entries, nil
+}
+
 func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
 	if !checkSSZContentType(w, r) {
 		return
@@ -379,34 +409,19 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
-	// Filter by fork before fetching bodies: retrieval can re-execute blocks
-	// to recover missing block access lists.
-	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(blockHashes))
-	matchingHashes := make([]common.Hash, 0, len(blockHashes))
-	responsePositions := make([]int, 0, len(blockHashes))
+	headers := make([]*types.Header, len(blockHashes))
 	for i, hash := range blockHashes {
 		header, err := e.executionService.GetHeader(r.Context(), &hash, nil)
 		if err != nil {
 			writeEngineProblem(w, err)
 			return
 		}
-		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
-			continue
-		}
-		matchingHashes = append(matchingHashes, hash)
-		responsePositions = append(responsePositions, i)
+		headers[i] = header
 	}
-	if len(matchingHashes) > 0 {
-		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), matchingHashes)
-		if err != nil {
-			writeEngineProblem(w, err)
-			return
-		}
-		for i, position := range responsePositions {
-			if i < len(bodies) {
-				entries[position] = bodies[i]
-			}
-		}
+	entries, err := e.getSSZBodies(r.Context(), headers, forkName)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
 	}
 	out, err := encodeBodiesResponse(entries, version)
 	if err != nil {
@@ -435,11 +450,7 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 			fmt.Sprintf("invalid from or count, from: %d count: %d", from, count))
 		return
 	}
-	// Pin each body to the header used for fork filtering, even if the canonical
-	// chain changes between reads.
-	entries := make([]*engine_types.ExecutionPayloadBodyV2, 0, count)
-	matchingHashes := make([]common.Hash, 0, count)
-	responsePositions := make([]int, 0, count)
+	headers := make([]*types.Header, 0, count)
 	for i := range count {
 		number := from + i
 		header, err := e.executionService.GetHeader(r.Context(), nil, &number)
@@ -450,25 +461,12 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 		if header == nil {
 			break
 		}
-		// Every known block keeps its response position, including blocks from other forks.
-		entries = append(entries, nil)
-		if forkNameAtTime(e.config, header.Time) != forkName {
-			continue
-		}
-		matchingHashes = append(matchingHashes, header.Hash())
-		responsePositions = append(responsePositions, len(entries)-1)
+		headers = append(headers, header)
 	}
-	if len(matchingHashes) > 0 {
-		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), matchingHashes)
-		if err != nil {
-			writeEngineProblem(w, err)
-			return
-		}
-		for i, position := range responsePositions {
-			if i < len(bodies) {
-				entries[position] = bodies[i]
-			}
-		}
+	entries, err := e.getSSZBodies(r.Context(), headers, forkName)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
 	}
 	out, err := encodeBodiesResponse(entries, version)
 	if err != nil {
