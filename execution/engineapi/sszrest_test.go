@@ -1156,6 +1156,52 @@ func TestEncodeBuiltPayloadIgnoresExecutionRequestsBeforeElectra(t *testing.T) {
 	}
 }
 
+func TestSSZRESTGetPayload(t *testing.T) {
+	const payloadID uint64 = 0x0102030405060708
+	request := make(hexutil.Bytes, 1+types.WithdrawalRequestDataLen)
+	request[0], request[1] = types.WithdrawalRequestType, 0x42
+	block := minimalPayloadBlock(1, types.FlatRequests{{Type: request[0], RequestData: request[1:]}})
+	blockValue := uint256.NewInt(112233)
+	module := &stubExecutionModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{Block: block, BlockValue: blockValue}, nil
+		},
+	}
+	srv := newProposingEngineServerForGetPayloadTests(module)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/payloads/0x0102030405060708", "prague", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "application/octet-stream", rec.Header().Get("Content-Type"))
+	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	response, err := decodeBuiltPayload(rec.Body.Bytes(), clparams.ElectraVersion)
+	require.NoError(t, err)
+	require.Equal(t, block.Block.Hash(), response.ExecutionPayload.BlockHash)
+	require.Equal(t, hexutil.Uint64(1), response.ExecutionPayload.Timestamp)
+	require.Equal(t, blockValue, (*uint256.Int)(response.BlockValue))
+	require.Equal(t, []hexutil.Bytes{request}, response.ExecutionRequests)
+}
+
+func TestSSZRESTGetPayloadRejectsMismatchedFork(t *testing.T) {
+	module := &stubExecutionModule{
+		getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(1, types.FlatRequests{}),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerForGetPayloadTests(module)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/payloads/0x000000000000002a", "cancun", nil))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+}
+
 func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
 	id, err := parsePayloadIDPath("0x0102030405060708")
 	require.NoError(t, err)
