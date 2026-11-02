@@ -1047,7 +1047,7 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 		ibs.recordWriteBalance(addr, update)
 		return nil
 	}
-	ibs.journal.balanceChange(addr, *prev, wasCommited)
+	ibs.journal.balanceChange(addr, *prev, wasCommited, ibs.versionedWrites.balanceDeleted(addr))
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
 	}

@@ -64,6 +64,7 @@ const (
 	flagSelfdestructPrev           uint8 = 1 << 1 // kindSelfdestruct: account had already selfdestructed
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
+	flagBalanceDeleted             uint8 = 1 << 4
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -209,8 +210,12 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 	j.dirties[account]++
 }
 
-func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: commitFlag(wasCommitted)})
+func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted, prevDeleted bool) {
+	flags := commitFlag(wasCommitted)
+	if prevDeleted {
+		flags |= flagBalanceDeleted
+	}
+	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: flags})
 	j.dirties[account]++
 }
 
@@ -347,7 +352,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			// it. Gating this on committed (which describes SelfDestructPath, not
 			// BalancePath) deleted balance writes that predated the snapshot.
 			if je.flags&flagSelfdestructHadBalance != 0 {
-				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned)
+				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned, false)
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
@@ -382,7 +387,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
-				s.versionedWrites.updateBalance(je.account, je.value)
+				s.versionedWrites.updateBalance(je.account, je.value, je.flags&flagBalanceDeleted != 0)
 			}
 		}
 		return nil
@@ -516,7 +521,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
-				s.versionedWrites.updateBalance(je.account, je.value)
+				s.versionedWrites.updateBalance(je.account, je.value, false)
 			}
 		}
 		return nil

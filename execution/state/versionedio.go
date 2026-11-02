@@ -1891,14 +1891,22 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 
 // updateBalance, updateNonce etc. are typed in-place mutations on the
 // existing per-path entry.  No-op when no entry exists for addr.
-func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int) {
+func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int, deleted bool) {
 	if vw, ok := ws.balance[addr]; ok {
 		vw.Val = val
 		// Reverting restores a live prior balance, so clear any ValueDeleted stamp a
 		// self-destruct left on the cell — otherwise GetAccount still reads the
 		// account as removed after its destruct was rolled back.
 		vw.valStatus = ValueChanged
+		if deleted {
+			vw.valStatus = ValueDeleted
+		}
 	}
+}
+
+func (ws *WriteSet) balanceDeleted(addr accounts.Address) bool {
+	vw, ok := ws.GetBalance(addr)
+	return ok && vw.Deletes()
 }
 
 func (ws *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
