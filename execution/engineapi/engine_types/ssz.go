@@ -212,7 +212,8 @@ func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
 	if s.LatestValidHash != nil {
 		latestHashes.Append(*s.LatestValidHash)
 	}
-	// Optional[String] is a list with zero or one byte strings.
+	// Optional[String] contains at most one byte string. A present value needs
+	// an inner offset even when the message is empty; an absent value has no bytes.
 	var validationErr [][]byte
 	if s.ValidationError != nil && s.ValidationError.Error() != nil {
 		msg := s.ValidationError.Error().Error()

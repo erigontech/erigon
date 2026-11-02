@@ -274,7 +274,7 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
-// EngineNewPayload validates and possibly executes payload
+// newPayload validates and may execute a payload.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
@@ -436,6 +436,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	// The SSZ envelope omits blob hashes. Derive them during transaction decoding,
+	// after the transaction-count gas guard, to avoid decoding the payload twice.
 	if deriveBlobHashes {
 		expectedBlobHashes = []common.Hash{}
 	}

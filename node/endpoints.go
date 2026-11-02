@@ -78,7 +78,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		httpSrv.Protocols.SetHTTP1(true)
 		httpSrv.Protocols.SetHTTP2(true)
 		httpSrv.Protocols.SetUnencryptedHTTP2(true)
-		// A 1 MiB stream window reduces flow-control stalls on large Engine requests.
+		// Pin the receive window per stream to 1 MiB, matching Go's server default.
 		httpSrv.HTTP2 = &http.HTTP2Config{MaxReceiveBufferPerStream: 1 << 20}
 	}
 	// start the HTTP server

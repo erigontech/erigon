@@ -1,8 +1,8 @@
 // Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 
-// HTTP routing for the Engine API v2 REST transport
-// (https://github.com/ethereum/execution-apis/pull/793).
+// HTTP routing for the Engine REST API under /engine/v1.
+// See https://github.com/ethereum/execution-apis/blob/22e87b3c689f4fd1696baf40328d3c94c02275dd/src/engine/refactor.md.
 
 package engineapi
 
@@ -324,8 +324,8 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		e.logger.Debug("[SSZ-REST] ignoring custody columns update", "fork", forkName)
 	}
 	if attrs != nil {
-		// the header fork is load-bearing for payload builds only: it must match
-		// the fork the new payload would belong to
+		// With payload attributes, the header fork must match their timestamp.
+		// Without attributes, forkchoice may refer to a head from another fork.
 		if attrsFork := forkNameAtTime(e.config, uint64(attrs.Timestamp)); attrsFork != forkName {
 			writeProblem(w, http.StatusBadRequest, problemUnsupportedFork,
 				fmt.Sprintf("payload attributes timestamp belongs to fork %q, not header fork %q", attrsFork, forkName))
@@ -359,7 +359,8 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	// Body retrieval can re-execute blocks to recover missing access lists.
+	// Filter by fork before fetching bodies: retrieval can re-execute blocks
+	// to recover missing block access lists.
 	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(blockHashes))
 	hashes := make([]common.Hash, 0, len(blockHashes))
 	positions := make([]int, 0, len(blockHashes))
@@ -420,6 +421,7 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 		if header == nil {
 			break
 		}
+		// Every known block keeps its response position, including blocks from other forks.
 		entries = append(entries, nil)
 		if forkNameAtTime(e.config, header.Time) != forkName {
 			continue
@@ -499,7 +501,8 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 			writeBlobsProblem(w, err)
 			return
 		}
-		// nil signals "cannot serve" (and the all-or-nothing miss on v2)
+		// A nil response means the request cannot be served. For v2, this also
+		// covers a missing blob because v2 is all-or-nothing.
 		if resp == nil {
 			w.WriteHeader(http.StatusNoContent)
 			return

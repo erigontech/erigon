@@ -317,8 +317,8 @@ func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
 	})
 }
 
-// Pin the exact wire examples from execution-apis#793. Example A: a VALID
-// PayloadStatus with latest_valid_hash present and no validation_error is 41 bytes.
+// Pin the PayloadStatus byte examples from refactor-ssz.md. A VALID status
+// with latest_valid_hash present and no validation_error is 41 bytes.
 func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
 	latest := common.HexToHash("0xcd")
 	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}
@@ -774,10 +774,9 @@ func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {
 	})
 }
 
-// An unavailable BlobEntry carries zero-valued contents. For v1 the spec
-// mandates the layout: a zero-filled blob and proof. For v2 the spec leaves
-// the unavailable contents unstated; the empty (not zero-filled) cell_proofs
-// list pinned here is the SSZ zero value and matches go-ethereum.
+// Unavailable entries carry SSZ zero values: a zero-filled blob and proof for
+// v1, or a zero-filled blob and empty proof list for the v2/v3 entry schema.
+// The v2/v3 unavailable entry is used by /blobs/v3; /blobs/v2 returns 204 on a miss.
 func TestSSZRESTBlobsUnavailableEntryByteLayout(t *testing.T) {
 	t.Run("v1", func(t *testing.T) {
 		enc, err := encodeBlobsV1Response([]*engine_types.BlobAndProofV1{nil})

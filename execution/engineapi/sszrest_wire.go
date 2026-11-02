@@ -6,8 +6,8 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-// SSZ wire codecs for the Engine API v2 REST transport
-// (https://github.com/ethereum/execution-apis/pull/793).
+// SSZ wire codecs for the Engine REST API under /engine/v1.
+// See https://github.com/ethereum/execution-apis/blob/22e87b3c689f4fd1696baf40328d3c94c02275dd/src/engine/refactor-ssz.md.
 
 package engineapi
 
@@ -102,13 +102,14 @@ func hashListValues(l solid.HashListSSZ) []common.Hash {
 	return out
 }
 
-// BodiesByHashRequest {block_hashes} and BlobsVNRequest {versioned_hashes} are
-// single-field containers wrapping a List[Hash32, limit]; they share this codec.
+// Body requests by hash and blob requests v1-v3 wrap a hash list in a container.
+// Blob v4 requests have an additional indices bitvector and use a separate codec.
 func decodeHashListRequest(buf []byte, limit int) ([]common.Hash, error) {
 	list := solid.NewHashList(limit)
 	if err := ssz2.UnmarshalSSZStrict(buf, 0, list); err != nil {
 		return nil, err
 	}
+	// HashList.DecodeSSZ checks element size but does not enforce the list limit.
 	if list.Length() > limit {
 		return nil, fmt.Errorf("hash list length %d exceeds limit %d", list.Length(), limit)
 	}
@@ -165,8 +166,8 @@ func decodeNewPayloadEnvelope(buf []byte, version clparams.StateVersion) (*engin
 	return payload, parentRoot, transactionsBytes(requests), nil
 }
 
-// ForkchoiceUpdate is the request body of POST /forkchoice.
-// custody_columns (Optional[Bitvector[CELLS_PER_EXT_BLOB]]) exists since Amsterdam.
+// Paris attributes have a fixed SSZ size. Withdrawals make later versions
+// variable-size, so a present optional value needs an element offset.
 func newOptionalPayloadAttributes(version clparams.StateVersion) *solid.ListSSZ[*engine_types.PayloadAttributes] {
 	if version < clparams.CapellaVersion {
 		return solid.NewStaticListSSZ[*engine_types.PayloadAttributes](1, sszPayloadAttributesParisBytes)
@@ -174,6 +175,8 @@ func newOptionalPayloadAttributes(version clparams.StateVersion) *solid.ListSSZ[
 	return solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
 }
 
+// ForkchoiceUpdate is the request body of POST /forkchoice.
+// custody_columns (Optional[Bitvector[CELLS_PER_EXT_BLOB]]) exists since Amsterdam.
 func forkchoiceUpdateSchema(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *solid.ListSSZ[*engine_types.PayloadAttributes], custody *solid.ByteListSSZ) []any {
 	if version < clparams.GloasVersion {
 		return []any{state, attrs}
@@ -328,7 +331,7 @@ func (b *sszPayloadBody) EncodingSizeSSZ() int {
 func (b *sszPayloadBody) Clone() clonable.Clonable { return newSSZPayloadBody(b.version) }
 
 // sszBodyEntry is BodyEntry {available: boolean, body: ExecutionPayloadBody}.
-// When Available is false the body is zero-valued.
+// Unavailable entries must have a zero-valued body.
 type sszBodyEntry struct {
 	Available       bool
 	Transactions    []hexutil.Bytes
@@ -384,9 +387,9 @@ func (e *sszBodyEntry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
 func (*sszBodyEntry) Clone() clonable.Clonable { return &sszBodyEntry{} }
 
-// The response of POST /bodies/hash and GET /bodies is
-// BodiesResponse {entries: List[BodyEntry, MAX_BODIES_REQUEST]}; nil bodies
-// become available=false.
+// BodiesResponse wraps List[BodyEntry, MAX_BODIES_REQUEST] in a container.
+// Missing bodies and Amsterdam bodies without a block access list are encoded
+// as unavailable, with zero-valued bodies and their response positions preserved.
 func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version clparams.StateVersion) ([]byte, error) {
 	entries := solid.NewDynamicListSSZ[*sszBodyEntry](sszMaxBodiesRequest)
 	for _, body := range bodies {
@@ -410,7 +413,7 @@ var (
 	zeroSSZProof = make([]byte, sszKZGBytes)
 )
 
-// sszBlobV1Entry is BlobEntry {available: boolean, contents: BlobAndProofV1}.
+// sszBlobV1Entry is BlobV1Entry {available: boolean, contents: BlobAndProofV1}.
 type sszBlobV1Entry struct {
 	Available bool
 	Blob      hexutil.Bytes
@@ -442,7 +445,7 @@ func (e *sszBlobV1Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
 func (*sszBlobV1Entry) Clone() clonable.Clonable { return &sszBlobV1Entry{} }
 
-// sszBlobV2Entry is BlobEntry {available: boolean, contents: BlobAndProofV2},
+// sszBlobV2Entry is BlobV2Entry {available: boolean, contents: BlobAndProofV2},
 // shared by /blobs/v2 and /blobs/v3.
 type sszBlobV2Entry struct {
 	Available bool
@@ -482,9 +485,8 @@ func (e *sszBlobV2Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
 func (*sszBlobV2Entry) Clone() clonable.Clonable { return &sszBlobV2Entry{} }
 
-// The response of POST /blobs/vN is BlobsVNResponse {entries:
-// List[BlobVNEntry, MAX_BLOBS_REQUEST]}; nil contents become available=false
-// with zero-valued contents.
+// BlobsV1Response wraps List[BlobV1Entry, MAX_BLOBS_REQUEST] in a container.
+// Missing blobs keep their positions with available=false and zero-valued contents.
 func encodeBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {
 	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](sszMaxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
 	for _, blob := range blobs {
@@ -560,8 +562,8 @@ func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, indices [sszCustody
 		entry.available = true
 		entry.cells = make([][]byte, sszCellsPerExtBlob)
 		entry.proofs = make([][]byte, sszCellsPerExtBlob)
-		// JSON-RPC returns only requested indices, in ascending order. SSZ preserves
-		// all 128 positions; unrequested or missing cells and their proofs stay empty.
+		// JSON-RPC returns selected indices in ascending order. Available SSZ blobs
+		// retain all 128 positions; unrequested or missing cell/proof pairs stay empty.
 		j := 0
 		for index := range sszCellsPerExtBlob {
 			if indices[index/8]&(1<<(index%8)) == 0 {
