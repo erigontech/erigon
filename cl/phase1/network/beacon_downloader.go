@@ -801,6 +801,9 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	envelopes := f.fetchGloasEnvelopes(envelopeCtx, p2pCtx, tipPeer, blocks, [][32]byte{root})
 	cancelP2P()
 	cancel()
+	if ctx.Err() != nil {
+		return false
+	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()

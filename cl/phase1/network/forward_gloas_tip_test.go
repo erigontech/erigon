@@ -364,6 +364,28 @@ func TestForwardBeaconDownloaderDropsRejectedHeldGloasTip(t *testing.T) {
 	}
 }
 
+// With a cancelled stage context, processing fails with the context error, which says nothing about the tip's peer.
+func TestForwardBeaconDownloaderKeepsHeldGloasTipWhenContextIsCancelled(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	tip := makeGloasBlock(11, hash(0xaa), common.Hash{})
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
+	var banned []string
+	downloader.banPeer = func(peer string) { banned = append(banned, peer) }
+	processed := false
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed = true
+		return highest, fmt.Errorf("failed to read signed header: %w", context.Canceled)
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.False(t, downloader.ImportHeldGloasTip(ctx, 50*time.Millisecond, acceptAnyRoot))
+	require.False(t, processed)
+	require.Empty(t, banned)
+	require.Same(t, tip, downloader.gloasLookahead)
+}
+
 // When P2P does not serve the tip's envelope, the beacon API still gets part of the budget.
 func TestForwardBeaconDownloaderFetchesHeldGloasTipEnvelopeFromHTTPAfterP2P(t *testing.T) {
 	cfg := gloasFromGenesisConfig()
