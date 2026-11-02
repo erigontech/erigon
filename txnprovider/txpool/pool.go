@@ -139,6 +139,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
+	flushes                 atomic.Uint64 // committed flushNoFsync runs
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -308,15 +309,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	defer coreTx.Rollback()
 
-	var poolTx kv.Tx
-	if p.poolDB != nil {
-		poolTx, err = p.poolDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		defer poolTx.Rollback()
-	}
-
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
 
@@ -344,7 +336,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	p.lock.Lock()
+	var poolTx kv.Tx
+	if p.poolDB != nil {
+		if poolTx, err = p.beginRoThenLock(ctx); err != nil {
+			return err
+		}
+		defer poolTx.Rollback()
+	} else {
+		p.lock.Lock()
+	}
 	p.stateGeneration++
 	defer func() {
 		if err == nil {
@@ -425,7 +425,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(poolTx, minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
@@ -2108,31 +2108,64 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 	return p.blobs.get(blobHashes)
 }
 
+// minedBlobReorgDepth bounds the mined-blob cache when finality stalls: two epochs.
+const minedBlobReorgDepth = 64
+
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
-	// Remove blobs in the finalized block and older, loop through all entries
-	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
-		// delete individual hashes
-		for _, mt := range p.minedBlobTxnsByBlock[finalizedBlock] {
-			delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+	// Remove blobs of finalized blocks, and of blocks too deep to reorg.
+	for b, mts := range p.minedBlobTxnsByBlock {
+		if (finalizedBlock > 0 && b <= finalizedBlock) || b+minedBlobReorgDepth < minedBlock {
+			for _, mt := range mts {
+				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+			}
+			delete(p.minedBlobTxnsByBlock, b)
 		}
-		// delete the map entry for this block num
-		delete(p.minedBlobTxnsByBlock, finalizedBlock)
-		// move on to older blocks, if present
-		finalizedBlock--
 	}
 
 	// Add mined blobs
-	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
+	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
+		p.minedBlobTxnsByBlock[minedBlock] = nil
+	}
 	for _, txn := range minedTxns {
-		if txn.TxType() == BlobTxnType {
-			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
-			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
-			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
-			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
+		if txn.TxType() != BlobTxnType {
+			continue
 		}
+		hash := string(txn.IDHash[:])
+		// Mined txns arrive without blobs; the pooled or an earlier cached copy still has them.
+		if pooled, ok := p.byHash[hash]; ok {
+			txn = pooled.TxnSlot
+			// A flushed txn keeps its Rlp only in the db row, which the next flush deletes.
+			if txn.Rlp == nil && poolTx != nil {
+				rlp, _, _, err := p.getRlpLocked(poolTx, txn.IDHash[:])
+				if err != nil {
+					return err
+				}
+				if rlp != nil {
+					// A fresh parse points the blobs into the new buffer, so the flushed one can be freed.
+					parseCtx := NewTxnParseContext(p.chainID)
+					parseCtx.WithSender(false)
+					fresh := &TxnSlot{}
+					if _, err := parseCtx.ParseTransaction(bytes.Clone(rlp), 0, fresh, nil, false, true, nil); err != nil {
+						p.logger.Warn("[txpool] processMinedFinalizedBlobs: parseTransaction", "hash", hex.EncodeToString(txn.IDHash[:]), "err", err)
+					} else {
+						fresh.SenderID, fresh.Traced = txn.SenderID, txn.Traced
+						txn = fresh
+					}
+				}
+			}
+		} else if queued, ok := p.unprocessedRemoteByHash[hash]; ok {
+			full := *queued
+			full.SenderID, full.Traced = txn.SenderID, txn.Traced
+			txn = &full
+		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
+			txn = cached.TxnSlot
+		}
+		p.deleteMinedBlobTxn(hash)
+		mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(p.minedBlobTxnsByBlock[minedBlock])}
+		p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
+		p.minedBlobTxnsByHash[hash] = mt
 	}
 	return nil
 }
@@ -2609,6 +2642,25 @@ func (p *TxPool) Run(ctx context.Context) error {
 	}
 }
 
+// beginRoThenLock opens a pool read tx and then takes p.lock, the order every other caller uses. It
+// retries when a flush commits in between, because the flush clears the Rlp of pooled slots and the
+// older snapshot does not have the rows it wrote.
+func (p *TxPool) beginRoThenLock(ctx context.Context) (kv.Tx, error) {
+	for {
+		flushes := p.flushes.Load()
+		tx, err := p.poolDB.BeginRo(ctx) //nolint:gocritic // The caller owns Rollback.
+		if err != nil {
+			return nil, err
+		}
+		p.lock.Lock()
+		if p.flushes.Load() == flushes {
+			return tx, nil
+		}
+		p.lock.Unlock()
+		tx.Rollback()
+	}
+}
+
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -2626,6 +2678,7 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
+	p.flushes.Add(1)
 	return written, nil
 }
 
