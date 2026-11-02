@@ -380,6 +380,21 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	require.Nil(t, out2.ValidationError)
 }
 
+func TestSSZRESTPayloadStatusRejectsMultipleLatestValidHashes(t *testing.T) {
+	latest := common.HexToHash("0x01")
+	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}
+	encoded, err := status.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	extraHash := common.HexToHash("0x02")
+	encoded = append(encoded, extraHash[:]...)
+	const validationErrorOffsetPosition = 5
+	binary.LittleEndian.PutUint32(encoded[validationErrorOffsetPosition:], uint32(len(encoded)))
+
+	var decoded engine_types.PayloadStatus
+	require.ErrorContains(t, decoded.DecodeSSZ(encoded, 0), "latest_valid_hash")
+}
+
 func TestSSZRESTForkchoiceResponseRoundTrip(t *testing.T) {
 	latest := common.HexToHash("0x11")
 	payloadID := hexutil.Bytes{1, 2, 3, 4, 5, 6, 7, 8}
