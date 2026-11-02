@@ -176,12 +176,12 @@ func (pt *poolTask) waitThen(t, next int) bool {
 const poolNamedReruns = 3
 
 func (pt *poolTask) rerunAfter(named int) bool {
-	t := pt.tv.index - 1
-	if pt.reruns < poolNamedReruns {
-		t = named
-	}
 	pt.reruns++
-	return pt.waitThen(t, psReexec)
+	if pt.reruns <= poolNamedReruns {
+		pt.next = psReexec
+		return !pt.be.requeueAtValidated(pt.tv.index, named, pt)
+	}
+	return pt.waitThen(pt.tv.index-1, psReexec)
 }
 
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
