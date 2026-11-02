@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -124,4 +125,35 @@ func TestValidateChainBeyondLoopBlockLimitDoesNotWarn(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	require.False(t, recorder.warned.Load())
+}
+
+func TestValidateChainAcceptsCanonicalUnexecutedBlock(t *testing.T) {
+	const lag = 12
+	m, chainPack := execmoduletester.NewWithExecLag(t, lag, 1, execmoduletester.WithLoopBlockLimit(5))
+
+	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[lag].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+}
+
+func TestValidateChainExecutesCanonicalUnexecutedBlockWithinLimit(t *testing.T) {
+	m, chainPack := execmoduletester.NewWithExecLag(t, 3, 1, execmoduletester.WithLoopBlockLimit(5))
+
+	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[3].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+}
+
+func TestValidateChainDoesNotInvalidateUnexecutedCanonicalAncestorsOfBadTip(t *testing.T) {
+	m, chainPack := execmoduletester.NewWithExecLag(t, 2, 1, execmoduletester.WithLoopBlockLimit(5))
+	tip := chainPack.Blocks[3]
+	badHeader := types.CopyHeader(tip.Header())
+	badHeader.Root[0] ^= 0xff
+	bad := tip.WithSeal(badHeader)
+	execmoduletester.InsertUnexecutedCanonical(t, m, []*types.Block{bad})
+
+	result, err := m.ValidateChain(t.Context(), bad.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+	require.Equal(t, common.Hash{}, result.LatestValidHash)
 }

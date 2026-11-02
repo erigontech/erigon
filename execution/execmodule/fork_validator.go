@@ -213,9 +213,15 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		return
 	}
 	if foundCanonical {
-		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
-		return
+		var executedTo uint64
+		if executedTo, criticalError = stages.GetStageProgress(tx, stages.Execution); criticalError != nil {
+			return
+		}
+		if executedTo >= number {
+			status = engine_types.ValidStatus
+			latestValidHash = header.Hash()
+			return
+		}
 	}
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
@@ -350,6 +356,13 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.Execution)
 
 		if criticalError != nil {
+			return
+		}
+		// The run also executed unexecuted canonical ancestors, so it cannot tell which block failed.
+		if latestValidNumber+1 < headersChain[0].Number.Uint64() {
+			status, latestValidHash, validationError = engine_types.AcceptedStatus, common.Hash{}, nil
+			fv.extendingForkHeadHash = common.Hash{}
+			fv.extendingForkNumber = 0
 			return
 		}
 		var ok bool
