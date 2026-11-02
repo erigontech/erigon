@@ -19,7 +19,9 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/rand"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -1159,4 +1161,56 @@ func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
 		checked++
 	}
 	require.Positive(t, checked)
+}
+
+// Compute-ahead must fold an account the BAL drains to empty under EIP-161 as absent: its root equals that of a base that never had it.
+func TestComputeAhead_BALDrainedEmptyAccountFoldsAsAbsent(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	const firstTxNum, lastTxNum = uint64(11), uint64(20)
+	cfg := *chain.AllProtocolChanges
+	require.True(t, cfg.IsEIP161Enabled(2))
+	addrA, addrB := bytes.Repeat([]byte{0xaa}, length.Addr), bytes.Repeat([]byte{0xbb}, length.Addr)
+
+	run := func(withA bool, stateRoot common.Hash) commitmentResult {
+		ctx := context.Background()
+		db, tx, doms := setupStepTest(t)
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &cfg, "test", log.New(), false, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+		defer cc.Stop()
+		cc.hasFirstBlock = true
+		cc.firstBlockNum = 2
+
+		put := func(addr []byte, nonce uint64, bal uint64) {
+			acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(bal), CodeHash: accounts.EmptyCodeHash}
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), 5, nil))
+		}
+		put(addrB, 1, 100)
+		bList := types.BlockAccessList{{
+			Address:        [20]byte(addrB),
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(90)}},
+		}}
+		if withA {
+			put(addrA, 0, 7)
+			bList = append(bList, types.AccountChanges{
+				Address:        [20]byte(addrA),
+				BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(0)}},
+			})
+		}
+		cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: firstTxNum, lastTxNum: lastTxNum, stateRoot: stateRoot, bal: bList})
+		return <-out
+	}
+
+	ref := run(false, common.Hash{0xde, 0xad})
+	m := regexp.MustCompile(`root ([0-9a-f]{64}) expected`).FindStringSubmatch(fmt.Sprint(ref.err))
+	require.Len(t, m, 2, "reference run must report its root through the mismatch error, got %v", ref.err)
+	want := common.HexToHash(m[1])
+
+	got := run(true, want)
+	require.NoError(t, got.err, "root with the drained empty account must equal the root of a base without it (%x)", want)
+	require.Equal(t, want[:], got.rootHash)
 }
