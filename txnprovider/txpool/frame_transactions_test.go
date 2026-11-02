@@ -1217,6 +1217,65 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 	require.Equal(t, reserved, pool.frameReservations[payer].cost)
 }
 
+func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {
+	for _, name := range []string{"no parked frames", "one parked frame"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			senders := []common.Address{{2}, {3}, {4}, {5}}
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, senders...)
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 1, 1
+
+			orphan := newTestTxnSlot(0, 0, 1, 2, 21_000)
+			orphan.IDHash[0] = 1
+			var initial TxnSlots
+			initial.Append(orphan, senders[0][:], true)
+			reasons, err := pool.AddLocalTxns(ctx, initial)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			var selected TxnsRlp
+			_, err = pool.PeekBest(ctx, 1, &selected, 0)
+			require.NoError(t, err)
+			require.Empty(t, selected.Txns)
+			require.Zero(t, pool.pending.Len())
+			require.Contains(t, pool.byHash, string(orphan.IDHash[:]))
+
+			if name == "one parked frame" {
+				frame := framePoolSlot(t, payer, 1, 2, uint256.Int{1})
+				var frames TxnSlots
+				frames.Append(frame, payer[:], true)
+				reasons, err = pool.AddLocalTxns(ctx, frames)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				pool.ethBackend.(*frameValidationBackend).err = context.DeadlineExceeded
+				change = newBlockChangeForAccounts(common.Hash{2}, 0, payer)
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+			}
+
+			var txns TxnSlots
+			for i, txn := range []*TxnSlot{
+				newTestTxnSlot(0, 0, 1, 2, 21_000),
+				newTestTxnSlot(0, 0, 0, 0, 21_000),
+				newTestTxnSlot(1, 0, 1, 2, 21_000),
+			} {
+				txn.IDHash[0] = byte(i + 2)
+				txns.Append(txn, senders[i+1][:], true)
+			}
+			require.NotPanics(t, func() {
+				reasons, err = pool.AddLocalTxns(ctx, txns)
+			})
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Equal(t, 1, pool.pending.Len())
+			require.Equal(t, 1, pool.baseFee.Len())
+			require.Equal(t, 1, pool.queued.Len())
+			require.Empty(t, pool.all.senderIDFrameTxn)
+			require.Empty(t, pool.frameReservations)
+		})
+	}
+}
+
 func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 	for _, failure := range []string{"invalid prefix", "payer balance"} {
 		t.Run(failure, func(t *testing.T) {
