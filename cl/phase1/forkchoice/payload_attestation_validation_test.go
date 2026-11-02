@@ -367,38 +367,36 @@ func TestPayloadAttestationValidationContextsBoundPendingRoots(t *testing.T) {
 	}
 }
 
-func TestPayloadAttestationValidationContextViewsCurrentState(t *testing.T) {
-	f, graph, blockState, root, publicKeys := newPayloadAttestationValidationContextTestStore(t, []uint64{1, 0}, 2)
-	graph.currentStateRoot = root
-	beforeCopies := currentStateCopyCount(t)
+func TestPayloadAttestationValidationContextBuildsFromState(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		replay         bool
+		wantStateRoots []common.Hash
+	}{
+		{name: "current state"},
+		{name: "replayed state", replay: true, wantStateRoots: []common.Hash{{0xaa}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, graph, blockState, root, publicKeys := newPayloadAttestationValidationContextTestStore(t, []uint64{1, 0}, 2)
+			graph.currentStateRoot = root
+			if test.replay {
+				graph.currentStateRoot = common.Hash{0xff}
+			}
+			beforeCopies := currentStateCopyCount(t)
 
-	validationContext, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
+			validationContext, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
 
-	require.NoError(t, err)
-	domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), blockState.Slot()))
-	require.NoError(t, err)
-	require.Equal(t, blockState.Slot(), validationContext.slot)
-	require.Equal(t, common.BytesToHash(domain), validationContext.domain)
-	require.Equal(t, map[uint64][]int{0: {1}, 1: {0}}, validationContext.positions)
-	require.Equal(t, map[uint64]common.Bytes48{0: publicKeys[0], 1: publicKeys[1]}, validationContext.publicKeys)
-	require.Zero(t, currentStateCopyCount(t)-beforeCopies)
-	require.Empty(t, graph.stateRoots())
-}
-
-func TestPayloadAttestationValidationContextBuildsFromReplayedState(t *testing.T) {
-	f, graph, blockState, root, publicKeys := newPayloadAttestationValidationContextTestStore(t, []uint64{0, 1}, 2)
-	graph.currentStateRoot = common.Hash{0xff}
-
-	validationContext, err := f.payloadAttestationValidationContext(t.Context(), root, blockState.Slot())
-
-	require.NoError(t, err)
-	domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), blockState.Slot()))
-	require.NoError(t, err)
-	require.Equal(t, blockState.Slot(), validationContext.slot)
-	require.Equal(t, common.BytesToHash(domain), validationContext.domain)
-	require.Equal(t, map[uint64][]int{0: {0}, 1: {1}}, validationContext.positions)
-	require.Equal(t, map[uint64]common.Bytes48{0: publicKeys[0], 1: publicKeys[1]}, validationContext.publicKeys)
-	require.Equal(t, []common.Hash{root}, graph.stateRoots())
+			require.NoError(t, err)
+			domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), blockState.Slot()))
+			require.NoError(t, err)
+			require.Equal(t, blockState.Slot(), validationContext.slot)
+			require.Equal(t, common.BytesToHash(domain), validationContext.domain)
+			require.Equal(t, map[uint64][]int{0: {1}, 1: {0}}, validationContext.positions)
+			require.Equal(t, map[uint64]common.Bytes48{0: publicKeys[0], 1: publicKeys[1]}, validationContext.publicKeys)
+			require.Zero(t, currentStateCopyCount(t)-beforeCopies)
+			require.Equal(t, test.wantStateRoots, graph.stateRoots())
+		})
+	}
 }
 
 func TestPayloadAttestationValidationContextIgnoresSlotMismatch(t *testing.T) {
