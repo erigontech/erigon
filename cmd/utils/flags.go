@@ -1648,10 +1648,6 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 			szLimit, DbSizeLimitFlag.Usage)
 	}
 
-	if err := cfg.Dirs.RenameOldVersions(false); err != nil {
-		return fmt.Errorf("failed to rename old versions: %w", err)
-	}
-
 	return nil
 }
 
