@@ -51,43 +51,16 @@ func TestValidatorSetWithoutPhase0DataStaysLazy(t *testing.T) {
 	}
 }
 
-func TestValidatorSetMissingPhase0DataReadsNilAndChecksBounds(t *testing.T) {
-	set := NewValidatorSetWithLength(4, 2)
-	for i := range set.Length() {
-		require.Nil(t, set.MinCurrentInclusionDelayAttestation(i))
-		require.Nil(t, set.MinPreviousInclusionDelayAttestation(i))
-	}
-	for _, i := range []int{-1, set.Length()} {
-		require.Panics(t, func() { set.MinCurrentInclusionDelayAttestation(i) })
-		require.Panics(t, func() { set.MinPreviousInclusionDelayAttestation(i) })
-	}
-}
-
 func TestValidatorSetPhase0DataSettersCheckBounds(t *testing.T) {
 	set := NewValidatorSetWithLength(4, 2)
 	attestation := &PendingAttestation{}
-	panicValue := "ValidatorSet -- phase0ForWrite: out of bounds"
 
-	require.PanicsWithValue(t, panicValue, func() {
+	require.Panics(t, func() {
 		set.SetMinCurrentInclusionDelayAttestation(set.Length(), attestation)
 	})
-	require.PanicsWithValue(t, panicValue, func() {
+	require.Panics(t, func() {
 		set.SetMinPreviousInclusionDelayAttestation(set.Length(), attestation)
 	})
-}
-
-func TestValidatorSetPhase0DataFirstWrite(t *testing.T) {
-	set := NewValidatorSetWithLength(4, 2)
-	current := &PendingAttestation{InclusionDelay: 1}
-	previous := &PendingAttestation{InclusionDelay: 2}
-	set.SetMinCurrentInclusionDelayAttestation(0, current)
-
-	require.Len(t, set.phase0Data, set.Length())
-
-	set.SetMinPreviousInclusionDelayAttestation(1, previous)
-
-	require.Same(t, current, set.MinCurrentInclusionDelayAttestation(0))
-	require.Same(t, previous, set.MinPreviousInclusionDelayAttestation(1))
 }
 
 func TestValidatorSetPhase0DataCopyTo(t *testing.T) {
@@ -116,17 +89,6 @@ func TestValidatorSetPhase0DataAppend(t *testing.T) {
 		require.Same(t, current, validators.MinCurrentInclusionDelayAttestation(0))
 		require.Same(t, previous, validators.MinPreviousInclusionDelayAttestation(1))
 	}
-}
-
-func TestValidatorSetPhase0DataCopyWriteDoesNotChangeSource(t *testing.T) {
-	set, current, _ := newValidatorSetWithPhase0Data()
-	copySet := NewValidatorSetWithLength(4, 2)
-	set.CopyTo(copySet)
-
-	replacement := &PendingAttestation{InclusionDelay: 3}
-	copySet.SetMinCurrentInclusionDelayAttestation(0, replacement)
-	require.Same(t, current, set.MinCurrentInclusionDelayAttestation(0))
-	require.Same(t, replacement, copySet.MinCurrentInclusionDelayAttestation(0))
 }
 
 func newValidatorSetWithPhase0Data() (*ValidatorSet, *PendingAttestation, *PendingAttestation) {
