@@ -656,8 +656,14 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	t0 := time.Now()
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
+	}
+	if flushSplitTrace {
+		defer func(tHist time.Duration) {
+			log.Info("[flush] domain writer", "domain", w.name, "hist", tHist, "vals", time.Since(t0)-tHist)
+		}(time.Since(t0))
 	}
 	if w.values == nil {
 		w.Close()
