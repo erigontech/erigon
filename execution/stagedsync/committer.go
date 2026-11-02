@@ -70,6 +70,8 @@ type commitmentCalculator struct {
 	probeApply time.Duration
 	probeCkpt  time.Duration
 	probePref  time.Duration
+	probeCkL   []string
+	probeBusy  time.Duration
 	probeLock  time.Duration
 	probeFPU   time.Duration
 	probeCWD   time.Duration
@@ -374,8 +376,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 	switch r := msg.(type) {
 	case *txResult:
 		if logNpPhases {
-			cc.probeArr = append(cc.probeArr, time.Now())
-			defer func() { cc.probeDone = append(cc.probeDone, time.Now()) }()
+			ta := time.Now()
+			cc.probeArr = append(cc.probeArr, ta)
+			defer func() { cc.probeDone = append(cc.probeDone, time.Now()); cc.probeBusy += time.Since(ta) }()
 		}
 		// Pin asOfReader at this tx's txNum before ApplyWrites so a first-touch
 		// lazy-load reads the canonical pre-tx state via GetAsOf(r.txNum).
@@ -406,6 +409,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			tc := time.Now()
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 			cc.probeCkpt += time.Since(tc)
+			if len(cc.probeArr) > 0 {
+				cc.probeCkL = append(cc.probeCkL, fmt.Sprintf("%d@%s+%s", len(cc.probeArr), tc.Sub(cc.probeArr[0]).Round(time.Millisecond), time.Since(tc).Round(time.Millisecond)))
+			}
 			cc.probeCkptN++
 		}
 
@@ -474,8 +480,13 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
-				"ckpt", cc.probeCkpt, "ckptPrefetchWait", cc.probePref, "lockWait", cc.probeLock, "flushPending", cc.probeFPU, "fold", cc.probeCWD, "ckptN", cc.probeCkptN, "arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
-			cc.probeArr, cc.probeDone = cc.probeArr[:0], cc.probeDone[:0]
+				"ckpts", cc.probeCkL, "txBusy", cc.probeBusy, "firstArr", func() string {
+					if len(cc.probeArr) == 0 {
+						return ""
+					}
+					return cc.probeArr[0].Sub(r.execStartedAt).Round(time.Millisecond).String() + " lastArr=" + cc.probeArr[len(cc.probeArr)-1].Sub(r.execStartedAt).Round(time.Millisecond).String()
+				}(), "ckpt", cc.probeCkpt, "ckptPrefetchWait", cc.probePref, "lockWait", cc.probeLock, "flushPending", cc.probeFPU, "fold", cc.probeCWD, "ckptN", cc.probeCkptN, "arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
+			cc.probeArr, cc.probeDone, cc.probeCkL, cc.probeBusy = cc.probeArr[:0], cc.probeDone[:0], nil, 0
 			cc.probeCkpt, cc.probeCkptN, cc.probePref, cc.probeLock, cc.probeFPU, cc.probeCWD = 0, 0, 0, 0, 0, 0
 			cc.probeApply, cc.probeTxs = 0, 0
 		}
