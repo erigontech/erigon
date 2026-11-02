@@ -2322,26 +2322,16 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	var toDelReasons []txpoolcfg.DiscardReason // parallel reasons slice for toDel
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
-		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
-			mt.minFeeCap = *frame.GetFeeCap()
-			mt.minTip = math.MaxUint64
-			if frame.GetTipCap().IsUint64() {
-				mt.minTip = frame.GetTipCap().Uint64()
-			}
-			mt.nonceDistance, mt.cumulativeBalanceDistance = 0, 0
-			mt.subPool |= NoNonceGaps | EnoughBalance
-			p.updateGasLimitMarker(mt, blockGasLimit)
-			p.updateInSubPool(mt)
-			return true
-		}
 		deleteAndContinueReasonLog := ""
 		discardReason := txpoolcfg.NonceTooLow
 		switch {
-		case senderNonce > mt.TxnSlot.Nonce:
-			deleteAndContinueReasonLog = "low nonce"
 		case senderHasCode && senderTxnKept:
 			deleteAndContinueReasonLog = "delegated sender transaction limit"
 			discardReason = txpoolcfg.DelegatedTxnLimit
+		case mt.keyedNonce:
+			// Keyed frames share the delegated sender limit, but not the account nonce checks.
+		case senderNonce > mt.TxnSlot.Nonce:
+			deleteAndContinueReasonLog = "low nonce"
 		case !nonceChainBlocked && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
@@ -2362,6 +2352,19 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 		if senderHasCode {
 			senderTxnKept = true
+		}
+
+		if mt.keyedNonce {
+			mt.minFeeCap = *mt.TxnSlot.GetFeeCap()
+			mt.minTip = math.MaxUint64
+			if mt.TxnSlot.GetTipCap().IsUint64() {
+				mt.minTip = mt.TxnSlot.GetTipCap().Uint64()
+			}
+			mt.nonceDistance, mt.cumulativeBalanceDistance = 0, 0
+			mt.subPool |= NoNonceGaps | EnoughBalance
+			p.updateGasLimitMarker(mt, blockGasLimit)
+			p.updateInSubPool(mt)
+			return true
 		}
 
 		if minFeeCap.Gt(mt.TxnSlot.GetFeeCap()) {

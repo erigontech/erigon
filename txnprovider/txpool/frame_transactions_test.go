@@ -270,6 +270,104 @@ func TestFramePoolKeyedAndOrdinaryNoncesCoexist(t *testing.T) {
 	}
 }
 
+func TestFramePoolDelegatedSenderLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		frameFirst bool
+		batch      bool
+	}{
+		{name: "ordinary first"},
+		{name: "frame first", frameFirst: true},
+		{name: "ordinary first in batch", batch: true},
+		{name: "frame first in batch", frameFirst: true, batch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
+			pool.chainConfig = pool.chainConfig.Copy()
+			pool.chainConfig.BogotaTime = common.NewUint64(0)
+			pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+			ordinary.IDHash[0] = 2
+			slots := []*TxnSlot{ordinary, frame}
+			if tc.frameFirst {
+				slots[0], slots[1] = slots[1], slots[0]
+			}
+			var txns TxnSlots
+			for _, slot := range slots {
+				txns.Append(slot, sender[:], true)
+			}
+			var reasons []txpoolcfg.DiscardReason
+			if tc.batch {
+				var err error
+				reasons, err = pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+			} else {
+				for _, slot := range slots {
+					var single TxnSlots
+					single.Append(slot, sender[:], true)
+					result, err := pool.AddLocalTxns(ctx, single)
+					require.NoError(t, err)
+					reasons = append(reasons, result...)
+				}
+			}
+			wantReasons := []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.DelegatedTxnLimit}
+			kept := slots[0]
+			if tc.batch {
+				kept = ordinary
+				if tc.frameFirst {
+					wantReasons[0], wantReasons[1] = wantReasons[1], wantReasons[0]
+				}
+			}
+			require.Equal(t, wantReasons, reasons)
+			require.Len(t, pool.byHash, 1)
+			require.Contains(t, pool.byHash, string(kept.IDHash[:]))
+			require.Equal(t, 1, pool.pending.Len())
+			if kept == frame {
+				require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+			} else {
+				require.Empty(t, pool.frameReservations)
+			}
+		})
+	}
+}
+
+func TestFramePoolNewlyDelegatedSender(t *testing.T) {
+	for _, nonce := range []uint64{1, 2} {
+		t.Run(fmt.Sprintf("account nonce %d", nonce), func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			ordinary := newTestTxnSlot(1, 0, 1, 2, 21_000)
+			ordinary.IDHash[0] = 2
+			var txns TxnSlots
+			txns.Append(ordinary, sender[:], true)
+			txns.Append(frame, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Len(t, pool.byHash, 2)
+
+			change := newBlockChangeForAccounts(common.Hash{1}, nonce, sender)
+			account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: testDelegationCodeHash()}
+			change.ChangeBatch[0].Changes[0].Data = accounts.SerialiseV3(&account)
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+			require.Len(t, pool.byHash, 1)
+			require.Equal(t, 1, pool.pending.Len())
+			if nonce == 1 {
+				require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+				reason, ok := pool.discardReasonsLRU.Get(string(frame.IDHash[:]))
+				require.True(t, ok)
+				require.Equal(t, txpoolcfg.DelegatedTxnLimit, reason)
+			} else {
+				require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+				require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+			}
+		})
+	}
+}
+
 func TestFramePoolSharesOrdinaryBalance(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -2139,7 +2237,10 @@ func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
 }
 
 func TestFramePoolReplacementRequiresSameKeys(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
+	pool.chainConfig = pool.chainConfig.Copy()
+	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
 	var txns TxnSlots
 	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txns)
