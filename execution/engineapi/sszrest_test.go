@@ -1089,23 +1089,55 @@ func TestSSZRESTUnscheduledForkSchema(t *testing.T) {
 	}
 }
 
-// An empty (but well-formed) Paris payload travels through decode and dispatch
-// and comes back as an SSZ INVALID status ("invalid block hash") over HTTP 200.
-func TestSSZRESTNewPayloadDispatch(t *testing.T) {
-	srv := newTestEngineServer(allForksConfig(), true)
-	payload := engine_types.NewExecutionPayloadSSZ(clparams.BellatrixVersion)
-	body, err := encodeNewPayloadEnvelope(clparams.BellatrixVersion, payload, common.Hash{}, nil)
-	require.NoError(t, err)
+func TestSSZRESTNewPayloadForkMatching(t *testing.T) {
+	for _, tc := range []struct {
+		fork      string
+		timestamp hexutil.Uint64
+		code      int
+	}{
+		{"paris", 99, http.StatusOK},
+		{"paris", 100, http.StatusBadRequest},
+		{"shanghai", 99, http.StatusBadRequest},
+		{"shanghai", 100, http.StatusOK},
+		{"shanghai", 200, http.StatusBadRequest},
+		{"cancun", 199, http.StatusBadRequest},
+		{"cancun", 200, http.StatusOK},
+		{"cancun", 300, http.StatusBadRequest},
+		{"prague", 299, http.StatusBadRequest},
+		{"prague", 300, http.StatusOK},
+		{"prague", 400, http.StatusBadRequest},
+		{"osaka", 399, http.StatusBadRequest},
+		{"osaka", 400, http.StatusOK},
+		{"osaka", 500, http.StatusBadRequest},
+		{"amsterdam", 499, http.StatusBadRequest},
+		{"amsterdam", 500, http.StatusOK},
+	} {
+		t.Run(fmt.Sprintf("%s/%d", tc.fork, tc.timestamp), func(t *testing.T) {
+			version, ok := engineForkVersion(tc.fork)
+			require.True(t, ok)
+			payload := engine_types.NewExecutionPayloadSSZ(version)
+			payload.Timestamp = tc.timestamp
+			if version >= clparams.GloasVersion {
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+			}
+			body, err := encodeNewPayloadEnvelope(version, payload, common.Hash{}, nil)
+			require.NoError(t, err)
+			srv := newTestEngineServer(allForksConfig(), true)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", tc.fork, body))
 
-	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "paris", body))
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
-	var status engine_types.PayloadStatus
-	require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
-	require.Equal(t, engine_types.InvalidStatus, status.Status)
-	require.Contains(t, status.ValidationError.Error().Error(), "invalid block hash")
+			require.Equal(t, tc.code, rec.Code, rec.Body.String())
+			if tc.code == http.StatusBadRequest {
+				require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+				return
+			}
+			require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+			var status engine_types.PayloadStatus
+			require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.ErrorContains(t, status.ValidationError.Error(), "invalid block hash")
+		})
+	}
 }
 
 func TestSSZRESTNewPayloadRejectsExcessTransactionsBeforeDecoding(t *testing.T) {
@@ -1421,22 +1453,53 @@ func TestSSZRESTGetPayload(t *testing.T) {
 	require.Equal(t, []hexutil.Bytes{request}, response.ExecutionRequests)
 }
 
-func TestSSZRESTGetPayloadRejectsMismatchedFork(t *testing.T) {
-	module := &stubExecutionModule{
-		getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
-			return execmodule.AssembledBlockResult{
-				Block:      minimalPayloadBlock(1, types.FlatRequests{}),
-				BlockValue: uint256.NewInt(0),
-			}, nil
-		},
-	}
-	srv := newProposingEngineServerForGetPayloadTests(module)
-	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec,
-		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/payloads/0x000000000000002a", "cancun", nil))
+func TestSSZRESTGetPayloadForkMatching(t *testing.T) {
+	for _, tc := range []struct {
+		fork      string
+		timestamp uint64
+		code      int
+	}{
+		{"paris", 99, http.StatusOK},
+		{"paris", 100, http.StatusBadRequest},
+		{"shanghai", 99, http.StatusBadRequest},
+		{"shanghai", 100, http.StatusOK},
+		{"shanghai", 200, http.StatusBadRequest},
+		{"cancun", 199, http.StatusBadRequest},
+		{"cancun", 300, http.StatusBadRequest},
+		{"prague", 299, http.StatusBadRequest},
+		{"prague", 400, http.StatusBadRequest},
+		{"osaka", 399, http.StatusBadRequest},
+		{"osaka", 500, http.StatusBadRequest},
+		{"amsterdam", 499, http.StatusBadRequest},
+	} {
+		t.Run(fmt.Sprintf("%s/%d", tc.fork, tc.timestamp), func(t *testing.T) {
+			module := &stubExecutionModule{
+				getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+					return execmodule.AssembledBlockResult{
+						Block:      minimalPayloadBlock(tc.timestamp, types.FlatRequests{}),
+						BlockValue: uint256.NewInt(0),
+					}, nil
+				},
+			}
+			cfg := allForksConfig()
+			cfg.TerminalTotalDifficulty = uint256.NewInt(0)
+			srv := newProposingEngineServerWithConfig(cfg, module)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec,
+				newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/payloads/0x000000000000002a", tc.fork, nil))
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+			require.Equal(t, tc.code, rec.Code)
+			if tc.code == http.StatusBadRequest {
+				require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+				return
+			}
+			version, ok := engineForkVersion(tc.fork)
+			require.True(t, ok)
+			response, err := decodeBuiltPayload(rec.Body.Bytes(), version)
+			require.NoError(t, err)
+			require.Equal(t, hexutil.Uint64(tc.timestamp), response.ExecutionPayload.Timestamp)
+		})
+	}
 }
 
 func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {

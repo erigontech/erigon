@@ -195,6 +195,15 @@ func writeEngineProblem(w http.ResponseWriter, err error) {
 	writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
 }
 
+func (e *EngineServer) checkSSZForkTimestamp(w http.ResponseWriter, forkName string, timestamp uint64) bool {
+	if timestampFork := forkNameAtTime(e.config, timestamp); timestampFork != forkName {
+		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork,
+			fmt.Sprintf("payload timestamp belongs to fork %q, not header fork %q", timestampFork, forkName))
+		return false
+	}
+	return true
+}
+
 func checkSSZContentType(w http.ResponseWriter, r *http.Request) bool {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != sszRestContentType {
@@ -260,6 +269,9 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
+	if !e.checkSSZForkTimestamp(w, forkName, uint64(payload.Timestamp)) {
+		return
+	}
 	var status *engine_types.PayloadStatus
 	switch version {
 	case clparams.BellatrixVersion:
@@ -288,6 +300,9 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 	resp, err := e.getPayload(r.Context(), decodedID, version)
 	if err != nil {
 		writeEngineProblem(w, err)
+		return
+	}
+	if !e.checkSSZForkTimestamp(w, forkName, uint64(resp.ExecutionPayload.Timestamp)) {
 		return
 	}
 	out, err := encodeBuiltPayload(resp, version)
@@ -328,14 +343,9 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	if custodyColumns != nil {
 		e.logger.Debug("[SSZ-REST] ignoring custody columns update", "fork", forkName)
 	}
-	if attrs != nil {
-		// With payload attributes, the header fork must match their timestamp.
-		// Without attributes, forkchoice may refer to a head from another fork.
-		if attrsFork := forkNameAtTime(e.config, uint64(attrs.Timestamp)); attrsFork != forkName {
-			writeProblem(w, http.StatusBadRequest, problemUnsupportedFork,
-				fmt.Sprintf("payload attributes timestamp belongs to fork %q, not header fork %q", attrsFork, forkName))
-			return
-		}
+	// Without payload attributes, forkchoice may refer to a head from another fork.
+	if attrs != nil && !e.checkSSZForkTimestamp(w, forkName, uint64(attrs.Timestamp)) {
+		return
 	}
 	resp, err := e.forkchoiceUpdated(r.Context(), &state, attrs, version)
 	if err != nil {
