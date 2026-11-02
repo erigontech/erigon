@@ -40,8 +40,8 @@ func (cc *commitmentCalculator) clearTouched() {
 }
 
 // accumulateTouched folds one write-set view's changed-key set into the touched union.
-// An account is marked touched by any real account-field change (AccountChanges drops
-// net-zero writes) and by any real storage change (so its storageRoot refolds); a slot is
+// An account is marked touched by any real account-field change
+// and by any real storage change (so its storageRoot refolds); a slot is
 // marked only when it actually changed; a true SelfDestruct marks the subtree reset. A
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
