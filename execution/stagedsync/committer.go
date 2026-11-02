@@ -383,6 +383,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.lastTxAt = t0
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
+			if originsEnabled {
+				cc.state.origins = r.origins
+			}
 			cc.state.ApplyWrites(r.writes)
 			cc.applyWritesDur += time.Since(t0)
 			cc.applyWritesN++
@@ -466,8 +469,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				gap = -d
 			}
 			residual := stageWall - execActive - commitActive + overlap - gap
-			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt), "edgeDur", cc.edgeDur, "waitIn", cc.waitIn, "lazyReads", cc.state.readN, "lazyReadDur", cc.state.readDur)
-			cc.state.readN, cc.state.readDur = 0, 0
+			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt), "edgeDur", cc.edgeDur, "waitIn", cc.waitIn, "lazyReads", cc.state.readN, "lazyReadDur", cc.state.readDur, "originHits", cc.state.originHits)
+			cc.state.readN, cc.state.readDur, cc.state.originHits = 0, 0, 0
 			cc.edgeDur, cc.waitIn = 0, 0
 			cc.applyWritesDur, cc.applyWritesN = 0, 0
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
@@ -1037,3 +1040,5 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed
 // tx, so every read resolves on the worker's own tx and the fold need not serialize.
 func (r *asOfStateReader) BindsWorkerTx() bool { return true }
+
+var originsEnabled = dbg.EnvBool("CALC_ORIGINS", true)

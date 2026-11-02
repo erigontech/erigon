@@ -62,6 +62,8 @@ func (r *calcDomainReader) ReadAccountData(addr accounts.Address) (*accounts.Acc
 type calcState struct {
 	readDur      time.Duration
 	readN        int
+	originHits   int
+	origins      *state.VersionMap
 	accounts     map[accounts.Address]*calcAccountState
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
@@ -121,6 +123,14 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
+	}
+	if cs.origins != nil {
+		if o, ok := cs.origins.LoadOriginAccount(addr); ok && o != nil {
+			acc.Balance, acc.Nonce, acc.CodeHash, acc.Incarnation = o.Balance, o.Nonce, o.CodeHash.Value(), o.Incarnation
+			cs.originHits++
+			cs.accounts[addr] = acc
+			return acc
+		}
 	}
 	if cs.domainReader != nil {
 		t0 := time.Now()
