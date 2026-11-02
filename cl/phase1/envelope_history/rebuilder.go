@@ -76,6 +76,10 @@ func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 	if err != nil {
 		return nil, err
 	}
+	prepared, err := r.prepareParent(tx, slot, blockRoot, block)
+	if err != nil || prepared == nil {
+		return nil, err
+	}
 	var childRoot common.Hash
 	var childSlot uint64
 	err = beacon_indicies.RangeBlockRoots(tx, slot+1, math.MaxUint64, func(nextSlot uint64, root common.Hash) bool {
@@ -94,10 +98,19 @@ func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 	if err != nil {
 		return nil, err
 	}
-	return r.PrepareFromBlocks(tx, slot, blockRoot, block, childSlot, child)
+	return r.prepareChild(prepared, block, childSlot, child), nil
 }
 
+// PrepareFromBlocks expects blockRoot to be canonical at slot and child to be the next canonical block, stored at childSlot.
 func (r *Rebuilder) PrepareFromBlocks(tx kv.Tx, slot uint64, blockRoot common.Hash, block *cltypes.SignedBeaconBlock, childSlot uint64, child *cltypes.SignedBeaconBlock) (*PreparedRebuild, error) {
+	prepared, err := r.prepareParent(tx, slot, blockRoot, block)
+	if err != nil || prepared == nil {
+		return nil, err
+	}
+	return r.prepareChild(prepared, block, childSlot, child), nil
+}
+
+func (r *Rebuilder) prepareParent(tx kv.Tx, slot uint64, blockRoot common.Hash, block *cltypes.SignedBeaconBlock) (*PreparedRebuild, error) {
 	if block == nil || block.Block == nil || block.Block.Body == nil || block.Block.Slot != slot || block.Version() < clparams.GloasVersion {
 		r.unavailable(blockRoot, "block is unavailable or predates Gloas")
 		return nil, nil
@@ -117,26 +130,30 @@ func (r *Rebuilder) PrepareFromBlocks(tx kv.Tx, slot uint64, blockRoot common.Ha
 		r.unavailable(blockRoot, "signature is unavailable")
 		return nil, nil
 	}
-	if child == nil || child.Block == nil || child.Block.Body == nil || child.Block.Slot != childSlot || child.Block.ParentRoot != blockRoot {
-		r.unavailable(blockRoot, "canonical child is invalid")
-		return nil, nil
+	return &PreparedRebuild{
+		blockRoot:  blockRoot,
+		parentRoot: block.Block.ParentRoot,
+		bid:        bid,
+		signature:  signature,
+	}, nil
+}
+
+func (r *Rebuilder) prepareChild(prepared *PreparedRebuild, block *cltypes.SignedBeaconBlock, childSlot uint64, child *cltypes.SignedBeaconBlock) *PreparedRebuild {
+	if child == nil || child.Block == nil || child.Block.Body == nil || child.Block.Slot != childSlot || child.Block.ParentRoot != prepared.blockRoot {
+		r.unavailable(prepared.blockRoot, "canonical child is invalid")
+		return nil
 	}
 	if forkchoice.ParentPayloadStatusFromBids(block, child.Block) != cltypes.PayloadStatusFull {
-		r.unavailable(blockRoot, "payload status is not full")
-		return nil, nil
+		r.unavailable(prepared.blockRoot, "payload status is not full")
+		return nil
 	}
 	executionRequests := child.Block.Body.GetParentExecutionRequests()
 	if executionRequests == nil {
-		r.unavailable(blockRoot, "parent execution requests are unavailable")
-		return nil, nil
+		r.unavailable(prepared.blockRoot, "parent execution requests are unavailable")
+		return nil
 	}
-	return &PreparedRebuild{
-		blockRoot:         blockRoot,
-		parentRoot:        block.Block.ParentRoot,
-		bid:               bid,
-		signature:         signature,
-		executionRequests: executionRequests,
-	}, nil
+	prepared.executionRequests = executionRequests
+	return prepared
 }
 
 func (r *Rebuilder) Rebuild(ctx context.Context, prepared *PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
