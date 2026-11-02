@@ -16,59 +16,73 @@ import (
 )
 
 func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
-	snapDir := t.TempDir()
-	settingsPath := filepath.Join(snapDir, "erigondb.toml")
-	settings := []byte("step_size = 1562500\n")
-	require.NoError(t, os.WriteFile(settingsPath, settings, 0o644))
+	for _, hashMatches := range []bool{true, false} {
+		name := "matching_hash"
+		if !hashMatches {
+			name = "mismatched_hash"
+		}
+		t.Run(name, func(t *testing.T) {
+			snapDir := t.TempDir()
+			settingsPath := filepath.Join(snapDir, "erigondb.toml")
+			settings := []byte("step_size = 1562500\n")
+			require.NoError(t, os.WriteFile(settingsPath, settings, 0o644))
 
-	cfg := newTestClientConfig(t, snapDir)
-	cfg.Slogger = slog.Default()
-	store, client, err := newTorrentClient(snapDir, cfg)
-	require.NoError(t, err)
-	defer store.Close()
-	defer client.Close()
+			cfg := newTestClientConfig(t, snapDir)
+			cfg.Slogger = slog.Default()
+			store, client, err := newTorrentClient(snapDir, cfg)
+			require.NoError(t, err)
+			defer store.Close()
+			defer client.Close()
 
-	infoBytes, err := bencode.Marshal(metainfo.Info{
-		Name:        "erigondb.toml",
-		PieceLength: 256 * 1024,
-	})
-	require.NoError(t, err)
-	infoHash := metainfo.Hash{1}
-	require.NotEqual(t, infoHash, (&metainfo.MetaInfo{InfoBytes: infoBytes}).HashInfoBytes())
+			infoBytes, err := bencode.Marshal(metainfo.Info{
+				Name:        "erigondb.toml",
+				PieceLength: 256 * 1024,
+			})
+			require.NoError(t, err)
+			infoHash := (&metainfo.MetaInfo{InfoBytes: infoBytes}).HashInfoBytes()
+			if !hashMatches {
+				infoHash[0] ^= 0xff
+			}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	done := make(chan struct{})
-	var downloadErr error
-	go func() {
-		defer close(done)
-		_, downloadErr = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, nil)
-	}()
-	defer func() {
-		cancel()
-		<-done
-	}()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			done := make(chan struct{})
+			var downloadErr error
+			go func() {
+				defer close(done)
+				_, downloadErr = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, nil)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
 
-	var manifest *torrent.Torrent
-	require.Eventually(t, func() bool {
-		var ok bool
-		manifest, ok = client.Torrent(infoHash)
-		return ok
-	}, 5*time.Second, time.Millisecond)
-	if err = manifest.SetInfoBytes(infoBytes); err != nil {
-		cancel()
+			var manifest *torrent.Torrent
+			require.Eventually(t, func() bool {
+				var ok bool
+				manifest, ok = client.Torrent(infoHash)
+				return ok
+			}, 5*time.Second, time.Millisecond)
+			err = manifest.SetInfoBytes(infoBytes)
+			if err != nil {
+				cancel()
+			}
+			<-done
+			if err == nil {
+				require.ErrorContains(t, downloadErr, `chain.toml torrent names "erigondb.toml"`)
+			} else {
+				require.False(t, hashMatches, "valid metadata must reach the filename check")
+			}
+
+			got, err := os.ReadFile(settingsPath)
+			require.NoError(t, err)
+			assert.Equal(t, settings, got)
+			assert.Empty(t, client.Torrents())
+			entries, err := os.ReadDir(snapDir)
+			require.NoError(t, err)
+			require.Len(t, entries, 1)
+			assert.Equal(t, "erigondb.toml", entries[0].Name())
+		})
 	}
-	<-done
-	require.Error(t, downloadErr)
-
-	got, err := os.ReadFile(settingsPath)
-	require.NoError(t, err)
-	assert.Equal(t, settings, got)
-	assert.Empty(t, client.Torrents())
-	entries, err := os.ReadDir(snapDir)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, "erigondb.toml", entries[0].Name())
 }
 
 func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
@@ -79,10 +93,10 @@ func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
 	infoHash := metainfo.Hash{1}
 	existing, _ := client.AddTorrentInfoHash(infoHash)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	_, err = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, nil)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "already exists and is incomplete")
 	got, ok := client.Torrent(infoHash)
 	require.True(t, ok, "the existing torrent must remain registered")
 	assert.Same(t, existing, got)
