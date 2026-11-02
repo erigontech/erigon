@@ -106,7 +106,7 @@ func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
 // a block-created account (absent in the committed base) has only field cells; the address
 // existence read consults the AddressPath (not the field cells), so unseeded it reads absent
 // and the EIP-161 withhold path stamps a spurious removal. SeedAddresses marks existence
-// straight from the BAL — no base reader — stamping a ValueUnknown AddressPath so the
+// straight from the BAL — no base reader — marking the AddressPath AccountFromBAL so the
 // authoritative value still defers to the committed base.
 func TestSeedAddresses(t *testing.T) {
 	t.Parallel()
@@ -148,7 +148,7 @@ func TestSeedAddresses(t *testing.T) {
 		t.Fatal("a touched base-present account also reads present")
 	}
 
-	// The marker is ValueUnknown, so the authoritative value defers to the base: a
+	// The marker is AccountFromBAL, so the authoritative value defers to the base: a
 	// base-present account keeps its untouched base nonce, not the seed's zeroed marker.
 	ex := NewVersionedAccountView(existing, 6, vm, reader).Account()
 	require.NotNil(t, ex)
@@ -243,4 +243,22 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	acc, ok = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
+}
+
+// TestSeedEmptyRemovals_SkipsBaseReadWhenCellsDecide pins that an account whose BAL cells
+// already show it non-empty is not read from the base: the seed runs serially at block start.
+func TestSeedEmptyRemovals_SkipsBaseReadWhenCellsDecide(t *testing.T) {
+	t.Parallel()
+
+	funded := accounts.InternAddress(common.HexToAddress("0xd7a5"))
+	bumped := accounts.InternAddress(common.HexToAddress("0xd7a6"))
+	bal := types.BlockAccessList{
+		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(3)}}},
+		{Address: bumped.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}},
+	}
+	reader := &countingAccountReader{}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	require.Zero(t, reader.reads)
 }

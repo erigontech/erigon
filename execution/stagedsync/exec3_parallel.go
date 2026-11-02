@@ -1527,11 +1527,6 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 	return nil
 }
 
-// scheduleNextPending starts the lowest-numbered block still queued in
-// pe.blockExecutors. Called after a completed block is removed so a block enqueued
-// by processRequest while the slot was busy gets scheduled — processRequest itself
-// only schedules when the map was empty at insert time, so without this a block
-// enqueued mid-flight would orphan in the map and never be validated.
 func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	if !be.execStarted.IsZero() {
 		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
@@ -1539,6 +1534,11 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	}
 }
 
+// scheduleNextPending starts the lowest-numbered block still queued in
+// pe.blockExecutors. Called after a completed block is removed so a block enqueued
+// by processRequest while the slot was busy gets scheduled — processRequest itself
+// only schedules when the map was empty at insert time, so without this a block
+// enqueued mid-flight would orphan in the map and never be validated.
 func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {

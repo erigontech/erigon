@@ -73,7 +73,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if _, balRes, balOk := view.vm.ReadBalance(addr, txIdx); balOk && balRes.ValStatus() == ValueDeleted {
 		return accounts.Account{}, false
 	}
-	av := NewVersionedAccountView(addr, txIdx, view.vm, view.base)
+	av := VersionedAccountView{addr: addr, txIdx: txIdx, vm: view.vm, base: view.base}
 	exists := av.recordExists()
 	if err := av.Err(); err != nil {
 		view.err = cmp.Or(view.err, err)
@@ -82,7 +82,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if !exists {
 		return accounts.Account{}, false
 	}
-	return *av.compose(), true
+	return av.compose(), true
 }
 
 // GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok
@@ -136,10 +136,16 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		}
 		candidates = append(candidates, maxIdx)
 		for _, idx := range candidates {
-			if balProvesNonEmptyAt(ac, idx) {
+			if b, ok := versionedUpdateBalance(vm, addr, int(idx)); ok && !b.IsZero() {
 				continue
 			}
-			av := NewVersionedAccountView(addr, int(idx), vm, base)
+			if n, ok := versionedUpdateNonce(vm, addr, int(idx)); ok && n != 0 {
+				continue
+			}
+			if ch, ok := versionedUpdateCodeHash(vm, addr, int(idx)); ok && !ch.IsEmpty() {
+				continue
+			}
+			av := VersionedAccountView{addr: addr, txIdx: int(idx), vm: vm, base: base}
 			acc := av.Account()
 			if err := av.Err(); err != nil {
 				return err
@@ -172,7 +178,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 // writes only field cells (not an AddressPath), so a block-created account would
 // otherwise read absent — the EIP-161 withhold path then stamps a spurious removal. The
 // existence is taken straight from the BAL (the account's first change index), with no
-// base read: the AddressPath is stamped ValueUnknown, so field reads still fall back to
+// base read: the AddressPath is marked AccountFromBAL, so field reads still fall back to
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses() {
 	for i := range vm.bal {
@@ -181,33 +187,11 @@ func (vm *VersionMap) SeedAddresses() {
 			continue
 		}
 		addr := accounts.InternAddress(vm.bal[i].Address)
-		if acc := NewVersionedAccountView(addr, int(minIdx), vm, nil).Account(); acc != nil {
+		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
+		if acc := av.Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
 		}
 	}
-}
-
-// balProvesNonEmptyAt reports whether the account's last balance, nonce or code change at or
-// below idx already makes it non-empty, so no committed-base read is needed.
-func balProvesNonEmptyAt(ac *types.AccountChanges, idx uint32) bool {
-	if c := lastChangeAt(ac.BalanceChanges, idx, func(c *types.BalanceChange) uint32 { return c.Index }); c != nil && !c.Value.IsZero() {
-		return true
-	}
-	if c := lastChangeAt(ac.NonceChanges, idx, func(c *types.NonceChange) uint32 { return c.Index }); c != nil && c.Value != 0 {
-		return true
-	}
-	c := lastChangeAt(ac.CodeChanges, idx, func(c *types.CodeChange) uint32 { return c.Index })
-	return c != nil && len(c.Bytecode) > 0
-}
-
-func lastChangeAt[T any](changes []*T, idx uint32, index func(*T) uint32) *T {
-	var last *T
-	for _, c := range changes {
-		if i := index(c); i <= idx && (last == nil || i > index(last)) {
-			last = c
-		}
-	}
-	return last
 }
 
 func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
