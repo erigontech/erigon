@@ -77,31 +77,6 @@ func newLogIndexTestBlock(tasks []exec.Task) (*blockExecutor, chan applyResult) 
 	return be, applyResults
 }
 
-func runParallelLogIndexTestBlock(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx) {
-	t.Helper()
-	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
-	be, applyResults := newLogIndexTestBlock(tasks)
-	for i, task := range be.tasks {
-		be.execTasks.setInProgress(i)
-		version := task.Version()
-		version.Incarnation = 1
-		res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
-			Task: &taskVersion{execTask: task, version: version},
-		}, tx)
-		require.NoError(t, err)
-		if i < len(tasks)-1 {
-			require.Nil(t, res)
-		} else {
-			require.NotNil(t, res)
-			require.NoError(t, res.Err)
-		}
-	}
-	finalize := foldLogIndexTestResults(t, pe, tx, applyResults)
-	require.NotNil(t, finalize, "block-end logs must reach the apply loop")
-	require.Equal(t, logIndexFinalTxNum, finalize.txNum)
-	require.Len(t, finalize.logs, pe.cfg.engine.(*logEmittingSyscallEngine).calls)
-}
-
 // Drive the production apply path: nextResult only publishes the writes and
 // indexes, and foldTx owns the SharedDomains mutations.
 func foldLogIndexTestResults(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx, results chan applyResult) *txResult {
@@ -222,7 +197,27 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
 	pe := newParallelLogIndexTestExec(db, domains, syscalls)
-	runParallelLogIndexTestBlock(t, pe, rwTx)
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	be, applyResults := newLogIndexTestBlock(tasks)
+	for i, task := range be.tasks {
+		be.execTasks.setInProgress(i)
+		version := task.Version()
+		version.Incarnation = 1
+		res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+			Task: &taskVersion{execTask: task, version: version},
+		}, rwTx)
+		require.NoError(t, err)
+		if i < len(tasks)-1 {
+			require.Nil(t, res)
+		} else {
+			require.NotNil(t, res)
+			require.NoError(t, res.Err)
+		}
+	}
+	finalize := foldLogIndexTestResults(t, pe, rwTx, applyResults)
+	require.NotNil(t, finalize, "block-end logs must reach the apply loop")
+	require.Equal(t, logIndexFinalTxNum, finalize.txNum)
+	require.Len(t, finalize.logs, syscalls)
 
 	require.Equal(t, map[indexAddition]int{
 		{table: kv.LogAddrIdx, txNum: logIndexFinalTxNum}:  syscalls,
