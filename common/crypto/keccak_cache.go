@@ -17,7 +17,7 @@
 package crypto
 
 import (
-	"bytes"
+	"encoding/binary"
 	"hash/maphash"
 	"sync/atomic"
 
@@ -27,22 +27,19 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 )
 
-// keccakCacheMaxInput keeps a bucket at 128 bytes: tag 8 + length 1 + input 87 + hash 32.
-const keccakCacheMaxInput = 87
-
 const (
-	keccakBucketLocked = 1 << 0
-	keccakBucketAlive  = 1 << 1
+	keccakCacheMaxInput = 87
+	keccakCacheWords    = (keccakCacheMaxInput + 7) / 8
 )
 
-// keccakBucket holds its entry in place, so the table allocates nothing and the GC never scans it.
-// tag is both a pre-filter and a lock: readers and writers own the fields only between a
-// CompareAndSwap that sets keccakBucketLocked and the Store that clears it.
+// keccakBucket is a seqlock: a hit only loads, so workers that hash the same input
+// do not bounce the bucket's cache line between cores. seq is odd while a writer
+// fills the bucket; a reader that sees seq change discards what it read.
 type keccakBucket struct {
-	tag  atomic.Uint64
-	n    uint8
-	in   [keccakCacheMaxInput]byte
-	hash common.Hash
+	seq  atomic.Uint64
+	tag  atomic.Uint64 // input hash with the low byte replaced by the input length
+	hash [4]atomic.Uint64
+	in   [keccakCacheWords]atomic.Uint64
 }
 
 var (
@@ -50,8 +47,13 @@ var (
 	keccakCacheBuckets = new([1 << 17]keccakBucket)
 )
 
-// Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
-// another goroutine holds is treated as a miss, so a lookup never waits.
+// tailWord returns the last, partial 8 bytes of an input, zero-padded.
+func tailWord(rest []byte) uint64 {
+	var w [8]byte
+	copy(w[:], rest)
+	return binary.LittleEndian.Uint64(w[:])
+}
+
 func Keccak256Hash(data []byte) common.Hash {
 	if len(data) == 0 {
 		return empty.CodeHash
@@ -61,21 +63,41 @@ func Keccak256Hash(data []byte) common.Hash {
 	}
 	key := maphash.Bytes(keccakCacheSeed, data)
 	b := &keccakCacheBuckets[key&(uint64(len(keccakCacheBuckets))-1)]
-	tag := (key | keccakBucketAlive) &^ keccakBucketLocked
-	if st := b.tag.Load(); st == tag && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
-		hit := bytes.Equal(b.in[:b.n], data)
-		h := b.hash
-		b.tag.Store(st)
+	tag := key&^0xff | uint64(len(data))
+	words := (len(data) + 7) / 8
+	full := len(data) / 8
+	if seq := b.seq.Load(); seq&1 == 0 && b.tag.Load() == tag {
+		hit := true
+		for i := 0; i < full && hit; i++ {
+			hit = b.in[i].Load() == binary.LittleEndian.Uint64(data[i*8:])
+		}
+		if hit && full < words {
+			hit = b.in[full].Load() == tailWord(data[full*8:])
+		}
 		if hit {
-			return h
+			var h common.Hash
+			binary.LittleEndian.PutUint64(h[0:], b.hash[0].Load())
+			binary.LittleEndian.PutUint64(h[8:], b.hash[1].Load())
+			binary.LittleEndian.PutUint64(h[16:], b.hash[2].Load())
+			binary.LittleEndian.PutUint64(h[24:], b.hash[3].Load())
+			if b.seq.Load() == seq {
+				return h
+			}
 		}
 	}
 	h := keccak.Sum256(data)
-	if st := b.tag.Load(); st&keccakBucketLocked == 0 && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
-		b.n = uint8(len(data))
-		copy(b.in[:], data)
-		b.hash = h
+	if seq := b.seq.Load(); seq&1 == 0 && b.seq.CompareAndSwap(seq, seq+1) {
 		b.tag.Store(tag)
+		for i := range full {
+			b.in[i].Store(binary.LittleEndian.Uint64(data[i*8:]))
+		}
+		if full < words {
+			b.in[full].Store(tailWord(data[full*8:]))
+		}
+		for i := range b.hash {
+			b.hash[i].Store(binary.LittleEndian.Uint64(h[i*8:]))
+		}
+		b.seq.Store(seq + 2)
 	}
 	return h
 }

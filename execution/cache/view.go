@@ -65,6 +65,18 @@ type FrontierFunc func(domain kv.Domain) (visibleEnd uint64, ok bool)
 
 func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return f(domain) }
 
+// ClampFillTxNum bounds a read-fill stamp by a read-only snapshot's last visible
+// txNum. A nil frontier leaves the stamp unchanged; use it for writable backing
+// transactions, whose visible bounds may lag behind writes.
+func ClampFillTxNum(f Frontier, domain kv.Domain, txNum uint64) uint64 {
+	if f != nil {
+		if end, ok := f.DomainVisibleEnd(domain); ok && end > 0 {
+			return min(txNum, end-1)
+		}
+	}
+	return txNum
+}
+
 // rejectedFrontier distinguishes a non-retryable rejection from a nil, retryable
 // binding without growing ReadView, which is embedded in every state getter.
 type rejectedFrontier struct{}
@@ -78,23 +90,23 @@ func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, f
 // because code size is content-addressed. The zero value is inert: reads miss,
 // fills no-op.
 //
-// A ReadView does not isolate reads: the cache holds latest-applied state, so
-// a hit can be newer than the view — the same direction the exec overlay
-// already serves. In the forward direction the cache's invariant is
-// monotonicity (content never regresses behind the applied frontier),
-// enforced on the fill side; unwinds invalidate stored entries by their
-// per-cache entry epoch and floor.
+// Get and GetWithTxNum can return values newer than the transaction's snapshot.
+// GetVisible and GetAsOf check the snapshot's frontier and read-view epoch;
+// callers must read misses from their transaction. The cache stores latest-applied
+// values, not historical versions. Fills prevent cache contents from regressing
+// behind the applied frontier; unwinds invalidate entries by their per-cache
+// epoch and floor.
 //
 // Each view also snapshots the StateCache read-view epoch. An unwind advances
-// that epoch, so older views can still read but cannot fill from the discarded
-// fork. State version is checked when the frontier is bound, not on every fill:
+// that epoch, so older views cannot fill, and their snapshot-bounded reads miss.
+// State version is checked when the frontier is bound, not on every fill:
 // continuous forward publication keeps the view eligible, while the domain
 // frontier rejects values older than the latest update. A discontinuity also
 // advances the epoch and revokes every previously bound view.
-// During publication, reads remain available. Existing eligible views cannot
-// fill until the complete update batch is installed. A view bound during
-// publication has no frontier and remains fill-inert until explicitly rebound.
-// Snapshot-isolated caching is kvcache's job (node/shards).
+// During publication, unbounded reads remain available. Existing eligible views
+// cannot fill until the complete update batch is installed. A view bound during
+// publication has no frontier: snapshot-bounded reads miss and fills are disabled
+// until it is explicitly rebound.
 type ReadView struct {
 	c             *StateCache
 	frontier      Frontier

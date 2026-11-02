@@ -180,17 +180,7 @@ type IntraBlockState struct {
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
 	// at the block level.
-	versionMap *VersionMap
-	// waitCommit blocks a read that observes an in-flight (estimate) predecessor
-	// write until that predecessor commits, so execution pauses in place instead
-	// of aborting via ErrDependency. Returns false on shutdown.
-	waitCommit func(depTxIndex int) bool
-	// wakeGen counts resumes from a dep-wait pause. A lower-txIndex writer may
-	// commit a new value while this worker sleeps in waitCommit, so any frame
-	// read cached before the pause can be stale on wake. ReadStamp folds wakeGen
-	// in, so a resume invalidates the vm's frame caches on the next lookup — what
-	// makes those caches safe under the dep-wait executor.
-	wakeGen         uint64
+	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
@@ -325,11 +315,6 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 // retune a per-task overlay (PrevBlockReader.SetBlock) without rebuilding the IBS.
 func (ibs *IntraBlockState) StateReader() StateReader {
 	return ibs.stateReader
-}
-
-// SetWaitCommit installs the mid-flow dep-pause hook (self-loop). See waitCommit.
-func (ibs *IntraBlockState) SetWaitCommit(f func(depTxIndex int) bool) {
-	ibs.waitCommit = f
 }
 
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
@@ -3666,20 +3651,18 @@ func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *acco
 // lock-free origin layer (write-once), so later reads resolve the pre-block base without taking
 // an account's e.mu. The origin is immutable pre-block state, so it lives outside the OCC cells.
 func (ibs *IntraBlockState) PublishOrigins() {
-	if ibs.versionMap == nil || ibs.versionedOrigins.IsEmpty() {
+	if ibs.versionMap == nil {
 		return
 	}
 	ws := &ibs.versionedOrigins
-	ws.forEachAddr(func(addr accounts.Address) {
-		if vw, ok := ws.address[addr]; ok {
-			ibs.versionMap.StoreOriginAccount(addr, vw.Val)
+	for addr, vw := range ws.address {
+		ibs.versionMap.StoreOriginAccount(addr, vw.Val)
+	}
+	for addr, inner := range ws.storage {
+		for key, vw := range inner {
+			ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
 		}
-		if inner, ok := ws.storage[addr]; ok {
-			for key, vw := range inner {
-				ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
-			}
-		}
-	})
+	}
 	ws.ReleaseAndReset()
 }
 

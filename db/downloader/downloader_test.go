@@ -1416,3 +1416,28 @@ func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
 	require.Len(torrents, 1)
 	require.Equal(segName, torrents[0].Name())
 }
+
+func TestGrpcServerRejectsNonLocalNames(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+
+	for _, name := range []string{"v1.0-000000-000500-headers.seg", "domain/v1.0-accounts.0-32.kv"} {
+		require.NoError(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
+	}
+	for _, name := range []string{"", "/abs/a.seg", "../a.seg", "domain/v1.0-a/../../../../x"} {
+		require.Error(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
+	}
+}
+
+func TestGrpcServerDeleteKeepsFilesOutsideSnapDir(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	victim := filepath.Join(filepath.Dir(test.dirs.Snap), "victim.seg.torrent")
+	require.NoError(t, os.WriteFile(victim, []byte("x"), 0o644))
+
+	_, err = grpcServer.Delete(t.Context(), &downloaderproto.DeleteRequest{Paths: []string{"../victim.seg"}})
+	require.Error(t, err)
+	require.FileExists(t, victim)
+}
