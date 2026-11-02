@@ -677,17 +677,23 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	var hits, misses int
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
 		}
 		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
+			misses++
 			return valuesCursor.Put(k, v)
 		}
+		hits++
 		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
+	}
+	if flushSeekTrace {
+		log.Info("[flush] domain values", "table", w.valsTable, "sameStepHits", hits, "inserts", misses)
 	}
 	w.Close()
 
@@ -2406,3 +2412,5 @@ func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endT
 		return txNum, v, nil
 	}), nil
 }
+
+var flushSeekTrace = dbg.EnvBool("FLUSH_SEEK_TRACE", false)
