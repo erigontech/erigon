@@ -2645,7 +2645,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) beginRoThenLock(ctx context.Context) (kv.Tx, error) {
 	for {
 		flushes := p.flushes.Load()
-		tx, err := p.poolDB.BeginRo(ctx)
+		tx, err := p.poolDB.BeginRo(ctx) //nolint:gocritic // The caller owns Rollback.
 		if err != nil {
 			return nil, err
 		}
