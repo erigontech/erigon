@@ -426,3 +426,43 @@ func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidat
 		})
 	}
 }
+
+// Adding a verified message to the pool holds no service lock, so other messages are checked meanwhile.
+func TestSyncCommitteesPoolAddDoesNotBlockOtherMessages(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	entered, release := make(chan struct{}), make(chan struct{})
+	releasePoolAdd := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePoolAdd)
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			close(entered)
+			<-release
+			return nil
+		}).Times(1)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(state))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("message not added to the pool: %v", err)
+	}
+	duplicate := make(chan error, 1)
+	go func() { duplicate <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case err := <-duplicate:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a sync committee message waited for the pool add of another one")
+	}
+	releasePoolAdd()
+	require.NoError(t, <-done)
+}

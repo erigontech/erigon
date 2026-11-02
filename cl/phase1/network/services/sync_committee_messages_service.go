@@ -142,23 +142,13 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 }
 
 // storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
-// if another message for them was verified at the same time and recorded first.
+// if another message for them was verified at the same time and recorded first. Only the recording holds the service
+// lock, the cleanup and the pool add of the recorded message do not.
 func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
-	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok {
-		v := verified.(verifiedSyncCommitteeMessage)
-		if v.beaconBlockRoot != msg.BeaconBlockRoot || v.signature != msg.Signature {
-			return ErrIgnore
-		}
-		return nil
+	stored, err := s.recordVerifiedMessage(subnet, msg)
+	if !stored {
+		return err
 	}
-	s.seenSyncCommitteeMessages.Store(key, verifiedSyncCommitteeMessage{
-		beaconBlockRoot: msg.BeaconBlockRoot,
-		signature:       msg.Signature,
-	})
 	s.cleanupOldSyncCommitteeMessages()
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
@@ -166,6 +156,25 @@ func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *
 		log.Debug("failed to add sync committee message to pool", "err", err)
 	}
 	return nil
+}
+
+func (s *syncCommitteeMessagesService) recordVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
+	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok {
+		v := verified.(verifiedSyncCommitteeMessage)
+		if v.beaconBlockRoot != msg.BeaconBlockRoot || v.signature != msg.Signature {
+			return false, ErrIgnore
+		}
+		return false, nil
+	}
+	s.seenSyncCommitteeMessages.Store(key, verifiedSyncCommitteeMessage{
+		beaconBlockRoot: msg.BeaconBlockRoot,
+		signature:       msg.Signature,
+	})
+	return true, nil
 }
 
 // checkMessage runs the gossip checks that need no signature and returns the signature to verify, or nil for a
