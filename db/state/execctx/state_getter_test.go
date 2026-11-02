@@ -226,9 +226,6 @@ func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
-	roTx, err := db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
 
 	codes := [][]byte{
 		bytes.Repeat([]byte{0xa1}, 1024),
@@ -236,11 +233,24 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		bytes.Repeat([]byte{0xc3}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
-		tx.code[string(addrs[i])] = codes[i]
+		// Committed, not batched: a codeHash from the batch makes the read
+		// clone the bytes itself instead of going through FillCode.
+		commitAccount(t, db, nil, addrs[i], accounts.SerialiseV3(&accounts.Account{
+			Nonce:    1,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
+		}), 5)
+	}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	for i, addr := range addrs {
+		tx.code[string(addr)] = codes[i]
 	}
 
 	sc := newSmallStateCache()
@@ -249,13 +259,6 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	sd.BindStateCache(sc)
-	for i, addr := range addrs {
-		acc := accounts.SerialiseV3(&accounts.Account{
-			Nonce:    1,
-			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
-		})
-		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
-	}
 
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 	got := make([][]byte, len(codes))
@@ -268,6 +271,10 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	}
 	for i := range codes {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
+	}
+	require.Len(t, lentCaps, len(codes))
+	for i := 1; i < len(codes); i++ {
+		require.Positive(t, lentCaps[i], "read %d must decode into the lent buffer", i)
 	}
 }
 

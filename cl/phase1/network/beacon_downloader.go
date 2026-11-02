@@ -734,29 +734,16 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 	// P2P failed for blocks that came from the beacon API, so skip its long envelope timeout.
 	if pid != "http-fallback" || f.httpFallbackURL == "" {
 		var envErr error
-		envelopes, envErr = requestEnvelopesFranticallyWithValidator(
+		envelopes, envErr = RequestEnvelopesFrantically(
 			p2pCtx,
 			f.rpc,
 			fullRoots,
-			newEnvelopeValidator(blocks, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-				return ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope)
-			}),
+			NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(blocks)),
 			nil,
 			blocks...,
 		)
 		if envErr != nil {
 			log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
-		}
-		for _, block := range blocks {
-			root, err := block.Block.HashSSZ()
-			if err != nil {
-				continue
-			}
-			if envelope := envelopes[root]; envelope != nil {
-				if err := ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope); err != nil {
-					delete(envelopes, root)
-				}
-			}
 		}
 	}
 	if f.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
