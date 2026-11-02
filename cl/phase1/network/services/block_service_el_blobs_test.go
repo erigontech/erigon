@@ -269,6 +269,32 @@ func TestProcessMessageStartsELColumnsImportForValidGossipBlock(t *testing.T) {
 	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
 }
 
+// A gossip block and an equivocating block of the same proposer and slot queued on an unknown parent start one import:
+// the queued block never adds its key to the seen-blocks cache, so only the import claim stops the second one.
+func TestGossipAndQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	b := service.(*blockService)
+	encoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(b.beaconCfg, child.Version())
+	require.NoError(t, other.DecodeSSZ(encoded, int(child.Version())))
+	other.Block.Body.Graffiti = common.Hash{0x01}
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	_ = service.ProcessMessage(t.Context(), nil, child)
+	otherJob, _ := b.scheduleBlockForLaterProcessing(other, nil, false)
+	b.processScheduledBlock(t.Context(), otherRoot, otherJob, time.Now())
+
+	require.NotNil(t, otherJob.lastAttempt)
+	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
+}
+
 func TestProcessMessageDoesNotStartELColumnsImportForInvalidGossipBlock(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
