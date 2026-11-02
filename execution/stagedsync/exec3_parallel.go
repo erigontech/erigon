@@ -2666,7 +2666,7 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
 // balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
-const balDispatchWindow = 32
+var balDispatchWindow = dbg.EnvInt("BAL_DISPATCH_WINDOW", 32)
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
