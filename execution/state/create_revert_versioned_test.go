@@ -297,3 +297,30 @@ func TestNoMaterialize_RevertedCreditAfterBurnKeepsBalanceDeleted(t *testing.T) 
 	require.True(t, ok)
 	require.True(t, bal.Deletes(), "the burned account must stay deleted after the revert")
 }
+
+// A second SELFDESTRUCT over a burned-then-credited account journals a balance cell
+// that already carries the burn's deletion stamp; reverting it must keep the stamp.
+func TestNoMaterialize_RevertedRepeatDestructAfterBurnKeepsBalanceDeleted(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x99})
+	code := []byte("destroyed-contract-code")
+	committed := accounts.NewAccount()
+	committed.Nonce = 1
+	committed.Balance = *uint256.NewInt(1000)
+	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	ibs := NewWithVersionMap(&fieldReader{addr: addr, account: &committed, code: code}, NewVersionMap(nil))
+	ibs.SetTxContext(1, 0)
+
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	snap := ibs.PushSnapshot()
+	_, err = ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	ibs.RevertToSnapshot(snap, nil)
+
+	writes := finalizedWrites(t, ibs, &chain.Rules{IsHomestead: true})
+	bal, ok := writes.GetBalance(addr)
+	require.True(t, ok)
+	require.True(t, bal.Deletes(), "the burned account must stay deleted after the revert")
+}

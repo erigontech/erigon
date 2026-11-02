@@ -193,7 +193,7 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 // selfdestructChangeVersioned records a self-destruct on the parallel path,
 // capturing the versioned balance/incarnation writes it overwrites so a revert
 // can restore them (see selfdestructChange.revert).
-func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int) {
+func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int, prevBalanceDeleted bool) {
 	flags := commitFlag(wasCommitted)
 	if prev {
 		flags |= flagSelfdestructPrev
@@ -204,6 +204,9 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, aux: prevIncarnation, flags: flags}
 	if hadBalance {
 		e.flags |= flagSelfdestructHadBalance
+		if prevBalanceDeleted {
+			e.flags |= flagBalanceDeleted
+		}
 		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
 	}
 	j.entries = append(j.entries, e)
@@ -352,7 +355,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			// it. Gating this on committed (which describes SelfDestructPath, not
 			// BalancePath) deleted balance writes that predated the snapshot.
 			if je.flags&flagSelfdestructHadBalance != 0 {
-				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned, false)
+				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned, je.flags&flagBalanceDeleted != 0)
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
