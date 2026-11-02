@@ -91,9 +91,21 @@ func TestSetOverrideGenesis(t *testing.T) {
 		wantNetworkID uint64
 		wantDNS       []string
 	}{
-		{"no --networkid → genesis chain id", nil, 1337, nil},
-		{"explicit --networkid wins", []string{"--networkid=7"}, 7, nil},
-		{"--nodiscover keeps discovery config", []string{"--nodiscover"}, 1337, mainnetDNS},
+		{
+			name:          "no --networkid → genesis chain id",
+			wantNetworkID: 1337,
+		},
+		{
+			name:          "explicit --networkid wins",
+			args:          []string{"--networkid=7"},
+			wantNetworkID: 7,
+		},
+		{
+			name:          "--nodiscover keeps discovery config",
+			args:          []string{"--nodiscover"},
+			wantNetworkID: 1337,
+			wantDNS:       mainnetDNS,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -118,13 +130,40 @@ func TestSetOverrideGenesisErrors(t *testing.T) {
 		wantErr       string
 		wantNetworkID uint64
 	}{
-		{"empty path", []string{"--override.genesis="}, "failed to read genesis file", 0},
-		{"with --chain", []string{"--override.genesis=" + path, "--chain=sepolia"}, "mutually exclusive", 0},
-		{"chain id 0", []string{"--override.genesis=" + zeroChainID}, "must be set to a nonzero network id", 0},
-		{"chain id 0 with --networkid", []string{"--override.genesis=" + zeroChainID, "--networkid=7"}, "", 7},
-		{"chain id 2^64", []string{"--override.genesis=" + largeChainID}, "must be set to a nonzero network id", 0},
-		{"chain id 2^64 with --networkid", []string{"--override.genesis=" + largeChainID, "--networkid=7"}, "", 7},
-		{"flag not given", nil, "", ethconfig.Defaults.NetworkID},
+		{
+			name:    "empty path",
+			args:    []string{"--override.genesis="},
+			wantErr: "failed to read genesis file",
+		},
+		{
+			name:    "with --chain",
+			args:    []string{"--override.genesis=" + path, "--chain=sepolia"},
+			wantErr: "mutually exclusive",
+		},
+		{
+			name:    "chain id 0",
+			args:    []string{"--override.genesis=" + zeroChainID},
+			wantErr: "must be set to a nonzero network id",
+		},
+		{
+			name:          "chain id 0 with --networkid",
+			args:          []string{"--override.genesis=" + zeroChainID, "--networkid=7"},
+			wantNetworkID: 7,
+		},
+		{
+			name:    "chain id 2^64",
+			args:    []string{"--override.genesis=" + largeChainID},
+			wantErr: "must be set to a nonzero network id",
+		},
+		{
+			name:          "chain id 2^64 with --networkid",
+			args:          []string{"--override.genesis=" + largeChainID, "--networkid=7"},
+			wantNetworkID: 7,
+		},
+		{
+			name:          "flag not given",
+			wantNetworkID: ethconfig.Defaults.NetworkID,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

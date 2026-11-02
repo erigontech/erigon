@@ -1146,7 +1146,7 @@ func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 
 func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logger log.Logger, tracer *tracers.Tracer) (*chain.Config, *types.Block, error) {
 	var chainConfig *chain.Config
-	var genesis *types.Block
+	var genesisBlock *types.Block
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		genesisSpec, err := selectGenesis(tx, config)
 		if err != nil {
@@ -1157,7 +1157,7 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		chainConfig, genesis, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesisBlock, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		return err
 	}); err != nil {
 		if _, ok := errors.AsType[*chain.ConfigCompatError](err); ok {
@@ -1165,7 +1165,7 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 		}
 		return nil, nil, err
 	}
-	return chainConfig, genesis, nil
+	return chainConfig, genesisBlock, nil
 }
 
 // selectGenesis returns an explicit genesis for the writer to validate.
@@ -1175,18 +1175,18 @@ func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
 	if config.GenesisFromFile {
 		return config.Genesis, nil
 	}
-	stored, err := rawdb.ReadGenesis(tx)
+	storedGenesis, err := rawdb.ReadGenesis(tx)
 	if err != nil {
 		return nil, err
 	}
-	if stored != nil {
-		config.Genesis = stored
+	if storedGenesis != nil {
+		config.Genesis = storedGenesis
 	}
-	h, err := rawdb.ReadCanonicalHash(tx, 0)
+	storedHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return nil, err
 	}
-	if h != (common.Hash{}) { // fallback to db content
+	if storedHash != (common.Hash{}) { // fallback to db content
 		return nil, nil
 	}
 	return config.Genesis, nil
