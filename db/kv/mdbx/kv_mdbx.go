@@ -791,14 +791,26 @@ func (db *MdbxKV) CloseAndReopen(ctx context.Context, drainTimeout time.Duration
 		return false, nil
 	}
 
+	if db.syncerDone != nil {
+		close(db.syncerStop)
+		<-db.syncerDone
+		db.syncerDone = nil
+		if err := db.env.Sync(true, false); err != nil {
+			db.log.Warn("[db] flush before reopen", "label", db.opts.label, "err", err)
+		}
+	}
+	db.drainRoTxPool()
 	db.env.Close()
+	db.env = nil
 	whileClosed()
 	reopened, err := db.opts.Open(ctx)
 	if err != nil {
 		return true, err
 	}
 	fresh := reopened.(*MdbxKV)
+	// The reopened instance's background flush now serves this env; Close stops it.
 	db.env, db.buckets = fresh.env, fresh.buckets
+	db.syncerStop, db.syncerDone = fresh.syncerStop, fresh.syncerDone
 	return true, nil
 }
 

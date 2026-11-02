@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1297,4 +1298,30 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
 		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
+}
+
+// CloseAndReopen must drop the read txns pooled on the closed env and leave exactly one
+// background flush running: the reopened instance's poller replaces the old one.
+func TestCloseAndReopenDropsPooledTxnsAndJoinsFlush(t *testing.T) {
+	base := runtime.NumGoroutine()
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
+		SafeNoSync().SyncPeriod(time.Millisecond).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	m := db.(*mdbx.MdbxKV)
+	for range 5 {
+		tx, err := db.BeginRo(t.Context())
+		require.NoError(t, err)
+		tx.Rollback()
+		require.Equal(t, 1, mdbx.RoTxPoolLen(m))
+		drained, err := m.CloseAndReopen(t.Context(), time.Second, func() {})
+		require.NoError(t, err)
+		require.True(t, drained)
+		require.Zero(t, mdbx.RoTxPoolLen(m), "a txn pooled on the closed env must not be renewed")
+		tx, err = db.BeginRo(t.Context())
+		require.NoError(t, err)
+		tx.Rollback()
+	}
+	db.Close()
+	require.Eventually(t, func() bool { return runtime.NumGoroutine() <= base+1 }, 5*time.Second, 10*time.Millisecond,
+		"a background flush outlived Close")
 }
