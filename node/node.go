@@ -254,6 +254,10 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		n.dirLock = l
 		break
 	}
+	if err := n.config.Dirs.RenameOldVersions(false); err != nil {
+		n.closeDataDir()
+		return fmt.Errorf("failed to rename old versions: %w", err)
+	}
 
 	diskutils.CheckFilesystem(n.logger, n.config.Dirs.All()...)
 	return nil
