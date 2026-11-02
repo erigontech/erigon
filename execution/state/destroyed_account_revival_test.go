@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -180,51 +179,32 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
 }
 
-// TestEIP8246PreserveSelfDestruct pins the commitment projection of an EIP-8246
-// balance-preserving self-destruct of a PRE-EXISTING contract. Unreverted, the account
-// resolves at end-of-tx to a codeless EOA {balance, nonce 0, EmptyCodeHash}, the same thing
-// the domain apply writes (NewAccount+balance); the why-free projection reads raw cells over
-// base, so Finalize must stamp the cleared nonce+codeHash, else it inherits the base
-// contract's and the commitment leaf diverges from the domain (wrong state root). Reverted,
-// the destruct's cell changes are undone and the original contract is projected.
-func TestEIP8246PreserveSelfDestruct(t *testing.T) {
+// A reverted EIP-8246 balance-preserving self-destruct projects the original contract.
+func TestEIP8246PreserveSelfDestructRevert(t *testing.T) {
 	t.Parallel()
-	for _, revert := range []bool{false, true} {
-		t.Run(fmt.Sprintf("revert=%v", revert), func(t *testing.T) {
-			t.Parallel()
-			addr := accounts.InternAddress(common.HexToAddress("0x8246c0de"))
-			codeHash := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
-			base := accounts.NewAccount()
-			base.Nonce = 5
-			base.Balance = *uint256.NewInt(100)
-			base.CodeHash = codeHash
-			reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &base}}
+	addr := accounts.InternAddress(common.HexToAddress("0x8246c0de"))
+	codeHash := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
+	base := accounts.NewAccount()
+	base.Nonce = 5
+	base.Balance = *uint256.NewInt(100)
+	base.CodeHash = codeHash
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &base}}
 
-			vm := NewVersionMap(nil)
-			ibs := newAmsterdamIBS(reader, vm, 0)
-			t.Cleanup(ibs.Close)
+	vm := NewVersionMap(nil)
+	ibs := newAmsterdamIBS(reader, vm, 0)
+	t.Cleanup(ibs.Close)
 
-			snap := ibs.PushSnapshot()
-			destroyed, err := ibs.Selfdestruct(addr, true) // preserveBalance = EIP-8246 no-burn
-			require.NoError(t, err)
-			require.True(t, destroyed)
-			if revert {
-				ibs.RevertToSnapshot(snap, nil)
-			}
+	snap := ibs.PushSnapshot()
+	destroyed, err := ibs.Selfdestruct(addr, true) // preserveBalance = EIP-8246 no-burn
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	ibs.RevertToSnapshot(snap, nil)
 
-			require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
-			vm.FlushVersionedWrites(finalizedWrites(t, ibs, amsterdamRules), true)
+	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, amsterdamRules), true)
 
-			acc, ok := vm.View(1, reader).GetAccount(addr)
-			require.True(t, ok)
-			if revert {
-				require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")
-				require.Equal(t, codeHash, acc.CodeHash, "revert leaves the original contract code")
-				return
-			}
-			require.Equal(t, *uint256.NewInt(100), acc.Balance, "balance is preserved")
-			require.Equal(t, uint64(0), acc.Nonce, "the codeless EOA's nonce is 0, not the base contract's")
-			require.True(t, acc.CodeHash.IsEmpty() || acc.CodeHash == accounts.EmptyCodeHash, "the codeless EOA has no code, not the base contract's")
-		})
-	}
+	acc, ok := vm.View(1, reader).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")
+	require.Equal(t, codeHash, acc.CodeHash, "revert leaves the original contract code")
 }

@@ -359,15 +359,10 @@ func TestSelfdestructWriteSetShape(t *testing.T) {
 			for _, path := range []AccountPath{AddressPath, CodePath, CodeSizePath} {
 				require.False(t, writes.Has(WriteHeader{Address: addr, Path: path}), "%s must not survive the destruct", path)
 			}
-			nonce, hasNonce := writes.GetNonce(addr)
-			codeHash, hasCodeHash := writes.GetCodeHash(addr)
-			if preserveBalance {
-				require.True(t, hasNonce && nonce.Val == 0, "EIP-8246 re-stamps the pre-existing account's nonce to 0")
-				require.True(t, hasCodeHash && codeHash.Val == accounts.EmptyCodeHash, "EIP-8246 re-stamps the pre-existing account's code hash to empty")
-			} else {
-				require.False(t, hasNonce, "Nonce must not survive the destruct")
-				require.False(t, hasCodeHash, "CodeHash must not survive the destruct")
-			}
+			_, hasNonce := writes.GetNonce(addr)
+			_, hasCodeHash := writes.GetCodeHash(addr)
+			require.False(t, hasNonce, "Nonce must not survive the destruct")
+			require.False(t, hasCodeHash, "CodeHash must not survive the destruct")
 
 			bal, hasBalance := writes.GetBalance(addr)
 			require.True(t, hasBalance, "the destruct writes a balance cell in both the burn and EIP-8246 cases")

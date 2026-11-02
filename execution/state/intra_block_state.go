@@ -1978,9 +1978,8 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 		ibs.recordWriteBalanceDeleted(addr)
 	}
 	// Nonce and code hash are not written here: Snapshot (finalize) drops them for a
-	// self-destructed account, and a balance-preserving destruct re-stamps the cleared
-	// values there so the version map carries the full codeless-EOA state. Explicit
-	// cells here would also make a same-tx re-creation abort on a phantom collision.
+	// self-destructed account. Explicit cells here would also make a same-tx
+	// re-creation abort on a phantom collision.
 	return true, nil
 }
 

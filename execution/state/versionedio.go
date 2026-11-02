@@ -1334,18 +1334,6 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 			if vw, ok := ws.codeSize[addr]; ok {
 				out.SetCodeSize(addr, cloneVW(vw))
 			}
-		} else if bw, ok := ws.balance[addr]; ok && !bw.Deletes() {
-			// A balance-preserving destruct (EIP-8246) resolves at end-of-tx to a codeless
-			// EOA — the domain apply writes NewAccount+balance (nonce 0, EmptyCodeHash). The
-			// per-field writes were dropped above, so re-stamp the cleared nonce/code — but
-			// only for a pre-existing account, whose base record the commitment would
-			// otherwise read. An account created this block has no base, so the commitment
-			// composes the codeless-EOA defaults on its own, and re-stamping nonce 0 would
-			// leak a net-zero nonce change (0→1→0) into the block access list.
-			if _, created := ws.createContract[addr]; !created {
-				out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: bw.Version}, Val: 0})
-				out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: bw.Version}, Val: accounts.EmptyCodeHash})
-			}
 		}
 	}
 	return out
