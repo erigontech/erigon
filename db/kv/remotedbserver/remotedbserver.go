@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -663,7 +664,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 	return reply, nil
 }
 
-func (s *KvServer) IndexJoin(_ context.Context, req *remoteproto.IndexJoinReq) (*remoteproto.IndexRangeReply, error) {
+func (s *KvServer) IndexJoin(ctx context.Context, req *remoteproto.IndexJoinReq) (*remoteproto.IndexRangeReply, error) {
 	q := kv.IndexQuery{Clauses: make([][]kv.IndexKey, len(req.Clauses)), FromTs: int(req.FromTs), ToTs: int(req.ToTs), Asc: order.By(req.OrderAscend)}
 	for i, clause := range req.Clauses {
 		q.Clauses[i] = make([]kv.IndexKey, len(clause.Keys))
@@ -688,7 +689,10 @@ func (s *KvServer) IndexJoin(_ context.Context, req *remoteproto.IndexJoinReq) (
 
 	reply := &remoteproto.IndexRangeReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		it, err := tx.IndexJoin(q)
+		it, err := kv.JoinIndexRanges(q, func(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+			it, err := tx.IndexRange(name, k, fromTs, toTs, asc, limit)
+			return &ctxU64{U64: it, ctx: ctx}, err
+		})
 		if err != nil {
 			return err
 		}
@@ -709,6 +713,31 @@ func (s *KvServer) IndexJoin(_ context.Context, req *remoteproto.IndexJoinReq) (
 		return nil, err
 	}
 	return reply, nil
+}
+
+// ctxU64 stops a stream once ctx is done: a join can scan far more entries than it returns.
+type ctxU64 struct {
+	stream.U64
+	ctx context.Context
+}
+
+func (it *ctxU64) Next() (uint64, error) {
+	if err := it.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return it.U64.Next()
+}
+
+func (it *ctxU64) CanSeek() bool {
+	s, ok := it.U64.(stream.Seeker[uint64])
+	return ok && s.CanSeek()
+}
+
+func (it *ctxU64) Seek(v uint64) error {
+	if err := it.ctx.Err(); err != nil {
+		return err
+	}
+	return it.U64.(stream.Seeker[uint64]).Seek(v)
 }
 
 func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRangeReq) (*remoteproto.Pairs, error) {

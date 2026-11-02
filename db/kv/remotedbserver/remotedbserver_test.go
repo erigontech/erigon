@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"slices"
@@ -193,7 +194,7 @@ func TestKVServerSnapshotsReturnsEmptyIfNoBlockSnapshots(t *testing.T) {
 	require.Empty(t, reply.HistoryFiles)
 }
 
-// indexJoinTx joins in-memory inverted indexes with the range semantics of TemporalTx.IndexRange.
+// indexJoinTx serves in-memory inverted indexes with the range semantics of TemporalTx.IndexRange.
 type indexJoinTx struct {
 	kv.TemporalTx
 	index map[kv.InvertedIdx]map[string][]uint64
@@ -211,10 +212,6 @@ func (tx *indexJoinTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs in
 		slices.Reverse(res)
 	}
 	return stream.Array(res), nil
-}
-
-func (tx *indexJoinTx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
-	return kv.JoinIndexRanges(q, tx.IndexRange)
 }
 
 func TestIndexJoinPaginates(t *testing.T) {
@@ -256,4 +253,53 @@ func TestIndexJoinPaginates(t *testing.T) {
 			require.Equal(t, (len(tc.want)+1)/2, pages)
 		})
 	}
+}
+
+// cancelingTx cancels the request context once its index streams have been read a given number of times.
+type cancelingTx struct {
+	*indexJoinTx
+	cancel      context.CancelFunc
+	readsBefore int
+}
+
+type cancelingStream struct {
+	stream.U64
+	tx *cancelingTx
+}
+
+func (it cancelingStream) Next() (uint64, error) {
+	if it.tx.readsBefore--; it.tx.readsBefore == 0 {
+		it.tx.cancel()
+	}
+	return it.U64.Next()
+}
+
+func (tx *cancelingTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+	it, err := tx.indexJoinTx.IndexRange(name, k, fromTs, toTs, asc, limit)
+	return cancelingStream{it, tx}, err
+}
+
+func TestIndexJoinStopsScanningOnCancel(t *testing.T) {
+	var even, odd []uint64
+	for ts := range uint64(1000) {
+		if ts%2 == 0 {
+			even = append(even, ts)
+		} else {
+			odd = append(odd, ts)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: &cancelingTx{
+		indexJoinTx: &indexJoinTx{index: map[kv.InvertedIdx]map[string][]uint64{kv.LogAddrIdx: {"even": even, "odd": odd}}},
+		cancel:      cancel,
+		readsBefore: 10,
+	}}
+	req := &remoteproto.IndexJoinReq{TxId: 1, FromTs: -1, ToTs: -1, OrderAscend: true, Clauses: []*remoteproto.IndexJoinClause{
+		{Keys: []*remoteproto.IndexJoinKey{{Table: kv.LogAddrIdx.String(), K: []byte("even")}}},
+		{Keys: []*remoteproto.IndexJoinKey{{Table: kv.LogAddrIdx.String(), K: []byte("odd")}}},
+	}}
+	_, err := s.IndexJoin(ctx, req)
+	require.ErrorIs(t, err, context.Canceled)
 }
