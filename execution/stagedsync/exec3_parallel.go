@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -2973,6 +2974,10 @@ func (be *blockExecutor) signalCommitted(tx int) {
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+	if poolRerunTrace {
+		_, _, line, _ := runtime.Caller(1)
+		fmt.Fprintf(os.Stderr, "POOLREEXEC block=%d tx=%d line=%d\n", be.blockNum, tx, line)
+	}
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3045,6 +3050,10 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 	// TxIndex. They differ by the block's leading system tx, so blockIO reads map
 	// through be.tasks[i].Task.Version().TxIndex.
 	newWrites := be.blockIO.WriteSet(be.tasks[changedTx].Task.Version().TxIndex)
+	if poolRerunTrace {
+		_, _, line, _ := runtime.Caller(1)
+		fmt.Fprintf(os.Stderr, "POOLREVAL block=%d changed=%d line=%d oldNil=%v\n", be.blockNum, changedTx, line, oldWrites == nil)
+	}
 	for _, tx := range be.revalCandidates(changedTx, newWrites, oldWrites) {
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
 			continue
@@ -3072,7 +3081,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 					return state.VersionInvalid
 				}
 				return state.VersionValid
-			}, false, "") == state.VersionValid {
+			}, poolRerunTrace, "REVALINV") == state.VersionValid {
 			continue
 		}
 		be.cntValidationFail++

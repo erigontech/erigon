@@ -246,6 +246,9 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
+	if poolRerunTrace {
+		fmt.Fprintf(os.Stderr, "POOLRUN block=%d tx=%d inc=%d final=%v\n", be.blockNum, tv.index, tv.version.Incarnation, finalExec)
+	}
 	result := wk.w.RunTxTask(tv)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
