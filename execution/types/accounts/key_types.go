@@ -37,15 +37,18 @@ var (
 // allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
 // direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
 const (
-	addressTableSize = 256 * 1024
-	keyTableSize     = 1024 * 1024
+	addressTableSize  = 256 * 1024
+	keyTableSize      = 1024 * 1024
+	codeHashTableSize = 64 * 1024
 )
 
 var (
-	addressTable [addressTableSize]atomic.Value // Address
-	keyTable     [keyTableSize]atomic.Value     // StorageKey
-	_            = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
-	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
+	addressTable  [addressTableSize]atomic.Value  // Address
+	keyTable      [keyTableSize]atomic.Value      // StorageKey
+	codeHashTable [codeHashTableSize]atomic.Value // CodeHash
+	_             = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
+	_             = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
+	_             = [1]struct{}{}[codeHashTableSize&(codeHashTableSize-1)]
 )
 
 func addressSlot(a common.Address) *atomic.Value {
@@ -213,7 +216,13 @@ var (
 )
 
 func InternCodeHash(k common.Hash) CodeHash {
-	return CodeHash(unique.Make(k))
+	slot := &codeHashTable[binary.BigEndian.Uint32(k[:4])&(codeHashTableSize-1)]
+	if h, ok := slot.Load().(CodeHash); ok && h.Value() == k {
+		return h
+	}
+	h := CodeHash(unique.Make(k))
+	slot.Store(h)
+	return h
 }
 
 func (h CodeHash) IsNil() bool {
