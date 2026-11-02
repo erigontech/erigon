@@ -378,27 +378,15 @@ func New(
 	var genesis *types.Block
 	var compatErr *chain.ConfigCompatError
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		genesisConfig, err := rawdb.ReadGenesis(tx)
+		genesisSpec, err := selectGenesis(tx, config)
 		if err != nil {
 			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
 		}
 
 		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
@@ -1178,6 +1166,32 @@ func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) e
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+
+// selectGenesis returns the genesis to pass to WriteGenesisBlock for this start. A
+// genesis stored in the DB replaces config.Genesis, and an initialised DB needs no
+// spec, unless the genesis came from --override.genesis: that one is passed on, so
+// that WriteGenesisBlock rejects it if it differs from the stored one, as `erigon
+// init` does, instead of running the stored chain under the file's network id.
+func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
+	if config.GenesisFromFile {
+		return config.Genesis, nil
+	}
+	stored, err := rawdb.ReadGenesis(tx)
+	if err != nil {
+		return nil, err
+	}
+	if stored != nil {
+		config.Genesis = stored
+	}
+	h, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	if h != (common.Hash{}) { // fallback to db content
+		return nil, nil
+	}
+	return config.Genesis, nil
+}
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 

@@ -148,7 +148,7 @@ var (
 	}
 	OverrideGenesisFlag = cli.StringFlag{
 		Name:  "override.genesis",
-		Usage: "Load the genesis block and chain config from this JSON file instead of the --chain network's; written on first start like `erigon init`",
+		Usage: "Load the genesis block and chain config from this JSON file instead of the --chain network's; written on first start like `erigon init`, and must match a genesis already in the datadir",
 	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
@@ -2439,6 +2439,7 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) {
 		Fatalf("%v", err)
 	}
 	cfg.Genesis = genesis
+	cfg.GenesisFromFile = true
 	if !ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = genesis.Config.ChainID.Uint64()
 	}

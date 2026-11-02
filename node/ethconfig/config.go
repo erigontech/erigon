@@ -259,6 +259,10 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
+	// Whether Genesis came from --override.genesis. Such a genesis must match the one
+	// already stored in the DB, as with `erigon init`, rather than give way to it.
+	GenesisFromFile bool
+
 	// Account Abstraction
 	AllowAA bool
 
