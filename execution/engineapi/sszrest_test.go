@@ -320,6 +320,18 @@ func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
 	})
 }
 
+func TestSSZRESTForkchoiceUpdateRejectsShortCustodyColumns(t *testing.T) {
+	for length := 1; length < 16; length++ {
+		t.Run(fmt.Sprintf("%d bytes", length), func(t *testing.T) {
+			enc, err := encodeForkchoiceUpdate(clparams.GloasVersion, &engine_types.ForkChoiceState{}, nil, make([]byte, length))
+			require.NoError(t, err)
+
+			_, _, _, err = decodeForkchoiceUpdate(enc, clparams.GloasVersion)
+			require.ErrorContains(t, err, "custody columns bitvector length")
+		})
+	}
+}
+
 // Pin the PayloadStatus byte examples from refactor-ssz.md. A VALID status
 // with latest_valid_hash present and no validation_error is 41 bytes.
 func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
