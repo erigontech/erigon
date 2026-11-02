@@ -40,7 +40,6 @@ func balFoldUpdates(t *testing.T, blockBAL types.BlockAccessList, eip161Enabled,
 	t.Helper()
 	const foldTxNum = 1 << 20 // above every BAL change index → GetAccount reads the block-end floor
 	vm := state.NewVersionMap(blockBAL)
-	vm.SetBaseTxNum(0)
 	require.NoError(t, vm.SeedEmptyRemovals(eip161Enabled, isAura, base))
 	return emitTouchedUpdates(t, vm, foldTxNum, base, bal.ToWriteSet(blockBAL, math.MaxUint32))
 }

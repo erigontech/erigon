@@ -37,7 +37,6 @@ func TestSeedEmptyRemovals(t *testing.T) {
 
 	emptied := accounts.InternAddress(common.HexToAddress("0xe3111"))  // drained to empty
 	survives := accounts.InternAddress(common.HexToAddress("0x5a71e")) // balance 0 but base nonce 5
-	const baseTxNum = 0
 
 	bal := types.BlockAccessList{
 		{Address: emptied.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}},
@@ -52,7 +51,6 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	reader.accounts[survives] = &survivesBase
 
 	vm := NewVersionMap(bal)
-	vm.SetBaseTxNum(baseTxNum)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
@@ -75,7 +73,6 @@ func TestSeedAddresses(t *testing.T) {
 
 	created := accounts.InternAddress(common.HexToAddress("0xc0ffee")) // absent in base, created this block
 	existing := accounts.InternAddress(common.HexToAddress("0xe5157")) // present in base, only touched
-	const baseTxNum = 0
 
 	bal := types.BlockAccessList{
 		{
@@ -95,7 +92,6 @@ func TestSeedAddresses(t *testing.T) {
 	reader.accounts[existing] = &existingBase // `created` is intentionally absent from the base
 
 	vm := NewVersionMap(bal)
-	vm.SetBaseTxNum(baseTxNum)
 
 	// Before seeding the BAL leaves only field cells, so the created account's address
 	// read is absent even though it exists — the bug SeedAddresses fixes.
@@ -131,7 +127,6 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 	t.Parallel()
 
 	proxy := accounts.InternAddress(common.HexToAddress("0xc0ffee")) // funded early, CREATE2'd later
-	const baseTxNum = 0
 
 	bal := types.BlockAccessList{
 		{
@@ -145,7 +140,6 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}} // proxy absent in base
 
 	vm := NewVersionMap(bal)
-	vm.SetBaseTxNum(baseTxNum)
 	vm.SeedAddresses()
 
 	// Compose after funding (BAL index 2 → TxIndex 1) but before the code deploy (index 5
@@ -162,63 +156,51 @@ func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe2})
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	vm := NewVersionMap(bal)
-	vm.SetBaseTxNum(0)
 	boom := errors.New("boom")
 	require.ErrorIs(t, vm.SeedEmptyRemovals(true, false, &failingBaseReader{err: boom}), boom)
 }
 
 // TestSeedEmptyRemovals_DrainThenRefund pins the removal at an interior index: an
-// account drained to empty and funded again later in the block reads absent to a
-// step checkpoint between the two, and present at block end.
+// account drained to empty reads absent to a step checkpoint at index 1, then is
+// present at block end once funded again at index 2, or once re-created at index 2
+// with no balance change (CREATE2 onto a drained address, as createObject does for a
+// worker).
 func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	t.Parallel()
 
-	addr := accounts.InternAddress(common.HexToAddress("0xd7a1"))
-	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{
-		{Index: 1, Value: uint256.Int{}},
-		{Index: 2, Value: *uint256.NewInt(7)},
-	}}}
+	refunded := accounts.InternAddress(common.HexToAddress("0xd7a1"))
+	recreated := accounts.InternAddress(common.HexToAddress("0xd7a2"))
+	bal := types.BlockAccessList{
+		{Address: refunded.Value(), BalanceChanges: []*types.BalanceChange{
+			{Index: 1, Value: uint256.Int{}},
+			{Index: 2, Value: *uint256.NewInt(7)},
+		}},
+		{
+			Address:        recreated.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+			NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+			CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x00}}},
+		},
+	}
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
-	base := accounts.NewAccount()
-	base.Balance = *uint256.NewInt(5)
-	reader.accounts[addr] = &base
+	for _, addr := range []accounts.Address{refunded, recreated} {
+		base := accounts.NewAccount()
+		base.Balance = *uint256.NewInt(5)
+		reader.accounts[addr] = &base
+	}
 
 	vm := NewVersionMap(bal)
-	vm.SetBaseTxNum(0)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
-	_, ok := vm.View(1, reader).GetAccount(addr)
+	_, ok := vm.View(1, reader).GetAccount(refunded)
 	require.False(t, ok, "drained to empty at index 1: absent before the re-fund")
-	acc, ok := vm.View(2, reader).GetAccount(addr)
+	acc, ok := vm.View(2, reader).GetAccount(refunded)
 	require.True(t, ok, "funded again at index 2: present at block end")
 	require.Equal(t, *uint256.NewInt(7), acc.Balance)
-}
 
-// TestSeedEmptyRemovals_DrainThenRecreateWithoutBalance pins that a re-creation with no
-// balance change (CREATE2 onto a drained address) supersedes the interior removal, as
-// createObject does for a worker.
-func TestSeedEmptyRemovals_DrainThenRecreateWithoutBalance(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xd7a2"))
-	bal := types.BlockAccessList{{
-		Address:        addr.Value(),
-		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
-		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
-		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x00}}},
-	}}
-	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
-	base := accounts.NewAccount()
-	base.Balance = *uint256.NewInt(5)
-	reader.accounts[addr] = &base
-
-	vm := NewVersionMap(bal)
-	vm.SetBaseTxNum(0)
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
-
-	_, ok := vm.View(1, reader).GetAccount(addr)
+	_, ok = vm.View(1, reader).GetAccount(recreated)
 	require.False(t, ok, "drained to empty at index 1")
-	acc, ok := vm.View(2, reader).GetAccount(addr)
+	acc, ok = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
 }

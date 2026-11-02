@@ -1302,26 +1302,7 @@ func TestCalcFees_EIP8246PreservedCoinbase(t *testing.T) {
 			t.Parallel()
 			coinbase := fAddr("coinbase")
 
-			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
-			version := state.Version{BlockNum: 1, TxNum: 2, TxIndex: 1}
-			txTask := &exec.TxTask{
-				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
-				Config:          chain.TestChainBerlinConfig,
-				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
-			}
-			task := &taskVersion{
-				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
-				version:  version,
-			}
-			result := &execResult{TxResult: &exec.TxResult{
-				Task: task,
-				ExecutionResult: evmtypes.ExecutionResult{
-					FeeTipped:            *uint256.NewInt(tc.tip),
-					BurntContractAddress: accounts.NilAddress,
-				},
-				Coinbase: coinbase,
-			}}
-			result.TxOut = &state.WriteSet{}
+			result, task := coinbaseTipResult(coinbase, tc.tip)
 
 			vm := state.NewVersionMap(nil)
 			destructor := state.NewWithVersionMap(state.NewNoopReader(), vm)

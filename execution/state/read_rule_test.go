@@ -64,32 +64,6 @@ func TestReadRule_XB2_NonRemovalTouchKeepsCommittedStorage(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(9), val, "a non-removal touch must leave the committed slot readable")
 }
 
-// XB3: an account committed in block N is removed then revived (value transfer) in N+1.
-// The revived account is present but inherits no committed storage.
-func TestReadRule_XB3_RemovedThenRevivedWipesCommittedStorage(t *testing.T) {
-	t.Parallel()
-	addr := accounts.InternAddress([20]byte{0x5a})
-	slot := accounts.InternKey([32]byte{0x01})
-	committed := accounts.NewAccount()
-	base := &storageReader{addr: addr, account: &committed, storage: map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(9)}}
-
-	vm := NewVersionMap(nil)
-	ws := &WriteSet{}
-	ws.SetEmptyRemoval(addr, Version{TxIndex: 0}) // removed in N+1 @0
-	vm.FlushVersionedWrites(ws, true)
-	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(5), true) // revived by a credit @1
-
-	vr := NewVersionedStateReader(2, ReadSet{}, vm, base)
-	val, _, err := vr.ReadAccountStorage(addr, slot)
-	require.NoError(t, err)
-	require.True(t, val.IsZero(), "a revived account inherits no committed storage, got %s", val.String())
-
-	view := vm.View(2, base)
-	acc, ok := view.GetAccount(addr)
-	require.True(t, ok, "the revived account is present")
-	require.Equal(t, *uint256.NewInt(5), acc.Balance, "revived balance")
-}
-
 // A1 (guard on the SD leg): a burning self-destruct already wipes committed storage via
 // the SelfDestruct cell. Pins that the SD path keeps working (the rule must subsume it).
 func TestReadRule_A1_BurnSelfDestructWipesCommittedStorage(t *testing.T) {
@@ -133,6 +107,10 @@ func TestReadRule_B3_PostRemovalWriteVisibleBaseSuppressed(t *testing.T) {
 	valS, _, err := vr.ReadAccountStorage(addr, slotS)
 	require.NoError(t, err)
 	require.True(t, valS.IsZero(), "a committed slot the revival did not rewrite stays 0, got %s", valS.String())
+
+	acc, ok := vm.View(2, base).GetAccount(addr)
+	require.True(t, ok, "the revived account is present")
+	require.Equal(t, *uint256.NewInt(5), acc.Balance, "revived balance")
 }
 
 // XB4: the prevBlocks cascade — a removal in a sealed prior-block layer must suppress the

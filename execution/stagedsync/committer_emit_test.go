@@ -109,7 +109,6 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			ws := sc.ws
 			vm := state.NewVersionMap(nil)
-			vm.SetBaseTxNum(0)
 			vm.FlushVersionedWrites(ws, true)
 
 			got := emitTouchedUpdates(t, vm, T, nil, state.NewVersionMapWriteView(ws, vm, txIdx))
@@ -146,7 +145,6 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 
 	t.Run("non-zero base value writes the slot", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
-		vm.SetBaseTxNum(0)
 		vm.FlushVersionedWrites(flushed, true)
 		base := newMapStateReader()
 		base.accounts[addr] = &acc
@@ -160,7 +158,6 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 
 	t.Run("absent base value deletes the slot", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
-		vm.SetBaseTxNum(0)
 		vm.FlushVersionedWrites(flushed, true)
 		base := newMapStateReader()
 		base.accounts[addr] = &acc
@@ -184,12 +181,10 @@ func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
 
 	wsA := newWS().selfDestruct(addr, ver, true).bal(addr, ver, uint256.Int{}).build()
 	vmA := state.NewVersionMap(nil)
-	vmA.SetBaseTxNum(0)
 	vmA.FlushVersionedWrites(wsA, true)
 
 	wsB := newWS().bal(addr, ver, *uint256.NewInt(7)).build()
 	vmB := state.NewVersionMap(nil)
-	vmB.SetBaseTxNum(0)
 	vmB.FlushVersionedWrites(wsB, true)
 
 	got := emitTouchedUpdates(t, vmB, T, newMapStateReader(),
@@ -211,7 +206,6 @@ func TestEmitTouched_ZeroCodeHashFoldsAsEmpty(t *testing.T) {
 
 	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).addr(addr, ver, &accounts.Account{Balance: *uint256.NewInt(5)}).build()
 	vm := state.NewVersionMap(nil)
-	vm.SetBaseTxNum(0)
 	vm.FlushVersionedWrites(ws, true)
 
 	got := emitTouchedUpdates(t, vm, txIdx+1, newMapStateReader(), state.NewVersionMapWriteView(ws, vm, txIdx))[string(av[:])]
@@ -245,7 +239,6 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 
 	t.Run("account", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
-		vm.SetBaseTxNum(0)
 		cc := &commitmentCalculator{}
 		cc.accumulateTouched(newWS().nonce(addr, ver, 1).build())
 		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{accErr: boom}), newTestUpdates())
@@ -255,7 +248,6 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 	t.Run("storage", func(t *testing.T) {
 		ws := newWS().bal(addr, ver, *uint256.NewInt(1)).stor(addr, slot, ver, *uint256.NewInt(1)).build()
 		vm := state.NewVersionMap(nil)
-		vm.SetBaseTxNum(0)
 		vm.FlushVersionedWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
 		cc := &commitmentCalculator{}
 		cc.accumulateTouched(ws)

@@ -47,10 +47,8 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		reader.accounts[addr].CodeHash = accounts.InternCodeHash(common.HexToHash("0xc0de"))
 
 		vm := NewVersionMap(nil)
-		ibs := NewWithVersionMap(reader, vm)
+		ibs := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(ibs.Close)
-		ibs.SetTxContext(1, 0)
-		ibs.SetVersion(0)
 
 		destroyed, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
@@ -68,10 +66,8 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
 
 		vm := NewVersionMap(nil)
-		ibs := NewWithVersionMap(reader, vm)
+		ibs := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(ibs.Close)
-		ibs.SetTxContext(1, 0)
-		ibs.SetVersion(0)
 
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract))
@@ -86,28 +82,6 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.False(t, ok, "an account created and destroyed in one tx must project as absent")
 	})
 
-	t.Run("pre-existing account left EIP-161 empty projects absent", func(t *testing.T) {
-		addr := accounts.InternAddress(common.HexToAddress("0xe3917"))
-		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
-		empty := accounts.NewAccount() // balance 0, nonce 0, EmptyCodeHash — a pre-existing empty EOA
-		reader.accounts[addr] = &empty
-
-		vm := NewVersionMap(nil)
-		ibs := NewWithVersionMap(reader, vm)
-		t.Cleanup(ibs.Close)
-		ibs.SetTxContext(1, 0)
-		ibs.SetVersion(0)
-
-		// Touch it with a zero-value add — stays empty, so EIP-161 removes it.
-		require.NoError(t, ibs.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
-		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
-		writes := finalizedWrites(t, ibs, sd)
-		vm.FlushVersionedWrites(writes, true)
-
-		_, ok := vm.View(1, reader).GetAccount(addr)
-		require.False(t, ok, "a pre-existing account left empty must project as absent (EIP-161)")
-	})
-
 	t.Run("self-destruct then recreate in a later tx projects live", func(t *testing.T) {
 		addr := accounts.InternAddress(common.HexToAddress("0x5de5c0de"))
 		code := []byte{0x60, 0x01}
@@ -116,20 +90,16 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 
 		vm := NewVersionMap(nil)
 
-		destroyer := NewWithVersionMap(reader, vm)
+		destroyer := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(destroyer.Close)
-		destroyer.SetTxContext(1, 0)
-		destroyer.SetVersion(0)
 		destroyed, err := destroyer.Selfdestruct(addr, false)
 		require.NoError(t, err)
 		require.True(t, destroyed)
 		require.NoError(t, destroyer.FinalizeTx(sd, NewNoopWriter()))
 		vm.FlushVersionedWrites(finalizedWrites(t, destroyer, sd), true)
 
-		recreator := NewWithVersionMap(reader, vm)
+		recreator := newAmsterdamIBS(reader, vm, 1)
 		t.Cleanup(recreator.Close)
-		recreator.SetTxContext(1, 1)
-		recreator.SetVersion(0)
 		require.NoError(t, recreator.CreateAccount(addr, true))
 		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeNewContract))
 		require.NoError(t, recreator.SetCode(addr, code, tracing.CodeChangeContractCreation))
@@ -147,10 +117,8 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		reader := newAccountStateReader(addr) // balance 100
 
 		vm := NewVersionMap(nil)
-		ibs := NewWithVersionMap(reader, vm)
+		ibs := newAmsterdamIBS(reader, vm, 0)
 		t.Cleanup(ibs.Close)
-		ibs.SetTxContext(1, 0)
-		ibs.SetVersion(0)
 
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified))
 		require.NoError(t, ibs.FinalizeTx(sd, NewNoopWriter()))
