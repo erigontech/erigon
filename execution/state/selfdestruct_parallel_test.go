@@ -200,10 +200,15 @@ func TestApplyWrites_SelfDestructWithoutCommittedAccountSkipsStorageWalk(t *test
 	ws := &WriteSet{}
 	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+	// Paying out to another beneficiary leaves a plain zero balance write, not a burn.
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: uint256.Int{}})
 
 	domains.SetTxNum(2)
 	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
 
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
+	require.NoError(t, err)
+	assert.Empty(t, enc, "a pure delete must not write an account record")
 	v, _, err := domains.GetLatest(kv.StorageDomain, tx, storageKey)
 	require.NoError(t, err)
 	assert.Equal(t, []byte{0x42}, v, "self-destruct of an address without a committed account walked its storage prefix")
