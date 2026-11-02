@@ -105,7 +105,7 @@ type Args struct {
 	hasDownloaded bool
 	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
 	headUnpublished bool
-	// atForwardSyncTip is set while ForwardSync showed, less than an epoch ago, that no block follows the highest seen block.
+	// atForwardSyncTip is set for less than an epoch after ForwardSync imported a Gloas tip without a successor, while no newer block is seen.
 	atForwardSyncTip bool
 }
 
@@ -191,9 +191,12 @@ func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
+	if args.atForwardSyncTip {
+		return ""
+	}
 	// ForwardSync can work without peers via the beacon API HTTP fallback,
 	// so allow it even when peers == 0.
-	if args.seenEpoch < args.targetEpoch && !args.atForwardSyncTip {
+	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
 	}
 	// ChainTipSync relies on gossip for real-time updates, skip it without peers.
@@ -378,6 +381,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					// so gossip can deliver blocks that range requests cannot.
 					if errors.Is(err, ErrForwardSyncStale) {
 						return ChainTipSync
+					}
+					if args.atForwardSyncTip {
+						return ForkChoice
 					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
