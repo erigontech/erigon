@@ -32,9 +32,6 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.Stream) error {
 			return err
 		}
 	}
-	if x.Sender != nil {
-		ethjson.Data(s, "sender", x.Sender[:])
-	}
 	if len(x.Frames) > 0 {
 		s.Field("frames")
 		if err := x.Frames.MarshalFastJSONTo(s); err != nil {
