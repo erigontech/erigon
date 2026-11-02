@@ -1311,6 +1311,16 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
+func blobCellIndices(mask []byte) []int {
+	indices := make([]int, 0, goethkzg.CellsPerExtBlob)
+	for i := range goethkzg.CellsPerExtBlob {
+		if mask[i/8]&(1<<(i%8)) != 0 {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
 func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellIndices hexutil.Bytes) (any, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
@@ -1331,12 +1341,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 
 	switch version {
 	case clparams.GloasVersion:
-		indices := make([]int, 0, goethkzg.CellsPerExtBlob)
-		for i := range goethkzg.CellsPerExtBlob {
-			if cellIndices[i/8]&(1<<(i%8)) != 0 {
-				indices = append(indices, i)
-			}
-		}
+		indices := blobCellIndices(cellIndices)
 		ret := make([]*engine_types.BlobCellsAndProofsV1, len(blobHashes))
 		for i, bundle := range bundles {
 			if err := ctx.Err(); err != nil {

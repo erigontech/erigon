@@ -29,43 +29,11 @@ func blobsV4RequestBytes(hashes []common.Hash, mask []byte) []byte {
 	return body
 }
 
-func decodeBlobsV4TestResponse(t *testing.T, buf []byte) []*engine_types.BlobCellsAndProofsV1 {
+func decodeBlobsV4TestResponse(t *testing.T, buf []byte) *solid.ListSSZ[*sszBlobV4Entry] {
 	t.Helper()
-	entries := solid.NewTransactionsSSZWithLimits(128, 1<<20)
+	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](sszMaxGetBlobHashes)
 	require.NoError(t, ssz2.UnmarshalSSZStrict(buf, 0, entries))
-	result := make([]*engine_types.BlobCellsAndProofsV1, entries.Len())
-	for i, entry := range entries.UnderlyngReference() {
-		var available bool
-		contents := solid.NewByteListSSZ(1 << 20)
-		require.NoError(t, ssz2.UnmarshalSSZStrict(entry, 0, &available, contents))
-		cells := solid.NewTransactionsSSZWithLimits(128, 2048)
-		proofs := solid.NewTransactionsSSZWithLimits(128, 48)
-		require.NoError(t, ssz2.UnmarshalSSZStrict(contents.Bytes(), 0, cells, proofs))
-		if !available {
-			require.Zero(t, cells.Len())
-			require.Zero(t, proofs.Len())
-			continue
-		}
-		require.Equal(t, 128, cells.Len())
-		require.Equal(t, 128, proofs.Len())
-		result[i] = &engine_types.BlobCellsAndProofsV1{
-			BlobCells: make([]*hexutil.Bytes, 128),
-			Proofs:    make([]*hexutil.Bytes, 128),
-		}
-		for j, cell := range cells.UnderlyngReference() {
-			proof := proofs.UnderlyngReference()[j]
-			if len(cell) == 0 {
-				require.Empty(t, proof)
-				continue
-			}
-			require.Len(t, cell, 2048)
-			require.Len(t, proof, 48)
-			cellBytes, proofBytes := hexutil.Bytes(cell), hexutil.Bytes(proof)
-			result[i].BlobCells[j] = &cellBytes
-			result[i].Proofs[j] = &proofBytes
-		}
-	}
-	return result
+	return entries
 }
 
 func TestSSZRESTBlobsV4SelectedCells(t *testing.T) {
@@ -84,20 +52,24 @@ func TestSSZRESTBlobsV4SelectedCells(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
 			result := decodeBlobsV4TestResponse(t, rec.Body.Bytes())
-			require.Len(t, result, 3)
-			require.Nil(t, result[0])
-			for _, blob := range result[1:] {
-				require.NotNil(t, blob)
+			require.Equal(t, 3, result.Len())
+			require.False(t, result.Get(0).Available)
+			require.Zero(t, result.Get(0).Contents.cells.Len())
+			require.Zero(t, result.Get(0).Contents.proofs.Len())
+			for i := 1; i < result.Len(); i++ {
+				blob := result.Get(i)
+				require.True(t, blob.Available)
+				blobCells, proofs := blob.Contents.cells.UnderlyngReference(), blob.Contents.proofs.UnderlyngReference()
+				require.Len(t, blobCells, 128)
+				require.Len(t, proofs, 128)
 				for index := range 128 {
 					if mask[index/8]&(1<<(index%8)) == 0 {
-						require.Nil(t, blob.BlobCells[index])
-						require.Nil(t, blob.Proofs[index])
+						require.Empty(t, blobCells[index])
+						require.Empty(t, proofs[index])
 						continue
 					}
-					require.NotNil(t, blob.BlobCells[index])
-					require.NotNil(t, blob.Proofs[index])
-					require.Equal(t, hexutil.Bytes(cells[index][:]), *blob.BlobCells[index])
-					require.Equal(t, hexutil.Bytes(bundle.Proofs[index][:]), *blob.Proofs[index])
+					require.Equal(t, cells[index][:], blobCells[index])
+					require.Equal(t, bundle.Proofs[index][:], proofs[index])
 				}
 			}
 		})
@@ -129,9 +101,12 @@ func TestSSZRESTBlobsV4Availability(t *testing.T) {
 				return
 			}
 			result := decodeBlobsV4TestResponse(t, rec.Body.Bytes())
-			require.Len(t, result, len(tc.hashes))
-			for _, blob := range result {
-				require.Nil(t, blob)
+			require.Equal(t, len(tc.hashes), result.Len())
+			for i := range result.Len() {
+				blob := result.Get(i)
+				require.False(t, blob.Available)
+				require.Zero(t, blob.Contents.cells.Len())
+				require.Zero(t, blob.Contents.proofs.Len())
 			}
 		})
 	}
@@ -176,15 +151,23 @@ func TestSSZRESTBlobsV4PartialCells(t *testing.T) {
 	}
 	encoded, err := encodeBlobsV4Response(engine_types.BlobsBundleV3{blob}, mask)
 	require.NoError(t, err)
+	// Pin the nested container offsets independently of the decoder.
+	prefix := hexutil.MustDecodeHex("0x0400000004000000010500000008000000080a0000")
+	require.GreaterOrEqual(t, len(encoded), len(prefix))
+	require.Equal(t, prefix, encoded[:len(prefix)])
 	decoded := decodeBlobsV4TestResponse(t, encoded)
-	require.Len(t, decoded, 1)
+	require.Equal(t, 1, decoded.Len())
+	require.True(t, decoded.Get(0).Available)
+	cells, proofs := decoded.Get(0).Contents.cells.UnderlyngReference(), decoded.Get(0).Contents.proofs.UnderlyngReference()
+	require.Len(t, cells, 128)
+	require.Len(t, proofs, 128)
 	for index := range 128 {
 		if index == 64 {
-			require.Equal(t, &cell, decoded[0].BlobCells[index])
-			require.Equal(t, &proof, decoded[0].Proofs[index])
+			require.Equal(t, []byte(cell), cells[index])
+			require.Equal(t, []byte(proof), proofs[index])
 		} else {
-			require.Nil(t, decoded[0].BlobCells[index])
-			require.Nil(t, decoded[0].Proofs[index])
+			require.Empty(t, cells[index])
+			require.Empty(t, proofs[index])
 		}
 	}
 }

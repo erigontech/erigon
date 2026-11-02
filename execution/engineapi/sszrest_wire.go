@@ -13,7 +13,6 @@ package engineapi
 
 import (
 	"fmt"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 
@@ -24,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
@@ -483,65 +481,89 @@ func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCustodyBitvectorBytes]
 	return hashListValues(hashes), cellMask, nil
 }
 
+// Optional fixed-size cells and proofs encode as empty bytes or the value itself,
+// so TransactionsSSZ provides the required list encoding.
+type sszBlobV4Contents struct {
+	cells  *solid.TransactionsSSZ
+	proofs *solid.TransactionsSSZ
+}
+
+func (*sszBlobV4Contents) Static() bool { return false }
+
+func (c *sszBlobV4Contents) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, c.cells, c.proofs)
+}
+
+func (c *sszBlobV4Contents) DecodeSSZ(buf []byte, version int) error {
+	c.cells = solid.NewTransactionsSSZWithLimits(sszCellsPerExtBlob, sszCellBytes)
+	c.proofs = solid.NewTransactionsSSZWithLimits(sszCellsPerExtBlob, sszKZGBytes)
+	return ssz2.UnmarshalSSZStrict(buf, version, c.cells, c.proofs)
+}
+
+func (c *sszBlobV4Contents) EncodingSizeSSZ() int {
+	return 2*sszContainerOffsetBytes + c.cells.EncodingSizeSSZ() + c.proofs.EncodingSizeSSZ()
+}
+
+func (*sszBlobV4Contents) Clone() clonable.Clonable { return &sszBlobV4Contents{} }
+
 type sszBlobV4Entry struct {
-	available bool
-	cells     [][]byte
-	proofs    [][]byte
+	Available bool
+	Contents  sszBlobV4Contents
 }
 
-func (e sszBlobV4Entry) EncodeSSZ(dst []byte) ([]byte, error) {
-	// The outer container is a boolean and one offset; contents has two list offsets.
-	// Optional fixed-size values are empty bytes or the value itself, which lets
-	// TransactionsSSZ encode the cell and proof lists without an extra wrapper.
-	dst, err := ssz2.MarshalSSZ(dst, e.available, ssz.OffsetSSZ(5))
-	if err != nil {
-		return nil, err
-	}
-	return ssz2.MarshalSSZ(dst, solid.NewTransactionsSSZFromTransactions(e.cells), solid.NewTransactionsSSZFromTransactions(e.proofs))
+func (*sszBlobV4Entry) Static() bool { return false }
+
+func (e *sszBlobV4Entry) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, e.Available, &e.Contents)
 }
 
-func (e sszBlobV4Entry) EncodingSizeSSZ() int {
-	return 1 + 4 + 8 + solid.NewTransactionsSSZFromTransactions(e.cells).EncodingSizeSSZ() + solid.NewTransactionsSSZFromTransactions(e.proofs).EncodingSizeSSZ()
+func (e *sszBlobV4Entry) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, &e.Available, &e.Contents)
 }
+
+func (e *sszBlobV4Entry) EncodingSizeSSZ() int {
+	return 1 + sszContainerOffsetBytes + e.Contents.EncodingSizeSSZ()
+}
+
+func (*sszBlobV4Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
+
+func (*sszBlobV4Entry) Clone() clonable.Clonable { return &sszBlobV4Entry{} }
 
 func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, cellMask [sszCustodyBitvectorBytes]byte) ([]byte, error) {
 	if len(blobs) > sszMaxGetBlobHashes {
 		return nil, fmt.Errorf("too many blob entries: %d", len(blobs))
 	}
-	selectedCount := 0
-	for _, b := range cellMask {
-		selectedCount += bits.OnesCount8(b)
+	indices := blobCellIndices(cellMask[:])
+	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](sszMaxGetBlobHashes)
+	for _, blob := range blobs {
+		var cells, proofs [][]byte
+		if blob != nil {
+			if len(blob.BlobCells) != len(indices) || len(blob.Proofs) != len(indices) {
+				return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), len(indices))
+			}
+			// Available SSZ blobs retain all 128 positions; unrequested or missing
+			// cell/proof pairs stay empty.
+			cells = make([][]byte, sszCellsPerExtBlob)
+			proofs = make([][]byte, sszCellsPerExtBlob)
+			for selectedIndex, index := range indices {
+				cell, proof := blob.BlobCells[selectedIndex], blob.Proofs[selectedIndex]
+				if cell == nil && proof == nil {
+					continue
+				}
+				if cell == nil || proof == nil || len(*cell) != sszCellBytes || len(*proof) != sszKZGBytes {
+					return nil, fmt.Errorf("invalid cell or proof at index %d", index)
+				}
+				cells[index] = *cell
+				proofs[index] = *proof
+			}
+		}
+		entries.Append(&sszBlobV4Entry{
+			Available: blob != nil,
+			Contents: sszBlobV4Contents{
+				cells:  solid.NewTransactionsSSZFromTransactions(cells),
+				proofs: solid.NewTransactionsSSZFromTransactions(proofs),
+			},
+		})
 	}
-	entries := make([]sszBlobV4Entry, len(blobs))
-	for i, blob := range blobs {
-		if blob == nil {
-			continue
-		}
-		if len(blob.BlobCells) != selectedCount || len(blob.Proofs) != selectedCount {
-			return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), selectedCount)
-		}
-		entry := &entries[i]
-		entry.available = true
-		entry.cells = make([][]byte, sszCellsPerExtBlob)
-		entry.proofs = make([][]byte, sszCellsPerExtBlob)
-		// JSON-RPC returns selected indices in ascending order. Available SSZ blobs
-		// retain all 128 positions; unrequested or missing cell/proof pairs stay empty.
-		selectedIndex := 0
-		for index := range sszCellsPerExtBlob {
-			if cellMask[index/8]&(1<<(index%8)) == 0 {
-				continue
-			}
-			cell, proof := blob.BlobCells[selectedIndex], blob.Proofs[selectedIndex]
-			selectedIndex++
-			if cell == nil && proof == nil {
-				continue
-			}
-			if cell == nil || proof == nil || len(*cell) != sszCellBytes || len(*proof) != sszKZGBytes {
-				return nil, fmt.Errorf("invalid cell or proof at index %d", index)
-			}
-			entry.cells[index] = *cell
-			entry.proofs[index] = *proof
-		}
-	}
-	return ssz.EncodeDynamicList(ssz.OffsetSSZ(4), entries)
+	return ssz2.MarshalSSZ(nil, entries)
 }
