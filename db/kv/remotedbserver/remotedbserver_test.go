@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -218,4 +219,43 @@ func TestKvServerPagination(t *testing.T) {
 		txNums, token = append(txNums, reply.Timestamps...), reply.NextPageToken
 	}
 	require.Equal([]uint64{1, 2, 3, 4, 5}, txNums)
+}
+
+func TestKvServerRangeAsOfPagination(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require, ctx, db := require.New(t), t.Context(), temporaltest.NewTestDB(t, dirs)
+	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		for i := byte(1); i <= 5; i++ {
+			if err := d.DomainPut(kv.AccountsDomain, tx, []byte{i}, []byte{i}, 1, nil); err != nil {
+				return err
+			}
+		}
+		return d.Flush(ctx, tx)
+	}))
+
+	s := NewKvServer(ctx, db, nil, nil, log.New())
+	id, err := s.begin(ctx)
+	require.NoError(err)
+	defer s.rollback(id)
+
+	pages := func(limit int64) (keys []string) {
+		for token, n := "", 0; n == 0 || token != ""; n++ {
+			reply, err := s.RangeAsOf(ctx, &remoteproto.RangeAsOfReq{TxId: id, Table: "accounts", Ts: 10, OrderAscend: true, Limit: limit, PageSize: 2, PageToken: token})
+			require.NoError(err)
+			require.LessOrEqual(len(reply.Keys), 2)
+			for i, k := range reply.Keys {
+				require.Equal(k, reply.Values[i])
+				keys = append(keys, string(k))
+			}
+			token = reply.NextPageToken
+		}
+		return keys
+	}
+	require.Equal([]string{"\x01", "\x02", "\x03", "\x04", "\x05"}, pages(-1))
+	require.Equal([]string{"\x01", "\x02", "\x03"}, pages(3))
 }

@@ -19,7 +19,6 @@ package kvcache
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -303,11 +302,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				for _, change := range sc.Changes[i].StorageChanges {
 					loc := gointerfaces.ConvertH256ToHash(change.Location)
-					k := make([]byte, 20+8+32)
-					copy(k, addr[:])
-					binary.BigEndian.PutUint64(k[20:], sc.Changes[i].Incarnation)
-					copy(k[20+8:], loc[:])
-					c.add(k, change.Data, r, id)
+					c.add(append(addr[:], loc[:]...), change.Data, r, id) // StorageDomain key: no incarnation
 				}
 			}
 		}
