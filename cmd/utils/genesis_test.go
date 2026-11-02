@@ -109,6 +109,7 @@ func TestSetOverrideGenesis(t *testing.T) {
 func TestSetOverrideGenesisErrors(t *testing.T) {
 	path := writeGenesis(t, `{"config":{"chainId":1337},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`)
 	zeroChainID := writeGenesis(t, `{"config":{"chainId":0},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`)
+	largeChainID := writeGenesis(t, `{"config":{"chainId":18446744073709551616},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`)
 	tests := []struct {
 		name    string
 		args    []string
@@ -118,6 +119,8 @@ func TestSetOverrideGenesisErrors(t *testing.T) {
 		{"with --chain", []string{"--override.genesis=" + path, "--chain=sepolia"}, "mutually exclusive"},
 		{"chain id 0", []string{"--override.genesis=" + zeroChainID}, "must be set to a nonzero network id"},
 		{"chain id 0 with --networkid", []string{"--override.genesis=" + zeroChainID, "--networkid=7"}, ""},
+		{"chain id 2^64", []string{"--override.genesis=" + largeChainID}, "must be set to a nonzero network id"},
+		{"chain id 2^64 with --networkid", []string{"--override.genesis=" + largeChainID, "--networkid=7"}, ""},
 		{"flag not given", nil, ""},
 	}
 	for _, tt := range tests {
@@ -128,10 +131,13 @@ func TestSetOverrideGenesisErrors(t *testing.T) {
 			app := &cli.Command{}
 			app.Flags = []cli.Flag{&overrideGenesisFlag, &chainFlag, &networkIdFlag}
 			app.Action = func(_ context.Context, ctx *cli.Command) error {
-				cfg := &ethconfig.Config{NetworkID: 1}
+				cfg := &ethconfig.Config{NetworkID: ctx.Uint64(NetworkIdFlag.Name)}
 				err := setOverrideGenesis(ctx, cfg)
 				if tt.wantErr == "" {
 					require.NoError(t, err)
+					if ctx.IsSet(NetworkIdFlag.Name) {
+						require.Equal(t, ctx.Uint64(NetworkIdFlag.Name), cfg.NetworkID)
+					}
 				} else {
 					require.ErrorContains(t, err, tt.wantErr)
 					require.Nil(t, cfg.Genesis)

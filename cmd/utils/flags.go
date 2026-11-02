@@ -2443,11 +2443,12 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
 		return err
 	}
 	if !ctx.IsSet(NetworkIdFlag.Name) {
+		networkID := genesis.Config.ChainID.Uint64()
 		// Sentry rejects a zero network id in the eth handshake.
-		if genesis.Config.ChainID.IsZero() {
-			return fmt.Errorf("--%s: genesis chain id is 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, NetworkIdFlag.Name)
+		if networkID == 0 {
+			return fmt.Errorf("--%s: genesis chain id %v maps to network id 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
 		}
-		cfg.NetworkID = genesis.Config.ChainID.Uint64()
+		cfg.NetworkID = networkID
 	}
 	cfg.Genesis = genesis
 	cfg.GenesisFromFile = true
