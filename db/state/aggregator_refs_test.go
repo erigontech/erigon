@@ -138,31 +138,43 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 	})
 }
 
-// Reclaim stops at the oldest visible set that still has a reader, so the superseded sets behind
-// it stay in the chain. Their files must stay, their cached bytes must not: one long-lived reader
-// would otherwise hold a whole cache budget per set for as long as it lives.
-func TestReclaimClosesCachesOfUnreadSets(t *testing.T) {
-	newSet := func() *aggregatorVisible {
-		v := &aggregatorVisible{}
-		v.d[kv.AccountsDomain] = newDomainVisible(kv.AccountsDomain, seg.CompressNone, nil)
-		return v
-	}
-	pinned, unread, cur := newSet(), newSet(), newSet()
-	pinned.refcnt.Store(1)
-	pinned.next, unread.next = unread, cur
-	for _, v := range []*aggregatorVisible{pinned, unread, cur} {
-		require.True(t, v.d[kv.AccountsDomain].cache.Add(1, domainGetFromFileCacheItem{v: []byte{7}}))
-	}
+func newCachedVisibleSetForTest(t *testing.T) *aggregatorVisible {
+	t.Helper()
+	v := &aggregatorVisible{}
+	v.d[kv.AccountsDomain] = newDomainVisible(kv.AccountsDomain, seg.CompressNone, nil)
+	require.True(t, v.d[kv.AccountsDomain].cache.Add(1, domainGetFromFileCacheItem{v: []byte{7}}))
+	return v
+}
 
-	a := &Aggregator{oldestVisible: pinned}
+func visibleSetCached(v *aggregatorVisible) bool {
+	_, ok := v.d[kv.AccountsDomain].cache.Get(1)
+	return ok
+}
+
+// A set's cache serves only readers of that set, and new readers attach only to the current set.
+func TestLastReaderOfSupersededSetClosesItsCaches(t *testing.T) {
+	old, cur := newCachedVisibleSetForTest(t), newCachedVisibleSetForTest(t)
+	old.next = cur
+	old.refcnt.Store(1)
+	cur.refcnt.Store(1)
+	a := &Aggregator{oldestVisible: old}
 	a.visible.Store(cur)
-	require.Empty(t, a.reclaimRetiredLocked(), "no files leave the chain while the oldest set is pinned")
 
-	cached := func(v *aggregatorVisible) bool {
-		_, ok := v.d[kv.AccountsDomain].cache.Get(1)
-		return ok
+	a.releaseVisibleFiles(cur)
+	require.True(t, visibleSetCached(cur), "the current set keeps its cache without readers")
+	a.releaseVisibleFiles(old)
+	require.False(t, visibleSetCached(old), "a superseded set's last reader closes its cache")
+}
+
+func TestPublishClosesCachesOfUnreadSupersededSet(t *testing.T) {
+	for _, readers := range []int32{0, 1} {
+		old := newCachedVisibleSetForTest(t)
+		old.refcnt.Store(readers)
+		a := &Aggregator{oldestVisible: old}
+		a.visible.Store(old)
+		a.dirtyFilesLock.Lock()
+		a.recalcVisibleFiles(nil)
+		a.dirtyFilesLock.Unlock()
+		require.Equal(t, readers > 0, visibleSetCached(old), "readers=%d", readers)
 	}
-	require.True(t, cached(pinned), "the set its reader is on keeps what it cached")
-	require.False(t, cached(unread), "a superseded set no one reads does not")
-	require.True(t, cached(cur), "the current set keeps what it cached")
 }
