@@ -950,35 +950,16 @@ func TestExecutionPayloadEnvelopesByRangeRebuildsHistoryBelowForkGraph(t *testin
 }
 
 func TestExecutionPayloadEnvelopesByRangeRebuildReusesScannedBlocks(t *testing.T) {
-	ctx := t.Context()
-	_, indiciesDB := setupStore(t)
-	reader := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
-	ethClock, cfg := getGloasEthClockAndConfig(t)
-	startSlot := ethClock.GetCurrentSlot() - 4
-	tx, err := indiciesDB.BeginRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	roots, _ := populateGloasEnvelopeHistory(t, reader.MockBlockReader, tx, cfg, startSlot, 3, -1)
-	require.NoError(t, beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, startSlot, roots[0], common.Bytes96{1}))
-	require.NoError(t, tx.Commit())
-
+	c, cfg, roots, _, _, stream := newRangeHistoryHandler(t, 3, 1)
+	require.NoError(t, c.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, stream.startSlot, roots[0], common.Bytes96{1})
+	}))
+	reader := &countingBlockReader{MockBlockReader: c.beaconDB.(*tests.MockBlockReader)}
 	engine := new(countingExecutionEngine)
-	rebuilder := envelope_history.NewRebuilder(cfg, reader, engine)
-	fc := mock_services.NewForkChoiceStorageMock(t)
-	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
-	fc.HeadVal = roots[2]
-	fc.HeadSlotVal = startSlot + 2
-	lowestAvailableSlot := startSlot + 2
-	fc.LowestAvailableSlotVal = &lowestAvailableSlot
-	c := NewConsensusHandlers(ctx, reader, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-	stream := &rangeHandlerTestStream{
-		envelopeHandlerStream: &envelopeHandlerStream{
-			conn:     &remotePeerConn{peerID: peer.ID("history-peer")},
-			protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRangeProtocolV1),
-		},
-		startSlot: startSlot,
-		count:     1,
-	}
+	c.beaconDB = reader
+	c.envelopeRebuilder = envelope_history.NewRebuilder(cfg, reader, engine)
+	lowestAvailableSlot := stream.startSlot + 2
+	c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock).LowestAvailableSlotVal = &lowestAvailableSlot
 
 	data := stream.run(t, c)
 	require.Equal(t, byte(ResourceUnavailablePrefix), data[0])
