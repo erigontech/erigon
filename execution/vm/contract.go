@@ -66,8 +66,8 @@ type Contract struct {
 // around 64MB cache in the worst case.
 var jumpDestCache = newJumpDestCache()
 
-func newJumpDestCache() *cache.GenericCache[bitvec] {
-	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
+func newJumpDestCache() *cache.HashByteLRU[bitvec] {
+	return cache.NewHashByteLRU[bitvec](64*datasize.MB, func(v bitvec) int64 { return int64(len(v)) * 8 })
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
@@ -107,7 +107,7 @@ func (c *Contract) jumpdestAnalysis() bitvec {
 	}
 
 	if !isCodeHashZero {
-		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
+		if analysis, ok := jumpDestCache.Get(codeHash); ok {
 			return analysis
 		}
 	}
@@ -115,8 +115,7 @@ func (c *Contract) jumpdestAnalysis() bitvec {
 	analysis := codeBitmap(c.Code)
 
 	if !isCodeHashZero {
-		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], analysis, 0)
+		jumpDestCache.Add(codeHash, analysis)
 	}
 
 	return analysis
