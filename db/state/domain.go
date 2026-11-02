@@ -1633,12 +1633,12 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 }
 
 func (dt *DomainRoTx) debugGetLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	return dt.lookupLatestFromFiles(k, nil, maxTxNum, maxTxNum != 0 && maxTxNum != math.MaxUint64)
+	return dt.lookupLatestFromFiles(k, nil, maxTxNum, maxTxNum != 0 && maxTxNum != math.MaxUint64, true)
 }
 
-func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step, fileCache bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if maxStep == kv.NoStepBound {
-		return dt.lookupLatestFromFiles(k, buf, 0, false)
+		return dt.lookupLatestFromFiles(k, buf, 0, false, fileCache)
 	}
 	maxTxNum := maxStep.LastTxNum(dt.stepSize)
 	for _, f := range dt.files {
@@ -1646,10 +1646,10 @@ func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step) (v []by
 			return nil, false, 0, 0, fmt.Errorf("max step %d splits %s domain file [%d,%d)", maxStep, dt.name, f.startTxNum, f.endTxNum)
 		}
 	}
-	return dt.lookupLatestFromFiles(k, buf, maxTxNum, true)
+	return dt.lookupLatestFromFiles(k, buf, maxTxNum, true, fileCache)
 }
 
-func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, bounded bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, bounded, fileCache bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
 	}
@@ -1657,7 +1657,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.visible.cache != nil && !bounded && buf == nil
+	useCache := fileCache && dt.visible.cache != nil && !bounded && buf == nil
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -2057,7 +2057,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions
 
 	var foundInFile bool
 	var endTxNum uint64
-	v, foundInFile, _, endTxNum, err = dt.getLatestFromFiles(key, opts.Buf(), maxStep)
+	v, foundInFile, _, endTxNum, err = dt.getLatestFromFiles(key, opts.Buf(), maxStep, opts.FileCache())
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(dt.name, key, start)
 	}

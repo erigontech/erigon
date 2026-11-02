@@ -464,6 +464,7 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	noFileCache bool
 	buf         []byte
 }
 
@@ -507,6 +508,14 @@ func (opts GetLatestOptions) MaxStep() Step {
 func (opts GetLatestOptions) BranchCache() bool {
 	return opts.branchCache
 }
+
+// WithoutFileCache skips the latest-from-files cache, for a caller with its own cache in front.
+func (opts GetLatestOptions) WithoutFileCache() GetLatestOptions {
+	opts.noFileCache = true
+	return opts
+}
+
+func (opts GetLatestOptions) FileCache() bool { return !opts.noFileCache }
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte, opts GetLatestOptions) (v []byte, step Step, err error)

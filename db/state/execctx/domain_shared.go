@@ -1478,6 +1478,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if fillsCode {
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
+	if willFill {
+		getOpts = getOpts.WithoutFileCache()
+	}
 
 	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
