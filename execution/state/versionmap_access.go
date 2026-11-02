@@ -173,7 +173,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 }
 
 // SeedAddresses marks each BAL account as existing at its creating tx, so the address
-// existence read resolves present without a first-access base lookup in exec. The BAL
+// existence read resolves present. The BAL
 // writes only field cells (not an AddressPath), so a block-created account would
 // otherwise read absent — the EIP-161 withhold path then stamps a spurious removal. The
 // existence is taken straight from the BAL (the account's first change index), with no

@@ -852,9 +852,18 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// stays recorded at the marker's version, so it does not add a second AddressPath
 		// origin that would trip OCC against the marker cell.
 		if r.hdr.accSource == AccountFromBAL {
-			if base, err := s.committedAccount(addr); err != nil {
-				return nil, r.source, r.version, err
-			} else if base != nil {
+			base, ok := s.versionMap.LoadOriginAccount(addr)
+			if !ok {
+				var err error
+				if base, err = s.committedAccount(addr); err != nil {
+					return nil, r.source, r.version, err
+				}
+				if base != nil {
+					origin := *base
+					s.recordAddressOrigin(addr, &origin)
+				}
+			}
+			if base != nil {
 				acc = base
 			}
 		}

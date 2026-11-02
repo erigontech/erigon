@@ -243,6 +243,29 @@ func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
 	}
 }
 
+func TestBALMarkedAccountReadsCommittedBaseOncePerBlock(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xba5e"))
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(100)
+	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
+	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(50)}}}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	for txIndex := 1; txIndex <= 5; txIndex++ {
+		startNoMaterializeTx(ibs, vm, txIndex)
+		_, err := ibs.GetCodeHash(a)
+		require.NoError(t, err)
+		exists, err := ibs.Exist(a)
+		require.NoError(t, err)
+		require.True(t, exists)
+		ibs.PublishOrigins()
+	}
+	require.Equal(t, 1, reader.reads)
+}
+
 func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	t.Parallel()
 
