@@ -472,7 +472,7 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 }
 
 // WriteAddressExists stamps an AddressPath cell that records only that the account
-// exists at v — its value is not authoritative (ValueUnknown), so field reads fall
+// exists at v — its value is not authoritative (AccountFromBAL), so field reads fall
 // back to the committed base. Used to seed existence for a BAL-created account
 // (whose field cells, not an AddressPath, are the real record) without a base lookup.
 func (vm *VersionMap) WriteAddressExists(addr accounts.Address, v Version, value *accounts.Account) {

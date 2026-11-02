@@ -66,7 +66,7 @@ func TestSeedEmptyRemovals(t *testing.T) {
 // a block-created account (absent in the committed base) has only field cells; the address
 // existence read consults the AddressPath (not the field cells), so unseeded it reads absent
 // and the EIP-161 withhold path stamps a spurious removal. SeedAddresses marks existence
-// straight from the BAL — no base reader — stamping a ValueUnknown AddressPath so the
+// straight from the BAL — no base reader — marking the AddressPath AccountFromBAL so the
 // authoritative value still defers to the committed base.
 func TestSeedAddresses(t *testing.T) {
 	t.Parallel()
@@ -108,7 +108,7 @@ func TestSeedAddresses(t *testing.T) {
 		t.Fatal("a touched base-present account also reads present")
 	}
 
-	// The marker is ValueUnknown, so the authoritative value defers to the base: a
+	// The marker is AccountFromBAL, so the authoritative value defers to the base: a
 	// base-present account keeps its untouched base nonce, not the seed's zeroed marker.
 	ex := NewVersionedAccountView(existing, 6, vm, reader).Account()
 	require.NotNil(t, ex)

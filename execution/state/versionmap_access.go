@@ -178,7 +178,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 // writes only field cells (not an AddressPath), so a block-created account would
 // otherwise read absent — the EIP-161 withhold path then stamps a spurious removal. The
 // existence is taken straight from the BAL (the account's first change index), with no
-// base read: the AddressPath is stamped ValueUnknown, so field reads still fall back to
+// base read: the AddressPath is marked AccountFromBAL, so field reads still fall back to
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses() {
 	for i := range vm.bal {
