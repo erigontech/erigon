@@ -208,16 +208,23 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	require.NoError(t, m.InsertChain(chainBlocks))
 
 	overrideOsakaTime := common.NewUint64(500)
-	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
+	for name, genesis := range map[string]*types.Genesis{
+		"stored genesis":   nil,
+		"supplied genesis": gspec,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := genesiswrite.CommitGenesisBlockWithOverride(m.DB, genesis, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
 
-	require.Error(t, err)
-	var compatErr *chain.ConfigCompatError
-	require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
-	require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
-	require.True(t, compatErr.HasTimestampConflict())
-	require.Zero(t, compatErr.RewindToTime)
-	require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
-		"applyOverrides must not write through into the shared config")
+			require.Error(t, err)
+			var compatErr *chain.ConfigCompatError
+			require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
+			require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
+			require.True(t, compatErr.HasTimestampConflict())
+			require.Zero(t, compatErr.RewindToTime)
+			require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
+				"applyOverrides must not write through into the shared config")
+		})
+	}
 }
 
 func TestCommitGenesisBlockRejectsChainIDChange(t *testing.T) {
