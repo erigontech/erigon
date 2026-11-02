@@ -215,6 +215,9 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.newAccountCharged = false
 	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
+	if contract.analysis == nil && !contract.CodeHash.IsZero() && ctx.Contract.CodeHash == contract.CodeHash {
+		contract.analysis = ctx.Contract.analysis
+	}
 	ctx.Contract = contract
 	return ctx
 }
@@ -241,7 +244,8 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.cachedKey = accounts.NilKey
 	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
-	ctx.Contract = Contract{}
+	// Keep the code hash and its JUMPDEST analysis: a frame that calls the same code again reuses them.
+	ctx.Contract = Contract{CodeHash: ctx.Contract.CodeHash, analysis: ctx.Contract.analysis}
 	if evm.depth > 1 && evm.spareFrame == nil {
 		evm.spareFrame = ctx
 		return
