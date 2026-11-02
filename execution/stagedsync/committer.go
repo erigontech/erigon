@@ -458,7 +458,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			residual := stageWall - execActive - commitActive + overlap - gap
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
-				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs)
+				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs, "ahead", cc.computedAhead[r.BlockNum])
 			cc.probeApply, cc.probeTxs = 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
