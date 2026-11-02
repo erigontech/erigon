@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -59,6 +60,8 @@ func (r *calcDomainReader) ReadAccountData(addr accounts.Address) (*accounts.Acc
 // from the domain on first touch, overwritten by later writes, and fed to the
 // trie's Updates buffer at block boundary.
 type calcState struct {
+	readDur      time.Duration
+	readN        int
 	accounts     map[accounts.Address]*calcAccountState
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
@@ -120,7 +123,10 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 		CodeHash: empty.CodeHash,
 	}
 	if cs.domainReader != nil {
+		t0 := time.Now()
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
+		cs.readDur += time.Since(t0)
+		cs.readN++
 		if err != nil {
 			if cs.lazyLoadErr == nil {
 				cs.lazyLoadErr = fmt.Errorf("ensureAccount(%x): %w", addr.Value(), err)

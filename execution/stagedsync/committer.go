@@ -466,7 +466,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				gap = -d
 			}
 			residual := stageWall - execActive - commitActive + overlap - gap
-			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt), "edgeDur", cc.edgeDur, "waitIn", cc.waitIn)
+			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt), "edgeDur", cc.edgeDur, "waitIn", cc.waitIn, "lazyReads", cc.state.readN, "lazyReadDur", cc.state.readDur)
+			cc.state.readN, cc.state.readDur = 0, 0
 			cc.edgeDur, cc.waitIn = 0, 0
 			cc.applyWritesDur, cc.applyWritesN = 0, 0
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
