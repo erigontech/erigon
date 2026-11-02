@@ -29,6 +29,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -1038,6 +1039,41 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 		require.NotZero(t, mt.subPool&IsLocal)
 		require.Equal(t, txn.BlobBundles, mt.TxnSlot.BlobBundles)
 	}
+}
+
+func TestFramePoolReloadValidationBudgets(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	var frames []*TxnSlot
+	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, address := range []common.Address{sender, {2}} {
+			frame := framePoolSlot(t, address, 1, 2, uint256.Int{1})
+			frames = append(frames, frame)
+			if err := tx.Put(kv.PoolTransaction, frame.IDHash[:], append(address[:], frame.Rlp...)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	synctest.Test(t, func(t *testing.T) {
+		pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+			// Each validation fits its own budget, but together they exceed one budget.
+			select {
+			case <-time.After(frameValidationTimeout * 3 / 4):
+				return backend.FrameValidation(ctx, req)
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+		require.NoError(t, pool.start(t.Context()))
+		for _, frame := range frames {
+			mt := pool.byHash[string(frame.IDHash[:])]
+			require.NotNil(t, mt, "other restored frames must not consume this frame's validation budget")
+			require.Equal(t, PendingSubPool, mt.currentSubPool)
+		}
+	})
 }
 
 func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {

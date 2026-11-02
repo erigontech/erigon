@@ -2875,9 +2875,30 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 	if err != nil || len(deferredTxns.Txns) == 0 {
 		return err
 	}
-	// Validation results and payer reservations are not persisted. Restored
-	// frame nonce chains must pass admission against the current head, outside the pool lock.
-	reasons, err := p.addNewTxns(ctx, deferredTxns, nil)
+	// Validation results and payer reservations are not persisted. Revalidate outside
+	// the pool lock with a separate budget per sender, keeping each nonce chain together.
+	bySender := make(map[common.Address]*TxnSlots)
+	var batches []*TxnSlots
+	for i, txn := range deferredTxns.Txns {
+		sender := deferredTxns.Senders.AddressAt(i)
+		batch := bySender[sender]
+		if batch == nil {
+			batch = &TxnSlots{}
+			bySender[sender] = batch
+			batches = append(batches, batch)
+		}
+		batch.Append(txn, sender[:], deferredTxns.IsLocal[i])
+	}
+	for _, batch := range batches {
+		if err := p.restoreSenderFromDB(ctx, *batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *TxPool) restoreSenderFromDB(ctx context.Context, txns TxnSlots) error {
+	reasons, err := p.addNewTxns(ctx, txns, nil)
 	if err != nil {
 		return err
 	}
@@ -2887,7 +2908,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 		if reason == txpoolcfg.Success || reason == txpoolcfg.DuplicateHash {
 			continue
 		}
-		txn := deferredTxns.Txns[i]
+		txn := txns.Txns[i]
 		// Another admission may have accepted this hash while restoration ran unlocked.
 		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			continue

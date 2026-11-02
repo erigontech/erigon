@@ -71,7 +71,8 @@ var errFrameStateChanged = errors.New("frame validation state changed")
 // Each admission or revalidation batch shares one deadline, including waits for
 // the simulation gate, so the time limit does not grow with the batch size.
 // The remote worker admits one transaction per batch; waiting in its queue
-// does not consume that transaction's deadline.
+// does not consume that transaction's deadline. Startup restoration uses one
+// sender's nonce chain per batch so earlier frames cannot exhaust later budgets.
 const frameValidationTimeout = 5 * time.Second
 
 func (tx *TxnSlot) hasKeyedNonce() bool {
