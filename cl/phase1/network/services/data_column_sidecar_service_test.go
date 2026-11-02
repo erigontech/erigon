@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -106,9 +107,17 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		beaconevents.NewEventEmitter(),
 		nil,
 	)
+	// createMockDataColumnSidecar proposes every block with validator 1.
+	t.setExpectedProposer(1, nil)
 
 	t.mockFuncs = &mockFuncs{
 		ctrl: t.gomockCtrl,
+	}
+}
+
+func (t *dataColumnSidecarTestSuite) setExpectedProposer(proposer uint64, err error) {
+	t.dataColumnSidecarService.(*dataColumnSidecarService).expectedProposer = func(common.Hash, uint64, uint64) (uint64, error) {
+		return proposer, err
 	}
 }
 
@@ -659,6 +668,45 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidSidecarOutsid
 
 	t.Error(err)
 	t.NotErrorIs(err, ErrIgnore)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenNotFromExpectedProposer_ReturnsError() {
+	t.expectValidFuluSidecarOutsideCustody(true)
+	t.setExpectedProposer(2, nil)
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
+
+	t.ErrorContains(err, "does not match expected proposer")
+	t.NotErrorIs(err, ErrIgnore)
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: 1})
+	t.False(seen)
+}
+
+// While the proposers of the sidecar's branch are not known, the sidecar is ignored instead of rejected.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenExpectedProposerUnknown_ReturnsErrIgnore() {
+	t.expectValidFuluSidecarOutsideCustody(true)
+	t.setExpectedProposer(0, fmt.Errorf("%w: expected proposer is not in the parent state", ErrIgnore))
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion))
+
+	t.ErrorIs(err, ErrIgnore)
+}
+
+// A block in fork choice had its proposer checked by the state transition, so its sidecars need no shuffling read.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenBlockInForkChoice_SkipsExpectedProposerRead() {
+	t.expectValidFuluSidecarOutsideCustody(true)
+	t.dataColumnSidecarService.(*dataColumnSidecarService).expectedProposer = func(common.Hash, uint64, uint64) (uint64, error) {
+		t.Fail("expected proposer read for a block in fork choice")
+		return 0, nil
+	}
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
+	blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	t.Require().NoError(err)
+	t.mockForkChoice.Headers[blockRoot] = sidecar.SignedBlockHeader.Header
+
+	t.NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
 }
 
 // ============================================
