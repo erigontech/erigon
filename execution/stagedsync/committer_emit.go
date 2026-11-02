@@ -17,6 +17,8 @@
 package stagedsync
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
@@ -45,8 +47,8 @@ func (cc *commitmentCalculator) clearTouched() {
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, base state.StateReader) {
 	if cc.touchedAccounts == nil {
-		cc.touchedAccounts = map[accounts.Address]struct{}{}
-		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
+		cc.touchedAccounts = map[accounts.Address][]byte{}
+		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
 		cc.destructed = map[accounts.Address]struct{}{}
 	}
 	for a := range writes.AccountChanges() {
@@ -61,17 +63,18 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 		cc.addTouchedAccount(a, base)
 		m := cc.touchedStorage[a]
 		if m == nil {
-			m = map[accounts.StorageKey]struct{}{}
+			m = map[accounts.StorageKey][]byte{}
 			cc.touchedStorage[a] = m
 		}
 		for k := range slots {
 			if _, seen := m[k]; seen {
 				continue
 			}
-			m[k] = struct{}{}
+			address, slot := a.Value(), k.Value()
+			plainKey := slices.Concat(address[:], slot[:])
+			m[k] = cc.hashKey(plainKey)
 			if cc.prefetchFn != nil {
-				address, slot := a.Value(), k.Value()
-				cc.prefetchFn(append(address[:], slot[:]...))
+				cc.prefetchFn(plainKey)
 			}
 		}
 	}
@@ -81,16 +84,23 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	if _, seen := cc.touchedAccounts[a]; seen {
 		return
 	}
-	cc.touchedAccounts[a] = struct{}{}
+	address := a.Value()
+	cc.touchedAccounts[a] = cc.hashKey(address[:])
 	if base != nil {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
 		}
 	}
 	if cc.prefetchFn != nil {
-		address := a.Value()
 		cc.prefetchFn(address[:])
 	}
+}
+
+func (cc *commitmentCalculator) hashKey(plainKey []byte) []byte {
+	if cc.updates == nil {
+		return nil
+	}
+	return cc.updates.HashKey(plainKey)
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value
@@ -99,7 +109,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 // (and subtree), a present one writes its full account; a storage slot cleared to zero
 // removes its leaf, a non-zero one writes it.
 func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) error {
-	for addr := range cc.touchedAccounts {
+	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update
 		acc, ok := view.GetAccount(addr)
@@ -119,11 +129,11 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		if _, ok := cc.destructed[addr]; ok || view.WasDestroyed(addr) {
 			u.DeleteStorageSubtree = true
 		}
-		updates.TouchPlainKeyDirect(string(address[:]), &u)
+		updates.TouchPlainKeyDirectHashed(string(address[:]), hashed, &u)
 	}
 	for addr, slots := range cc.touchedStorage {
 		address := addr.Value()
-		for slot := range slots {
+		for slot, hashed := range slots {
 			slotVal := slot.Value()
 			var u commitment.Update
 			val, ok := view.GetStorage(addr, slot)
@@ -135,7 +145,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 			} else {
 				u.Flags = commitment.DeleteUpdate
 			}
-			updates.TouchPlainKeyDirect(string(address[:])+string(slotVal[:]), &u)
+			updates.TouchPlainKeyDirectHashed(string(address[:])+string(slotVal[:]), hashed, &u)
 		}
 	}
 	return view.Err()

@@ -105,8 +105,8 @@ type commitmentCalculator struct {
 	// values are retained — emitTouched reads each value from the version map.
 	// destructed carries the self-destruct subtree-reset signal. Cleared after each
 	// block's emit.
-	touchedAccounts map[accounts.Address]struct{}
-	touchedStorage  map[accounts.Address]map[accounts.StorageKey]struct{}
+	touchedAccounts map[accounts.Address][]byte
+	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 	destructed      map[accounts.Address]struct{}
 	blockBase       state.StateReader
 	blockBaseTxNum  uint64

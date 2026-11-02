@@ -293,3 +293,38 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 	require.NoError(t, cc.emitTouched(cc.foldView(other, 100+txIdx+1, base), newTestUpdates()))
 	require.Equal(t, readsBeforeFold+1, base.reads, "a fold over another block must read its own base")
 }
+
+// TestEmitTouched_FoldReusesFirstTouchKeyHash pins that the fold inserts each key under
+// the hash computed when the key was first touched, instead of hashing it again at
+// block end.
+func TestEmitTouched_FoldReusesFirstTouchKeyHash(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	ver := state.Version{TxIndex: txIdx}
+	addr := accounts.InternAddress([20]byte{0xf2})
+	slot := accounts.InternKey([32]byte{0x3})
+	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).nonce(addr, ver, 1).stor(addr, slot, ver, *uint256.NewInt(9)).build()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true)
+
+	hashes := 0
+	hasher := func(key []byte) []byte {
+		hashes++
+		return commitment.KeyToHexNibbleHash(key)
+	}
+	cc := &commitmentCalculator{updates: commitment.NewUpdates(commitment.ModeUpdate, "", hasher)}
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), nil)
+	hashesBeforeFold := hashes
+
+	require.NoError(t, cc.emitTouched(vm.View(txIdx+1, nil), cc.updates))
+	require.Equal(t, hashesBeforeFold, hashes, "the fold must not hash a touched key again")
+	got := map[string][]byte{}
+	require.NoError(t, cc.updates.HashSort(t.Context(), nil, func(hk, pk []byte, _ *commitment.Update) error {
+		got[string(pk)] = append([]byte(nil), hk...)
+		return nil
+	}))
+	for _, pk := range []string{acctPlainKey(addr), storPlainKey(addr, slot)} {
+		require.Equal(t, commitment.KeyToHexNibbleHash([]byte(pk)), got[pk], "key %x", pk)
+	}
+}
