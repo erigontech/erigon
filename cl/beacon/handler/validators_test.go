@@ -20,6 +20,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +31,9 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -86,10 +92,20 @@ func TestHeadValidatorsResponseMatchesHeadState(t *testing.T) {
 	}{
 		{query: ""},
 		{query: "?id=0,1,2&status=active", ids: []uint64{0, 1, 2}, statuses: []validatorStatus{validatorActive}},
+		{query: "?id=2,0,2,1,999999&status=active", ids: []uint64{2, 0, 2, 1, 999999}, statuses: []validatorStatus{validatorActive}},
+		{query: "?id=1,0&status=active_exiting", ids: []uint64{1, 0}, statuses: []validatorStatus{validatorActiveExiting}},
 	} {
 		expected := httptest.NewRecorder()
 		require.NoError(t, syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			responseValidators(expected, tc.ids, tc.statuses, state.Epoch(s), s.Balances(), s.Validators(), false, true)
+			registryOrder := func(yield func(validatorEntry) bool) {
+				s.Validators().Range(func(i int, v solid.Validator, _ int) bool {
+					if len(tc.ids) > 0 && !slices.Contains(tc.ids, uint64(i)) {
+						return true
+					}
+					return yield(validatorEntry{i, v, s.Balances().Get(i)})
+				})
+			}
+			responseValidatorEntries(expected, registryOrder, tc.statuses, state.Epoch(s), false, true)
 			return nil
 		}))
 
@@ -101,21 +117,67 @@ func TestHeadValidatorsResponseMatchesHeadState(t *testing.T) {
 }
 
 func TestHeadValidatorsAreCopiedInsideTheView(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		ids   []uint64
+	}{
+		{query: ""},
+		{query: "?id=0", ids: []uint64{0}},
+	} {
+		_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+		expected := httptest.NewRecorder()
+		require.NoError(t, syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			responseValidators(expected, tc.ids, nil, state.Epoch(s), s.Balances(), s.Validators(), false, false)
+			return nil
+		}))
+
+		next, err := postState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, next.SetValidatorBalance(0, next.Balances().Get(0)+1))
+		require.NoError(t, next.SetExitEpochForValidatorAtIndex(0, state.Epoch(next)+1))
+		handler.syncedData = overwriteAfterViewSyncedData{SyncedData: syncedData, t: t, next: next}
+
+		actual := httptest.NewRecorder()
+		handler.mux.ServeHTTP(actual, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/states/head/validators"+tc.query, http.NoBody))
+		require.Equal(t, http.StatusOK, actual.Code)
+		require.Equal(t, expected.Body.String(), actual.Body.String(), tc.query)
+	}
+}
+
+type allocationInViewSyncedData struct {
+	synced_data.SyncedData
+	allocated *uint64
+}
+
+func (s allocationInViewSyncedData) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	return s.SyncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		defer func() {
+			runtime.ReadMemStats(&after)
+			*s.allocated = after.TotalAlloc - before.TotalAlloc
+		}()
+		return fn(headState, root, slot)
+	})
+}
+
+func TestHeadValidatorsFilteredByIdCopyOnlyTheRequestedEntries(t *testing.T) {
 	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	expected := httptest.NewRecorder()
-	require.NoError(t, syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		responseValidators(expected, nil, nil, state.Epoch(s), s.Balances(), s.Validators(), false, false)
-		return nil
-	}))
-
-	next, err := postState.Copy()
+	head, err := postState.Copy()
 	require.NoError(t, err)
-	require.NoError(t, next.SetValidatorBalance(0, next.Balances().Get(0)+1))
-	require.NoError(t, next.SetExitEpochForValidatorAtIndex(0, state.Epoch(next)+1))
-	handler.syncedData = overwriteAfterViewSyncedData{SyncedData: syncedData, t: t, next: next}
+	for head.ValidatorLength() < 100_000 {
+		require.NoError(t, head.AddValidator(solid.NewValidator(), 32_000_000_000))
+	}
+	require.NoError(t, syncedData.(*synced_data.SyncedDataManager).OnHeadState(head))
+	var allocated uint64
+	handler.syncedData = allocationInViewSyncedData{SyncedData: syncedData, allocated: &allocated}
 
-	actual := httptest.NewRecorder()
-	handler.mux.ServeHTTP(actual, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/states/head/validators", http.NoBody))
-	require.Equal(t, http.StatusOK, actual.Code)
-	require.Equal(t, expected.Body.String(), actual.Body.String())
+	var ids []string
+	for i := range 30_000 {
+		ids = append(ids, strconv.Itoa(i%3), strconv.Itoa(head.ValidatorLength()+i))
+	}
+	response := httptest.NewRecorder()
+	handler.mux.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/states/head/validators?id="+strings.Join(ids, ","), http.NoBody))
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Less(t, allocated, uint64(8*len(ids)), "bytes allocated under the head-state lock, against one copy of the requested ids")
 }

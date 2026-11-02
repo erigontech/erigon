@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"math"
 	"net/http"
 	"slices"
@@ -304,25 +305,24 @@ func (a *ApiHandler) writeValidatorsResponse(
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		var (
 			epoch      uint64
-			balances   solid.Uint64ListSSZ
-			validators *solid.ValidatorSet
+			entries    iter.Seq[validatorEntry]
 			optimistic bool
 		)
+		// The client chooses the number of ids, so sort and dedupe them before taking the lock.
+		slices.Sort(filterIndicies)
+		filterIndicies = slices.Compact(filterIndicies)
 		// Copy out under the head-state lock and encode after it is released, so a slow client cannot stall head-state publishing.
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
 			epoch = state.Epoch(s)
 			optimistic = a.forkchoiceStore.IsRootOptimistic(root)
-			balances = solid.NewUint64ListSSZ(s.Balances().Cap())
-			if err := balances.DecodeSSZ(s.Balances().Bytes(), 0); err != nil {
-				return err
-			}
-			validators = solid.NewValidatorSet(s.Validators().Cap())
-			return validators.DecodeSSZ(s.Validators().Bytes(), 0)
+			var err error
+			entries, err = copyValidatorEntries(s, filterIndicies)
+			return err
 		}); err != nil {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced")).WriteTo(w)
 			return
 		}
-		responseValidators(w, filterIndicies, statusFilters, epoch, balances, validators, false, optimistic)
+		responseValidatorEntries(w, entries, statusFilters, epoch, false, optimistic)
 		return
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
@@ -617,7 +617,56 @@ func (d directString) MarshalJSON() ([]byte, error) {
 	return []byte(d), nil
 }
 
+type validatorEntry struct {
+	index     int
+	validator solid.Validator
+	balance   uint64
+}
+
+// validatorEntries yields the validators selected by filterIndicies, or all of them if it is empty, in ascending index order.
+func validatorEntries(filterIndicies []uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet) iter.Seq[validatorEntry] {
+	return func(yield func(validatorEntry) bool) {
+		if len(filterIndicies) == 0 {
+			validators.Range(func(i int, v solid.Validator, _ int) bool {
+				return yield(validatorEntry{i, v, balances.Get(i)})
+			})
+			return
+		}
+		for _, idx := range sortedIndicesBelow(filterIndicies, validators.Length()) {
+			if !yield(validatorEntry{int(idx), validators.Get(int(idx)), balances.Get(int(idx))}) {
+				return
+			}
+		}
+	}
+}
+
+// copyValidatorEntries copies the selected validators and balances, so the result does not point into the head state.
+// filterIndicies must be sorted and distinct.
+func copyValidatorEntries(s *state.CachingBeaconState, filterIndicies []uint64) (iter.Seq[validatorEntry], error) {
+	if len(filterIndicies) > 0 {
+		end, _ := slices.BinarySearch(filterIndicies, uint64(s.ValidatorLength()))
+		entries := make([]validatorEntry, end)
+		for i, idx := range filterIndicies[:end] {
+			entries[i] = validatorEntry{int(idx), slices.Clone(s.Validators().Get(int(idx))), s.Balances().Get(int(idx))}
+		}
+		return slices.Values(entries), nil
+	}
+	balances := solid.NewUint64ListSSZ(s.Balances().Cap())
+	if err := balances.DecodeSSZ(s.Balances().Bytes(), 0); err != nil {
+		return nil, err
+	}
+	validators := solid.NewValidatorSet(s.Validators().Cap())
+	if err := validators.DecodeSSZ(s.Validators().Bytes(), 0); err != nil {
+		return nil, err
+	}
+	return validatorEntries(nil, balances, validators), nil
+}
+
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
+	responseValidatorEntries(w, validatorEntries(filterIndicies, balances, validators), filterStatuses, stateEpoch, finalized, optimistic)
+}
+
+func responseValidatorEntries(w http.ResponseWriter, entries iter.Seq[validatorEntry], filterStatuses []validatorStatus, stateEpoch uint64, finalized bool, optimistic bool) {
 	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer func() {
@@ -636,9 +685,9 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 	b.WriteString("[")
 	first := true
 	var err error
-	appendValidator := func(i int, v solid.Validator) bool {
+	appendValidator := func(i int, v solid.Validator, balance uint64) bool {
 		// "{\"index\":\"%d\",\"status\":\"%s\",\"balance\":\"%d\",\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":\"%d\",\"slashed\":%t,\"activation_eligibility_epoch\":\"%d\",\"activation_epoch\":\"%d\",\"exit_epoch\":\"%d\",\"withdrawable_epoch\":\"%d\"}}"
-		status := validatorStatusFromValidator(v, stateEpoch, balances.Get(i))
+		status := validatorStatusFromValidator(v, stateEpoch, balance)
 		if shouldStatusBeFiltered(status, filterStatuses) {
 			return true
 		}
@@ -653,7 +702,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		// }
 		if _, err = b.WriteString("{\"index\":\"" + strconv.FormatUint(uint64(i), 10) +
 			"\",\"status\":\"" + status.String() +
-			"\",\"balance\":\"" + strconv.FormatUint(balances.Get(i), 10) +
+			"\",\"balance\":\"" + strconv.FormatUint(balance, 10) +
 			"\",\"validator\":{\"pubkey\":\"" + common.Bytes48(v.PublicKey()).Hex() +
 			"\",\"withdrawal_credentials\":\"" + v.WithdrawalCredentials().Hex() +
 			"\",\"effective_balance\":\"" + strconv.FormatUint(v.EffectiveBalance(), 10) +
@@ -667,15 +716,9 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 
 		return true
 	}
-	if len(filterIndicies) == 0 {
-		validators.Range(func(i int, v solid.Validator, _ int) bool {
-			return appendValidator(i, v)
-		})
-	} else {
-		for _, idx := range sortedIndicesBelow(filterIndicies, validators.Length()) {
-			if !appendValidator(int(idx), validators.Get(int(idx))) {
-				break
-			}
+	for e := range entries {
+		if !appendValidator(e.index, e.validator, e.balance) {
+			break
 		}
 	}
 	if err != nil {
