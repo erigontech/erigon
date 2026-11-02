@@ -683,17 +683,30 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	var tSeek, tPut time.Duration
+	var nPut, nBytes, nHit int
+	tLoad := time.Now()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		t1 := time.Now()
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
 		}
+		t2 := time.Now()
+		tSeek += t2.Sub(t1)
+		nPut++
+		nBytes += len(k) + len(v)
+		defer func() { tPut += time.Since(t2) }()
 		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
 			return valuesCursor.Put(k, v)
 		}
+		nHit++
 		return valuesCursor.PutCurrent(k, v) // DeleteCurrent+Put
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
+	}
+	if flushSplitTrace {
+		log.Info("[flush] vals load", "domain", w.name, "n", nPut, "hits", nHit, "bytes", nBytes, "seek", tSeek, "put", tPut, "load", time.Since(tLoad))
 	}
 	w.Close()
 
