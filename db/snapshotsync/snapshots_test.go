@@ -309,6 +309,22 @@ func TestMergeKeepsFinishedRangesOnLaterFailure(t *testing.T) {
 	}
 }
 
+// A frozen merge output retires only the non-frozen segments it covers, not ones below its range.
+func TestIntegrateFrozenMergeKeepsSegmentsBelowItsRange(t *testing.T) {
+	logger := log.New()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, t.TempDir(), snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	below := &DirtySegment{Range: NewRange(0, 100_000), segType: snaptype2.Headers}
+	s.dirty[snaptype2.Headers.Enum()].Set(below)
+
+	merger := NewMerger(t.TempDir(), 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	frozen := &DirtySegment{Range: NewRange(100_000, 600_000), segType: snaptype2.Headers, frozen: true}
+	merger.integrateMergedDirtyFiles(s, map[snaptype.Enum][]*DirtySegment{snaptype2.Headers.Enum(): {frozen}}, map[snaptype.Enum][]*DirtySegment{})
+
+	_, ok := s.dirty[snaptype2.Headers.Enum()].Get(below)
+	require.True(t, ok, "segment below the frozen output must stay")
+}
+
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
