@@ -2124,3 +2124,24 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, 1, res.DepIdx())
 	require.Equal(t, *uint256.NewInt(42), val)
 }
+
+// A contract an earlier tx deploys has no account cell until that tx flushes. A reader of its
+// AddressPath must wait for the deployer the BAL names instead of reading the pre-block
+// absence and running the contract's code against it.
+func TestBALReadAddressOfInBlockDeployIsDependency(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x03})
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+	}})
+	_, res, _ := vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultDependency, res.Status())
+	require.Equal(t, 2, res.DepIdx())
+
+	_, res, _ = vm.ReadAddress(addr, 2)
+	require.Equal(t, MVReadResultNone, res.Status(), "the deployer itself has nothing to wait for")
+
+	vm.SealUpTo(2)
+	_, res, _ = vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultNone, res.Status(), "a sealed deployer is in the base state")
+}

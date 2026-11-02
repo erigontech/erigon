@@ -747,7 +747,36 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 	if oacc, seeded := vm.LoadOriginAccount(addr); seeded {
 		return oacc, ReadResult{depIdx: originIndex}, true
 	}
+	if k := vm.unflushedDeployer(addr, txIdx); k >= 0 {
+		res.depIdx = k
+	}
 	return val, res, false
+}
+
+// unflushedDeployer returns the earlier tx the access list shows deploying code at addr while
+// that tx is neither sealed nor validated, or -1. Until it flushes, addr has no account cell.
+func (vm *VersionMap) unflushedDeployer(addr accounts.Address, txIdx int) int {
+	if !vm.HasBAL {
+		return -1
+	}
+	address := addr.Value()
+	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
+	if i == len(vm.bal) || vm.bal[i].Address != address {
+		return -1
+	}
+	k := -1
+	for _, c := range vm.bal[i].CodeChanges {
+		if idx := int(c.Index) - 1; idx >= 0 && idx < txIdx && len(c.Bytecode) > 0 {
+			k = idx
+		}
+	}
+	if k < 0 || (vm.sealedArmed.Load() && int64(k) <= vm.sealed.Load()) {
+		return -1
+	}
+	if _, rr, ok := vm.ReadCode(addr, k+1); ok && rr.validated {
+		return -1
+	}
+	return k
 }
 
 func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
