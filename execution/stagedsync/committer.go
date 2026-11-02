@@ -101,10 +101,9 @@ type commitmentCalculator struct {
 	// disables warmup. Called from accumulateTouched on this calculator's goroutine.
 	prefetchFn func(plainKey []byte)
 
-	// touched* are the per-block key-only union the commitment path folds over: no
+	// touched* are the key-only union the commitment path folds over: no
 	// values are retained — emitTouched reads each value from the version map.
-	// destructed carries the self-destruct subtree-reset signal. Cleared after each
-	// block's emit.
+	// destructed carries the self-destruct subtree-reset signal.
 	touchedAccounts map[accounts.Address][]byte
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 	destructed      map[accounts.Address]struct{}
@@ -568,7 +567,6 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
-	vm.SeedAddresses()
 	if err := vm.SeedEmptyRemovals(
 		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
 		cc.chainConfig.Aura != nil,

@@ -37,7 +37,7 @@ import (
 
 func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 	var got [][]byte
-	cc := &commitmentCalculator{prefetchFn: func(plainKey []byte) { got = append(got, plainKey) }}
+	cc := &commitmentCalculator{updates: newTestUpdates(), prefetchFn: func(plainKey []byte) { got = append(got, plainKey) }}
 	payer, contract := common.Address{19: 1}, common.Address{19: 2}
 	slot := accounts.InternKey(common.Hash{31: 9})
 	writes := func(v uint64) *state.WriteSet {

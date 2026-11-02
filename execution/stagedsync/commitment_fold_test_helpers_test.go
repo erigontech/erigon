@@ -44,7 +44,7 @@ func collectUpdates(t *testing.T, updates *commitment.Updates) map[string]commit
 // the committed-base reader for untouched fields (nil when the version map holds them).
 func emitTouchedUpdates(t *testing.T, vm *state.VersionMap, lastTxNum uint64, base state.StateReader, writes ...state.WriteSetView) map[string]commitment.Update {
 	t.Helper()
-	cc := &commitmentCalculator{}
+	cc := &commitmentCalculator{updates: newTestUpdates()}
 	for _, w := range writes {
 		cc.accumulateTouched(w, nil)
 	}

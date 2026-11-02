@@ -228,7 +228,7 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 
 	t.Run("account", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
-		cc := &commitmentCalculator{}
+		cc := &commitmentCalculator{updates: newTestUpdates()}
 		cc.accumulateTouched(newWS().nonce(addr, ver, 1).build(), nil)
 		err := cc.emitTouched(vm.View(txIdx+1, &failingAccountReader{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
 		require.ErrorIs(t, err, boom)
@@ -238,7 +238,7 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 		ws := newWS().bal(addr, ver, *uint256.NewInt(1)).stor(addr, slot, ver, *uint256.NewInt(1)).build()
 		vm := state.NewVersionMap(nil)
 		vm.FlushVersionedWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
-		cc := &commitmentCalculator{}
+		cc := &commitmentCalculator{updates: newTestUpdates()}
 		cc.accumulateTouched(ws, nil)
 		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
 		require.ErrorIs(t, err, boom)
@@ -275,7 +275,7 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 	base := &countingAccountReader{mapStateReader: newMapStateReader()}
 	base.accounts[addr] = &acc
 
-	cc := &commitmentCalculator{}
+	cc := &commitmentCalculator{updates: newTestUpdates()}
 	cc.setBlockBase(vm, base)
 	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), base)
 	readsBeforeFold := base.reads

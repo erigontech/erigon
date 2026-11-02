@@ -1709,11 +1709,8 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
-	// versionMap is the block's map; with the per-tx access list recorded at publish,
-	// the commitment calculator reads this tx's final writes from it (VersionMap.View)
-	// rather than from a retained write-set.
-	versionMap *state.VersionMap
-	rules      *chain.Rules
+	versionMap            *state.VersionMap
+	rules                 *chain.Rules
 	// balTxs carries the sealed reads and writes of txs before the block's final one,
 	// so the apply loop builds the block access list while the block runs.
 	balTxs []balTx
