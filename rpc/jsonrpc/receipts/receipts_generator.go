@@ -167,11 +167,12 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	view := g.filters.WithTemporalOverlay(tx)
+	receipt, ok, err := readPersistedReceipt(view, header.Number.Uint64(), header.Hash(), txnHash, txNum)
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
+	g.addToCacheReceipt(ctx, view, header, txNum, receipt)
 	return receipt, true, nil
 }
 
@@ -216,11 +217,22 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	}, nil
 }
 
-// canonicalInView reports whether header is canonical in the view receipts are read from; when it is
-// not, the view holds another fork at this height and its receipts must not be cached under header.
-func (g *Generator) canonicalInView(ctx context.Context, tx kv.TemporalTx, header *types.Header) bool {
-	hash, ok, err := g.blockReader.CanonicalHash(ctx, g.filters.WithTemporalOverlay(tx), header.Number.Uint64())
-	return err == nil && ok && hash == header.Hash()
+// canonicalInView reports whether header is canonical in view, the view its receipts were read from;
+// when it is not, view holds another fork at this height and its receipts must not be cached under header.
+func (g *Generator) canonicalInView(ctx context.Context, view kv.TemporalTx, header *types.Header) bool {
+	n := header.Number.Uint64()
+	// Read the mapping from view: RemoteBlockReader.CanonicalHash ignores the tx and asks the live backend.
+	hash, err := rawdb.ReadCanonicalHash(view, n)
+	if err != nil {
+		return false
+	}
+	if hash == (common.Hash{}) { // frozen blocks have their mapping only in snapshots
+		var ok bool
+		if hash, ok, err = g.blockReader.CanonicalHash(ctx, view, n); err != nil || !ok {
+			return false
+		}
+	}
+	return hash == header.Hash()
 }
 
 func (g *Generator) addToCacheReceipts(ctx context.Context, tx kv.TemporalTx, header *types.Header, receipts types.Receipts) {

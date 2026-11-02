@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
 
 // TestGetLogsFromPersistedReceipts serves eth_getLogs from the persistent receipt cache, where
@@ -911,5 +913,37 @@ func TestGetReceiptDoesNotCacheReceiptReadFromAnotherFork(t *testing.T) {
 	_, err = base.receiptsGenerator.GetReceipt(m.Ctx, chainConfig, tx, block.HeaderNoCopy(), block.Transactions()[0], 0, txNum, nil)
 	require.NoError(t, err)
 	_, cached := base.receiptsGenerator.TryGetCachedReceipt(block.Hash(), txNum, 0)
+	require.False(t, cached)
+}
+
+// liveCanonicalReader answers CanonicalHash from outside the read view, like RemoteBlockReader.
+type liveCanonicalReader struct {
+	dbservices.FullBlockReader
+	hash common.Hash
+}
+
+func (r liveCanonicalReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return r.hash, true, nil
+}
+
+func TestGetReceiptChecksCanonicalInReadViewNotLiveBackend(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	base, doms, _, _ := newPublishedOverlayTestBase(t, m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block, err := base.blockByNumberWithSenders(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum++
+	chainConfig, err := base.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteCanonicalHash(doms.BlockOverlay(), common.Hash{0xf0}, 1))
+	gen := receipts.NewGenerator(m.Dirs, liveCanonicalReader{m.BlockReader, block.Hash()}, m.Engine, base.stateCache, time.Minute, base.filters)
+
+	_, err = gen.GetReceipt(m.Ctx, chainConfig, tx, block.HeaderNoCopy(), block.Transactions()[0], 0, txNum, nil)
+	require.NoError(t, err)
+	_, cached := gen.TryGetCachedReceipt(block.Hash(), txNum, 0)
 	require.False(t, cached)
 }
