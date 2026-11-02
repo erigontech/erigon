@@ -17,6 +17,8 @@
 package state
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
@@ -119,19 +121,19 @@ func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, er
 		aged = append(aged, agedList)
 	}
 
-	var retired []*FilesItem
-	for _, agedList := range aged {
-		retired = append(retired, agedList.files...)
-	}
-	if len(retired) == 0 {
+	if !slices.ContainsFunc(aged, func(a agedFiles) bool { return len(a.files) > 0 }) {
 		return 0, nil
 	}
 
 	// get lock only if have something to retire
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
+	var retired []*FilesItem
 	for _, agedList := range aged {
-		retire(mvcc.RetireReasonAged, agedList.dirtyFiles, agedList.files, agedList.filenameBase, at.a.logger)
+		retired = append(retired, retire(mvcc.RetireReasonAged, agedList.dirtyFiles, agedList.files, agedList.filenameBase, at.a.logger)...)
+	}
+	if len(retired) == 0 {
+		return 0, nil
 	}
 	at.a.onFilesDelete(deleted)
 	at.a.recalcVisibleFiles(retired)

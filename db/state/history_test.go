@@ -2488,3 +2488,16 @@ func TestIntegrityHistoryValueAccessor(t *testing.T) {
 	require.Error(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
 	a.vAccessor = acc
 }
+
+func TestHistoryCanPruneUntilMalformedProgress(t *testing.T) {
+	t.Parallel()
+	db, h := testDbAndHistory(t, false, log.New())
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rwTx.Put(kv.TblPruningValsProg, append([]byte(h.ValuesTable), "range"...), []byte{1}))
+
+	hc := h.beginForTests()
+	defer hc.Close()
+	require.NotPanics(t, func() { hc.canPruneUntil(rwTx, 100) })
+}

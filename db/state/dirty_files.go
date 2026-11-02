@@ -373,7 +373,7 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 // to the outgoing visible generation itself. Physical reclaim happens once the last
 // reader of that generation closes — so readers still pinning these files are never
 // surprised.
-func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) {
+func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) (detached []*FilesItem) {
 	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
 	var canDelete bool
 	switch reason {
@@ -388,12 +388,16 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
+		if _, ok := dirtyFiles.Delete(out); !ok { // already retired from another (older) view
+			continue
+		}
 		out.canDelete.Store(canDelete)
-		dirtyFiles.Delete(out)
+		detached = append(detached, out)
 		if filenameBase == traceFileLife && out.decompressor != nil {
 			logger.Warn("[agg.dbg] retire", "f", out.decompressor.FileName(), "reason", reason)
 		}
 	}
+	return detached
 }
 
 // openDirtyDataFile opens the matching data file and records its version.
@@ -861,7 +865,5 @@ func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
 }
 
 func retireFilesNotInList(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, fNames []string, filenameBase string, logger log.Logger) retiredFiles {
-	outs := filesNotInList(dirtyFiles, fNames)
-	retire(reason, dirtyFiles, outs, filenameBase, logger)
-	return outs
+	return retire(reason, dirtyFiles, filesNotInList(dirtyFiles, fNames), filenameBase, logger)
 }
