@@ -111,8 +111,7 @@ func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoic
 	}
 
 	currentSlot := tip.Block.Slot + slotsAfterTip
-	genesisTime := uint64(time.Now().Unix()) - currentSlot*cfg.beaconCfg.SecondsPerSlot
-	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg.beaconCfg)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
 	digest, err := clock.ComputeForkDigest(tip.Block.Slot / cfg.beaconCfg.SlotsPerEpoch)
 	require.NoError(t, err)
 	f := &forwardSyncTipFixture{cfg: cfg, tip: tip, tipRoot: tipRoot, envelope: envelope, successor: successor, emptyChild: emptyChild, currentSlot: currentSlot, digest: digest}
