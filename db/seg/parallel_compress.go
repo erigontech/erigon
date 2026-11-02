@@ -397,11 +397,12 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		}
 		stopped := make(chan struct{})
 		go func() { wg.Wait(); close(stopped) }()
+		drain := out
 		for {
 			select {
-			case _, ok := <-out:
+			case _, ok := <-drain:
 				if !ok {
-					out = nil
+					drain = nil
 				}
 			case <-stopped:
 				return
