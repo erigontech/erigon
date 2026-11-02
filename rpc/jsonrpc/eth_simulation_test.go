@@ -1339,7 +1339,8 @@ func TestSimulateV1HistoricalBasePartialAccountWriteKeepsNonce(t *testing.T) {
 // An account the simulation deletes stays deleted in later simulated blocks, also when the
 // canonical chain deleted it after the base block, so it is absent at head: no code, no storage
 // from the base for a contract later created at the same address, and the same state roots as
-// a chain that ran the simulated calls.
+// a chain that ran the simulated calls, also for an account the simulation leaves unchanged
+// while the canonical chain changed it after the base.
 func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -1347,6 +1348,7 @@ func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
 	factory := common.HexToAddress("0x00000000000000000000000000000000000000fa")
 	probe := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	store := common.HexToAddress("0x00000000000000000000000000000000000000cc")
 	// runtime returns storage slot 0; initCode deploys it; factory runs CREATE2(salt 0) of initCode
 	runtime := []byte{0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
 	initCode := append(append([]byte{0x6a}, runtime...), 0x60, 0x00, 0x52, 0x60, 0x0b, 0x60, 0x15, 0xf3)
@@ -1355,26 +1357,31 @@ func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 	selfdestruct := append(append([]byte{0x73}, beneficiary[:]...), 0xff)
 	codeSize := append(append([]byte{0x73}, doomed[:]...), 0x3b, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3)
 	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
-	newChain := func(recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	type send struct {
+		to    common.Address
+		value uint64
+	}
+	newChain := func(sends ...send) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
 			bank:    {Balance: funds},
 			doomed:  {Code: selfdestruct, Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
 			probe:   {Code: codeSize, Balance: big.NewInt(0)},
 			factory: {Code: factoryCode, Balance: big.NewInt(0)},
+			store:   {Code: []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}, Balance: big.NewInt(0)}, // SSTORE(0, 1)
 		}}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
-		cp, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
-			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 200_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+		cp, err := m.GenerateChain(len(sends), func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), sends[i].to, uint256.NewInt(sends[i].value), 200_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
 			require.NoError(t, err)
 			b.AddTx(txn)
 		})
 		require.NoError(t, err)
 		return m, cp
 	}
-	m, cp := newChain(beneficiary, doomed)
+	m, cp := newChain(send{to: beneficiary}, send{to: doomed}, send{to: store, value: 1})
 	require.NoError(t, m.InsertChain(cp))
-	_, oracle := newChain(beneficiary, doomed, probe, factory, doomed)
+	_, oracle := newChain(send{to: beneficiary}, send{to: doomed}, send{to: probe}, send{to: factory}, send{to: doomed}, send{to: store})
 	wants := oracle.Blocks[1:]
 
 	blocks := make([]SimulatedBlock, 0, len(wants))
