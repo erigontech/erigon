@@ -8,6 +8,7 @@ Default to **no comment**. Clear names and small functions should carry the mean
 - Non-obvious invariants or constraints not enforced by types.
 - Surprising edge cases easy to miss when reading.
 - Performance choices where the straightforward code would be wrong.
+- Occasional contextual jokes within complicated code to induce human behaviour within code.
 
 ## Never put in code (→ goes in the commit message or PR body)
 
