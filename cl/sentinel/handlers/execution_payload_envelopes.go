@@ -106,10 +106,12 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 	headIndexMatches := canonicalHeadSlot == headSlot && canonicalHeadRoot == head.Root
 	type responseCandidate struct {
-		root        common.Hash
-		slot        uint64
-		epoch       uint64
-		rebuildable bool
+		root      common.Hash
+		slot      uint64
+		epoch     uint64
+		block     *cltypes.SignedBeaconBlock
+		childSlot uint64
+		child     *cltypes.SignedBeaconBlock
 	}
 	responseCandidates := make([]responseCandidate, 0, maxPayloads)
 	type canonicalBlock struct {
@@ -169,7 +171,14 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
 			if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion &&
 				forkchoice.ParentPayloadStatusFromBids(pending.block, current.block.Block) == cltypes.PayloadStatusFull {
-				responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, slot: pending.slot, epoch: epoch, rebuildable: true})
+				responseCandidates = append(responseCandidates, responseCandidate{
+					root:      pending.root,
+					slot:      pending.slot,
+					epoch:     epoch,
+					block:     pending.block,
+					childSlot: current.slot,
+					child:     current.block,
+				})
 				pending = nil
 				if uint64(len(responseCandidates)) == maxPayloads {
 					return false
@@ -233,8 +242,8 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 				log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
 			}
 		}
-		if envelope == nil && err == nil && candidate.rebuildable && c.envelopeRebuilder != nil {
-			prepared, prepareErr := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.root)
+		if envelope == nil && err == nil && candidate.child != nil && c.envelopeRebuilder != nil {
+			prepared, prepareErr := c.envelopeRebuilder.PrepareFromBlocks(tx, candidate.slot, candidate.root, candidate.block, candidate.childSlot, candidate.child)
 			err = prepareErr
 			if err == nil && prepared != nil {
 				envelope, err = c.tryRebuildEnvelope(requestCtx, peerID, prepared)

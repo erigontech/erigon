@@ -68,6 +68,7 @@ type ConsensusHandlers struct {
 
 type EnvelopeRebuilder interface {
 	Prepare(context.Context, kv.Tx, uint64, common.Hash) (*envelope_history.PreparedRebuild, error)
+	PrepareFromBlocks(kv.Tx, uint64, common.Hash, *cltypes.SignedBeaconBlock, uint64, *cltypes.SignedBeaconBlock) (*envelope_history.PreparedRebuild, error)
 	TryRebuild(context.Context, *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 

@@ -35,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/db/kv"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type testEnvelopeRebuilder struct {
@@ -44,6 +46,29 @@ type testEnvelopeRebuilder struct {
 	onRebuild func()
 	err       error
 	called    []common.Hash
+}
+
+type countingBlockReader struct {
+	*tests.MockBlockReader
+	readBlockByRootCalls int
+}
+
+func (r *countingBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	r.readBlockByRootCalls++
+	return r.MockBlockReader.ReadBlockByRoot(ctx, tx, blockRoot)
+}
+
+type countingExecutionEngine struct {
+	headerCalls int
+}
+
+func (e *countingExecutionEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	e.headerCalls++
+	return nil, nil
+}
+
+func (*countingExecutionEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	return nil, nil
 }
 
 type envelopeHandlerStream struct {
@@ -66,6 +91,14 @@ func (s *envelopeHandlerStream) Conn() network.Conn    { return s.conn }
 func (s *envelopeHandlerStream) Protocol() protocol.ID { return s.protocol }
 
 func (r *testEnvelopeRebuilder) Prepare(_ context.Context, _ kv.Tx, _ uint64, blockRoot common.Hash) (*envelope_history.PreparedRebuild, error) {
+	return r.prepare(blockRoot)
+}
+
+func (r *testEnvelopeRebuilder) PrepareFromBlocks(_ kv.Tx, _ uint64, blockRoot common.Hash, _ *cltypes.SignedBeaconBlock, _ uint64, _ *cltypes.SignedBeaconBlock) (*envelope_history.PreparedRebuild, error) {
+	return r.prepare(blockRoot)
+}
+
+func (r *testEnvelopeRebuilder) prepare(blockRoot common.Hash) (*envelope_history.PreparedRebuild, error) {
 	if _, rejected := r.rejected[blockRoot]; rejected {
 		return nil, nil
 	}
@@ -914,6 +947,43 @@ func TestExecutionPayloadEnvelopesByRangeRebuildsHistoryBelowForkGraph(t *testin
 	require.NoError(t, c.executionPayloadEnvelopesByRangeHandler(stream))
 	require.Equal(t, []uint64{0, 1}, readEnvelopeBuilderIndices(t, stream.response.Bytes(), beaconCfg))
 	require.Len(t, rebuilder.called, 2)
+}
+
+func TestExecutionPayloadEnvelopesByRangeRebuildReusesScannedBlocks(t *testing.T) {
+	ctx := t.Context()
+	_, indiciesDB := setupStore(t)
+	reader := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+	ethClock, cfg := getGloasEthClockAndConfig(t)
+	startSlot := ethClock.GetCurrentSlot() - 4
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	roots, _ := populateGloasEnvelopeHistory(t, reader.MockBlockReader, tx, cfg, startSlot, 3, -1)
+	require.NoError(t, beacon_indicies.WriteExecutionPayloadEnvelopeSignature(tx, startSlot, roots[0], common.Bytes96{1}))
+	require.NoError(t, tx.Commit())
+
+	engine := new(countingExecutionEngine)
+	rebuilder := envelope_history.NewRebuilder(cfg, reader, engine)
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+	fc.HeadVal = roots[2]
+	fc.HeadSlotVal = startSlot + 2
+	lowestAvailableSlot := startSlot + 2
+	fc.LowestAvailableSlotVal = &lowestAvailableSlot
+	c := NewConsensusHandlers(ctx, reader, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+	stream := &rangeHandlerTestStream{
+		envelopeHandlerStream: &envelopeHandlerStream{
+			conn:     &remotePeerConn{peerID: peer.ID("history-peer")},
+			protocol: protocol.ID(communication.ExecutionPayloadEnvelopesByRangeProtocolV1),
+		},
+		startSlot: startSlot,
+		count:     1,
+	}
+
+	data := stream.run(t, c)
+	require.Equal(t, byte(ResourceUnavailablePrefix), data[0])
+	require.Equal(t, 1, engine.headerCalls)
+	require.Equal(t, int(stream.count+1), reader.readBlockByRootCalls)
 }
 
 func TestExecutionPayloadEnvelopesByRangeStartsAtFirstKnownCanonicalBlock(t *testing.T) {

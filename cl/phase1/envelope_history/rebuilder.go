@@ -76,6 +76,28 @@ func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 	if err != nil {
 		return nil, err
 	}
+	var childRoot common.Hash
+	var childSlot uint64
+	err = beacon_indicies.RangeBlockRoots(tx, slot+1, math.MaxUint64, func(nextSlot uint64, root common.Hash) bool {
+		childSlot = nextSlot
+		childRoot = root
+		return false
+	})
+	if err != nil {
+		return nil, err
+	}
+	if childRoot == (common.Hash{}) {
+		r.unavailable(blockRoot, "canonical child is unavailable")
+		return nil, nil
+	}
+	child, err := r.beaconDB.ReadBlockByRoot(ctx, tx, childRoot)
+	if err != nil {
+		return nil, err
+	}
+	return r.PrepareFromBlocks(tx, slot, blockRoot, block, childSlot, child)
+}
+
+func (r *Rebuilder) PrepareFromBlocks(tx kv.Tx, slot uint64, blockRoot common.Hash, block *cltypes.SignedBeaconBlock, childSlot uint64, child *cltypes.SignedBeaconBlock) (*PreparedRebuild, error) {
 	if block == nil || block.Block == nil || block.Block.Body == nil || block.Block.Slot != slot || block.Version() < clparams.GloasVersion {
 		r.unavailable(blockRoot, "block is unavailable or predates Gloas")
 		return nil, nil
@@ -94,24 +116,6 @@ func (r *Rebuilder) Prepare(ctx context.Context, tx kv.Tx, slot uint64, blockRoo
 	if !found {
 		r.unavailable(blockRoot, "signature is unavailable")
 		return nil, nil
-	}
-	var childRoot common.Hash
-	var childSlot uint64
-	err = beacon_indicies.RangeBlockRoots(tx, slot+1, math.MaxUint64, func(nextSlot uint64, root common.Hash) bool {
-		childSlot = nextSlot
-		childRoot = root
-		return false
-	})
-	if err != nil {
-		return nil, err
-	}
-	if childRoot == (common.Hash{}) {
-		r.unavailable(blockRoot, "canonical child is unavailable")
-		return nil, nil
-	}
-	child, err := r.beaconDB.ReadBlockByRoot(ctx, tx, childRoot)
-	if err != nil {
-		return nil, err
 	}
 	if child == nil || child.Block == nil || child.Block.Body == nil || child.Block.Slot != childSlot || child.Block.ParentRoot != blockRoot {
 		r.unavailable(blockRoot, "canonical child is invalid")
