@@ -2862,12 +2862,30 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 	err := p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
 		return p.fromDBLocked(tx, coreTx, cacheView, &deferredTxns)
 	})
+	if err != nil || len(deferredTxns.Txns) == 0 {
+		return err
+	}
 	// Validation results and payer reservations are not persisted. Restored
 	// frame nonce chains must pass admission against the current head, outside the pool lock.
-	if err == nil && len(deferredTxns.Txns) > 0 {
-		_, err = p.addNewTxns(ctx, deferredTxns, nil)
+	reasons, err := p.addNewTxns(ctx, deferredTxns, nil)
+	if err != nil {
+		return err
 	}
-	return err
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for i, reason := range reasons {
+		if reason == txpoolcfg.Success || reason == txpoolcfg.DuplicateHash {
+			continue
+		}
+		txn := deferredTxns.Txns[i]
+		// Another admission may have accepted this hash while restoration ran unlocked.
+		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
+			continue
+		}
+		// Rejected restores still have a DB row. Queue its deletion without retaining the body.
+		p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
+	}
+	return nil
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, deferredTxns *TxnSlots) error {

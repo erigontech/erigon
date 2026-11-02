@@ -1114,6 +1114,90 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 	}
 }
 
+func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		valid         bool
+		backendErr    error
+		alreadyPooled bool
+		wantKept      bool
+	}{
+		{name: "accepted", valid: true, wantKept: true},
+		{name: "rejected by simulation"},
+		{name: "backend unavailable", backendErr: errors.New("validation backend unavailable")},
+		{name: "duplicate", valid: true, alreadyPooled: true, wantKept: true},
+		{name: "rejected but already pooled", alreadyPooled: true, wantKept: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.chainID.SetUint64(1)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			if tc.alreadyPooled {
+				var txns TxnSlots
+				txns.Append(frame, sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				_, err = pool.flushNoFsync(ctx)
+				require.NoError(t, err)
+			} else {
+				require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+					return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+				}))
+			}
+			backend.valid, backend.err = tc.valid, tc.backendErr
+			backend.calls = nil
+
+			require.NoError(t, pool.start(ctx))
+			require.Len(t, backend.calls, 1)
+			require.Equal(t, tc.wantKept, pool.byHash[string(frame.IDHash[:])] != nil)
+			_, err := pool.flushNoFsync(ctx)
+			require.NoError(t, err)
+			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+				persisted, err := tx.Has(kv.PoolTransaction, frame.IDHash[:])
+				require.NoError(t, err)
+				require.Equal(t, tc.wantKept, persisted, "rejected restored rows must be removed on flush")
+				return nil
+			}))
+		})
+	}
+}
+
+func TestFramePoolReloadDeletesRejectedNonceSuccessor(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	frame := framePoolSlot(t, sender, 1, 2)
+	ordinary := newTestTxnSlot(1, 0, 1, 2, 1)
+	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, txn := range []*TxnSlot{frame, ordinary} {
+			var encoded bytes.Buffer
+			if err := txn.Txn.MarshalBinary(&encoded); err != nil {
+				return err
+			}
+			txn.IDHash = txn.Txn.Hash()
+			if err := tx.Put(kv.PoolTransaction, txn.IDHash[:], append(sender[:], encoded.Bytes()...)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(t, pool.start(ctx))
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
+	_, err := pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		for _, txn := range []*TxnSlot{frame, ordinary} {
+			persisted, err := tx.Has(kv.PoolTransaction, txn.IDHash[:])
+			require.NoError(t, err)
+			require.Equal(t, txn == frame, persisted, "transaction type %d", txn.TxType())
+		}
+		return nil
+	}))
+}
+
 func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.chainID.SetUint64(1)
@@ -1137,6 +1221,14 @@ func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		persisted, err := tx.Has(kv.PoolTransaction, frame.IDHash[:])
+		require.NoError(t, err)
+		require.True(t, persisted, "the deletion queued by reload must not erase a successful resubmission")
+		return nil
+	}))
 }
 
 func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
