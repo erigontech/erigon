@@ -35,9 +35,6 @@ func startGenesis(t *testing.T, db kv.RwDB, config *ethconfig.Config) (*chain.Co
 // A restart with --override.genesis on a datadir initialised with another genesis
 // must fail, not run the stored chain under the new file's network id.
 func TestOverrideGenesisRestart(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	a := testGenesis(1337, 30_000_000)
 	b := testGenesis(1338, 31_000_000)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
