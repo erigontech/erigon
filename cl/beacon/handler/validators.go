@@ -646,8 +646,14 @@ func copyValidatorEntries(s *state.CachingBeaconState, filterIndicies []uint64) 
 	if len(filterIndicies) > 0 {
 		end, _ := slices.BinarySearch(filterIndicies, uint64(s.ValidatorLength()))
 		entries := make([]validatorEntry, end)
+		var records []byte
 		for i, idx := range filterIndicies[:end] {
-			entries[i] = validatorEntry{int(idx), slices.Clone(s.Validators().Get(int(idx))), s.Balances().Get(int(idx))}
+			record := s.Validators().Get(int(idx))
+			if records == nil {
+				records = make([]byte, 0, end*len(record))
+			}
+			records = append(records, record...)
+			entries[i] = validatorEntry{int(idx), records[len(records)-len(record) : len(records) : len(records)], s.Balances().Get(int(idx))}
 		}
 		return slices.Values(entries), nil
 	}

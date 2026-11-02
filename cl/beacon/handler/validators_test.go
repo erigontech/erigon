@@ -181,3 +181,16 @@ func TestHeadValidatorsFilteredByIdCopyOnlyTheRequestedEntries(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	require.Less(t, allocated, uint64(8*len(ids)), "bytes allocated under the head-state lock, against one copy of the requested ids")
 }
+
+func TestCopyValidatorEntriesByIdAllocatesOneBuffer(t *testing.T) {
+	_, _, _, _, postState, _, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ids := make([]uint64, postState.ValidatorLength())
+	for i := range ids {
+		ids[i] = uint64(i)
+	}
+	allocs := testing.AllocsPerRun(5, func() {
+		_, err := copyValidatorEntries(postState, ids)
+		require.NoError(t, err)
+	})
+	require.Less(t, allocs, float64(10), "mallocs for %d ids", len(ids))
+}
