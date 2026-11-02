@@ -36,9 +36,9 @@ import (
 // cachebudget envelope, up to maxBytes, and stops asking once the envelope refuses a chunk,
 // until Purge or Close; an unbudgeted one (NewByteLRU) holds maxBytes from the start.
 //
-// The synchronous executor orders InvalidateAll but not eviction against Add,
-// so a layer can sit over its ceiling until the next write; CleanUp forces a
-// drain. Eviction is W-TinyLFU, so a newcomer can be rejected outright.
+// Otter drains its buffers on its own goroutine, so a layer can sit over its
+// ceiling until that drain runs; CleanUp forces one. Eviction is W-TinyLFU, so
+// a newcomer can be rejected outright.
 type ByteLRU[V any] struct {
 	c        *otter.Cache[uint64, V]
 	weigh    func(uint64, V) int64

@@ -190,6 +190,7 @@ func TestDomainCache_GrowingUpdateKeepsOtherKeys_NoOpMode(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(two+two/4, ModeNoOp))
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
+	c.data.c.CleanUp()
 
 	c.Put(makeAddr(1), make([]byte, len(makeValue(1))+int(two/2)), 0)
 	c.data.c.CleanUp()
