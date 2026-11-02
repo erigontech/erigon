@@ -17,12 +17,42 @@
 package state
 
 import (
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCopyWithTotalActiveBalanceMatchesRescannedCopy(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	source := New(&cfg)
+	source.SetVersion(clparams.AltairVersion)
+
+	for index, balance := range []uint64{32_000_000_000, 16_000_000_000} {
+		validator := activeValidatorWithIndex(uint64(index))
+		validator.SetEffectiveBalance(balance)
+		require.NoError(t, source.AddValidator(validator, balance))
+	}
+	inactive := activeValidatorWithIndex(2)
+	inactive.SetActivationEpoch(math.MaxUint64)
+	require.NoError(t, source.AddValidator(inactive, 32_000_000_000))
+	require.NoError(t, source.InitBeaconState())
+
+	rescanned, err := source.Copy()
+	require.NoError(t, err)
+	rescannedTotal := rescanned.GetTotalActiveBalance()
+	seeded, err := source.CopyWithTotalActiveBalance(rescannedTotal)
+	require.NoError(t, err)
+	require.Equal(t, rescannedTotal, seeded.GetTotalActiveBalance())
+	require.Equal(t, rescanned.BaseRewardPerIncrement(), seeded.BaseRewardPerIncrement())
+
+	clamped, err := source.CopyWithTotalActiveBalance(cfg.EffectiveBalanceIncrement - 1)
+	require.NoError(t, err)
+	require.Equal(t, cfg.EffectiveBalanceIncrement, clamped.GetTotalActiveBalance())
+}
 
 func TestGloasCopyIntoReusedSpareMatchesFreshDecode(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
