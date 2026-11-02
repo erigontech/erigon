@@ -77,6 +77,8 @@ type syncCommitteeMessagesService struct {
 
 	mu     sync.Mutex
 	poolMu sync.Mutex
+	// cleanedAtHeadSlot is the head slot of the last cleanup of seenSyncCommitteeMessages, guarded by poolMu.
+	cleanedAtHeadSlot uint64
 }
 
 type SyncCommitteeMessageForGossip struct {
@@ -160,11 +162,11 @@ func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *
 		}
 		return nil
 	}
-	s.cleanupOldSyncCommitteeMessages()
 	// One addition at a time holds a head-state view: an addition waiting for the pool inside a view would keep a
 	// head-state write, and every reader queued behind it, waiting.
 	s.poolMu.Lock()
 	defer s.poolMu.Unlock()
+	s.cleanupOldSyncCommitteeMessages()
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
 	}); err != nil {
@@ -259,9 +261,15 @@ func (s *syncCommitteeMessagesService) MarkPublished(subnet, slot, validatorInde
 	s.seenSyncCommitteeMessages.CompareAndSwap(key, verified, v)
 }
 
-// cleanupOldSyncCommitteeMessages removes old sync committee messages from the cache
+// cleanupOldSyncCommitteeMessages removes messages of slots before the previous one. Only messages of the current slot
+// are admitted, so entries go stale only when the head slot advances, and one cleanup per head slot is enough. The
+// caller holds poolMu.
 func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
+	if headSlot == s.cleanedAtHeadSlot {
+		return
+	}
+	s.cleanedAtHeadSlot = headSlot
 
 	entriesToRemove := []seenSyncCommitteeMessage{}
 	s.seenSyncCommitteeMessages.Range(func(key, value any) bool {

@@ -18,7 +18,9 @@ package services
 
 import (
 	"context"
+	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -528,25 +530,12 @@ func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
 	await(entered, done, "first addition in the pool")
 	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), other) }()
 	await(verified, done, "second message verified")
-	// From its verdict to the pool lock the second addition does not block, so this lets it reach that lock.
-	time.Sleep(50 * time.Millisecond)
+	waitForBlockedGoroutine(t, "sync.Mutex.Lock", "(*syncCommitteeMessagesService).storeVerifiedMessage")
 
 	published := make(chan error, 1)
 	go func() { published <- synced.OnHeadState(headState) }()
-	// While the first addition holds its view, a new view blocks only once the publication waits for the lock.
-	require.Eventually(t, func() bool {
-		viewed := make(chan struct{})
-		go func() {
-			_ = synced.ViewHeadState(func(*state.CachingBeaconState) error { return nil })
-			close(viewed)
-		}()
-		select {
-		case <-viewed:
-			return false
-		case <-time.After(20 * time.Millisecond):
-			return true
-		}
-	}, 5*time.Second, time.Millisecond, "head-state publication did not start waiting")
+	// A writer reported in this state has already turned away new readers and waits for the held view.
+	waitForBlockedGoroutine(t, "sync.RWMutex.Lock", "(*SyncedDataManager).publishHeadStateLocked")
 	releaseFirst()
 	select {
 	case err := <-published:
@@ -557,6 +546,22 @@ func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
 	releaseSecond()
 	require.NoError(t, <-done)
 	require.NoError(t, <-done)
+}
+
+// waitForBlockedGoroutine waits until a goroutine that has frame in its stack is blocked in state, as runtime.Stack
+// reports it.
+func waitForBlockedGoroutine(t *testing.T, state, frame string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		buf := make([]byte, 1<<22)
+		buf = buf[:runtime.Stack(buf, true)]
+		for goroutine := range strings.SplitSeq(string(buf), "\n\n") {
+			if strings.Contains(goroutine, "["+state) && strings.Contains(goroutine, frame) {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, time.Millisecond, "no goroutine blocked in %s at %s", state, frame)
 }
 
 func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, subnet, except uint64) uint64 {
@@ -573,4 +578,37 @@ func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, sub
 	}
 	t.Fatalf("no other validator on sync subnet %d", subnet)
 	return 0
+}
+
+// Entries go stale only when the head slot advances, so the seen map is cleaned once per head slot.
+func TestSyncCommitteesCleansStaleMessagesOncePerHeadSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	seen := &s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages
+	staleKey := func(validatorIndex uint64) seenSyncCommitteeMessage {
+		return seenSyncCommitteeMessage{slot: headState.Slot() - 2, validatorIndex: validatorIndex}
+	}
+	seen.Store(staleKey(1), verifiedSyncCommitteeMessage{})
+
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), msg))
+	_, kept := seen.Load(staleKey(1))
+	require.False(t, kept, "a stale entry outlived the first cleanup at this head slot")
+
+	seen.Store(staleKey(2), verifiedSyncCommitteeMessage{})
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), other))
+	_, kept = seen.Load(staleKey(2))
+	require.True(t, kept, "the seen map was scanned again at the same head slot")
 }
