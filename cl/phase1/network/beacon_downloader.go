@@ -373,6 +373,9 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 		for {
 			select {
 			case <-reqInterval.C:
+				if answeredEmpty.Load() && f.scanReachedCurrentSlot() {
+					continue
+				}
 				select {
 				case probeSlots <- struct{}{}:
 				default:
@@ -497,7 +500,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					break Loop
 				}
-				if answeredEmpty.Load() && f.scanReachedCurrentSlot() {
+				requestsMu.Lock()
+				probesDone := inFlightRequests == 0 && !responseAccepted
+				requestsMu.Unlock()
+				if probesDone && answeredEmpty.Load() && f.scanReachedCurrentSlot() {
 					return true
 				}
 				time.Sleep(forwardBeaconResponsePoll)

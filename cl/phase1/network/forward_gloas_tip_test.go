@@ -173,6 +173,49 @@ func TestForwardBeaconDownloaderNeedsEmptyAnswerAfterTip(t *testing.T) {
 	require.True(t, requestMoreWithin(t, downloader))
 }
 
+// The scan already reached the current slot. One probe answers empty while another is still bringing the successor,
+// so RequestMore must wait for that probe instead of reporting the tip.
+func TestForwardBeaconDownloaderWaitsForProbeInFlightAfterEmptyAnswer(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	forwardBeaconRequestInterval = time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval = previousInterval })
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	successor := makeGloasBlock(11, hash(0xbb), common.Hash{})
+	linkBeaconBlocks(t, tip, successor)
+	downloader := newHeldTipDownloader(t, gloasFromGenesisConfig(), nil, tip, "tip-peer")
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	emptyAnswered := make(chan struct{})
+	var calls atomic.Int32
+	downloader.requestBlocksByRange = func(ctx context.Context, _ uint64, _ uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		switch calls.Add(1) {
+		case 1:
+			select {
+			case <-emptyAnswered:
+			case <-ctx.Done():
+			}
+			time.Sleep(100 * time.Millisecond)
+			return []*cltypes.SignedBeaconBlock{successor}, "slow-peer", nil
+		case 2:
+			close(emptyAnswered)
+		}
+		return []*cltypes.SignedBeaconBlock{}, "empty-peer", nil
+	}
+	var processedTip atomic.Bool
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			if block == tip {
+				processedTip.Store(true)
+				highest = max(highest, block.Block.Slot)
+			}
+		}
+		return highest, nil
+	})
+
+	require.False(t, requestMoreWithin(t, downloader))
+	require.True(t, processedTip.Load())
+}
+
 // No completed slot follows a tip in the current slot, so there is nothing to ask about.
 func TestForwardBeaconDownloaderReportsGloasTipInCurrentSlot(t *testing.T) {
 	tip := makeGloasBlock(11, hash(0xaa), common.Hash{})
