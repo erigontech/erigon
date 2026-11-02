@@ -129,6 +129,7 @@ func endTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 		return nil
 	}
 	writes, err := ibs.FinalizedWrites(rules)
+	defer writes.ReleaseMaps() // the flush copies values into version-map cells
 	if err != nil {
 		return err
 	}
