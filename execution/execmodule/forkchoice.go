@@ -817,6 +817,42 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}()
 		}
 
+		if fcuAsyncCommitProbe {
+			sd, rt := currentContext, roTx
+			currentContext, roTx = nil, nil
+			handOffSemaphore(func() error {
+				defer func() {
+					if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+						dispatcher.PublishOverlay(nil)
+					}
+					sd.Close()
+				}()
+				timings, err := e.runForkchoiceFlushCommit(sd, rt)
+				if err != nil {
+					return err
+				}
+				if e.hook != nil {
+					if err := e.db.View(e.backgroundCtx, func(tx kv.Tx) error {
+						return e.hook.UpdateHead(tx, finishProgressBefore, isSynced)
+					}); err != nil {
+						return err
+					}
+				}
+				pruneTimings, _, err := e.runForkchoicePrune(initialCycle)
+				if err != nil {
+					return err
+				}
+				e.logTimings("Timings: Forkchoice (async)", append(timings, pruneTimings...))
+				return nil
+			})
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: headHash,
+				Status:          status,
+				ValidationError: validationError,
+			}, stateFlushingInParallel)
+			return nil
+		}
+
 		// Flush + commit: pass the outer roTx so it gets released between
 		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
 		persistStart := time.Now()
@@ -868,6 +904,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 // runPostForkchoice runs the background FCU prune. Flush+commit and the
 // notification dispatch have already run inline.
+var fcuAsyncCommitProbe = dbg.EnvBool("FCU_ASYNC_COMMIT", false)
+
 func (e *ExecModule) runPostForkchoice(initialCycle bool) error {
 	timings, _, err := e.runForkchoicePrune(initialCycle)
 	if err != nil {
