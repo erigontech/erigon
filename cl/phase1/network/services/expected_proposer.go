@@ -43,6 +43,7 @@ type expectedProposerKey struct {
 // expectedProposers reads the expected proposer of a slot on the branch of a parent block. All sidecars of a block
 // share its parent and slot, so each pair is read once.
 type expectedProposers struct {
+	ctx        context.Context
 	cfg        *clparams.BeaconChainConfig
 	forkChoice forkchoice.ForkChoiceStorage
 	results    *lru.Cache[expectedProposerKey, uint64]
@@ -50,12 +51,13 @@ type expectedProposers struct {
 	rebuilds   chan struct{}
 }
 
-func newExpectedProposers(cfg *clparams.BeaconChainConfig, forkChoice forkchoice.ForkChoiceStorage) *expectedProposers {
+func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, forkChoice forkchoice.ForkChoiceStorage) *expectedProposers {
 	results, err := lru.New[expectedProposerKey, uint64]("sidecarExpectedProposers", 64)
 	if err != nil {
 		panic(err)
 	}
 	return &expectedProposers{
+		ctx:        ctx,
 		cfg:        cfg,
 		forkChoice: forkChoice,
 		results:    results,
@@ -67,26 +69,34 @@ func newExpectedProposers(cfg *clparams.BeaconChainConfig, forkChoice forkchoice
 // state advanced to slot. The parent state fork choice holds is read in place when it already gives the proposer.
 // Any other parent state is rebuilt, a bounded number at a time; a read that waits longer than a slot for its turn,
 // or whose parent state is gone, ignores the sidecar.
+//
+// The sidecars of a block share one read. It runs under the service context, not a caller's, so one canceled
+// validation does not fail the others; each caller waits for it under its own context.
 func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	key := expectedProposerKey{parentRoot: parentRoot, slot: slot}
 	if proposer, ok := e.results.Get(key); ok {
 		return proposer, nil
 	}
-	proposer, err, _ := e.reads.Do(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (any, error) {
+	read := e.reads.DoChan(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (any, error) {
 		if proposer, ok := e.results.Get(key); ok {
 			return proposer, nil
 		}
-		proposer, err := e.read(ctx, parentRoot, parentSlot, slot)
+		proposer, err := e.read(e.ctx, parentRoot, parentSlot, slot)
 		if err != nil {
 			return uint64(0), err
 		}
 		e.results.Add(key, proposer)
 		return proposer, nil
 	})
-	if err != nil {
-		return 0, err
+	select {
+	case res := <-read:
+		if res.Err != nil {
+			return 0, res.Err
+		}
+		return res.Val.(uint64), nil
+	case <-ctx.Done():
+		return 0, fmt.Errorf("%w: expected proposer read canceled: %w", ErrIgnore, ctx.Err())
 	}
-	return proposer.(uint64), nil
 }
 
 func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
@@ -122,7 +132,7 @@ func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, pa
 	case <-wait.C:
 		return 0, fmt.Errorf("%w: no parent state rebuild for the expected proposer within a slot", ErrIgnore)
 	case <-ctx.Done():
-		return 0, fmt.Errorf("%w: expected proposer read canceled: %w", ErrIgnore, ctx.Err())
+		return 0, fmt.Errorf("%w: expected proposer read stopped: %w", ErrIgnore, ctx.Err())
 	}
 	defer func() { <-e.rebuilds }()
 

@@ -17,6 +17,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -63,7 +64,7 @@ func TestExpectedProposerIsReadFromTheHeldParentStateOnce(t *testing.T) {
 		t.Error("parent state rebuilt although fork choice holds it")
 		return nil, nil
 	}
-	proposers := newExpectedProposers(cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
 
 	for range 2 {
 		got, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
@@ -95,7 +96,7 @@ func TestExpectedProposerOfTheNextEpochIsReadFromTheFuluLookahead(t *testing.T) 
 		return nil, nil
 	}
 
-	got, err := newExpectedProposers(&cfg, fc).get(t.Context(), testParentRootForProposer, parentSlot, parentSlot+3)
+	got, err := newExpectedProposers(t.Context(), &cfg, fc).get(t.Context(), testParentRootForProposer, parentSlot, parentSlot+3)
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(1000+cfg.SlotsPerEpoch+2), got)
@@ -113,7 +114,7 @@ func TestExpectedProposerOfALaterEpochIsComputedFromTheAdvancedParent(t *testing
 	fc.StateAtBlockRootVal[testParentRootForProposer] = parentState
 	parentSlot := parentState.Slot()
 
-	got, err := newExpectedProposers(cfg, fc).get(t.Context(), testParentRootForProposer, parentSlot, slot)
+	got, err := newExpectedProposers(t.Context(), cfg, fc).get(t.Context(), testParentRootForProposer, parentSlot, slot)
 
 	require.NoError(t, err)
 	require.Equal(t, want, got)
@@ -142,7 +143,7 @@ func TestExpectedProposerAcrossTheElectraFuluBoundary(t *testing.T) {
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
 	fc.StateAtBlockRootVal[testParentRootForProposer] = parentState
 
-	got, err := newExpectedProposers(&cfg, fc).get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+	got, err := newExpectedProposers(t.Context(), &cfg, fc).get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
 
 	require.NoError(t, err)
 	require.Equal(t, want, got)
@@ -156,7 +157,7 @@ func TestExpectedProposerWithoutAParentStateIsIgnoredAndNotCached(t *testing.T) 
 	fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		return nil, errors.New("state not found")
 	}
-	proposers := newExpectedProposers(cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
 
 	_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
 	require.ErrorIs(t, err, ErrIgnore)
@@ -193,7 +194,7 @@ func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 		<-release
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(&cfg, fc)
+	proposers := newExpectedProposers(t.Context(), &cfg, fc)
 	get := func(root common.Hash) <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -234,5 +235,119 @@ func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 	require.NoError(t, <-waiting, "a read over the budget did not wait for a rebuild to finish")
 	for _, done := range running {
 		require.NoError(t, <-done)
+	}
+}
+
+// Every sidecar of a block waits for the same shared read, each under its own context: a canceled validation stops
+// waiting at once, and the others, the first one's included, still get the proposer.
+func TestExpectedProposerWaitersFollowTheirOwnContext(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	slot := (state.Epoch(parentState)+1)*cfg.SlotsPerEpoch - 1
+	want, err := parentState.GetBeaconProposerIndexForSlot(slot)
+	require.NoError(t, err)
+	started, release := make(chan struct{}), make(chan struct{})
+	releaseRead := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseRead)
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		close(started)
+		<-release
+		return fn(parentState)
+	}
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	get := func(ctx context.Context) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			got, err := proposers.get(ctx, testParentRootForProposer, parentState.Slot(), slot)
+			if err == nil && got != want {
+				err = errors.New("wrong proposer")
+			}
+			done <- err
+		}()
+		return done
+	}
+
+	firstCtx, cancelFirst := context.WithCancel(t.Context())
+	first := get(firstCtx)
+	<-started
+	secondCtx, cancelSecond := context.WithCancel(t.Context())
+	second := get(secondCtx)
+	third := get(t.Context())
+
+	cancelSecond()
+	select {
+	case err := <-second:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled validation kept waiting for the shared read")
+	}
+	cancelFirst()
+	select {
+	case err := <-first:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the canceled first validation kept waiting for the shared read")
+	}
+
+	releaseRead()
+	require.NoError(t, <-third, "the first validation's cancellation failed the other waiters")
+	got, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+	require.NoError(t, err)
+	require.Equal(t, want, got, "the shared read was not cached")
+}
+
+// A shared read that waits for a rebuild permit is not stopped when the validation that started it is canceled: the
+// other sidecars of the block still get the proposer once a permit frees.
+func TestExpectedProposerSharedReadOutlivesTheFirstWaitersCancellation(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	slot := (state.Epoch(parentState)+1)*cfg.SlotsPerEpoch - 1
+	want, err := parentState.GetBeaconProposerIndexForSlot(slot)
+	require.NoError(t, err)
+	holding, release := make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds), make(chan struct{})
+	releaseRebuilds := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseRebuilds)
+	shared := common.Hash{0xaa}
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+		if root != shared {
+			holding <- struct{}{}
+			<-release
+		}
+		return fn(parentState)
+	}
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	get := func(ctx context.Context, root common.Hash) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			got, err := proposers.get(ctx, root, parentState.Slot(), slot)
+			if err == nil && got != want {
+				err = errors.New("wrong proposer")
+			}
+			done <- err
+		}()
+		return done
+	}
+	for i := range maxConcurrentSidecarProposerStateRebuilds {
+		get(t.Context(), common.Hash{byte(i + 1)})
+		<-holding
+	}
+
+	firstCtx, cancelFirst := context.WithCancel(t.Context())
+	first := get(firstCtx, shared)
+	// Lets the first read reach the permit wait and the second join it; if they have not, the test passes anyway.
+	time.Sleep(50 * time.Millisecond)
+	second := get(t.Context(), shared)
+	time.Sleep(50 * time.Millisecond)
+	cancelFirst()
+	require.ErrorIs(t, <-first, ErrIgnore)
+
+	releaseRebuilds()
+	select {
+	case err := <-second:
+		require.NoError(t, err, "canceling the first validation stopped the shared read")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shared read did not finish")
 	}
 }
