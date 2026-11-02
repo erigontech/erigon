@@ -9,11 +9,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func encodeHashListRequest(hashes []common.Hash, limit int) ([]byte, error) {
@@ -99,14 +101,35 @@ func decodeBuiltPayload(buf []byte, version clparams.StateVersion) (*engine_type
 	return resp, nil
 }
 
-func decodeBodiesResponse(buf []byte, version clparams.StateVersion) ([]*sszBodyEntry, error) {
+func withdrawalsFromSSZList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdrawal {
+	out := make([]*types.Withdrawal, 0, l.Len())
+	l.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
+		out = append(out, &types.Withdrawal{Index: hexutil.Uint64(w.Index), Validator: hexutil.Uint64(w.Validator), Address: w.Address, Amount: hexutil.Uint64(w.Amount)})
+		return true
+	})
+	return out
+}
+
+type decodedBodyEntry struct {
+	Available       bool
+	Transactions    []hexutil.Bytes
+	Withdrawals     []*types.Withdrawal
+	BlockAccessList hexutil.Bytes
+}
+
+func decodeBodiesResponse(buf []byte, version clparams.StateVersion) ([]*decodedBodyEntry, error) {
 	entries := solid.NewDynamicListSSZ[*sszBodyEntry](sszMaxBodiesRequest)
 	if err := ssz2.UnmarshalSSZ(buf, int(version), entries); err != nil {
 		return nil, err
 	}
-	out := make([]*sszBodyEntry, 0, entries.Len())
+	out := make([]*decodedBodyEntry, 0, entries.Len())
 	entries.Range(func(_ int, e *sszBodyEntry, _ int) bool {
-		out = append(out, e)
+		out = append(out, &decodedBodyEntry{
+			Available:       e.Available,
+			Transactions:    transactionsBytes(e.Body.transactions),
+			Withdrawals:     withdrawalsFromSSZList(e.Body.withdrawals),
+			BlockAccessList: e.Body.blockAccessList.Bytes(),
+		})
 		return true
 	})
 	return out, nil

@@ -268,15 +268,6 @@ func newWithdrawalListSSZ(withdrawals []*types.Withdrawal) *solid.ListSSZ[*cltyp
 	return l
 }
 
-func withdrawalsFromSSZList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdrawal {
-	out := make([]*types.Withdrawal, 0, l.Len())
-	l.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
-		out = append(out, &types.Withdrawal{Index: hexutil.Uint64(w.Index), Validator: hexutil.Uint64(w.Validator), Address: w.Address, Amount: hexutil.Uint64(w.Amount)})
-		return true
-	})
-	return out
-}
-
 // sszPayloadBody is the fork-scoped ExecutionPayloadBody: withdrawals exist
 // since Shanghai and block_access_list since Amsterdam.
 type sszPayloadBody struct {
@@ -333,54 +324,23 @@ func (b *sszPayloadBody) Clone() clonable.Clonable { return newSSZPayloadBody(b.
 // sszBodyEntry is BodyEntry {available: boolean, body: ExecutionPayloadBody}.
 // Unavailable entries must have a zero-valued body.
 type sszBodyEntry struct {
-	Available       bool
-	Transactions    []hexutil.Bytes
-	Withdrawals     []*types.Withdrawal
-	BlockAccessList hexutil.Bytes
-	version         clparams.StateVersion
+	Available bool
+	Body      *sszPayloadBody
 }
 
 func (e *sszBodyEntry) Static() bool { return false }
 
-func (e *sszBodyEntry) body() (*sszPayloadBody, error) {
-	body := newSSZPayloadBody(e.version)
-	body.transactions = newTransactionsSSZ(e.Transactions)
-	body.withdrawals = newWithdrawalListSSZ(e.Withdrawals)
-	if err := body.blockAccessList.SetBytes(e.BlockAccessList); err != nil {
-		return nil, err
-	}
-	return body, nil
-}
-
 func (e *sszBodyEntry) EncodeSSZ(dst []byte) ([]byte, error) {
-	body, err := e.body()
-	if err != nil {
-		return nil, err
-	}
-	return ssz2.MarshalSSZ(dst, e.Available, body)
+	return ssz2.MarshalSSZ(dst, e.Available, e.Body)
 }
 
 func (e *sszBodyEntry) DecodeSSZ(buf []byte, version int) error {
-	e.version = clparams.StateVersion(version)
-	body := newSSZPayloadBody(e.version)
-	if err := ssz2.UnmarshalSSZ(buf, version, &e.Available, body); err != nil {
-		return err
-	}
-	e.Transactions = transactionsBytes(body.transactions)
-	e.Withdrawals = withdrawalsFromSSZList(body.withdrawals)
-	e.BlockAccessList = body.blockAccessList.Bytes()
-	return nil
+	e.Body = newSSZPayloadBody(clparams.StateVersion(version))
+	return ssz2.UnmarshalSSZ(buf, version, &e.Available, e.Body)
 }
 
 func (e *sszBodyEntry) EncodingSizeSSZ() int {
-	size := 1 + 4 + 4 + newTransactionsSSZ(e.Transactions).EncodingSizeSSZ()
-	if e.version >= clparams.CapellaVersion {
-		size += 4 + len(e.Withdrawals)*sszWithdrawalBytes
-	}
-	if e.version >= clparams.GloasVersion {
-		size += 4 + len(e.BlockAccessList)
-	}
-	return size
+	return 1 + sszContainerOffsetBytes + e.Body.EncodingSizeSSZ()
 }
 
 func (e *sszBodyEntry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
@@ -393,13 +353,15 @@ func (*sszBodyEntry) Clone() clonable.Clonable { return &sszBodyEntry{} }
 func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version clparams.StateVersion) ([]byte, error) {
 	entries := solid.NewDynamicListSSZ[*sszBodyEntry](sszMaxBodiesRequest)
 	for _, body := range bodies {
-		entry := &sszBodyEntry{version: version}
+		entry := &sszBodyEntry{Body: newSSZPayloadBody(version)}
 		if body != nil && (version < clparams.GloasVersion || body.BlockAccessList != nil) {
 			entry.Available = true
-			entry.Transactions = body.Transactions
-			entry.Withdrawals = body.Withdrawals
+			entry.Body.transactions = newTransactionsSSZ(body.Transactions)
+			entry.Body.withdrawals = newWithdrawalListSSZ(body.Withdrawals)
 			if body.BlockAccessList != nil {
-				entry.BlockAccessList = *body.BlockAccessList
+				if err := entry.Body.blockAccessList.SetBytes(*body.BlockAccessList); err != nil {
+					return nil, err
+				}
 			}
 		}
 		entries.Append(entry)
