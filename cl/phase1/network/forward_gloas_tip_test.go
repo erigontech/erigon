@@ -449,6 +449,38 @@ func TestForwardBeaconDownloaderHTTPFallbackReportsGloasTip(t *testing.T) {
 	require.True(t, requestMoreWithin(t, downloader))
 }
 
+// The scan reached the current slot and one probe answered empty while another is still running, so the beacon API
+// fallback must not start a request that RequestMore would then wait for.
+func TestForwardBeaconDownloaderStartsNoHTTPFallbackAfterEmptyAnswerAtCurrentSlot(t *testing.T) {
+	previousInterval, previousDelay := forwardBeaconRequestInterval, forwardBeaconFallbackDelay
+	forwardBeaconRequestInterval, forwardBeaconFallbackDelay = time.Millisecond, 150*time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval, forwardBeaconFallbackDelay = previousInterval, previousDelay })
+
+	var httpCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	downloader := newHeldTipDownloader(t, gloasFromGenesisConfig(), nil, tip, "tip-peer")
+	downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	var calls atomic.Int32
+	downloader.requestBlocksByRange = func(ctx context.Context, _ uint64, _ uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		if calls.Add(1) == 1 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+		return []*cltypes.SignedBeaconBlock{}, "range-peer", nil
+	}
+
+	require.True(t, requestMoreWithin(t, downloader))
+	require.Zero(t, httpCalls.Load(), "HTTP fallback started after the empty answer at the current slot")
+}
+
 func TestForwardBeaconDownloaderReportsNoTipWithoutGloasLookahead(t *testing.T) {
 	previousInterval, previousTimeout := forwardBeaconRequestInterval, forwardBeaconRequestTimeout
 	forwardBeaconRequestInterval, forwardBeaconRequestTimeout = time.Millisecond, 100*time.Millisecond

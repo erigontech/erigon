@@ -293,7 +293,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 			}
 		}
 		startHTTPFallback := func() {
-			if f.httpFallbackURL == "" || !httpFallbackRunning.CompareAndSwap(false, true) {
+			if f.httpFallbackURL == "" || answeredEmpty.Load() && f.scanReachedCurrentSlot() || !httpFallbackRunning.CompareAndSwap(false, true) {
 				return
 			}
 			if !beginRequest() {
