@@ -66,6 +66,8 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
 	probeApply time.Duration
+	probeArr   []time.Time
+	probeDone  []time.Time
 	probeTxs   int
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
@@ -363,6 +365,10 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
+		if logNpPhases {
+			cc.probeArr = append(cc.probeArr, time.Now())
+			defer func() { cc.probeDone = append(cc.probeDone, time.Now()) }()
+		}
 		// Pin asOfReader at this tx's txNum before ApplyWrites so a first-touch
 		// lazy-load reads the canonical pre-tx state via GetAsOf(r.txNum).
 		// Otherwise the initial txNum=0 leaks into the first lazy-load and crashes
@@ -456,7 +462,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			residual := stageWall - execActive - commitActive + overlap - gap
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
-				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs)
+				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
+				"arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
+			cc.probeArr, cc.probeDone = cc.probeArr[:0], cc.probeDone[:0]
 			cc.probeApply, cc.probeTxs = 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
@@ -1022,3 +1030,12 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed
 // tx, so every read resolves on the worker's own tx and the fold need not serialize.
 func (r *asOfStateReader) BindsWorkerTx() bool { return true }
+
+func probeHist(ts []time.Time, start time.Time) string {
+	var b [16]int
+	for _, t := range ts {
+		i := int(t.Sub(start) / (100 * time.Millisecond))
+		b[min(max(i, 0), 15)]++
+	}
+	return fmt.Sprint(b)
+}
