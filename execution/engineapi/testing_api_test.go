@@ -65,6 +65,9 @@ type stubExecutionModule struct {
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
+
+	getPayloadBodiesByHashFunc  func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
+	getPayloadBodiesByRangeFunc func(ctx context.Context, start, count uint64) ([]*execmodule.PayloadBody, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -149,11 +152,17 @@ func (s *stubExecutionModule) GetBodiesByHashes(_ context.Context, _ []common.Ha
 	return nil, nil
 }
 
-func (s *stubExecutionModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
+func (s *stubExecutionModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
+	if s.getPayloadBodiesByHashFunc != nil {
+		return s.getPayloadBodiesByHashFunc(ctx, hashes)
+	}
 	return nil, nil
 }
 
-func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
+func (s *stubExecutionModule) GetPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*execmodule.PayloadBody, error) {
+	if s.getPayloadBodiesByRangeFunc != nil {
+		return s.getPayloadBodiesByRangeFunc(ctx, start, count)
+	}
 	return nil, nil
 }
 

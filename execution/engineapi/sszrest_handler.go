@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -408,23 +409,28 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 			fmt.Sprintf("invalid from or count, from: %d count: %d", from, count))
 		return
 	}
-	bodies, err := e.chainRW.GetPayloadBodiesByRange(r.Context(), from, count)
-	if err != nil {
-		writeEngineProblem(w, err)
-		return
-	}
-	// Canonical headers distinguish trailing unavailable bodies from blocks past head.
-	entries := make([]*engine_types.ExecutionPayloadBodyV2, 0, count)
+	// Pin each body to the header used for fork filtering, even if the canonical
+	// chain changes between reads.
+	hashes := make([]common.Hash, 0, count)
+	timestamps := make([]uint64, 0, count)
 	for i := range count {
 		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
 		if header == nil {
 			break
 		}
-		var body *engine_types.ExecutionPayloadBodyV2
-		if i < uint64(len(bodies)) && bodies[i] != nil && forkNameAtTime(e.config, header.Time) == forkName {
-			body = bodies[i]
+		hashes = append(hashes, header.Hash())
+		timestamps = append(timestamps, header.Time)
+	}
+	bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), hashes)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
+	}
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(hashes))
+	for i, timestamp := range timestamps {
+		if i < len(bodies) && forkNameAtTime(e.config, timestamp) == forkName {
+			entries[i] = bodies[i]
 		}
-		entries = append(entries, body)
 	}
 	out, err := encodeBodiesResponse(entries, version)
 	if err != nil {

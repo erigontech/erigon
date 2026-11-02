@@ -601,6 +601,61 @@ func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
 	}
 }
 
+func TestSSZRESTBodiesByRangeReorg(t *testing.T) {
+	for _, tc := range []struct {
+		fork      string
+		version   clparams.StateVersion
+		available bool
+	}{
+		{"shanghai", clparams.CapellaVersion, true},
+		{"cancun", clparams.DenebVersion, false},
+	} {
+		t.Run(tc.fork, func(t *testing.T) {
+			shanghai := &types.Header{Number: *uint256.NewInt(10), Time: 199}
+			cancun := &types.Header{Number: *uint256.NewInt(10), Time: 200}
+			canonical := shanghai
+			bodies := map[common.Hash]*execmodule.PayloadBody{
+				shanghai.Hash(): {Transactions: [][]byte{{0x01}}},
+				cancun.Hash():   {Transactions: [][]byte{{0x02}}},
+			}
+			module := &stubExecutionModule{
+				getHeaderFunc: func(_ context.Context, _ *common.Hash, _ *uint64) (*types.Header, error) {
+					header := canonical
+					canonical = cancun
+					return header, nil
+				},
+				getPayloadBodiesByRangeFunc: func(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
+					body := bodies[canonical.Hash()]
+					canonical = cancun
+					return []*execmodule.PayloadBody{body}, nil
+				},
+				getPayloadBodiesByHashFunc: func(_ context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
+					result := make([]*execmodule.PayloadBody, len(hashes))
+					for i, hash := range hashes {
+						result[i] = bodies[hash]
+					}
+					return result, nil
+				},
+			}
+			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec,
+				newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=1", tc.fork, nil))
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			entries, err := decodeBodiesResponse(rec.Body.Bytes(), tc.version)
+			require.NoError(t, err)
+			require.Len(t, entries, 1)
+			require.Equal(t, tc.available, entries[0].Available)
+			if tc.available {
+				require.Equal(t, []hexutil.Bytes{{0x01}}, entries[0].Transactions)
+			} else {
+				require.Empty(t, entries[0].Transactions)
+			}
+		})
+	}
+}
+
 func TestSSZRESTBodiesByRangePreservesTrailingUnavailableBody(t *testing.T) {
 	const (
 		from      = uint64(10)
