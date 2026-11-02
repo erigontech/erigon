@@ -831,12 +831,16 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
-	for _, ws := range sd.pastDomainWriters {
+	for di, ws := range sd.pastDomainWriters {
+		t0 := time.Now()
 		for _, w := range slices.Backward(ws) {
 			if err := w.Flush(ctx, tx); err != nil {
 				return err
 			}
 			w.Close()
+		}
+		if flushSplitTrace && len(ws) > 0 {
+			log.Info("[flush] past domain", "domain", kv.Domain(di), "writers", len(ws), "took", time.Since(t0))
 		}
 	}
 	for di, w := range sd.domainWriters {
@@ -853,11 +857,15 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		aggTx.d[di].closeValsCursor() // TODO: why?
 		w.Close()
 	}
+	t0 := time.Now()
 	for _, writer := range slices.Backward(sd.pastIIWriters) {
 		if err := writer.Flush(ctx, tx); err != nil {
 			return err
 		}
 		writer.close()
+	}
+	if flushSplitTrace {
+		log.Info("[flush] past ii", "writers", len(sd.pastIIWriters), "took", time.Since(t0))
 	}
 	for ii, w := range sd.iiWriters {
 		if w == nil {
