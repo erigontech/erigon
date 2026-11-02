@@ -1086,3 +1086,77 @@ func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(95), acc.Balance)
 	require.Equal(t, uint64(6), acc.Nonce, "the nonce committed by the block's earlier tx comes from the base")
 }
+
+// computeBlockFromBAL must map the step edge to the right BAL index: the checkpoint folds a key rewritten after the edge at its pre-edge value.
+func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	const firstTxNum, lastTxNum, edgeTxNum = uint64(11), uint64(20), uint64(15)
+
+	db, tx, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	rnd := rand.New(rand.NewSource(42))
+	key := make([]byte, length.Addr)
+	rnd.Read(key)
+	accountValues := map[string][]byte{}
+	var bList types.BlockAccessList
+	put := func(addrBytes []byte, txNum uint64, balV uint256.Int) []byte {
+		acc := accounts.Account{Nonce: txNum, Balance: balV, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		return buf
+	}
+	for txNum := firstTxNum; txNum <= lastTxNum; txNum++ {
+		addrBytes := key
+		if txNum != firstTxNum && txNum != lastTxNum-1 {
+			addrBytes = make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+		}
+		balV := *uint256.NewInt(txNum * 1000)
+		buf := put(addrBytes, txNum, balV)
+		if txNum <= edgeTxNum {
+			accountValues[string(addrBytes)] = buf
+		}
+		idx := uint32(txNum - firstTxNum)
+		bList = append(bList, types.AccountChanges{
+			Address:        [20]byte(addrBytes),
+			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
+			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
+		})
+	}
+	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: firstTxNum, lastTxNum: lastTxNum, stateRoot: common.Hash{0xde, 0xad}, bal: bList})
+	require.NoError(t, doms.Flush(ctx, tx))
+
+	it, err := tx.RangeAsOf(kv.CommitmentDomain, nil, nil, 1000, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	storageValues := map[string][]byte{}
+	checked := 0
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		v, ok, err := doms.GetAsOf(kv.CommitmentDomain, k, edgeTxNum+1)
+		require.NoError(t, err)
+		if !ok {
+			continue
+		}
+		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
+			"checkpoint branch %x at the step edge must hash the pre-edge value of the rewritten key", k)
+		checked++
+	}
+	require.Positive(t, checked)
+}

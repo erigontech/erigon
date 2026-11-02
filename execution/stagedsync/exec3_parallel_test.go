@@ -1969,3 +1969,27 @@ func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
 	lc, _, _, _ := pe.blockExecutors[1].versionMap.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc)
 }
+
+// processRequest must map a mid-block step edge to the right TxIndex: a view at the edge excludes the later write.
+func TestProcessRequestSetsVersionMapBase(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a6"))
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{
+		{Index: 1, Value: *uint256.NewInt(100)},
+		{Index: 6, Value: *uint256.NewInt(600)},
+	}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	task := &exec.TxTask{Header: header, Config: config, TxNum: 11, TxIndex: 0}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+
+	const edgeTxNum = 15
+	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())
+	acc, ok := view.GetAccount(addr)
+	require.NoError(t, view.Err())
+	require.True(t, ok)
+	require.Equal(t, uint64(100), acc.Balance.Uint64(), "view at the step edge must not include the write at txNum 17")
+}

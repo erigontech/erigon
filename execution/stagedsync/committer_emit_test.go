@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -177,6 +178,28 @@ func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
 		state.NewVersionMapWriteView(wsA, vmA, txIdx), state.NewVersionMapWriteView(wsB, vmB, txIdx))[string(av[:])]
 	require.Equal(t, *uint256.NewInt(7), got.Balance)
 	require.True(t, got.DeleteStorageSubtree, "a destruct in an earlier batch block must reset the storage subtree")
+}
+
+// An EIP-161 removal seeded from the BAL reaches no tx write-set, so an account re-funded
+// later in the block must still reset its storage subtree.
+func TestEmitTouched_SeededRemovalThenRevivalResetsStorage(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress([20]byte{0x5e})
+	av := addr.Value()
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(3)
+	base := newMapStateReader()
+	base.accounts[addr] = &baseAcc
+	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}, {Index: 2, Value: *uint256.NewInt(5)}}}}
+	vm := state.NewVersionMap(bal)
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+
+	refund := newWS().bal(addr, state.Version{TxIndex: 1}, *uint256.NewInt(5)).build()
+	got := emitTouchedUpdates(t, vm, 3, base, state.NewVersionMapWriteView(refund, vm, 1))[string(av[:])]
+	require.Equal(t, *uint256.NewInt(5), got.Balance)
+	require.True(t, got.DeleteStorageSubtree, "a seeded removal must reset the storage subtree of the revived account")
 }
 
 // TestEmitTouched_ZeroCodeHashFoldsAsEmpty pins that an account record carrying the
