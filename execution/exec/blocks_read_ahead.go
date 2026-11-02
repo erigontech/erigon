@@ -406,13 +406,16 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var slot accounts.StorageKey
-		if slotIndex < storageChanges {
-			slot = account.StorageChanges[slotIndex].Slot
-		} else {
-			slot = accounts.InternKey(account.StorageReads[slotIndex-storageChanges])
+		var err error
+		switch {
+		case slotIndex < storageChanges:
+			_, _, err = stateReader.ReadAccountStorage(address, account.StorageChanges[slotIndex].Slot)
+		case warmInternsReads:
+			_, _, err = stateReader.ReadAccountStorage(address, accounts.InternKey(account.StorageReads[slotIndex-storageChanges]))
+		default:
+			_, _, err = stateReader.ReadAccountStorageValue(address, account.StorageReads[slotIndex-storageChanges])
 		}
-		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
+		if err != nil {
 			return err
 		}
 	}
@@ -751,3 +754,5 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 
 	return nil
 }
+
+var warmInternsReads = dbg.EnvBool("BAL_WARM_INTERN", false)

@@ -918,8 +918,16 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	res, ok, err := r.ReadAccountStorageValue(address, key.Value())
+	if r.trace {
+		r.traceReadAccountStorage(address, key, nil, res)
+	}
+	return res, ok, err
+}
+
+// ReadAccountStorageValue is ReadAccountStorage for a slot that is not interned.
+func (r *ReaderV3) ReadAccountStorageValue(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
 	addressValue := address.Value()
-	keyValue := key.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
@@ -931,10 +939,6 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	var res uint256.Int
 	if ok {
 		(&res).SetBytes(enc)
-	}
-
-	if r.trace {
-		r.traceReadAccountStorage(address, key, enc, res)
 	}
 
 	return res, ok, err
