@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -591,7 +592,7 @@ func TestValidateCurrentRootWithStreamedStorage(t *testing.T) {
 	c := New(cfg)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	acc, loc := common.Address{1}, common.Hash{2}
-	slot := append(acc[:], loc[:]...)
+	slot := slices.Concat(acc[:], loc[:])
 
 	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
@@ -635,7 +636,7 @@ func TestStorageChangedByNextBlockIsNotStale(t *testing.T) {
 	c := New(cfg)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	acc, loc := common.Address{1}, common.Hash{2}
-	slot := append(acc[:], loc[:]...)
+	slot := slices.Concat(acc[:], loc[:])
 	put := func(v byte, txNum uint64) {
 		require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			d, err := execctx.NewSharedDomains(ctx, tx, log.New())
