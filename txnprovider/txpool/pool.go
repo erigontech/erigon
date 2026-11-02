@@ -369,7 +369,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 	if len(frames.unwound.Txns) > 0 {
-		_, err = p.addNewTxns(ctx, frames.unwound, nil)
+		_, err = p.addNewTxns(ctx, frames.unwound, nil, false)
 	}
 	return err
 }
@@ -1620,10 +1620,12 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	return p.addNewTxns(ctx, newTxns, nil)
+	return p.addNewTxns(ctx, newTxns, nil, true)
 }
 
-func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
+// State-update processing must disable waitForHead so it can continue delivering
+// the notifications needed to retry a backend head mismatch.
+func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForHead bool) ([]txpoolcfg.DiscardReason, error) {
 	reasons, err := p.prepareAuthorizations(ctx, newTxns)
 	if err != nil {
 		return nil, err
@@ -1636,7 +1638,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 		defer cancel()
 	}
 	for {
-		frames := p.prepareFrames(simulationCtx, newTxns)
+		frames := p.prepareFrames(simulationCtx, newTxns, waitForHead)
 		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons)
 			if err != nil {
@@ -2898,7 +2900,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 }
 
 func (p *TxPool) restoreSenderFromDB(ctx context.Context, txns TxnSlots) error {
-	reasons, err := p.addNewTxns(ctx, txns, nil)
+	reasons, err := p.addNewTxns(ctx, txns, nil, false)
 	if err != nil {
 		return err
 	}

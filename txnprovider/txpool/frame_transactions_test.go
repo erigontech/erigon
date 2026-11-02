@@ -733,6 +733,78 @@ func TestFramePoolValidationPinsHead(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 }
 
+func TestFramePoolAdmissionWaitsForHeadNotification(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		name := "remote"
+		if local {
+			name = "local"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, pool, sender := keyedFramePoolEnv(t)
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				oldHead, newHead := common.Hash{1}, common.Hash{2}
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(oldHead, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				backend := pool.ethBackend.(*frameValidationBackend)
+				var heads []common.Hash
+				var deadlines []time.Time
+				pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+					head := common.Hash(gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash))
+					heads = append(heads, head)
+					deadline, _ := ctx.Deadline()
+					deadlines = append(deadlines, deadline)
+					if head != newHead {
+						return nil, status.Error(codes.Aborted, "frame validation head changed")
+					}
+					return backend.FrameValidation(ctx, req)
+				}}
+				frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+				var txns TxnSlots
+				txns.Append(frame, sender[:], local)
+				var reasons []txpoolcfg.DiscardReason
+				var err error
+				done := make(chan struct{})
+				if local {
+					go func() {
+						defer close(done)
+						reasons, err = pool.AddLocalTxns(ctx, txns)
+					}()
+				} else {
+					pool.started.Store(true)
+					pool.AddRemoteTxns(ctx, txns, nil, nil)
+					require.NoError(t, pool.processRemoteTxns(ctx))
+					go func() {
+						defer close(done)
+						pool.processRemoteFrame(ctx, <-pool.remoteFrames.ready)
+					}()
+				}
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Fatal("admission returned before the pool received the new head")
+				default:
+				}
+				require.Equal(t, []common.Hash{oldHead}, heads, "wait for the notification instead of repeating requests against the old head")
+				require.Empty(t, pool.frameValidationGate, "waiting for state must release the simulation gate")
+				require.True(t, pool.lock.TryLock(), "waiting for state must release the pool lock")
+				pool.lock.Unlock()
+				time.Sleep(time.Second)
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(newHead, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				<-done
+				require.NoError(t, err)
+				if local {
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				}
+				require.Equal(t, []common.Hash{oldHead, newHead}, heads)
+				require.Equal(t, deadlines[0], deadlines[1], "a head change must not restart the admission deadline")
+				require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+				require.Empty(t, pool.remoteFrames.pending)
+			})
+		})
+	}
+}
+
 func TestFramePoolValidationBatchDeadline(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
@@ -745,6 +817,49 @@ func TestFramePoolValidationBatchDeadline(t *testing.T) {
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
 	require.Len(t, backend.deadlines, 2)
 	require.Equal(t, backend.deadlines[0], backend.deadlines[1], "one slow batch must not get a new timeout for every frame")
+}
+
+func TestFramePoolHeadNotificationTimeout(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.err = status.Error(codes.Aborted, "frame validation head changed")
+	var txns TxnSlots
+	for _, address := range []common.Address{sender, {2}} {
+		txns.Append(framePoolSlot(t, address, 1, 2, uint256.Int{1}), address[:], true)
+	}
+	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	ordinary.IDHash[0] = 2
+	txns.Append(ordinary, sender[:], true)
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		reasons, err := pool.AddLocalTxns(t.Context(), txns)
+		require.NoError(t, err)
+		require.Equal(t, frameValidationTimeout, time.Since(started))
+		require.Equal(t, []txpoolcfg.DiscardReason{
+			txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameValidationUnavailable, txpoolcfg.Success,
+		}, reasons)
+		require.Len(t, backend.calls, 1, "no repeated backend calls while the pool head is unchanged")
+		for _, txn := range txns.Txns[:2] {
+			known, err := pool.IdHashKnown(nil, txn.IDHash[:])
+			require.NoError(t, err)
+			require.False(t, known, "timed-out frames must remain eligible for resubmission")
+		}
+		require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
+	})
+}
+
+func TestFramePoolUnwindDoesNotWaitForHeadNotification(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.err = status.Error(codes.Aborted, "frame validation head changed")
+	var unwound TxnSlots
+	unwound.Append(framePoolSlot(t, sender, 1, 2), sender[:], true)
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		require.NoError(t, pool.OnNewBlock(t.Context(), newBlockChangeForAccounts(common.Hash{1}, 0, sender), unwound, TxnSlots{}, TxnSlots{}))
+		require.Zero(t, time.Since(started), "state updates must return so the next notification can be processed")
+		require.Len(t, backend.calls, 1)
+	})
 }
 
 type frameValidationFuncBackend struct {
@@ -1437,7 +1552,7 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 		frames = append(frames, frame)
 		var txns TxnSlots
 		txns.Append(frame, sender[:], false)
-		reasons, err := pool.addNewTxns(ctx, txns, nil)
+		reasons, err := pool.addNewTxns(ctx, txns, nil, false)
 		require.NoError(t, err)
 		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 		require.Equal(t, 1, pool.pending.Len())

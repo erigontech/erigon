@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -45,8 +47,9 @@ type frameReservation struct {
 }
 
 type frameValidationResult struct {
-	validation *protocol.FrameValidation
-	reason     txpoolcfg.DiscardReason
+	validation  *protocol.FrameValidation
+	reason      txpoolcfg.DiscardReason
+	headChanged bool
 }
 
 // frameValidationBatch keeps simulation results tied to the state they used.
@@ -69,7 +72,7 @@ type frameBlockUpdate struct {
 var errFrameStateChanged = errors.New("frame validation state changed")
 
 // Each admission or revalidation batch shares one deadline, including waits for
-// the simulation gate, so the time limit does not grow with the batch size.
+// the simulation gate or a newer pool head, so the limit does not grow with the batch size.
 // The remote worker admits one transaction per batch; waiting in its queue
 // does not consume that transaction's deadline. Startup restoration uses one
 // sender's nonce chain per batch so earlier frames cannot exhaust later budgets.
@@ -170,7 +173,7 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 // prepareFrames checks pool policy under the lock, then simulates against the
 // captured head without holding the lock. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
-func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidationBatch {
+func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots, waitForHead bool) frameValidationBatch {
 	if !slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
 		return frameValidationBatch{}
 	}
@@ -190,10 +193,32 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidati
 	p.lock.Unlock()
 	for _, txn := range txns.Txns {
 		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
-			batch.results[txn] = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
+			result = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
+			batch.results[txn] = result
+			if waitForHead && result.headChanged && p.waitForFrameStateChange(ctx, batch.generation) {
+				break
+			}
 		}
 	}
 	return batch
+}
+
+// Execution can publish a head before the pool receives its notification. Wait
+// for a new generation, including same-height reorgs, without polling the backend.
+func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64) bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	// Serialize cancellation with Wait so its wakeup cannot be lost.
+	stop := context.AfterFunc(ctx, func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast()
+		p.lock.Unlock()
+	})
+	defer stop()
+	for generation == p.stateGeneration && ctx.Err() == nil {
+		p.lastSeenCond.Wait()
+	}
+	return generation != p.stateGeneration
 }
 
 // applyFrameValidation requires the pool lock. Stale results trigger another
@@ -239,10 +264,10 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {
 	validation, err := p.simulateFrame(ctx, txn, generation, stateBlockHash)
 	if err != nil {
-		// Backend failures do not establish invalidity. Callers reject new
-		// transactions for retry or keep admitted ones parked.
+		// Backend failures do not establish invalidity. New submissions may retry
+		// a head mismatch; admitted transactions remain parked.
 		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
-		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
+		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable, headChanged: status.Code(err) == codes.Aborted}
 	}
 	if validation == nil {
 		return frameValidationResult{reason: txpoolcfg.InvalidFrame}
