@@ -68,6 +68,8 @@ type commitmentCalculator struct {
 	applyWritesDur time.Duration
 	applyWritesN   int
 	firstTxAt      time.Time
+	edgeDur        time.Duration
+	waitIn         time.Duration
 	lastTxAt       time.Time
 	doms           *execctx.SharedDomains
 	db             kv.TemporalRoDB
@@ -296,8 +298,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	defer logEvery.Stop()
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
+		tw := time.Now()
 		select {
 		case result, ok := <-in:
+			cc.waitIn += time.Since(tw)
 			if !ok {
 				in = nil
 				continue
@@ -390,7 +394,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// commitment .kv inconsistent. If a late-consumed blockRequest leaves
 		// computedAhead[n] unset and both paths checkpoint the same edge, that is
 		// benign — both emit identical values at the same txNum.
-		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
+		te := time.Now()
+		edge := !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum)
+		cc.edgeDur += time.Since(te)
+		if edge {
 			// Checkpoint commitment at a mid-block step edge without advancing
 			// lastComputedBlock or resetting block flags — the block-end fold still
 			// needs the pre-edge dirty keys.
@@ -459,7 +466,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				gap = -d
 			}
 			residual := stageWall - execActive - commitActive + overlap - gap
-			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt))
+			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt), "edgeDur", cc.edgeDur, "waitIn", cc.waitIn)
+			cc.edgeDur, cc.waitIn = 0, 0
 			cc.applyWritesDur, cc.applyWritesN = 0, 0
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
