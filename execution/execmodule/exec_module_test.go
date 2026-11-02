@@ -4103,8 +4103,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Same-sender txs that send value, revert with value and read the sender's
-// balance must reach the state root of serial execution, whether parallel exec
+// Same-sender txs that send value, revert with value, read the sender's balance and
+// create contracts must reach the state root of serial execution, whether parallel exec
 // charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
@@ -4125,9 +4125,13 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
-		for n := range uint64(24) {
+		// Init codes: store a constant; store the creator's balance; revert.
+		storeOne := []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}
+		storeCallerBalance := []byte{byte(vm.CALLER), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}
+		revertInit := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)}
+		for n := range uint64(35) {
 			to, value := reader, uint64(0)
-			switch n % 4 {
+			switch n % 7 {
 			case 1:
 				to, value = sink, 1
 			case 2:
@@ -4136,11 +4140,73 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 				to, value = common.Address{0xdd, byte(n)}, 7
 			}
 			slot := common.BigToHash(new(big.Int).SetUint64(n))
-			tx, err := types.SignTx(types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:]),
-				*types.LatestSignerForChainID(nil), privKey)
+			txn := types.NewTransaction(n, to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), slot[:])
+			for k, initCode := range [][]byte{storeOne, storeCallerBalance, revertInit} {
+				if n%7 == uint64(4+k) {
+					txn = types.NewContractCreation(n, uint256.NewInt(n%2*3), 100_000, uint256.NewInt(10*common.GWei), initCode)
+				}
+			}
+			tx, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), privKey)
 			require.NoError(t, err)
 			b.AddTx(tx)
 		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
+// Value transfers whose recipient is credited at validation must reach the state root of serial
+// execution, also when the recipient spends, its balance is read, or it gets code in the block.
+func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	keys := make([]*ecdsa.PrivateKey, 10)
+	alloc := types.GenesisAlloc{}
+	for i := range keys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
+	}
+	recipient := crypto.PubkeyToAddress(keys[9].PublicKey)
+	codeLater := types.CreateAddress(crypto.PubkeyToAddress(keys[0].PublicKey), 0)
+	balanceReader, sink := common.Address{0xaa}, common.Address{0xcc}
+	alloc[codeLater] = types.GenesisAccount{Balance: big.NewInt(1)}
+	alloc[balanceReader] = types.GenesisAccount{Code: []byte{byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}}
+	genesis := &types.Genesis{Config: chain.TestChainOsakaConfig, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(keys[1]))
+	// The deployed code stores the call value, so a credit that skips it changes the state root.
+	storeCallValue := []byte{
+		byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.RETURN),
+	}
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		nonces := make([]uint64, len(keys))
+		add := func(k int, to *common.Address, value uint64, data []byte) {
+			var txn types.Transaction
+			if to == nil {
+				txn = types.NewContractCreation(nonces[k], uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), data)
+			} else {
+				txn = types.NewTransaction(nonces[k], *to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), data)
+			}
+			nonces[k]++
+			tx, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), keys[k])
+			require.NoError(t, err)
+			b.AddTx(tx)
+		}
+		readRecipient := common.BytesToHash(recipient[:])
+		for k := 1; k <= 4; k++ {
+			add(k, &recipient, uint64(k), nil)
+		}
+		add(9, &sink, 1, nil)
+		add(5, &balanceReader, 0, readRecipient[:])
+		add(6, &codeLater, 2, nil)
+		add(0, nil, 0, storeCallValue)
+		add(7, &codeLater, 3, nil)
+		add(8, &recipient, 8, nil)
+		add(5, &balanceReader, 0, readRecipient[:])
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
@@ -4159,9 +4225,11 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 		name               string
 		senderNonce, nonce uint64
 		value, feeCap      uint256.Int
+		create             bool
 		wantErr            error
 	}{
 		{name: "nonce too high", nonce: 1, feeCap: feeCap, wantErr: protocol.ErrNonceTooHigh},
+		{name: "creation nonce too high", nonce: 1, feeCap: feeCap, create: true, wantErr: protocol.ErrNonceTooHigh},
 		{name: "max nonce", senderNonce: math.MaxUint64, nonce: math.MaxUint64, feeCap: feeCap, wantErr: protocol.ErrNonceMax},
 		{name: "value plus gas above balance", value: *uint256.MustFromBig(balance), feeCap: feeCap, wantErr: protocol.ErrInsufficientFunds},
 		{name: "gas above balance", feeCap: *uint256.NewInt(100_000 * common.GWei), wantErr: protocol.ErrInsufficientFunds},
@@ -4175,9 +4243,13 @@ func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
 				Alloc:  types.GenesisAlloc{crypto.PubkeyToAddress(privKey.PublicKey): {Balance: balance, Nonce: tc.senderNonce}},
 			}
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+			to, gas := &common.Address{0xaa}, uint64(21_000)
+			if tc.create {
+				to, gas = nil, 60_000
+			}
 			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 				tx, err := types.SignTx(&types.DynamicFeeTransaction{
-					CommonTx: types.CommonTx{Nonce: tc.nonce, GasLimit: 21_000, To: &common.Address{0xaa}, Value: tc.value},
+					CommonTx: types.CommonTx{Nonce: tc.nonce, GasLimit: gas, To: to, Value: tc.value},
 					ChainID:  *chain.TestChainOsakaConfig.ChainID,
 					TipCap:   *uint256.NewInt(common.GWei),
 					FeeCap:   tc.feeCap,

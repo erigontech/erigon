@@ -186,6 +186,8 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("failed to get block root: %w", err)
 	}
 
+	// A column outside custody is still validated and relayed on a subscribed subnet; it is just not stored.
+	inCustody := true
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
 			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
@@ -196,9 +198,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		if err != nil {
 			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
-		if _, ok := myCustodyColumns[msg.Index]; !ok {
-			return ErrIgnore
-		}
+		_, inCustody = myCustodyColumns[msg.Index]
 	}
 
 	blobParameters := s.cfg.GetBlobParameters(blockHeader.Slot / s.cfg.SlotsPerEpoch)
@@ -272,6 +272,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	// Claim the tuple atomically: columns built from EL blobs may have claimed it during validation.
 	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
 		return ErrIgnore
+	}
+	if !inCustody {
+		return nil
 	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		s.seenSidecar.Remove(seenKey)
