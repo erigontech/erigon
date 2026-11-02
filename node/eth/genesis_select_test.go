@@ -29,19 +29,7 @@ func testGenesis(chainID uint64, gasLimit uint64) *types.Genesis {
 // startGenesis runs this start's genesis selection and write on the DB, as New does.
 func startGenesis(t *testing.T, db kv.RwDB, config *ethconfig.Config) (*chain.Config, *types.Block, error) {
 	t.Helper()
-	var (
-		cfg   *chain.Config
-		block *types.Block
-	)
-	err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		spec, err := selectGenesis(tx, config)
-		if err != nil {
-			return err
-		}
-		cfg, block, err = genesiswrite.WriteGenesisBlock(tx, spec, "", config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, datadir.New(t.TempDir()), log.New())
-		return err
-	})
-	return cfg, block, err
+	return setupGenesis(db, config, datadir.New(t.TempDir()), log.New(), nil)
 }
 
 // A restart with --override.genesis on a datadir initialised with another genesis
@@ -117,6 +105,45 @@ func TestOverrideGenesisKeepsStoredChainConfig(t *testing.T) {
 		persisted, err := rawdb.ReadChainConfig(tx, first.Hash())
 		require.NoError(t, err)
 		require.Equal(t, storedCfg, persisted)
+		return nil
+	}))
+}
+
+func TestOverrideGenesisCompatibilityErrorRollsBack(t *testing.T) {
+	genesis := testGenesis(1337, 30_000_000)
+	genesis.Config.HomesteadBlock = common.NewUint64(0)
+	genesis.Config.TangerineWhistleBlock = common.NewUint64(0)
+	genesis.Config.SpuriousDragonBlock = common.NewUint64(0)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	storedCfg, block, err := startGenesis(t, db, &ethconfig.Config{Genesis: genesis, GenesisFromFile: true})
+	require.NoError(t, err)
+
+	head := block.Header()
+	head.ParentHash = block.Hash()
+	head.Number.SetUint64(1)
+	head.Time = 1
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		require.NoError(t, tx.Delete(kv.ConfigTable, kv.GenesisKey))
+		require.NoError(t, rawdb.WriteHeader(tx, head))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, head.Hash(), head.Number.Uint64()))
+		return rawdb.WriteHeadHeaderHash(tx, head.Hash())
+	}))
+
+	changed := *genesis
+	changed.Config = genesis.Config.Copy()
+	changed.Config.ChainID = uint256.NewInt(1338)
+	_, _, err = startGenesis(t, db, &ethconfig.Config{Genesis: &changed, GenesisFromFile: true})
+	var compatErr *chain.ConfigCompatError
+	require.ErrorAs(t, err, &compatErr)
+	require.Equal(t, "EIP155 chain ID", compatErr.What)
+	require.ErrorContains(t, err, "incompatible chain config")
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		persisted, err := rawdb.ReadChainConfig(tx, block.Hash())
+		require.NoError(t, err)
+		require.Equal(t, storedCfg, persisted)
+		hasGenesis, err := tx.Has(kv.ConfigTable, kv.GenesisKey)
+		require.NoError(t, err)
+		require.False(t, hasGenesis, "failed startup must not save the rejected genesis specification")
 		return nil
 	}))
 }

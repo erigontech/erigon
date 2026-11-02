@@ -374,32 +374,9 @@ func New(
 		return nil, err
 	}
 
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	var compatErr *chain.ConfigCompatError
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		genesisSpec, err := selectGenesis(tx, config)
-		if err != nil {
-			return err
-		}
-
-		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
-		}
-
-		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
-			return genesisErr
-		}
-		return nil
-	}); err != nil {
+	chainConfig, genesis, err := setupGenesis(rawChainDB, config, dirs, logger, tracer)
+	if err != nil {
 		return nil, err
-	}
-	// The rejected config is not written, so starting would run this process on a schedule
-	// the database contradicts, with no path back to agreement short of a rewind.
-	if compatErr != nil {
-		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
 	}
 	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
@@ -1166,6 +1143,30 @@ func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) e
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+
+func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logger log.Logger, tracer *tracers.Tracer) (*chain.Config, *types.Block, error) {
+	var chainConfig *chain.Config
+	var genesis *types.Block
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		genesisSpec, err := selectGenesis(tx, config)
+		if err != nil {
+			return err
+		}
+
+		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
+		}
+
+		chainConfig, genesis, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		return err
+	}); err != nil {
+		if _, ok := errors.AsType[*chain.ConfigCompatError](err); ok {
+			return nil, nil, fmt.Errorf("incompatible chain config: %w", err)
+		}
+		return nil, nil, err
+	}
+	return chainConfig, genesis, nil
+}
 
 // selectGenesis returns the genesis to pass to WriteGenesisBlock for this start. A
 // genesis stored in the DB replaces config.Genesis, and an initialised DB needs no
