@@ -220,10 +220,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Count before taking the store mutex so queued imports are visible as in progress.
 	f.blocksProcessing.Add(1)
 	defer f.blocksProcessing.Add(-1)
-	var columnsAvailable bool
-	var columnsErr error
+	var columns custodyColumnRead
 	if checkDataAvaiability {
-		columnsAvailable, columnsErr = f.custodyColumnsAvailable(block)
+		columns = f.readCustodyColumns(block)
 	}
 	f.mu.Lock()
 	unlocked := false
@@ -307,7 +306,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 
 		if checkDataAvaiability {
-			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes, columnsAvailable, columnsErr); err != nil {
+			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes, columns); err != nil {
 				return err
 			}
 		}
@@ -636,23 +635,34 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	return nil
 }
 
-// custodyColumnsAvailable reads Fulu custody column availability. Callers must not hold f.mu: the read stats column
-// files on disk.
-func (f *ForkChoiceStore) custodyColumnsAvailable(block *cltypes.SignedBeaconBlock) (bool, error) {
+// custodyColumnRead is a Fulu custody column availability read taken before f.mu, with the advertised custody group
+// count that defined the custody set at the time of the read.
+type custodyColumnRead struct {
+	available bool
+	cgc       uint64
+	err       error
+}
+
+// readCustodyColumns reads Fulu custody column availability. Callers must not hold f.mu: the read stats column files on
+// disk. Its skip conditions must match the Fulu branch of checkPreGloasBlockDataAvailability, which treats a skipped
+// read as unavailable.
+func (f *ForkChoiceStore) readCustodyColumns(block *cltypes.SignedBeaconBlock) custodyColumnRead {
 	if f.peerDas == nil || block == nil || block.Block == nil || block.Block.Body == nil || block.Version() < clparams.FuluVersion ||
 		block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
-		return false, nil
+		return custodyColumnRead{}
 	}
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
-		return false, invalidBlockError(err)
+		return custodyColumnRead{err: invalidBlockError(err)}
 	}
-	return f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+	cgc := f.peerDas.StateReader().GetAdvertisedCgc()
+	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+	return custodyColumnRead{available: available, cgc: cgc, err: err}
 }
 
 // checkPreGloasBlockDataAvailability checks that a pre-Gloas block's blob data is available before the block enters
 // fork choice.
-func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash, columnsAvailable bool, columnsErr error) error {
+func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash, columns custodyColumnRead) error {
 	// Before Fulu, blobs in the EL's pool are enough. From Fulu the node must hold its custody columns: peers that see
 	// it treat the block as known ask it for them, and score it down for a partial answer.
 	elHasBlobs := false
@@ -668,10 +678,11 @@ func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context
 	// Check if blob data is available (skip if blobs are in txpool)
 	if block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
 		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-			if columnsErr != nil {
-				return columnsErr
+			if columns.err != nil {
+				return columns.err
 			}
-			if !columnsAvailable {
+			// A custody raise while waiting for f.mu adds columns that the read did not check.
+			if !columns.available || f.peerDas.StateReader().GetAdvertisedCgc() != columns.cgc {
 				if !f.syncedDataManager.Syncing() {
 					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
 						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)

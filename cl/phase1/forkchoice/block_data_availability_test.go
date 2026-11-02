@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -20,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 // Fulu fork choice admits a block only once this node holds its custody columns (on_block asserts is_data_available).
@@ -53,13 +55,12 @@ func TestPreGloasBlockDataAvailabilityRequiresFuluCustodyColumns(t *testing.T) {
 		{name: "custody columns stored", columnsStored: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			peerDas := das_mock.NewMockPeerDas(ctrl)
+			peerDas, custody := newColumnPeerDas(t, &cfg)
 			peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
 			if tt.wantUnavailable {
 				peerDas.EXPECT().SyncColumnDataLater(block).Return(nil)
 			}
-			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 			engine.EXPECT().GetBlobs(gomock.Any(), versionedHashes, clparams.FuluVersion).DoAndReturn(
 				func(_ context.Context, hashes []common.Hash, _ clparams.StateVersion) ([][]byte, [][][]byte, error) {
 					if !tt.elHasBlobs {
@@ -69,7 +70,7 @@ func TestPreGloasBlockDataAvailabilityRequiresFuluCustodyColumns(t *testing.T) {
 				}).AnyTimes()
 			f := &ForkChoiceStore{beaconCfg: &cfg, engine: engine, peerDas: peerDas, syncedDataManager: syncedData}
 
-			err := f.checkPreGloasBlockDataAvailability(t.Context(), block, root, versionedHashes, tt.columnsStored, nil)
+			err := f.checkPreGloasBlockDataAvailability(t.Context(), block, root, versionedHashes, custodyColumnRead{available: tt.columnsStored, cgc: custody.GetAdvertisedCgc()})
 			if tt.wantUnavailable {
 				require.ErrorIs(t, err, ErrEIP7594ColumnDataNotAvailable)
 				return
@@ -117,7 +118,7 @@ func TestOnBlockReadsColumnAvailabilityWithoutForkChoiceLock(t *testing.T) {
 	store.OnTick(2 * store.beaconCfg.SecondsPerSlot * 1000)
 
 	lockFree := false
-	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas, _ := newColumnPeerDas(t, store.beaconCfg)
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, mustRoot(t, block)).DoAndReturn(func(uint64, common.Hash) (bool, error) {
 		if lockFree = store.mu.TryLock(); lockFree {
 			store.mu.Unlock()
@@ -134,7 +135,7 @@ func TestOnBlockAdmitsBlockWithAvailableColumns(t *testing.T) {
 	store, block := newFuluStoreWithBlock(t)
 	store.OnTick(2 * store.beaconCfg.SecondsPerSlot * 1000)
 
-	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas, _ := newColumnPeerDas(t, store.beaconCfg)
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, mustRoot(t, block)).Return(true, nil)
 	store.peerDas = peerDas
 	graph := store.forkGraph.(*getFinalizedExecutionHashForkGraph)
@@ -148,7 +149,7 @@ func TestOnBlockAdmitsBlockWithAvailableColumns(t *testing.T) {
 func TestOnBlockAdmissionErrorTakesPriorityOverColumnReadError(t *testing.T) {
 	store, block := newFuluStoreWithBlock(t)
 
-	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas, _ := newColumnPeerDas(t, store.beaconCfg)
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, mustRoot(t, block)).Return(false, errors.New("stat failed"))
 	store.peerDas = peerDas
 
@@ -168,9 +169,51 @@ func TestOnBlockReturnsColumnReadErrorAfterAdmission(t *testing.T) {
 	store.OnTick(2 * store.beaconCfg.SecondsPerSlot * 1000)
 
 	readErr := errors.New("stat failed")
-	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas, _ := newColumnPeerDas(t, store.beaconCfg)
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, mustRoot(t, block)).Return(false, readErr)
 	store.peerDas = peerDas
 
 	require.ErrorIs(t, store.OnBlock(t.Context(), block, false, false, true), readErr)
+}
+
+func newColumnPeerDas(t *testing.T, cfg *clparams.BeaconChainConfig) (*das_mock.MockPeerDas, *peerdasstate.PeerDasState) {
+	t.Helper()
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	custody := peerdasstate.NewPeerDasState(cfg, &networkConfig)
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().StateReader().Return(custody).AnyTimes()
+	return peerDas, custody
+}
+
+// A custody raise between the off-lock read and the decision adds columns the read did not check, so the block must
+// wait for them instead of entering fork choice on the stale result.
+func TestOnBlockRejectsColumnReadTakenBeforeCustodyRaise(t *testing.T) {
+	store, block := newFuluStoreWithBlock(t)
+	store.OnTick(2 * store.beaconCfg.SecondsPerSlot * 1000)
+	headState := state2.New(store.beaconCfg)
+	headState.SetVersion(clparams.FuluVersion)
+	require.NoError(t, headState.SetSlot(1))
+	require.NoError(t, store.syncedDataManager.OnHeadState(headState))
+	require.False(t, store.syncedDataManager.Syncing())
+
+	peerDas, custody := newColumnPeerDas(t, store.beaconCfg)
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, mustRoot(t, block)).DoAndReturn(func(uint64, common.Hash) (bool, error) {
+		require.True(t, custody.SetCustodyGroupCount(2*store.beaconCfg.SamplesPerSlot, func() uint64 { return 0 }))
+		return true, nil
+	})
+	peerDas.EXPECT().SyncColumnDataLater(block).Return(nil)
+	store.peerDas = peerDas
+	store.forkGraph.(*getFinalizedExecutionHashForkGraph).addChainSegmentErr = errors.New("block entered the state transition")
+
+	require.ErrorIs(t, store.OnBlock(t.Context(), block, false, false, true), ErrEIP7594ColumnDataNotAvailable)
+}
+
+func TestOnBlockSkipsColumnReadForEmptyCommitments(t *testing.T) {
+	store, block := newFuluStoreWithBlock(t)
+	block.Block.Body.BlobKzgCommitments = cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.FuluVersion).Block.Body.BlobKzgCommitments
+	require.NotNil(t, block.Block.Body.BlobKzgCommitments)
+	store.peerDas = das_mock.NewMockPeerDas(gomock.NewController(t))
+
+	require.ErrorIs(t, store.OnBlock(t.Context(), block, false, false, true), ErrBlockTooEarly)
 }
