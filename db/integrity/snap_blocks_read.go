@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,7 +61,7 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservi
 
 		select {
 		case <-ctx.Done():
-			return nil
+			return errors.Join(ctx.Err(), probs.verdict(string(Blocks)))
 		case <-logEvery.C:
 			log.Info("[integrity] Blocks", "blockNum", fmt.Sprintf("%s/%s", common.PrettyExact(i), common.PrettyExact(maxBlockNum)))
 		default:
