@@ -355,8 +355,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 // startELColumnsImportOnce starts the EL column import for the first block of a proposer and slot only, so equivocating
 // blocks and retries of a queued block do not repeat the getBlobs call and the column work.
 func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *cltypes.SignedBeaconBlock) {
-	// Equivocating blocks share the fork, so only the blob count can make the importer skip one and not another. A
-	// queued block gets here before gossip validation checked that count.
+	// The importer's fork and engine checks give the same result for every block of a proposer and slot, its blob-count
+	// check does not. A queued block gets here before gossip validation checked that count.
 	if v := block.Version(); v >= clparams.FuluVersion && v < clparams.GloasVersion && b.blobCountOutOfRange(block) {
 		return
 	}
