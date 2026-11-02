@@ -158,6 +158,11 @@ func writeProblem(w http.ResponseWriter, status int, problemType, detail string)
 	}
 }
 
+func (e *EngineServer) writeSSZDecodeProblem(w http.ResponseWriter, r *http.Request, err error) {
+	e.logger.Debug("[SSZ-REST] failed to decode request", "path", r.URL.Path, "fork", r.Header.Get(engineForkHeader), "err", err)
+	writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+}
+
 func writeEngineProblem(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
@@ -266,7 +271,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 	}
 	payload, parentRoot, executionRequests, err := decodeNewPayloadEnvelope(body, version)
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
 	if !e.checkSSZForkTimestamp(w, forkName, uint64(payload.Timestamp)) {
@@ -337,7 +342,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	}
 	state, attrs, custodyColumns, err := decodeForkchoiceUpdate(body, version)
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
 	if custodyColumns != nil {
@@ -371,7 +376,7 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 	}
 	blockHashes, err := decodeHashListRequest(body, sszMaxBodiesRequest)
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
 	// Filter by fork before fetching bodies: retrieval can re-execute blocks
@@ -492,7 +497,7 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 	}
 	blobHashes, err := decodeHashListRequest(body, sszMaxGetBlobHashes)
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
 
@@ -551,7 +556,7 @@ func (e *EngineServer) handleSSZGetBlobsV4(w http.ResponseWriter, r *http.Reques
 	}
 	hashes, cellMask, err := decodeBlobsV4Request(body)
 	if err != nil {
-		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
+		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
 	resp, err := e.GetBlobsV4(r.Context(), hashes, cellMask[:])

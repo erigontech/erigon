@@ -1020,7 +1020,6 @@ func TestSSZRESTUnscopedIgnoreForkHeader(t *testing.T) {
 }
 
 func TestSSZRESTRoutingErrors(t *testing.T) {
-	srv := newTestEngineServer(allForksConfig(), false)
 	for _, tc := range []struct {
 		name        string
 		method      string
@@ -1051,8 +1050,12 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 		{"bad blobs v1 body", http.MethodPost, "/engine/v1/blobs/v1", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 		{"bad blobs v2 body", http.MethodPost, "/engine/v1/blobs/v2", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 		{"bad blobs v3 body", http.MethodPost, "/engine/v1/blobs/v3", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
+		{"bad blobs v4 body", http.MethodPost, "/engine/v1/blobs/v4", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestEngineServer(allForksConfig(), false)
+			var logs bytes.Buffer
+			srv.logger.SetHandler(log.StreamHandler(&logs, log.JsonFormat()))
 			var body []byte
 			switch tc.name {
 			case "bad ssz body":
@@ -1073,6 +1076,16 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 			srv.SSZRESTHandler().ServeHTTP(rec, req)
 			require.Equal(t, tc.code, rec.Code)
 			require.Equal(t, tc.problem, problemType(t, rec))
+			if tc.problem == problemSSZDecodeError {
+				require.JSONEq(t, `{"type":"/engine-api/errors/ssz-decode-error"}`, rec.Body.String())
+				require.NotEmpty(t, logs.String(), "SSZ decode failures must be logged")
+				var record map[string]any
+				require.NoError(t, json.Unmarshal(logs.Bytes(), &record))
+				require.Equal(t, log.LvlDebug.String(), record["lvl"])
+				require.Equal(t, tc.path, record["path"])
+				require.Equal(t, tc.fork, record["fork"])
+				require.Contains(t, record["err"], commonssz.ErrLowBufferSize.Error())
+			}
 		})
 	}
 }
