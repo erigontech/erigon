@@ -358,6 +358,13 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		if criticalError != nil {
 			return
 		}
+		// The run also executed unexecuted canonical ancestors, so it cannot tell which block failed.
+		if latestValidNumber+1 < headersChain[0].Number.Uint64() {
+			status, latestValidHash, validationError = engine_types.AcceptedStatus, common.Hash{}, nil
+			fv.extendingForkHeadHash = common.Hash{}
+			fv.extendingForkNumber = 0
+			return
+		}
 		var ok bool
 		latestValidHash, ok, criticalError = fv.blockReader.CanonicalHash(fv.ctx, tx, latestValidNumber)
 		if criticalError != nil {
