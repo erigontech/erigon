@@ -89,6 +89,18 @@ func TestServerCatalog(t *testing.T) {
 	require.NotEmpty(t, resourceTemplateURIs(t, e.mcpServer))
 }
 
+// A tool whose namespace the node does not serve would only return "method not found".
+func TestServerListsOnlyServedNamespaces(t *testing.T) {
+	e := NewErigonMCPServer(nil, "", false)
+	e.KeepNamespaces(map[string]string{"eth": "1.0", "rpc": "1.0"})
+
+	tools := e.mcpServer.ListTools()
+	require.Contains(t, tools, "eth_blockNumber")
+	require.Contains(t, tools, "logs_tail")
+	require.NotContains(t, tools, "erigon_nodeInfo")
+	require.NotContains(t, tools, "ots_traceTransaction")
+}
+
 // Every tool is a read-only query; declaring it lets MCP clients skip
 // per-call approval prompts for them.
 func TestAllToolsDeclareReadOnlyHint(t *testing.T) {
@@ -152,7 +164,7 @@ func TestReadLogTail(t *testing.T) {
 	for i := range 10 {
 		fmt.Fprintf(&content, "line %d\n", i)
 	}
-	require.NoError(t, os.WriteFile(file, []byte(content.String()), 0600))
+	require.NoError(t, os.WriteFile(file, []byte(content.String()), 0o600))
 
 	lines, err := readLogTail(file, 3, "")
 	require.NoError(t, err)
@@ -181,7 +193,8 @@ func TestLogStatsCountsLevelTokens(t *testing.T) {
 		"[EROR] [09-04|08:52:12.133] rpc failed reason=timeout\n"+
 			"[INFO] [09-04|08:52:12.134] p2p peer dropped err=nil\n"+
 			"[WARN] [09-04|08:52:12.135] no error here\n"+
-			`{"lvl":"eror","msg":"json mode"}`+"\n"), 0600))
+			`{"lvl":"eror","msg":"json mode"}`+"\n",
+	), 0o600))
 
 	stats, err := getLogStats(file)
 	require.NoError(t, err)
@@ -199,7 +212,8 @@ func TestLogStatsCountsSlogLevels(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte(
 		`{"time":"2026-09-04T08:52:12Z","level":"WARN","msg":"piece failed"}`+"\n"+
 			`{"time":"2026-09-04T08:52:13Z","level":"ERROR","msg":"tracker gone"}`+"\n"+
-			`{"time":"2026-09-04T08:52:14Z","level":"INFO","msg":"seeding"}`+"\n"), 0600))
+			`{"time":"2026-09-04T08:52:14Z","level":"INFO","msg":"seeding"}`+"\n",
+	), 0o600))
 
 	stats, err := getLogStats(file)
 	require.NoError(t, err)

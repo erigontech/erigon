@@ -25,6 +25,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -33,8 +34,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
@@ -66,7 +69,47 @@ var diffAttEnc []byte
 // tree can seed itself from that latest-message snapshot on first use.
 func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	tb.Helper()
+	store, bd4 := buildExAnteStorePendingLast(tb, nil)
+	require.NoError(tb, store.OnBlock(context.Background(), bd4, false, true, false))
+	store.SetSynced(true)
+	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot())
+	require.NoError(tb, err)
+	require.NoError(tb, store.syncedDataManager.OnHeadState(s0))
+	att := &solid.Attestation{}
+	require.NoError(tb, utils.DecodeSSZSnappy(att, diffAttEnc, int(clparams.AltairVersion)))
+	require.NoError(tb, store.OnAttestation(att, false, false))
+	return store
+}
+
+// buildExAnteStorePendingLast builds the same scenario but stops before the last block,
+// so a caller can drive that one itself through a supplied engine.
+func buildExAnteStorePendingLast(tb testing.TB, engine execution_client.ExecutionEngine) (*ForkChoiceStore, *cltypes.SignedBeaconBlock) {
+	tb.Helper()
 	ctx := context.Background()
+	store, b3a, bc2, bd4 := buildExAnteStoreBeforeBlocks(tb, engine, nil)
+	store.OnTick(0)
+	store.OnTick(12 * 1000)
+	require.NoError(tb, store.OnBlock(ctx, b3a, false, true, false))
+	store.OnTick(36 * 1000)
+	require.NoError(tb, store.OnBlock(ctx, bc2, false, true, false))
+	return store, bd4
+}
+
+func TestOnBlockUpdatesCustodyForAttachedValidatorWithoutFeeRecipient(t *testing.T) {
+	store, block := buildExAnteStorePendingLast(t, nil)
+	store.localValidators.AddAttachedValidator(0)
+	_, found := store.localValidators.GetFeeRecipient(0)
+	require.False(t, found)
+
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().UpdateValidatorsCustody(gomock.Any()).Times(1)
+	store.peerDas = peerDas
+
+	require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
+}
+
+func buildExAnteStoreBeforeBlocks(tb testing.TB, engine execution_client.ExecutionEngine, genesisTime *uint64) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock) {
+	tb.Helper()
 	cfg := &clparams.MainnetBeaconConfig
 	sd := synced_data.NewSyncedDataManager(cfg, true)
 	b3a := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
@@ -75,10 +118,11 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	require.NoError(tb, utils.DecodeSSZSnappy(b3a, diffBlock3aEnc, int(clparams.AltairVersion)))
 	require.NoError(tb, utils.DecodeSSZSnappy(bc2, diffBlockc2Enc, int(clparams.AltairVersion)))
 	require.NoError(tb, utils.DecodeSSZSnappy(bd4, diffBlockd4Enc, int(clparams.AltairVersion)))
-	att := &solid.Attestation{}
-	require.NoError(tb, utils.DecodeSSZSnappy(att, diffAttEnc, int(clparams.AltairVersion)))
 	anchor := state2.New(cfg)
 	require.NoError(tb, utils.DecodeSSZSnappy(anchor, diffAnchorEnc, int(clparams.AltairVersion)))
+	if genesisTime != nil {
+		anchor.SetGenesisTime(*genesisTime)
+	}
 	em := beaconevents.NewEventEmitter()
 	gs, err := initial_state.GetGenesisState(tb.Context(), 1)
 	require.NoError(tb, err)
@@ -86,22 +130,11 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	bs := blob_storage.NewBlobStore(mdbxtest.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs())
 	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(tb, err)
-	store, err := NewForkChoiceStore(clk, anchor, nil, pool.NewOperationsPool(cfg),
+	store, err := NewForkChoiceStore(clk, anchor, engine, pool.NewOperationsPool(cfg),
 		forkGraphDisk,
 		em, sd, bs, public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
 	require.NoError(tb, err)
-	store.OnTick(0)
-	store.OnTick(12)
-	require.NoError(tb, store.OnBlock(ctx, b3a, false, true, false))
-	store.OnTick(36)
-	require.NoError(tb, store.OnBlock(ctx, bc2, false, true, false))
-	require.NoError(tb, store.OnBlock(ctx, bd4, false, true, false))
-	store.SetSynced(true)
-	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot(), true)
-	require.NoError(tb, err)
-	require.NoError(tb, sd.OnHeadState(s0))
-	require.NoError(tb, store.OnAttestation(att, false, false))
-	return store
+	return store, b3a, bc2, bd4
 }
 
 // TestGloasWeightTreeMatchesFullScan asserts the maintained delta tree returns
@@ -119,19 +152,19 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
-	blocks := f.getFilteredBlockTree(justified.Root, justified)
+	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
 	require.NotEmpty(t, blocks)
 
 	sawNonZero := false
 	for root := range blocks {
 		node := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
 		wantScore := full.GetAttestationScore(node)
-		wantWeight := full.GetWeight(node)
+		wantWeight := full.GetWeight(node, f.Slot())
 		require.Equalf(t, wantScore, tree.GetAttestationScore(node), "attestation score mismatch at %x", root)
-		require.Equalf(t, wantWeight, tree.GetWeight(node), "weight mismatch at %x", root)
+		require.Equalf(t, wantWeight, tree.GetWeight(node, f.Slot()), "weight mismatch at %x", root)
 		if wantWeight > 0 {
 			sawNonZero = true
 		}
@@ -152,7 +185,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)
@@ -163,7 +196,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, len(voters), 2, "fixture must seed multiple voters to exercise reassignment")
 
-	blocks := f.getFilteredBlockTree(justified.Root, justified)
+	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
 	roots := make([]common.Hash, 0, len(blocks))
 	for r := range blocks {
 		roots = append(roots, r)
@@ -194,7 +227,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 			want := full.GetAttestationScore(node)
 			require.Equalf(t, want, tree.GetAttestationScore(node),
 				"attestation score mismatch at %x (payload status %d)", root, ps)
-			require.Equalf(t, full.GetWeight(node), tree.GetWeight(node),
+			require.Equalf(t, full.GetWeight(node, f.Slot()), tree.GetWeight(node, f.Slot()),
 				"weight mismatch at %x (payload status %d)", root, ps)
 			if want > 0 {
 				sawNonZero = true

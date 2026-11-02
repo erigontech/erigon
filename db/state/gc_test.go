@@ -68,7 +68,7 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 	at := agg.BeginFilesRo()
 
 	// retire the overlap files; they get attached to the generation `at` pins
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 
 	// still pinned by `at` → must NOT be deleted yet
 	mustExist(t, subset01, true)
@@ -106,7 +106,7 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	rotx := agg.DebugBeginDirtyFilesRo()
 
 	// retire the overlap files; they are pinned by rotx so must be parked, not deleted
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	mustExist(t, subset01, true) // deferred — still on disk
 
 	// releasing the debug pin triggers the deferred deletion
@@ -140,7 +140,7 @@ func TestAggregatorReclaimConcurrent(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	close(stop)
 	wg.Wait()
 

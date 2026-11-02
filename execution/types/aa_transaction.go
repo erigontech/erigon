@@ -28,8 +28,10 @@ const (
 
 const AA_GAS_PENALTY_PCT = 10
 
-var AA_ENTRY_POINT = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
-var AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
+var (
+	AA_ENTRY_POINT    = accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000007560"))
+	AA_SENDER_CREATOR = accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000ffff7560"))
+)
 
 type AccountAbstractionTransaction struct {
 	TransactionMisc
@@ -103,6 +105,7 @@ func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
 func (tx *AccountAbstractionTransaction) GetNonce() uint64 {
 	return tx.Nonce
 }
+
 func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
 	return tx.Tip
 }

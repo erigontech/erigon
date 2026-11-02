@@ -2,7 +2,7 @@ participants:
   - cl_type: caplin
     cl_image: test/erigon:current
     cl_log_level: "debug"
-    cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics", "--beacon.api=beacon,validator,node,config,debug"]
+    cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics", "--beacon.api=beacon,validator,node,config,debug", "--sentinel.quic.port=4002"]
     el_type: geth
     el_image: ethpandaops/geth:glamsterdam-devnet-8
     el_log_level: "debug"

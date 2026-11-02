@@ -90,7 +90,7 @@ func TestCtx(t *testing.T) {
 	t.Parallel()
 
 	l, _, r := testLogger()
-	l.Info("", Ctx{"x": 1, "y": "foo", "tester": t})
+	l.Info("", Ctx{"x": 1, "y": "foo", "tester": t}) //nolint:loggercheck // a single Ctx is expanded into pairs
 	if len(r.Ctx) != 6 {
 		t.Fatalf("Expecting Ctx tansformed into %d ctx args, got %d: %v", 6, len(r.Ctx), r.Ctx)
 	}
@@ -219,7 +219,6 @@ func TestMultiHandler(t *testing.T) {
 	if r2.Msg != "clone" {
 		t.Fatalf("wrong value for h2.Msg. Got %s expected %s", r2.Msg, "clone")
 	}
-
 }
 
 type waitHandler struct {
@@ -272,7 +271,7 @@ func TestMapCtx(t *testing.T) {
 	t.Parallel()
 
 	l, _, r := testLogger()
-	l.Crit("test", Ctx{"foo": "bar"})
+	l.Crit("test", Ctx{"foo": "bar"}) //nolint:loggercheck // a single Ctx is expanded into pairs
 
 	if len(r.Ctx) != 2 {
 		t.Fatalf("Wrong context length, got %d, expected %d", len(r.Ctx), 2)
@@ -343,9 +342,9 @@ func TestNetHandler(t *testing.T) {
 	}()
 
 	lg := New()
-	h, err := NetHandler("tcp", l.Addr().String(), LogfmtFormat())
-	if err != nil {
-		t.Fatal(err)
+	h, handlerErr := NetHandler("tcp", l.Addr().String(), LogfmtFormat())
+	if handlerErr != nil {
+		t.Fatal(handlerErr)
 	}
 	lg.SetHandler(h)
 	lg.Info("test", "x", 1)
@@ -431,7 +430,8 @@ func TestFailoverHandler(t *testing.T) {
 
 	l.SetHandler(FailoverHandler(
 		StreamHandler(w, JsonFormat()),
-		h))
+		h,
+	))
 
 	l.Debug("test ok")
 	if r.Msg != "" {

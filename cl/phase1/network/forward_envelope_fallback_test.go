@@ -89,7 +89,7 @@ func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
 			var wire bytes.Buffer
 			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, bad, digest[:]...))
 			sentinel := &invalidEnvelopeSentinel{response: wire.Bytes()}
-			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 			second := makeGloasBlock(11, hash(2), bid.BlockHash)
 			linkBeaconBlocks(t, first, second)
 			var httpCalls atomic.Int32

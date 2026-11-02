@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // prestateTrace is the result of a prestateTrace run.
@@ -89,9 +90,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 		t.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(t *testing.T) {
 			t.Parallel()
 
-			var (
-				test = new(testcase)
-			)
+			test := new(testcase)
 			// Call tracer test found, read if from disk
 			if blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name())); err != nil {
 				t.Fatalf("failed to read testcase: %v", err)
@@ -165,7 +164,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, nil)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {
@@ -190,6 +189,11 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			if string(want) != string(res) {
 				t.Fatalf("trace mismatch\n have: %v\n want: %v\n", string(res), string(want))
+			}
+			if tracer.MarshalFastJSONTo != nil {
+				fast, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+				require.NoError(t, err)
+				require.Equal(t, string(res), string(fast))
 			}
 		})
 	}

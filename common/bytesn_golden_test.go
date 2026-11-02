@@ -264,7 +264,8 @@ func bytes4Goldens(t *testing.T) []goldenRow {
 	long.SetBytes(goldenSeq(9))
 	gen := b.Generate(mrand.New(mrand.NewSource(7)), 10).Interface().(Bytes4)
 
-	return append(formatGoldens(t, b),
+	return append(
+		formatGoldens(t, b),
 		goldenRow{"Hex", b.Hex()},
 		goldenRow{"TerminalString", b.TerminalString()},
 		goldenRow{"SetBytesShort", fmt.Sprintf("%x", short)},
@@ -285,7 +286,8 @@ func bytes48Goldens(t *testing.T) []goldenRow {
 	long.SetBytes(goldenSeq(53))
 	gen := b.Generate(mrand.New(mrand.NewSource(7)), 10).Interface().(Bytes48)
 
-	return append(formatGoldens(t, b),
+	return append(
+		formatGoldens(t, b),
 		goldenRow{"Hex", b.Hex()},
 		goldenRow{"TerminalString", b.TerminalString()},
 		goldenRow{"SetBytesShort", fmt.Sprintf("%x", short)},
@@ -305,7 +307,8 @@ func bytes64Goldens(t *testing.T) []goldenRow {
 	short.SetBytes([]byte{0xde, 0xad, 0xbe})
 	long.SetBytes(goldenSeq(69))
 
-	return append(formatGoldens(t, b),
+	return append(
+		formatGoldens(t, b),
 		goldenRow{"Hex", b.Hex()},
 		goldenRow{"TerminalString", b.TerminalString()},
 		goldenRow{"SetBytesShort", fmt.Sprintf("%x", short)},
@@ -325,7 +328,8 @@ func bytes96Goldens(t *testing.T) []goldenRow {
 	long.SetBytes(goldenSeq(101))
 	gen := b.Generate(mrand.New(mrand.NewSource(7)), 10).Interface().(Bytes96)
 
-	return append(formatGoldens(t, b),
+	return append(
+		formatGoldens(t, b),
 		goldenRow{"Hex", b.Hex()},
 		goldenRow{"TerminalString", b.TerminalString()},
 		goldenRow{"SetBytesShort", fmt.Sprintf("%x", short)},
@@ -346,7 +350,8 @@ func hashGoldens(t *testing.T) []goldenRow {
 	long.SetBytes(goldenSeq(37))
 	gen := h.Generate(randv2.New(randv2.NewPCG(7, 7)), 10).Interface().(Hash)
 
-	return append(formatGoldens(t, h),
+	return append(
+		formatGoldens(t, h),
 		goldenRow{"Hex", h.Hex()},
 		goldenRow{"TerminalString", h.TerminalString()},
 		goldenRow{"SetBytesShort", fmt.Sprintf("%x", short)},
@@ -366,7 +371,8 @@ func addressGoldens(t *testing.T) []goldenRow {
 	short.SetBytes([]byte{0xde, 0xad, 0xbe})
 	long.SetBytes(goldenSeq(25))
 
-	return append(formatGoldens(t, a),
+	return append(
+		formatGoldens(t, a),
 		goldenRow{"Hex", a.Hex()},
 		goldenRow{"HexEIP55", HexToAddress("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed").Hex()},
 		goldenRow{"SetBytesShort", fmt.Sprintf("%x", short)},

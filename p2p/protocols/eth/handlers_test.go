@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -477,15 +478,18 @@ func (m *mockHeaderReader) Header(_ context.Context, _ kv.Getter, hash common.Ha
 	}
 	return nil, nil
 }
+
 func (m *mockHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
 	return m.headers[blockNum], nil
 }
+
 func (m *mockHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
 	if n, ok := m.byHash[hash]; ok {
 		return &n, nil
 	}
 	return nil, nil
 }
+
 func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash common.Hash) (*types.Header, error) {
 	n, ok := m.byHash[hash]
 	if !ok {
@@ -493,6 +497,7 @@ func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash com
 	}
 	return m.headers[n], nil
 }
+
 func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, ancestor uint64, _ *uint64) (common.Hash, uint64) {
 	n, ok := m.byHash[hash]
 	if !ok || n != number || ancestor > number {
@@ -501,6 +506,7 @@ func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, a
 	anc := m.headers[number-ancestor]
 	return anc.Hash(), number - ancestor
 }
+
 func (m *mockHeaderReader) HeadersRange(_ context.Context, _ func(*types.Header) error) error {
 	return nil
 }
@@ -549,18 +555,23 @@ func (m balHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash commo
 	}
 	return &n, nil
 }
+
 func (balHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeaderByHash(context.Context, kv.Getter, common.Hash) (*types.Header, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) ReadAncestor(kv.Getter, common.Hash, uint64, uint64, *uint64) (common.Hash, uint64) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeadersRange(context.Context, func(*types.Header) error) error {
 	panic("not expected")
 }
@@ -595,7 +606,7 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	}
 
 	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil, nil)
 
 	if len(result) != 3 {
 		t.Fatalf("result len: have %d, want 3", len(result))
@@ -647,7 +658,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 		query = append(query, h)
 	}
 
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil, nil)
 	if len(result) < 1 || len(result) >= len(query) {
 		t.Fatalf("expected truncation: have %d entries, want 1..%d", len(result), len(query)-1)
 	}
@@ -662,18 +673,77 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 // fakeBalGetter satisfies BlockAccessListGetter for handler tests: returns the
 // configured bytes/error per hash and counts how often each hash is requested.
 type fakeBalGetter struct {
-	bals  map[common.Hash][]byte
-	errs  map[common.Hash]error
-	calls map[common.Hash]int
+	bals   map[common.Hash][]byte
+	cached map[common.Hash][]byte
+	errs   map[common.Hash]error
+	calls  map[common.Hash]int
+	onGet  func()
 }
 
-func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64) ([]byte, error) {
+func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64, beforeReplay func() error) ([]byte, error) {
+	if bal, ok := f.cached[hash]; ok {
+		return bal, nil
+	}
+	if beforeReplay != nil {
+		if err := beforeReplay(); err != nil {
+			return nil, err
+		}
+	}
 	f.calls[hash]++
+	if f.onGet != nil {
+		f.onGet()
+	}
 	err := f.errs[hash]
 	if err != nil {
 		return nil, err
 	}
 	return f.bals[hash], nil
+}
+
+func TestAnswerGetBlockAccessListsQuery_CancelledRegeneration(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	defer tx.Rollback()
+	storedHash, prunedHash, nextHash := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	storedBAL := []byte{0xc0}
+	if err := rawdb.WriteBlockAccessListBytes(tx, storedHash, 1, storedBAL); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	getter := &fakeBalGetter{
+		errs:  map[common.Hash]error{prunedHash: context.Canceled},
+		calls: map[common.Hash]int{},
+		onGet: cancel,
+	}
+	query := GetBlockAccessListsPacket{storedHash, prunedHash, nextHash}
+	reader := balHeaderReader{storedHash: 1, prunedHash: 2, nextHash: 3}
+	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx, query, reader, getter, nil)
+	if len(result) != 1 || !bytes.Equal(result[0], storedBAL) {
+		t.Errorf("cancelled replay must return only the completed prefix: got %x", result)
+	}
+	if getter.calls[nextHash] != 0 {
+		t.Errorf("started %d replays after cancellation", getter.calls[nextHash])
+	}
+}
+
+type cancellingBALHeaderReader struct {
+	balHeaderReader
+	cancel context.CancelFunc
+}
+
+func (r cancellingBALHeaderReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	r.cancel()
+	return nil, context.Canceled
+}
+
+func TestAnswerGetBlockAccessListsQuery_CancelledLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, nil,
+		GetBlockAccessListsPacket{{1}}, cancellingBALHeaderReader{cancel: cancel}, nil, nil)
+	if len(result) != 0 {
+		t.Errorf("cancelled lookup must leave the block retryable, got %x", result)
+	}
 }
 
 // TestAnswerGetBlockAccessListsQuery_GeneratorFallback verifies that a BAL
@@ -714,7 +784,7 @@ func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
 		calls: map[common.Hash]int{},
 	}
 	query := GetBlockAccessListsPacket{hashStored, hashRegen, hashRegenEmpty, hashRegenErr, hashUnknown}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter, nil)
 	if len(result) != 5 {
 		t.Fatalf("result len: have %d, want 5", len(result))
 	}
@@ -744,10 +814,8 @@ func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
 	}
 }
 
-// TestAnswerGetBlockAccessListsQuery_RegenerationBudget verifies that a single
-// request triggers at most MaxBlockAccessListsRegenerate regenerations — the
-// response is truncated at the budget so the peer re-requests the remainder —
-// and that stored BALs do not consume the budget.
+// The replay cap excludes stored and cached BALs. Responses stop at the next
+// uncached block after MaxBlockAccessListsRegenerate replays.
 func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -757,15 +825,17 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 	}
 	defer tx.Rollback()
 	const storedCount = 5
+	const cachedCount = 5
 	regenCount := MaxBlockAccessListsRegenerate + 8
 	reader := balHeaderReader{}
 	getter := &fakeBalGetter{
-		bals:  map[common.Hash][]byte{},
-		calls: map[common.Hash]int{},
+		bals:   map[common.Hash][]byte{},
+		cached: map[common.Hash][]byte{},
+		calls:  map[common.Hash]int{},
 	}
 	storedBal := []byte{0xc3, 0x01, 0x02, 0x03}
 	regenBal := []byte{0xc3, 0x04, 0x05, 0x06}
-	query := make(GetBlockAccessListsPacket, 0, storedCount+regenCount)
+	query := make(GetBlockAccessListsPacket, 0, storedCount+cachedCount+regenCount)
 	for i := range storedCount {
 		h := common.Hash{0xaa, byte(i)}
 		num := uint64(100 + i)
@@ -775,6 +845,12 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		}
 		query = append(query, h)
 	}
+	for i := range cachedCount {
+		h := common.Hash{0xcc, byte(i)}
+		reader[h] = uint64(300 + i)
+		getter.cached[h] = regenBal
+		query = append(query, h)
+	}
 	for i := range regenCount {
 		h := common.Hash{0xbb, byte(i)}
 		num := uint64(200 + i)
@@ -782,8 +858,8 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		getter.bals[h] = regenBal
 		query = append(query, h)
 	}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
-	wantLen := storedCount + MaxBlockAccessListsRegenerate
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter, nil)
+	wantLen := storedCount + cachedCount + MaxBlockAccessListsRegenerate
 	if len(result) != wantLen {
 		t.Fatalf("result len: have %d, want %d (truncated at the regeneration budget)", len(result), wantLen)
 	}
@@ -802,5 +878,29 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		if !bytes.Equal(e, want) {
 			t.Errorf("result[%d] mismatch: have %x, want %x", i, e, want)
 		}
+	}
+}
+
+type countingBodyReader struct {
+	dbservices.HeaderAndBodyReader
+	lookups int
+}
+
+func (r *countingBodyReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	r.lookups++
+	return nil, nil
+}
+
+func TestAnswerGetBlockBodiesQuery_StopsAtUnknownHash(t *testing.T) {
+	reader := &countingBodyReader{}
+	query := make(GetBlockBodiesPacket, 2*MaxBodiesServe)
+	for i := range query {
+		query[i] = common.Hash{byte(i), byte(i >> 8), 1}
+	}
+	if bodies := AnswerGetBlockBodiesQuery(nil, query, reader); len(bodies) != 0 {
+		t.Fatalf("expected no bodies, got %d", len(bodies))
+	}
+	if reader.lookups != 1 {
+		t.Fatalf("expected 1 header lookup, got %d", reader.lookups)
 	}
 }

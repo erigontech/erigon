@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -48,7 +47,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 
 	// Start the transaction pool
 	err = pool.start(ctx)
@@ -71,13 +70,13 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	for i := range 100 {
 		var addr [20]byte
 		addr[0] = uint8(i + 1)
-		acc := accounts3.Account{
+		acc := accounts.Account{
 			Nonce:       0,
 			Balance:     *uint256.NewInt(1 * common.Ether),
 			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 1,
 		}
-		v := accounts3.SerialiseV3(&acc)
+		v := accounts.SerialiseV3(&acc)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 			Action:  remoteproto.Action_UPSERT,
 			Address: gointerfaces.ConvertAddressToH160(addr),

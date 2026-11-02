@@ -89,7 +89,7 @@ const DefaultLogMaxSize = 1 << 27 // 128 Mb
 // already exists, FileHandler will append to the given file. If it does not,
 // FileHandler will create the file with mode 0644.
 func FileHandler(path string, fmtr Format, maxFileSize uint64) (Handler, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (r *rotatingWriter) Write(p []byte) (n int, err error) {
 		return 0, fmt.Errorf("rotating log %q stat: %w", r.file.Name(), err)
 	}
 	if uint64(info.Size())+uint64(len(p)) > r.logMaxSize {
-		if err := r.file.Truncate(0); err != nil {
+		if err = r.file.Truncate(0); err != nil {
 			return 0, fmt.Errorf("rotating log %q truncating: %w", r.file.Name(), err)
 		}
 	}

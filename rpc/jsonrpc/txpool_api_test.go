@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -36,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -53,7 +56,7 @@ func TestTxPoolContent(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), txPool)
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
@@ -130,7 +133,7 @@ func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 		}},
 		status: &txpoolproto.StatusReply{PendingCount: 2, BaseFeeCount: 1, QueuedCount: 1},
 	}
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, pool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), pool)
 
 	addr := m.Address.String()
 
@@ -157,14 +160,126 @@ func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 	require.Equal(hexutil.Uint(1), status["queued"])
 }
 
+func TestTxPoolInspect(t *testing.T) {
+	require := require.New(t)
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	rlpOf := func(txn types.Transaction) []byte {
+		buf := bytes.NewBuffer(nil)
+		require.NoError(txn.MarshalBinary(buf))
+		return buf.Bytes()
+	}
+	dynamicFee := types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 50000, To: &to, Value: *uint256.NewInt(7)},
+		ChainID:  *uint256.NewInt(1),
+		TipCap:   *uint256.NewInt(2),
+		FeeCap:   *uint256.NewInt(30),
+	}
+	blobRlp, _ := types.MakeBlobTxnRlp()
+
+	legacy := types.NewTransaction(0, to, uint256.NewInt(1234), params.TxGas, uint256.NewInt(10), nil)
+	creation := types.NewContractCreation(5, uint256.NewInt(0), 100000, uint256.NewInt(3), nil)
+
+	a1 := common.HexToAddress("0xfe00000000000000000000000000000000000001")
+	a2 := common.HexToAddress("0x0100000000000000000000000000000000000002")
+	s1, s2 := gointerfaces.ConvertAddressToH160(a1), gointerfaces.ConvertAddressToH160(a2)
+	pool := &stubPoolContentClient{all: &txpoolproto.AllReply{Txs: []*txpoolproto.AllReply_Tx{
+		{TxnType: txpoolproto.AllReply_PENDING, Sender: s1, RlpTx: rlpOf(legacy)},
+		{TxnType: txpoolproto.AllReply_BASE_FEE, Sender: s1, RlpTx: rlpOf(&dynamicFee)},
+		{TxnType: txpoolproto.AllReply_PENDING, Sender: s1, RlpTx: blobRlp},
+		{TxnType: txpoolproto.AllReply_QUEUED, Sender: s2, RlpTx: rlpOf(creation)},
+	}}}
+	api := NewTxPoolAPI(nil, pool)
+
+	inspect, err := api.Inspect(context.Background())
+	require.NoError(err)
+	require.Equal(map[string]map[string]map[string]string{
+		"pending": {a1.Hex(): {
+			"0": to.Hex() + ": 1234 wei + 21000 gas × 10 wei",
+			"1": to.Hex() + ": 7 wei + 50000 gas × 30 wei",
+			"7": common.HexToAddress("0x811a752c8cd697e3cb27279c330ed1ada745a8d7").Hex() + ": 0 wei + 5748100 gas × 30000000000 wei",
+		}},
+		"queued": {a2.Hex(): {
+			"5": "contract creation: 0 wei + 100000 gas × 3 wei",
+		}},
+	}, inspect)
+}
+
+// The txpool spec lists blob transactions among the pending and queued ones, and txpool_status counts them.
+func TestTxPoolContentIncludesBlobTxs(t *testing.T) {
+	require := require.New(t)
+	blobRlp, _ := types.MakeBlobTxnRlp()
+	sender := common.HexToAddress("0xfe00000000000000000000000000000000000001")
+	pool := &stubPoolContentClient{all: &txpoolproto.AllReply{Txs: []*txpoolproto.AllReply_Tx{
+		{TxnType: txpoolproto.AllReply_PENDING, Sender: gointerfaces.ConvertAddressToH160(sender), RlpTx: blobRlp},
+	}}}
+	api := NewTxPoolAPI(nil, pool)
+
+	content, err := api.Content(context.Background())
+	require.NoError(err)
+	blobTxn := content["pending"][sender.Hex()]["7"]
+	require.NotNil(blobTxn)
+	require.Equal(hexutil.Uint64(types.BlobTxType), blobTxn.Type)
+	require.Len(blobTxn.BlobVersionedHashes, 2)
+
+	contentFrom, err := api.ContentFrom(context.Background(), sender)
+	require.NoError(err)
+	require.Equal(blobTxn, contentFrom["pending"]["7"])
+}
+
 func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {
 	require := require.New(t)
 	pool := &stubPoolContentClient{
 		status: &txpoolproto.StatusReply{PendingCount: math.MaxUint32, BaseFeeCount: 1, QueuedCount: 0},
 	}
-	api := NewTxPoolAPI(nil, nil, pool)
+	api := NewTxPoolAPI(nil, pool)
 
 	status, err := api.Status(context.Background())
 	require.NoError(err)
 	require.Equal(hexutil.Uint(math.MaxUint32)+1, status["pending"])
+}
+
+// The named map types exist only to reach a fast marshaller, so what they write has to be
+// the bytes encoding/json wrote before, key order included.
+func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
+	txn := func(nonce uint64) *ethapi.RPCTransaction {
+		to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+		return newRPCPendingTransaction(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21000, To: &to},
+			GasPrice: *uint256.NewInt(1e9),
+		})
+	}
+	a1 := common.HexToAddress("0xfe00000000000000000000000000000000000001")
+	a2 := common.HexToAddress("0x0100000000000000000000000000000000000002")
+
+	for name, result := range map[string]any{
+		"content": TxPoolContent{
+			"queued":  {a1.Hex(): {"10": txn(10), "2": txn(2)}},
+			"pending": {a2.Hex(): {"1": txn(1)}, a1.Hex(): {"3": txn(3)}},
+		},
+		"contentFrom": TxPoolContentFrom{"pending": {"7": txn(7)}, "queued": {}},
+		"storageValues": StorageValues{
+			a1: {hexutil.Bytes{0x01}, hexutil.Bytes{}},
+			a2: {hexutil.Bytes{0xff, 0x00}},
+		},
+		"emptyContent":  TxPoolContent{"pending": {}, "queued": {}},
+		"nilSubPool":    TxPoolContent{"pending": nil, "queued": {a1.Hex(): nil}},
+		"nilNonceMap":   TxPoolContentFrom{"pending": nil},
+		"emptySlotList": StorageValues{a1: {}},
+		"nilStorage":    StorageValues(nil),
+		"nilSlotValues": StorageValues{a1: nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(result)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, result.(interface {
+				MarshalFastJSONTo(*jsonstream.Stream) error
+			}).MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+
+			require.Equal(t, string(want), string(s.Buffer()), "bytes and key order must match encoding/json")
+		})
+	}
 }

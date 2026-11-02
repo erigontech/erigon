@@ -644,6 +644,9 @@ func validateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChain
 }
 
 func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
+	if e == nil || e.Payload == nil || e.ExecutionRequests == nil {
+		return [32]byte{}, errors.New("execution payload envelope is incomplete")
+	}
 	return merkle_tree.ProgressiveContainerRootAll(
 		e.Payload,
 		e.ExecutionRequests,

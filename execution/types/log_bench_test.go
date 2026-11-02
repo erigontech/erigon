@@ -18,23 +18,33 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
+func BenchmarkLogsMarshalFastJSON(b *testing.B) {
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	logs := make(RPCLogs, 1000)
+	logs := make(Logs, 1000)
 	for i := range logs {
-		logs[i] = &RPCLog{Log: Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}}
+		logs[i] = &Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}
 	}
-	b.Run("fast", func(b *testing.B) {
+	b.Run("stream", func(b *testing.B) {
 		b.ReportAllocs()
+		rec := httptest.NewRecorder()
 		for b.Loop() {
-			if _, err := logs.MarshalFastJSON(); err != nil {
+			rec.Body.Reset()
+			s := jsonstream.Get(rec)
+			if err := logs.MarshalFastJSONTo(s); err != nil {
 				b.Fatal(err)
 			}
+			if err := s.Flush(); err != nil {
+				b.Fatal(err)
+			}
+			jsonstream.Put(s)
 		}
 	})
 	b.Run("reflect", func(b *testing.B) {
@@ -45,4 +55,42 @@ func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
 			}
 		}
 	})
+}
+
+// filterBenchLogs builds receipts of 8 logs each where 1 log in 4 comes from one of addrs and carries
+// one of topic0s, as in eth_getLogs results.
+func filterBenchLogs(n int) (logs Logs, addrs []common.Address, topic0s []common.Hash) {
+	val := func(i, salt int) common.Hash { return common.Hash{byte(i), byte(i >> 8), byte(salt)} }
+	addr := func(i, salt int) common.Address { return common.Address{byte(i), byte(i >> 8), byte(salt)} }
+	for i := range n {
+		addrs = append(addrs, addr(i, 1))
+		topic0s = append(topic0s, val(i, 2))
+	}
+	for i := range 4096 {
+		l := &Log{Address: addr(i, 3), Topics: []common.Hash{val(i, 4), val(i, 5), val(i, 6)}}
+		if i%4 == 0 {
+			l.Address, l.Topics[0] = addrs[i%n], topic0s[(i/4)%n]
+		}
+		logs = append(logs, l)
+	}
+	return logs, addrs, topic0s
+}
+
+func BenchmarkAppendFilteredLogs(b *testing.B) {
+	for _, n := range []int{1, 2, 4, 16} {
+		logs, addrs, topic0s := filterBenchLogs(n)
+		for name, topics := range map[string][][]common.Hash{"address": nil, "address+topic0": {topic0s}} {
+			b.Run(fmt.Sprintf("%s/n=%d", name, n), func(b *testing.B) {
+				f := NewLogFilter(addrs, topics)
+				dst := make(Logs, 0, len(logs))
+				b.ReportAllocs()
+				for b.Loop() {
+					for i := 0; i < len(logs); i += 8 {
+						dst = logs[i:i+8].AppendFilteredLogs(dst[:0], f, 1, 0)
+					}
+				}
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(logs)), "ns/log")
+			})
+		}
+	}
 }

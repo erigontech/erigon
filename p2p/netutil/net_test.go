@@ -32,7 +32,7 @@ import (
 )
 
 func TestParseNetlist(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		input    string
 		wantErr  bool
 		wantList *Netlist
@@ -78,7 +78,8 @@ func TestNilNetListContains(t *testing.T) {
 }
 
 func TestIsLAN(t *testing.T) {
-	checkContains(t, IsLAN,
+	checkContains(
+		t, IsLAN,
 		[]string{ // included
 			"127.0.0.1",
 			"10.0.1.1",
@@ -102,7 +103,8 @@ func TestIsLAN(t *testing.T) {
 }
 
 func TestIsSpecialNetwork(t *testing.T) {
-	checkContains(t, IsSpecialNetwork,
+	checkContains(
+		t, IsSpecialNetwork,
 		[]string{ // included
 			"192.0.2.1",
 			"192.0.2.44",

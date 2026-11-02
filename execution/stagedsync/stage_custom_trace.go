@@ -89,7 +89,8 @@ func NewProduce(produceList []string) Produce {
 
 func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br dbservices.FullBlockReader,
 	cc *chain.Config, engine rules.Engine,
-	genesis *types.Genesis, syncCfg ethconfig.Sync) CustomTraceCfg {
+	genesis *types.Genesis, syncCfg ethconfig.Sync,
+) CustomTraceCfg {
 	execArgs := &exec.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
@@ -209,7 +210,7 @@ Loop:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			//TODO: log progress and list of domains/files
+			// TODO: log progress and list of domains/files
 			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
 	}
@@ -433,7 +434,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			default:
 			}
 			return nil
-		}), tx, cfg, logger); err != nil {
+		},
+	), tx, cfg, logger); err != nil {
 		return err
 	}
 
@@ -441,7 +443,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 }
 
 func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
-	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
+	// TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	dbg := tx.Debug()
 	txNum := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
@@ -466,7 +468,7 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 }
 
 func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
-	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
+	// TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := dbstate.AggTx(tx)
 	fromStep := kv.Step(math.MaxUint64)
 	if produce.ReceiptDomain {

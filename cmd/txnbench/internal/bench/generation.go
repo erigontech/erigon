@@ -61,7 +61,6 @@ func findBlockWithTxs(ctx context.Context, c *rpcclient.Client, start uint64) (u
 			return 0, nil, fmt.Errorf("get block %d: %w", h, err)
 		}
 		if len(b.Transactions) > 0 {
-
 			return h, b.Transactions, nil
 		}
 	}

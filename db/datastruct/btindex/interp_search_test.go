@@ -23,7 +23,7 @@ func TestInterpEquivBinary(t *testing.T) {
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 	buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()

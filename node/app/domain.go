@@ -34,8 +34,10 @@ import (
 	"github.com/erigontech/erigon/common/ntoh"
 )
 
-var resolvedDomains = map[DomainId]Domain{}
-var resolvedDomainsLock = sync.RWMutex{}
+var (
+	resolvedDomains     = map[DomainId]Domain{}
+	resolvedDomainsLock = sync.RWMutex{}
+)
 
 // an ident is an immutable string of bytes
 type ident string
@@ -187,7 +189,6 @@ func NewDomain[T comparable](features ...domainFeature) (Domain, error) {
 	n := max(1, (bits.Len64(nextDomainId)+7)/8)
 	idbuf := append([]byte{byte(n)}, be[8-n:]...)
 	d, err := newDomain[T](asIdent(idbuf), nil, features...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -197,8 +198,10 @@ func NewDomain[T comparable](features ...domainFeature) (Domain, error) {
 	return d, nil
 }
 
-var nextDomainId uint64 = 0
-var nextDomainLock = sync.Mutex{}
+var (
+	nextDomainId   uint64 = 0
+	nextDomainLock        = sync.Mutex{}
+)
 
 func NewNamedDomain[T comparable](name string, features ...domainFeature) (Domain, error) {
 	return newDomain[T](ident(strings.ToLower(name)), nil, features...)
@@ -206,7 +209,6 @@ func NewNamedDomain[T comparable](name string, features ...domainFeature) (Domai
 
 func newDomain[T comparable](rootId ident, incarnation Incarnation, features ...domainFeature) (Domain, error) {
 	id, err := toId(unique.Make(rootId), incarnation, features...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +222,8 @@ func newDomain[T comparable](rootId ident, incarnation Incarnation, features ...
 	d := &domain[T]{
 		id:          id,
 		incarnation: incarnation,
-		info:        info}
+		info:        info,
+	}
 
 	for _, feature := range features {
 		feature.apply(d)
@@ -372,13 +375,11 @@ func (d *domain[T]) NewId(generationContext context.Context, entity ...any) (Id,
 		}
 
 		idval, err := d.idGenerator.GenerateId(generationContext, e)
-
 		if err != nil {
 			return nil, err
 		}
 
 		id, err := d.ToId(idval)
-
 		if err != nil {
 			return nil, err
 		}
@@ -394,7 +395,6 @@ func NewTypedDomain[I comparable, T any](features ...domainFeature) (TypedDomain
 }
 
 func newTypedDomain[I comparable, T any](_ ...domainFeature) (TypedDomain, error) {
-
 	localDomain, _ := NewDomain[I]()
 
 	var t T

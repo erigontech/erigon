@@ -31,6 +31,7 @@ type BlockCollector interface {
 	AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	Flush(ctx context.Context) error
 	HasBlock(blockNumber uint64) bool
+	Close() error
 }
 
 // payloadKey returns the key for the payload: just the block number.

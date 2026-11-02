@@ -369,17 +369,18 @@ func (r *Receipt) Size() int {
 	return n
 }
 
-// LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
-func (r *Receipt) LogsBloom() Bloom {
+// LogsBloom returns a pointer into the receipt, or to the bloom derived from the logs and
+// cached when Bloom is unset, so a caller that only reads it copies nothing.
+func (r *Receipt) LogsBloom() *Bloom {
 	if !r.Bloom.IsEmpty() || len(r.Logs) == 0 {
-		return r.Bloom
+		return &r.Bloom
 	}
 	if b := r.derivedBloom.Load(); b != nil {
-		return *b
+		return b
 	}
 	b := CreateBloom(Receipts{r})
 	r.derivedBloom.Store(&b)
-	return b
+	return &b
 }
 
 // Copy creates a deep copy of the Receipt.
@@ -476,11 +477,21 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	if l == 0 {
 		return Logs{}, s.ListEnd()
 	}
-	const typicalLogSize = 128 // estimate only, append grows past it
-	preAlloc := int(min(maxDecodePreAlloc, l/typicalLogSize+1))
-	logs := make(Logs, 0, preAlloc)
+	// One arena backs every Log, so a log costs no allocation of its own.
+	// CountItems is exact for a well-formed list but counts items, not logs, so
+	// minStoredLogSize bounds what a crafted payload can size.
+	const minStoredLogSize = 24 // list header, 21-byte address, empty topics, empty data
+	var arena []Log
+	if raw := s.Peek(); uint64(len(raw)) >= l {
+		arena = make([]Log, min(rlp.CountItems(raw[:l]), int(l/minStoredLogSize)))
+	}
+	logs := make(Logs, 0, len(arena))
 	for s.MoreDataInList() {
-		log := &Log{}
+		if len(arena) == 0 {
+			arena = make([]Log, 1)
+		}
+		log := &arena[0]
+		arena = arena[1:]
 		if err := (*LogForStorage)(log).DecodeRLP(s); err != nil {
 			return nil, err
 		}
@@ -603,7 +614,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 		logIndex += len(r.Logs)
 
-		//no duplicates
+		// no duplicates
 		if len(r.Logs) <= 1 {
 			continue
 		}

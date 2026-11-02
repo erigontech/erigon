@@ -34,6 +34,7 @@ var (
 	// A streamed response the client did not receive in full. Batch and
 	// non-streaming replies never touch the stream, so they are not counted.
 	undeliveredGauge = metrics.GetOrCreateCounter("rpc_undelivered_total")
+	ingressRejected  = metrics.GetOrCreateCounter("rpc_ingress_rejected_total")
 )
 
 // PreAllocateRPCMetricLabels pre-allocates labels for all rpc methods inside API List
@@ -64,6 +65,9 @@ func getRPCMethodNames(apiList []API) (methods []string) {
 		apiType := reflect.TypeOf(api.Service)
 
 		for method := range apiType.Methods() {
+			if !servedByIface(api.Iface, method.Name) {
+				continue
+			}
 			rpcMethod := fmt.Sprintf("%s_%s", api.Namespace, pascalToCamel(method.Name))
 			methods = append(methods, rpcMethod)
 		}
@@ -87,7 +91,6 @@ func createRPCMetricsLabel(method string, valid bool) string {
 	}
 
 	return fmt.Sprintf(`rpc_duration_seconds{method=%q,success=%q}`, method, status)
-
 }
 
 func newRPCServingTimerMS(method string, valid bool) metrics.Summary {

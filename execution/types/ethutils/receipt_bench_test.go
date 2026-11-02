@@ -19,6 +19,7 @@ package ethutils
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func BenchmarkMarshalReceipt(b *testing.B) {
@@ -35,7 +37,7 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 	txn.SetSender(accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef03")))
 	header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000, BaseFee: uint256.NewInt(50)}
 
-	for _, logCount := range []int{0, 2} {
+	for _, logCount := range []int{0, 2, 100} {
 		logs := make(types.Logs, logCount)
 		for i := range logs {
 			logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64)}
@@ -52,12 +54,39 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 		}
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
-		b.Run(fmt.Sprintf("logs=%d", logCount), func(b *testing.B) {
+		rpcReceipts := RPCReceipts{MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, true)}
+
+		// The served path: the pooled stream a reply writes into, through the hand-written
+		// encoder. The reflect arm is what it replaces.
+		b.Run(fmt.Sprintf("logs=%d/stream", logCount), func(b *testing.B) {
+			b.ReportAllocs()
+			rec := httptest.NewRecorder()
+			for b.Loop() {
+				rec.Body.Reset()
+				w := jsonstream.Get(rec)
+				if err := rpcReceipts.MarshalFastJSONTo(w); err != nil {
+					b.Fatal(err)
+				}
+				if err := w.Flush(); err != nil {
+					b.Fatal(err)
+				}
+				jsonstream.Put(w)
+			}
+		})
+		b.Run(fmt.Sprintf("logs=%d/reflect", logCount), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := json.Marshal(MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, true))
+				out, err := json.Marshal(rpcReceipts)
 				if err != nil || len(out) == 0 {
 					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("logs=%d/build", logCount), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, true) == nil {
+					b.Fatal("nil")
 				}
 			}
 		})

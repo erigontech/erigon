@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -330,7 +331,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
@@ -538,7 +539,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, true, 2, 14, 14)
 
-	//0-1....12-13, 13-15, 15-16 => 0-16
+	// 0-1....12-13, 13-15, 15-16 => 0-16
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
 }
 
@@ -551,7 +552,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 
 	require.NoError(t, filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //skip magically disappeared files
+			if os.IsNotExist(err) { // skip magically disappeared files
 				return nil
 			}
 			return err
@@ -648,7 +649,8 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, repo *SnapshotRepo, ranges 
 			allFiles = append(allFiles, file)
 		}
 		if acc.Has(statecfg.AccessorHashMap) {
-			file, _ := repo.schema.AccessorIdxFile(v, from, to, 0)
+			// zero version: let the schema name it with its own accessor version
+			file, _ := repo.schema.AccessorIdxFile(statecfg.Version{}, from, to, 0)
 			allFiles = append(allFiles, file)
 		}
 	}
@@ -705,12 +707,10 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
-			if err != nil {
+			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence); err != nil {
 				t.Fatal(err)
 			}
 			seg3.Close()
-			bti.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				btCount++
@@ -733,7 +733,22 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			return
 		}
 
-		if strings.HasSuffix(filename, ".kvi") || strings.HasSuffix(filename, ".vi") || strings.HasSuffix(filename, ".efi") {
+		if strings.HasSuffix(filename, ".vi") {
+			w, err := posidx.NewWriter(filename, t.TempDir(), 1, 1, 1, 1)
+			require.NoError(t, err)
+			defer w.Close()
+			w.NoFsync()
+			w.AddRun(1)
+			w.AddPage(0)
+			require.NoError(t, w.Build())
+			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
+				accessorCount++
+			}
+
+			return
+		}
+
+		if strings.HasSuffix(filename, ".kvi") || strings.HasSuffix(filename, ".efi") {
 			salt := uint32(1)
 			rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 				KeyCount:   1,
@@ -795,5 +810,4 @@ func fileExistsCheck(t *testing.T, repo *SnapshotRepo, startStep, endStep uint64
 		require.Error(t, err)
 		require.True(t, os.IsNotExist(err))
 	}
-
 }

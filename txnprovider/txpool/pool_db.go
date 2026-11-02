@@ -32,11 +32,13 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-var PoolChainConfigKey = []byte("chain_config")
-var PoolLastSeenBlockKey = []byte("last_seen_block")
-var PoolPendingBaseFeeKey = []byte("pending_base_fee")
-var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
-var PoolStateVersion = []byte("state_version")
+var (
+	PoolChainConfigKey    = []byte("chain_config")
+	PoolLastSeenBlockKey  = []byte("last_seen_block")
+	PoolPendingBaseFeeKey = []byte("pending_base_fee")
+	PoolPendingBlobFeeKey = []byte("pending_blob_fee")
+	PoolStateVersion      = []byte("state_version")
+)
 
 func getExecutionProgress(db kv.Getter) (uint64, error) {
 	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))
@@ -140,7 +142,7 @@ func SaveChainConfigIfNeed(
 	poolDB kv.RwDB,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
-	if err := poolDB.View(ctx, func(tx kv.Tx) error {
+	err = poolDB.View(ctx, func(tx kv.Tx) error {
 		cc, err = ChainConfig(tx)
 		if err != nil {
 			return err
@@ -150,7 +152,8 @@ func SaveChainConfigIfNeed(
 			return err
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -160,7 +163,8 @@ func SaveChainConfigIfNeed(
 			if err != nil {
 				return err
 			}
-			n, err := chain.CurrentBlockNumber(tx)
+			var n *uint64
+			n, err = chain.CurrentBlockNumber(tx)
 			if err != nil {
 				return err
 			}

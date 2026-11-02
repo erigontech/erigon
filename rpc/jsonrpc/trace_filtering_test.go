@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -101,7 +103,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Set up the state reader at the parent block boundary (= pre-block-6 state).
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, parentNrOrHash, 0,
-		api.filters, api.stateCache, api._txNumReader)
+		api.stateCache, api._txNumReader)
 	require.NoError(t, err)
 
 	hsr, ok := stateReader.(state.HistoricalStateReader)
@@ -115,7 +117,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
 
-	logger := log.New("trace_filtering_test")
+	logger := log.New("component", "trace_filtering_test")
 	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
@@ -128,10 +130,30 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	parallelResults, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
 	require.NoError(t, err)
 	require.Len(t, parallelResults, len(txs))
+	for _, tc := range []struct {
+		name       string
+		startTxNum uint64
+		pruned     bool
+	}{
+		{"worker_history_at_base", baseTxNum, false},
+		{"worker_history_after_base", baseTxNum + 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api.kv = historyFloorDB{TemporalRoDB: m.DB, startTxNum: tc.startTxNum}
+			defer func() { api.kv = m.DB }()
+			_, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
+			if tc.pruned {
+				require.ErrorIs(t, err, state.ErrPruned)
+				require.Contains(t, err.Error(), fmt.Sprintf("requested block %d", blockNum))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, false /* noBaseFee */, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -253,9 +275,17 @@ func TestBlockWithdrawalTraceEntries(t *testing.T) {
 	require.Equal(t, blk.NumberU64(), *wdTraces[0].BlockNumber)
 	require.Equal(t, rewardTraceType, wdTraces[0].Type)
 
-	// Withdrawal entries must not carry a transaction hash or position.
+	// Withdrawal entries have no transaction: their hash and position are null.
 	require.Nil(t, wdTraces[0].TransactionHash)
 	require.Nil(t, wdTraces[0].TransactionPosition)
+	encoded, err := jsonstream.Marshal(&wdTraces[0])
+	require.NoError(t, err)
+	var record map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &record))
+	require.Contains(t, record, "transactionHash")
+	require.Contains(t, record, "transactionPosition")
+	require.JSONEq(t, "null", string(record["transactionHash"]))
+	require.JSONEq(t, "null", string(record["transactionPosition"]))
 }
 
 // TestBlockWithdrawalNoEntriesWithoutFlag verifies that trace_block does not
@@ -535,4 +565,160 @@ func TestTraceGetUnknownTxReturnsNull(t *testing.T) {
 	trace, err := api.Get(context.Background(), common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), []hexutil.Uint64{0}, nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, trace)
+}
+
+func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	for n := rpc.BlockNumber(1); n <= 10; n++ {
+		traces, err := api.Block(context.Background(), n, new(bool), &config.TraceConfig{})
+		require.NoError(t, err)
+		requireFastJSONMatchesReflection(t, fmt.Sprintf("block %d", n), traces)
+	}
+
+	hash := common.HexToHash("0xab")
+	num, pos := uint64(7), uint64(2)
+	addr := common.HexToAddress("0xc0de")
+	u := func(v uint64) hexutil.U256 { return hexutil.U256(*uint256.NewInt(v)) }
+	gasUsed := u(21000)
+	for name, ts := range map[string]ParityTraces{
+		"nil":   nil,
+		"empty": {},
+		"state gas": {
+			{
+				Action: &CreateTraceAction{StateGas: new(hexutil.Uint64(100))},
+				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64(50))}, Type: "create",
+			},
+			{Action: &CallTraceAction{}, Result: &TraceResult{StateGasUsed: new(hexutil.Int64(-50))}, Type: "call"},
+		},
+		"zero state gas": {
+			{
+				Action: &CreateTraceAction{StateGas: new(hexutil.Uint64)},
+				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "create",
+			},
+			{Action: &CallTraceAction{}, Result: &TraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "call"},
+		},
+		"all kinds": {
+			{
+				Action:    &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},
+				BlockHash: &hash, BlockNumber: &num, Result: &TraceResult{GasUsed: &gasUsed, Output: hexutil.Bytes{3}},
+				Subtraces: 2, TraceAddress: []int{}, TransactionHash: &hash, TransactionPosition: &pos, Type: "call",
+			},
+			{
+				Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
+				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create",
+			},
+			{Action: &CreateTraceAction{}, Error: "Out of gas", Type: "create"},
+			{Action: &CreateTraceAction{}, Error: "Reverted", Result: &TraceResult{GasUsed: &gasUsed, Output: hexutil.Bytes{0xde}}, Type: "create"},
+			{Action: &SuicideTraceAction{Address: addr, RefundAddress: addr, Balance: u(9)}, TraceAddress: []int{3}, Type: "suicide"},
+			{Action: &RewardTraceAction{Author: addr, RewardType: "block", Value: u(2e18)}, BlockHash: &hash, BlockNumber: &num, Type: "reward"},
+			{Action: (*CallTraceAction)(nil), Result: (*TraceResult)(nil), Error: "Reverted", Type: "call"},
+			{},
+		},
+	} {
+		requireFastJSONMatchesReflection(t, name, ts)
+		for i := range ts {
+			requireFastJSONMatchesReflection(t, fmt.Sprintf("%s trace %d", name, i), &ts[i])
+		}
+	}
+
+	stream := jsonstream.Get(nil)
+	defer jsonstream.Put(stream)
+	err := ParityTraces{{Action: CallTraceAction{}}}.MarshalFastJSONTo(stream)
+	require.ErrorContains(t, err, "has no JSON writer")
+	require.Empty(t, stream.Buffer(), "an unsupported action fails before the first write")
+}
+
+// A localized record always carries transactionHash and transactionPosition, null for a reward,
+// while a frame inside a replay envelope carries no localization members.
+func TestTraceRecordLocalizationMembers(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	n := rpc.BlockNumber(1)
+
+	block, err := api.Block(m.Ctx, n, new(bool), nil)
+	require.NoError(t, err)
+	blockJSON, err := jsonstream.Marshal(block)
+	require.NoError(t, err)
+	filter := jsonstream.New(nil)
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &n, ToBlock: &n}, new(bool), nil, filter))
+
+	for name, encoded := range map[string][]byte{"trace_block": blockJSON, "trace_filter": filter.Buffer()} {
+		var records []map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(encoded, &records), name)
+		var rewards int
+		for _, r := range records {
+			for _, member := range []string{"blockHash", "blockNumber", "transactionHash", "transactionPosition"} {
+				require.Contains(t, r, member, name)
+			}
+			if string(r["type"]) == `"reward"` {
+				rewards++
+				require.JSONEq(t, "null", string(r["transactionHash"]), name)
+				require.JSONEq(t, "null", string(r["transactionPosition"]), name)
+			}
+		}
+		require.Positive(t, rewards, name)
+	}
+
+	replay, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(n), []string{TraceTypeTrace}, new(bool), nil)
+	require.NoError(t, err)
+	replayJSON, err := json.Marshal(replay)
+	require.NoError(t, err)
+	var envelopes []struct {
+		Trace []map[string]json.RawMessage `json:"trace"`
+	}
+	require.NoError(t, json.Unmarshal(replayJSON, &envelopes))
+	require.NotEmpty(t, envelopes)
+	for _, envelope := range envelopes {
+		require.NotEmpty(t, envelope.Trace)
+		for _, frame := range envelope.Trace {
+			for _, member := range []string{"blockHash", "blockNumber", "transactionHash", "transactionPosition"} {
+				require.NotContains(t, frame, member)
+			}
+		}
+	}
+}
+
+type localizedParityTraceFields struct {
+	Action              any          `json:"action"`
+	BlockHash           *common.Hash `json:"blockHash,omitempty"`
+	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
+	Error               string       `json:"error,omitempty"`
+	Result              any          `json:"result"`
+	Subtraces           int          `json:"subtraces"`
+	TraceAddress        []int        `json:"traceAddress"`
+	TransactionHash     *common.Hash `json:"transactionHash"`
+	TransactionPosition *uint64      `json:"transactionPosition"`
+	Type                string       `json:"type"`
+}
+
+func reflectedParityTrace(tr *ParityTrace) any {
+	if tr.BlockHash != nil {
+		return localizedParityTraceFields(*tr)
+	}
+	return tr
+}
+
+func requireFastJSONMatchesReflection(t *testing.T, name string, ts jsonstream.Marshaler) {
+	t.Helper()
+	var reflected any
+	switch v := ts.(type) {
+	case ParityTraces:
+		if v != nil {
+			traces := make([]any, len(v))
+			for i := range v {
+				traces[i] = reflectedParityTrace(&v[i])
+			}
+			reflected = traces
+		}
+	case *ParityTrace:
+		reflected = reflectedParityTrace(v)
+	default:
+		t.Fatalf("%s: unexpected %T", name, ts)
+	}
+	want, err := json.Marshal(reflected)
+	require.NoError(t, err, name)
+	got, err := jsonstream.Marshal(ts)
+	require.NoError(t, err, name)
+	require.Equal(t, string(want), string(got), name)
 }

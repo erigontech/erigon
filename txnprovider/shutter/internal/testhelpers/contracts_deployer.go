@@ -173,7 +173,8 @@ func (d ContractsDeployer) DeployKeyperSet(
 	}
 
 	// DeployCore ended with VerifyTxnsInclusion — wait for committed state (4 txns: 3 deploys + 1 init)
-	if err := d.waitForNonceAt(ctx, 4); err != nil {
+	err = d.waitForNonceAt(ctx, 4)
+	if err != nil {
 		return common.Address{}, nil, err
 	}
 
@@ -239,7 +240,8 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block,
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(
+		ctx, block,
 		keyperSetDeployTxn.Hash(),
 		setPublisherTxn.Hash(),
 		setThresholdTxn.Hash(),

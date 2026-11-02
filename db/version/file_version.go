@@ -48,8 +48,10 @@ type Version struct {
 	Minor uint64
 }
 
-var ErrVersionIsNotSupported error = errors.New("this version is not supported")
-var ErrInvalidVersion = errors.New("invalid version")
+var (
+	ErrVersionIsNotSupported error = errors.New("this version is not supported")
+	ErrInvalidVersion              = errors.New("invalid version")
+)
 
 var (
 	ZeroVersion                  = Version{}

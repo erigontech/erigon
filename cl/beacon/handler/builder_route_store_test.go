@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +53,7 @@ func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
 
 	require.Error(t, err)
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 	require.Empty(t, recorder.Header().Get("Eth-Builder-Url"))
 }

@@ -222,9 +222,11 @@ var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {},
 	stages.Finish:      {},
 }
+
 var stateBuckets = []string{
 	kv.Epoch, kv.PendingEpoch,
 }
+
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
 	kv.TblPruningValsProg,
@@ -273,7 +275,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
-
 		if err != nil {
 			return fmt.Errorf("get %s stage progress to advance: %w", stage, err)
 		}

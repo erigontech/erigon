@@ -213,7 +213,8 @@ func (b *BuilderEntry) EncodeSSZ(dst []byte) ([]byte, error) {
 		return nil, err
 	}
 	urlBytes := hexutil.Bytes(b.URL)
-	return ssz2.MarshalSSZ(dst,
+	return ssz2.MarshalSSZ(
+		dst,
 		&rawByteList{value: &urlBytes, limit: MaxBuilderURLSize},
 		b.Auth,
 		&builderPubkeyList{values: &b.BuilderPubkeys},
@@ -231,7 +232,8 @@ func (b *BuilderEntry) DecodeSSZStrict(buf []byte, version int) error {
 	var urlBytes hexutil.Bytes
 	b.Auth = new(SignedBuilderRequestAuth)
 	b.BuilderPubkeys = nil
-	if err := ssz2.UnmarshalSSZStrict(buf, version,
+	if err := ssz2.UnmarshalSSZStrict(
+		buf, version,
 		&rawByteList{value: &urlBytes, limit: MaxBuilderURLSize},
 		b.Auth,
 		&builderPubkeyList{values: &b.BuilderPubkeys},
@@ -630,12 +632,15 @@ func (b *BuilderPreferences) EncodingSizeSSZ() int { return 8 }
 func (b *BuilderPreferences) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, b.MaxExecutionPayment)
 }
+
 func (b *BuilderPreferences) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZStrict(buf, version, &b.MaxExecutionPayment)
 }
+
 func (b *BuilderPreferences) DecodeSSZStrict(buf []byte, version int) error {
 	return b.DecodeSSZ(buf, version)
 }
+
 func (b *BuilderPreferences) Clone() clonable.Clonable {
 	return &BuilderPreferences{MaxExecutionPayment: b.MaxExecutionPayment}
 }
@@ -671,20 +676,24 @@ func (b *BuilderPreferencesRequest) EncodingSizeSSZ() int {
 	}
 	return size
 }
+
 func (b *BuilderPreferencesRequest) EncodeSSZ(dst []byte) ([]byte, error) {
 	if b.Preferences == nil || b.Auth == nil || b.Auth.Message == nil {
 		return nil, errors.New("builder preferences request has nil field")
 	}
 	return ssz2.MarshalSSZ(dst, b.Preferences, b.Auth)
 }
+
 func (b *BuilderPreferencesRequest) DecodeSSZ(buf []byte, version int) error {
 	return b.DecodeSSZStrict(buf, version)
 }
+
 func (b *BuilderPreferencesRequest) DecodeSSZStrict(buf []byte, version int) error {
 	b.Preferences = new(BuilderPreferences)
 	b.Auth = new(SignedBuilderRequestAuth)
 	return ssz2.UnmarshalSSZStrict(buf, version, b.Preferences, b.Auth)
 }
+
 func (b *BuilderPreferencesRequest) Clone() clonable.Clonable {
 	clone := &BuilderPreferencesRequest{}
 	if b.Preferences != nil {
@@ -702,6 +711,7 @@ func (b *BuilderPreferencesRequest) HashSSZ() ([32]byte, error) {
 	}
 	return merkle_tree.HashTreeRoot(b.Preferences, b.Auth)
 }
+
 func (b *BuilderPreferencesRequest) UnmarshalJSON(data []byte) error {
 	var value struct {
 		Preferences *BuilderPreferences       `json:"preferences"`
@@ -738,6 +748,7 @@ func (r *rawByteList) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	return append(dst, (*r.value)...), nil
 }
+
 func (r *rawByteList) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) > r.limit {
 		return fmt.Errorf("byte list length %d exceeds %d", len(buf), r.limit)
@@ -745,9 +756,11 @@ func (r *rawByteList) DecodeSSZ(buf []byte, _ int) error {
 	*r.value = bytes.Clone(buf)
 	return nil
 }
+
 func (r *rawByteList) DecodeSSZStrict(buf []byte, version int) error {
 	return r.DecodeSSZ(buf, version)
 }
+
 func (r *rawByteList) Clone() clonable.Clonable {
 	value := hexutil.Bytes(nil)
 	return &rawByteList{value: &value, limit: r.limit}
@@ -766,6 +779,7 @@ func (l *builderPubkeyList) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	return dst, nil
 }
+
 func (l *builderPubkeyList) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%len(common.Bytes48{}) != 0 {
 		return commonssz.ErrLowBufferSize
@@ -780,9 +794,11 @@ func (l *builderPubkeyList) DecodeSSZ(buf []byte, _ int) error {
 	}
 	return nil
 }
+
 func (l *builderPubkeyList) DecodeSSZStrict(buf []byte, version int) error {
 	return l.DecodeSSZ(buf, version)
 }
+
 func (l *builderPubkeyList) Clone() clonable.Clonable {
 	values := []common.Bytes48(nil)
 	return &builderPubkeyList{values: &values}
@@ -810,12 +826,15 @@ func (r *rawBuilderRequestAuth) Static() bool { return false }
 func (r *rawBuilderRequestAuth) EncodingSizeSSZ() int {
 	return 4 + 8 + len(r.data)
 }
+
 func (r *rawBuilderRequestAuth) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, &rawByteList{value: &r.data, limit: MaxBuilderAuthDataSize}, r.slot)
 }
+
 func (r *rawBuilderRequestAuth) DecodeSSZ(buf []byte, version int) error {
 	return r.DecodeSSZStrict(buf, version)
 }
+
 func (r *rawBuilderRequestAuth) DecodeSSZStrict(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZStrict(buf, version, &rawByteList{value: &r.data, limit: MaxBuilderAuthDataSize}, &r.slot)
 }
@@ -833,16 +852,20 @@ func (r *rawSignedBuilderRequestAuth) EncodingSizeSSZ() int {
 	}
 	return 4 + len(r.signature) + r.message.EncodingSizeSSZ()
 }
+
 func (r *rawSignedBuilderRequestAuth) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, r.message, r.signature[:])
 }
+
 func (r *rawSignedBuilderRequestAuth) DecodeSSZ(buf []byte, version int) error {
 	return r.DecodeSSZStrict(buf, version)
 }
+
 func (r *rawSignedBuilderRequestAuth) DecodeSSZStrict(buf []byte, version int) error {
 	r.message = new(rawBuilderRequestAuth)
 	return ssz2.UnmarshalSSZStrict(buf, version, r.message, r.signature[:])
 }
+
 func (r *rawSignedBuilderRequestAuth) Clone() clonable.Clonable {
 	return new(rawSignedBuilderRequestAuth)
 }
@@ -856,6 +879,7 @@ func (r *rawBuilderEntry) EncodingSizeSSZ() int {
 	}
 	return r.entry.EncodingSizeSSZ()
 }
+
 func (r *rawBuilderEntry) EncodeSSZ(dst []byte) ([]byte, error) {
 	if r.entry == nil || r.entry.Auth == nil || r.entry.Auth.Message == nil {
 		return nil, errors.New("raw builder entry has nil auth")
@@ -865,7 +889,8 @@ func (r *rawBuilderEntry) EncodeSSZ(dst []byte) ([]byte, error) {
 		message:   &rawBuilderRequestAuth{data: r.entry.Auth.Message.Data, slot: r.entry.Auth.Message.Slot},
 		signature: r.entry.Auth.Signature,
 	}
-	return ssz2.MarshalSSZ(dst,
+	return ssz2.MarshalSSZ(
+		dst,
 		&rawByteList{value: &urlBytes, limit: MaxBuilderURLSize},
 		auth,
 		&builderPubkeyList{values: &r.entry.BuilderPubkeys},
@@ -874,15 +899,18 @@ func (r *rawBuilderEntry) EncodeSSZ(dst []byte) ([]byte, error) {
 		r.entry.BuilderBoostFactor,
 	)
 }
+
 func (r *rawBuilderEntry) DecodeSSZ(buf []byte, version int) error {
 	return r.DecodeSSZStrict(buf, version)
 }
+
 func (r *rawBuilderEntry) DecodeSSZStrict(buf []byte, version int) error {
 	var urlBytes hexutil.Bytes
 	var auth rawSignedBuilderRequestAuth
 	var pubkeys []common.Bytes48
 	entry := new(BuilderEntry)
-	if err := ssz2.UnmarshalSSZStrict(buf, version,
+	if err := ssz2.UnmarshalSSZStrict(
+		buf, version,
 		&rawByteList{value: &urlBytes, limit: MaxBuilderURLSize},
 		&auth,
 		&builderPubkeyList{values: &pubkeys},
@@ -913,12 +941,15 @@ func (l *rawBuilderEntryList) EncodingSizeSSZ() int {
 	}
 	return size
 }
+
 func (l *rawBuilderEntryList) EncodeSSZ(dst []byte) ([]byte, error) {
 	return commonssz.EncodeDynamicList(dst, *l.values)
 }
+
 func (l *rawBuilderEntryList) DecodeSSZ(buf []byte, version int) error {
 	return l.DecodeSSZStrict(buf, version)
 }
+
 func (l *rawBuilderEntryList) DecodeSSZStrict(buf []byte, version int) error {
 	values, err := commonssz.DecodeDynamicListStrict[*rawBuilderEntry](buf, 0, uint32(len(buf)), MaxBuilderEntries, version)
 	if err != nil {
@@ -927,10 +958,12 @@ func (l *rawBuilderEntryList) DecodeSSZStrict(buf []byte, version int) error {
 	*l.values = values
 	return nil
 }
+
 func (l *rawBuilderEntryList) Clone() clonable.Clonable {
 	values := []*rawBuilderEntry(nil)
 	return &rawBuilderEntryList{values: &values}
 }
+
 func (l *builderEntryList) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(*l.values) > MaxBuilderEntries {
 		return nil, fmt.Errorf("builder count %d exceeds %d", len(*l.values), MaxBuilderEntries)
@@ -942,6 +975,7 @@ func (l *builderEntryList) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	return commonssz.EncodeDynamicList(dst, *l.values)
 }
+
 func (l *builderEntryList) DecodeSSZ(buf []byte, version int) error {
 	values, err := commonssz.DecodeDynamicListStrict[*BuilderEntry](buf, 0, uint32(len(buf)), MaxBuilderEntries, version)
 	if err != nil {
@@ -950,9 +984,11 @@ func (l *builderEntryList) DecodeSSZ(buf []byte, version int) error {
 	*l.values = values
 	return nil
 }
+
 func (l *builderEntryList) DecodeSSZStrict(buf []byte, version int) error {
 	return l.DecodeSSZ(buf, version)
 }
+
 func (l *builderEntryList) Clone() clonable.Clonable {
 	values := []*BuilderEntry(nil)
 	return &builderEntryList{values: &values}

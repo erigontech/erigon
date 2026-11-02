@@ -161,7 +161,6 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			}
 			require.Equal(t, rootHashDirect, rootHashAnother, "storage-based and update-based rootHash mismatch")
 		}
-
 	})
 }
 

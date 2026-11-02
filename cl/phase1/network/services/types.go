@@ -5,6 +5,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
+	"github.com/erigontech/erigon/common"
 )
 
 type PublishedBlockJob interface {
@@ -25,7 +26,16 @@ type BlockService interface {
 type BlobSidecarsService serviceinterface.Service[*cltypes.BlobSidecar]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_committee_messages_service_mock.go -package=mock_services . SyncCommitteeMessagesService
-type SyncCommitteeMessagesService serviceinterface.Service[*SyncCommitteeMessageForGossip]
+type SyncCommitteeMessagesService interface {
+	serviceinterface.Service[*SyncCommitteeMessageForGossip]
+	// MarkPublished records that a caller successfully admitted the given,
+	// already-verified message to the gossip publish queue, so a later
+	// duplicate submission of the same content can be ignored instead of
+	// spending another admission attempt on it. Content that does not match
+	// what MarkPublished was called for makes no difference - only content
+	// ProcessMessage itself verified can ever be marked published.
+	MarkPublished(subnet, slot, validatorIndex uint64, beaconBlockRoot common.Hash, signature common.Bytes96)
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
 type SyncContributionService serviceinterface.Service[*SignedContributionAndProofForGossip]
@@ -46,7 +56,11 @@ type BLSToExecutionChangeService serviceinterface.Service[*SignedBLSToExecutionC
 type ProposerSlashingService serviceinterface.Service[*cltypes.ProposerSlashing]
 
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_sidecar_service_mock.go -package=mock_services . DataColumnSidecarService
-type DataColumnSidecarService serviceinterface.Service[*cltypes.DataColumnSidecar]
+type DataColumnSidecarService interface {
+	serviceinterface.Service[*cltypes.DataColumnSidecar]
+	// PublishColumnsFromEL handles columns built from local EL blobs as if they arrived on gossip.
+	PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/attester_slashing_service_mock.go -package=mock_services . AttesterSlashingService
 type AttesterSlashingService serviceinterface.Service[*cltypes.AttesterSlashing]

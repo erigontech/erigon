@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -34,7 +33,17 @@ func newBatchOverDbNonDupSort(tb testing.TB) *membatchwithdb.MemoryMutation {
 	tb.Helper()
 	_, rwTx := newTestTx(tb)
 	initializeDbNonDupSort(tb, rwTx)
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(tb, err)
+	tb.Cleanup(batch.Close)
+	return batch
+}
+
+func newBatchOverDbDupSort(tb testing.TB) *membatchwithdb.MemoryMutation {
+	tb.Helper()
+	_, rwTx := newTestTx(tb)
+	initializeDbDupSort(tb, rwTx)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(tb, err)
 	tb.Cleanup(batch.Close)
 	return batch
@@ -89,11 +98,7 @@ func TestRangeDescWithLimitCountsNonDeletedRows(t *testing.T) {
 }
 
 func TestRangeDupSortKeepsLastDbValue(t *testing.T) {
-	_, rwTx := newTestTx(t)
-	initializeDbDupSort(t, rwTx)
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
-	require.NoError(t, err)
-	defer batch.Close()
+	batch := newBatchOverDbDupSort(t)
 	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.5")))
 
 	it, err := batch.RangeDupSort(kv.TblAccountVals, []byte("key1"), nil, nil, order.Asc, kv.Unlim)
@@ -117,6 +122,18 @@ func TestRangeSkipsDeletedDbEntry(t *testing.T) {
 func TestRangeServesDeletedThenRewrittenEntry(t *testing.T) {
 	batch := newBatchOverDbNonDupSort(t)
 	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("CBAA")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("CBAA"), []byte("value2.new")))
+
+	it, err := batch.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	keys, values := collectStream(t, it)
+
+	require.Equal(t, []string{"AAAA", "CAAA", "CBAA", "CCAA"}, keys)
+	require.Equal(t, []string{"value", "value1", "value2.new", "value3"}, values)
+}
+
+func TestRangeOverlayOverridesDbValueOnSameKey(t *testing.T) {
+	batch := newBatchOverDbNonDupSort(t)
 	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("CBAA"), []byte("value2.new")))
 
 	it, err := batch.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
@@ -153,7 +170,7 @@ func TestPrefixSkipsDeletedDbEntry(t *testing.T) {
 func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbNonDupSort(t, rwTx)
-	overlay, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
 	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
@@ -169,7 +186,7 @@ func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbNonDupSort(t, rwTx)
-	overlay, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
 	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
@@ -214,11 +231,7 @@ func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
 }
 
 func TestRangeDupSortSkipsDeletedDbKey(t *testing.T) {
-	_, rwTx := newTestTx(t)
-	initializeDbDupSort(t, rwTx)
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
-	require.NoError(t, err)
-	defer batch.Close()
+	batch := newBatchOverDbDupSort(t)
 	require.NoError(t, batch.Delete(kv.TblAccountVals, []byte("key1")))
 
 	it, err := batch.RangeDupSort(kv.TblAccountVals, []byte("key1"), nil, nil, order.Asc, kv.Unlim)
@@ -245,7 +258,7 @@ func TestRangeDupSortWithLimitCountsNonDeletedValues(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbDupSort(t, rwTx)
 	require.NoError(t, rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.5")))
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer batch.Close()
 
@@ -262,11 +275,7 @@ func TestRangeDupSortWithLimitCountsNonDeletedValues(t *testing.T) {
 }
 
 func TestRangeOnDupSortHonorsDeletedDups(t *testing.T) {
-	_, rwTx := newTestTx(t)
-	initializeDbDupSort(t, rwTx)
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
-	require.NoError(t, err)
-	defer batch.Close()
+	batch := newBatchOverDbDupSort(t)
 
 	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
@@ -278,4 +287,38 @@ func TestRangeOnDupSortHonorsDeletedDups(t *testing.T) {
 	_, values := collectStream(t, it)
 
 	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
+}
+
+func TestRangeOnDupSortTableKeepsDbValuesUnderSharedKey(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")))
+
+	it, err := batch.Range(kv.TblAccountVals, nil, nil, order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	keys, values := collectStream(t, it)
+
+	require.Equal(t, []string{"key1", "key1", "key1", "key3", "key3"}, keys)
+	require.Equal(t, []string{"value1.1", "value1.2", "value1.3", "value3.1", "value3.3"}, values)
+}
+
+func TestRangeDescOnDupSortTableKeepsDbValuesUnderSharedKey(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")))
+
+	it, err := batch.Range(kv.TblAccountVals, nil, nil, order.Desc, kv.Unlim)
+	require.NoError(t, err)
+	_, values := collectStream(t, it)
+
+	require.Equal(t, []string{"value3.3", "value3.1", "value1.3", "value1.2", "value1.1"}, values)
+}
+
+func TestRangeOnDupSortTableCollapsesIdenticalValue(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1")))
+
+	it, err := batch.Range(kv.TblAccountVals, nil, nil, order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	_, values := collectStream(t, it)
+
+	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
 }

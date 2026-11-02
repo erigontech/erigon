@@ -19,10 +19,13 @@ package graphql
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestGraphQLQueryBlock(t *testing.T) {
@@ -168,4 +171,30 @@ func TestGraphQLQueryBlock(t *testing.T) {
 			t.Errorf("testcase (status code) %d %s,\nwrong statuscode, have: %v, want: %v", i, tt.body, resp.StatusCode, tt.code)
 		}
 	}
+}
+
+func TestGraphQLQueryDepthLimit(t *testing.T) {
+	srv := httptest.NewServer(CreateHandler(nil))
+	defer srv.Close()
+
+	post := func(q string) string {
+		resp, err := http.Post(srv.URL, "application/json", strings.NewReader(`{"query":"`+q+`"}`)) //nolint:noctx
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return string(body)
+	}
+	nest := func(outer, inner, leaf string, n int) string {
+		return outer + strings.Repeat(inner+"{", n) + leaf + strings.Repeat("}", n) + strings.Repeat("}", strings.Count(outer, "{"))
+	}
+
+	parents := nest("{block{", "parent", "number", maxQueryDepth-1)
+	require.Contains(t, post(parents), "exceeds the limit")
+
+	atLimit := nest(`{__type(name:\"Block\"){fields{type{`, "ofType", "name", maxQueryDepth-4)
+	body := post(atLimit)
+	require.NotContains(t, body, "exceeds the limit")
+	require.Contains(t, body, `"data"`)
+	require.Contains(t, post(nest(`{__type(name:\"Block\"){fields{type{`, "ofType", "name", maxQueryDepth-3)), "exceeds the limit")
 }

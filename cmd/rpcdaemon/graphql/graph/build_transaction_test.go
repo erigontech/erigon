@@ -103,8 +103,10 @@ func TestBuildTransactionReadsMarshalledReceipt(t *testing.T) {
 		t.Parallel()
 		txn := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 53000}, GasPrice: *uint256.NewInt(60)}
 		txn.SetSender(accounts.InternAddress(sender))
-		receipt := &types.Receipt{PostState: []byte{0x0b}, BlockNumber: uint256.NewInt(7), TxHash: txn.Hash(),
-			ContractAddress: common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef06")}
+		receipt := &types.Receipt{
+			PostState: []byte{0x0b}, BlockNumber: uint256.NewInt(7), TxHash: txn.Hash(),
+			ContractAddress: common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef06"),
+		}
 
 		got := (&queryResolver{}).buildTransaction(block, jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header))
 

@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -25,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
-	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 // boolToVote converts a bool to the three-state vote representation:
@@ -142,6 +142,25 @@ func (f *ForkChoiceStore) applyPayloadAttestationVotes(
 	f.ptcVoteMu.Unlock()
 }
 
+// PayloadAttestationVotes returns the PTC timeliness and data availability votes
+// for the block root (1=true, -1=false, 0=no vote), and whether each vote entry exists.
+func (f *ForkChoiceStore) PayloadAttestationVotes(root common.Hash) (
+	timeliness, dataAvailability [clparams.PtcSize]int8,
+	timelinessPresent, dataAvailabilityPresent bool,
+) {
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
+	if votes, ok := f.payloadTimelinessVote.Load(root); ok {
+		timeliness = votes.([clparams.PtcSize]int8)
+		timelinessPresent = true
+	}
+	if votes, ok := f.payloadDataAvailabilityVote.Load(root); ok {
+		dataAvailability = votes.([clparams.PtcSize]int8)
+		dataAvailabilityPresent = true
+	}
+	return timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent
+}
+
 // payloadTimeliness returns whether the PTC voted the payload as timely (timely=true)
 // or not timely (timely=false) for the given beacon block root.
 // [New in Gloas:EIP7732]
@@ -154,15 +173,7 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 	if !f.isPayloadAvailable(root) {
 		return !timely
 	}
-	votes := voteRaw.([clparams.PtcSize]int8)
-	target := boolToVote(timely)
-	count := uint64(0)
-	for i := range votes {
-		if votes[i] == target {
-			count++
-		}
-	}
-	return count > f.beaconCfg.PtcSize/2
+	return f.ptcMajority(voteRaw.([clparams.PtcSize]int8), timely)
 }
 
 // payloadDataAvailability returns whether the PTC voted blob data as available (available=true)
@@ -177,8 +188,12 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 	if !f.isPayloadAvailable(root) {
 		return !available
 	}
-	votes := voteRaw.([clparams.PtcSize]int8)
-	target := boolToVote(available)
+	return f.ptcMajority(voteRaw.([clparams.PtcSize]int8), available)
+}
+
+// ptcMajority reports whether more than half of the PTC members cast vote in votes.
+func (f *ForkChoiceStore) ptcMajority(votes [clparams.PtcSize]int8, vote bool) bool {
+	target := boolToVote(vote)
 	count := uint64(0)
 	for i := range votes {
 		if votes[i] == target {
@@ -186,6 +201,21 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 		}
 	}
 	return count > f.beaconCfg.PtcSize/2
+}
+
+// PayloadVotesRuleOutFull reports whether the PTC votes recorded for root already mark its payload
+// as not timely or its data as not available. ShouldBuildOnFull then stays false for root even
+// once its payload is applied.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) PayloadVotesRuleOutFull(root common.Hash) bool {
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
+	for _, votes := range []*sync.Map{&f.payloadTimelinessVote, &f.payloadDataAvailabilityVote} {
+		if raw, ok := votes.Load(root); ok && f.ptcMajority(raw.([clparams.PtcSize]int8), false) {
+			return true
+		}
+	}
+	return false
 }
 
 // getParentPayloadStatus returns the payload status of the parent block.
@@ -196,12 +226,14 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 	if !ok || parentBlock == nil {
 		return cltypes.PayloadStatusEmpty
 	}
-	return parentPayloadStatusFromBids(parentBlock, block)
+	return ParentPayloadStatusFromBids(parentBlock, block)
 }
 
-// parentPayloadStatusFromBids is getParentPayloadStatus with the parent block
-// already resolved, so callers iterating siblings fetch the parent only once.
-func parentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
+// ParentPayloadStatusFromBids derives the parent's canonical payload status from its child.
+func ParentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
+	if parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil || block == nil || block.Body == nil {
+		return cltypes.PayloadStatusEmpty
+	}
 	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice
 	// perspective they are treated as EMPTY: they always carried their execution
 	// payload inline (no separate envelope), so the PENDING → EMPTY/FULL
@@ -230,13 +262,8 @@ func parentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *
 
 	// Compare parent_block_hash with message_block_hash
 	if parentBlockHash == messageBlockHash {
-		log.Trace("[getParentPayloadStatus] FULL",
-			"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash)
 		return cltypes.PayloadStatusFull
 	}
-	log.Trace("[getParentPayloadStatus] EMPTY",
-		"slot", block.Slot, "parentBlockHash", parentBlockHash, "messageBlockHash", messageBlockHash,
-		"parentRoot", block.ParentRoot)
 	return cltypes.PayloadStatusEmpty
 }
 
@@ -284,7 +311,7 @@ func (f *ForkChoiceStore) isAncestor(node ForkChoiceNode, ancestor ForkChoiceNod
 // isPreviousSlotPayloadDecision identifies the special GLOAS fork-choice case
 // where EMPTY/FULL variants of a previous-slot block are decided by the payload
 // tiebreaker rather than by weight.
-func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) bool {
+func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode, proposalSlot uint64) bool {
 	if node.PayloadStatus != cltypes.PayloadStatusEmpty && node.PayloadStatus != cltypes.PayloadStatusFull {
 		return false
 	}
@@ -292,7 +319,7 @@ func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) boo
 	if !has || block == nil {
 		return false
 	}
-	return block.Block.Slot+1 == f.Slot()
+	return block.Block.Slot+1 == proposalSlot
 }
 
 // ShouldExtendPayload returns whether the payload for the given root should be extended.
@@ -336,9 +363,10 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 	return f.isParentNodeFull(proposerBlock.Block)
 }
 
-// ShouldBuildOnFull returns whether the proposer should build on the full payload
-// for the given head node. Returns false for EMPTY heads. For FULL heads, returns
-// true unless the PTC voted the payload as late or blob data as unavailable.
+// ShouldBuildOnFull requires a known FULL head. Only a head from the slot immediately before the
+// proposal is rechecked for payload timeliness and blob availability; older FULL heads keep their
+// resolved status. The proposal slot is explicit because preparation can run before the store
+// advances.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool {
 	header, has := f.forkGraph.GetHeader(head.Root)
@@ -354,6 +382,9 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bo
 	if head.PayloadStatus == cltypes.PayloadStatusPending {
 		return false
 	}
+	// The vote arrays form one decision; separate sync.Map loads are not a snapshot.
+	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
 	if f.payloadDataAvailability(head.Root, false) {
 		return false
 	}
@@ -366,8 +397,8 @@ func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bo
 // getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.
 // Used to decide between chains with different payload statuses.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 {
-	if !f.isPreviousSlotPayloadDecision(node) {
+func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode, currentSlot uint64) uint8 {
+	if !f.isPreviousSlotPayloadDecision(node, currentSlot) {
 		return uint8(node.PayloadStatus)
 	}
 
@@ -383,9 +414,8 @@ func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 
 // getNodeChildren returns the children of a fork choice node.
 // For PENDING nodes, returns EMPTY and possibly FULL variants of the same root.
 // For EMPTY/FULL nodes, returns child blocks with PENDING status.
-// blocks is the filtered block tree from get_head.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common.Hash]*cltypes.BeaconBlockHeader) []ForkChoiceNode {
+func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode) []ForkChoiceNode {
 	if node.PayloadStatus == cltypes.PayloadStatusPending {
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
@@ -398,14 +428,8 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		return children
 	}
 
-	// EMPTY or FULL → find child blocks from filtered block tree
 	result := make([]ForkChoiceNode, 0)
-	for root, header := range blocks {
-		// Use header.ParentRoot directly from blocks map
-		if header.ParentRoot != node.Root {
-			continue
-		}
-		// Need full block for getParentPayloadStatus
+	for _, root := range f.children(node.Root) {
 		block, ok := f.forkGraph.GetBlock(root)
 		if !ok || block == nil {
 			continue

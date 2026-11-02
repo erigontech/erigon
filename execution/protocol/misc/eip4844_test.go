@@ -23,10 +23,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 func TestFakeExponential(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		factor, num, denom uint64
 		want               uint64
 	}{
@@ -58,5 +61,34 @@ func TestFakeExponential(t *testing.T) {
 		if tt.want != result.ToBig().Uint64() {
 			t.Errorf("got %v want %v", result, tt.want)
 		}
+	}
+}
+
+// GetBlobGasPrice reuses its last result, so a change of any input must not return a stale price.
+func TestGetBlobGasPriceAcrossInputs(t *testing.T) {
+	pragueTime := uint64(100)
+	minPrice := uint64(1_000_000_000)
+	base := &chain.Config{CancunTime: new(uint64), PragueTime: &pragueTime}
+	highMin := &chain.Config{CancunTime: new(uint64), PragueTime: &pragueTime, MinBlobGasPrice: &minPrice}
+	require.NotEqual(t, base.GetBlobGasPriceUpdateFraction(0), base.GetBlobGasPriceUpdateFraction(pragueTime))
+	for _, tc := range []struct {
+		config *chain.Config
+		time   uint64
+		excess uint64
+	}{
+		{base, 0, 0},
+		{base, 0, 10_000_000},
+		{base, 0, 10_000_000},
+		{base, 0, 393_216},
+		{highMin, 0, 393_216},
+		{base, 0, 10_000_000},
+		{base, pragueTime, 10_000_000},
+		{base, 0, 10_000_000},
+	} {
+		want, err := FakeExponential(uint256.NewInt(tc.config.GetMinBlobGasPrice()), uint256.NewInt(tc.config.GetBlobGasPriceUpdateFraction(tc.time)), tc.excess)
+		require.NoError(t, err)
+		got, err := GetBlobGasPrice(tc.config, tc.excess, tc.time)
+		require.NoError(t, err)
+		require.Equalf(t, want, got, "minPrice %d time %d excess %d", tc.config.GetMinBlobGasPrice(), tc.time, tc.excess)
 	}
 }

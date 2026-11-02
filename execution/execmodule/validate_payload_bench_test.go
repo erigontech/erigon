@@ -176,7 +176,8 @@ func benchFixture(b *testing.B, w workload, stateSize, blocksPerOp int, senders 
 		GasLimit: benchGasLimit,
 		Alloc:    alloc,
 	}
-	m := execmoduletester.New(nil,
+	m := execmoduletester.New(
+		nil,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(senders[0]),
 	)

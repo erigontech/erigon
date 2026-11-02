@@ -265,6 +265,18 @@ func (d *Dirs) VersionedDirs() []string {
 	}
 }
 
+func (d *Dirs) RenamedOldVersion(dirPath, name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, "v1-")
+	if !ok {
+		return name, true
+	}
+	if strings.HasSuffix(name, ".torrent") ||
+		strings.Contains(name, "commitment") && (dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
+		return "", false
+	}
+	return "v1.0-" + rest, true
+}
+
 func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	renamed := 0
 	torrentsRemoved := 0
@@ -272,7 +284,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -283,27 +295,26 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 			}
 
 			name := entry.Name()
-			if strings.HasPrefix(name, "v1-") {
-				if strings.HasSuffix(name, ".torrent") {
-					if err := dir.RemoveFile(path); err != nil {
-						return err
-					}
-					torrentsRemoved++
-					return nil
+			newName, kept := d.RenamedOldVersion(dirPath, name)
+			switch {
+			case newName == name:
+			case !kept && strings.HasSuffix(name, ".torrent"):
+				if err := dir.RemoveFile(path); err != nil {
+					return err
 				}
-
-				if strings.Contains(entry.Name(), "commitment") &&
-					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
-					// remove the file instead of renaming
-					if err := dir.RemoveFile(path); err != nil {
-						return fmt.Errorf("failed to remove file %s: %w", path, err)
-					}
-					removed++
-					return nil
+				torrentsRemoved++
+			case !kept:
+				if err := dir.RemoveFile(path); err != nil {
+					return fmt.Errorf("failed to remove file %s: %w", path, err)
 				}
-
-				newName := strings.Replace(name, "v1-", "v1.0-", 1)
+				removed++
+			default:
 				newPath := filepath.Join(filepath.Dir(path), newName)
+				if err := dir.RemoveFile(newPath + ".torrent"); err == nil {
+					torrentsRemoved++
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
 				if err := os.Rename(path, newPath); err != nil {
 					return err
 				}
@@ -340,7 +351,7 @@ func (d *Dirs) RenameNewVersions() error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -370,7 +381,6 @@ func (d *Dirs) RenameNewVersions() error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}
@@ -378,7 +388,7 @@ func (d *Dirs) RenameNewVersions() error {
 		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
 		if err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -418,6 +428,7 @@ func (d *Dirs) RenameNewVersions() error {
 
 	return nil
 }
+
 func (d *Dirs) PreverifiedPath() string {
 	return filepath.Join(d.Snap, PreverifiedFileName)
 }

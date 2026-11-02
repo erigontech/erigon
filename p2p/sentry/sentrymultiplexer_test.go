@@ -60,7 +60,8 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 					},
 				},
 			}, nil
-		}).AnyTimes()
+		},
+	).AnyTimes()
 
 	return client
 }
@@ -108,21 +109,24 @@ func TestStatus(t *testing.T) {
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.SetStatusReply{}, nil
-			})
+			},
+		)
 		client.EXPECT().PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, sd *sentryproto.PenalizePeerRequest, co ...grpc.CallOption) (*emptypb.Empty, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
 				return &emptypb.Empty{}, nil
-			})
+			},
+		)
 		client.EXPECT().SetPeerMinimumBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, sd *sentryproto.SetPeerMinimumBlockRequest, co ...grpc.CallOption) (*emptypb.Empty, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
 				return &emptypb.Empty{}, nil
-			})
+			},
+		)
 
 		clients = append(clients, client)
 	}
@@ -171,14 +175,16 @@ func TestSend(t *testing.T) {
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.SentPeers{}, nil
-			}).AnyTimes()
+			},
+		).AnyTimes()
 		client.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.SentPeers{}, nil
-			}).AnyTimes()
+			},
+		).AnyTimes()
 
 		clients = append(clients, client)
 	}
@@ -337,8 +343,7 @@ func TestMessages(t *testing.T) {
 		client := newClient(ctrl, i, nil)
 		client.EXPECT().Messages(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-				ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
-				streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
+				streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
 
 				go func() {
 					for range 5 {
@@ -348,8 +353,9 @@ func TestMessages(t *testing.T) {
 					streamServer.Close()
 				}()
 
-				return &libsentry.SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
-			})
+				return streamClient, nil
+			},
+		)
 
 		clients = append(clients, client)
 	}
@@ -365,7 +371,6 @@ func TestMessages(t *testing.T) {
 
 	for {
 		message, err := client.Recv()
-
 		if err != nil {
 			require.ErrorIs(t, err, io.EOF)
 			break
@@ -395,11 +400,11 @@ func TestPeers(t *testing.T) {
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.AddPeerReply{}, nil
-			})
+			},
+		)
 		client.EXPECT().PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-				ch := make(chan libsentry.StreamReply[*sentryproto.PeerEvent], libsentry.MessagesQueueSize)
-				streamServer := &libsentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
+				streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.PeerEvent](ctx)
 
 				go func() {
 					for range 5 {
@@ -409,22 +414,25 @@ func TestPeers(t *testing.T) {
 					streamServer.Close()
 				}()
 
-				return &libsentry.SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
-			})
+				return streamClient, nil
+			},
+		)
 		client.EXPECT().PeerById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.PeerByIdRequest, opts ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.PeerByIdReply{}, nil
-			})
+			},
+		)
 		client.EXPECT().PeerCount(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				statusCount++
 				return &sentryproto.PeerCountReply{}, nil
-			})
+			},
+		)
 
 		clients = append(clients, client)
 	}
@@ -448,7 +456,6 @@ func TestPeers(t *testing.T) {
 
 	for {
 		message, err := client.Recv()
-
 		if err != nil {
 			require.ErrorIs(t, err, io.EOF)
 			break

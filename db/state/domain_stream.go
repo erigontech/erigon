@@ -153,6 +153,7 @@ func (hi *DomainLatestIterFile) closeCursorItem(item *CursorItem) {
 func (hi *DomainLatestIterFile) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
 	return stream.TraceDuo(hi, hi.logger, "[dbg] DomainLatestIterFile.Next "+prefix)
 }
+
 func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
@@ -363,6 +364,13 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
+		if (*hi.h)[0].btCursor != nil {
+			lastKey = append(hi.k[:0], lastKey...)
+			lastVal = append(hi.v[:0], lastVal...)
+			if lastKey == nil {
+				lastKey = []byte{}
+			}
+		}
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
@@ -426,8 +434,8 @@ func (hi *DomainLatestIterFile) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
+	// Asc:  [from, to) AND from < to
+	// Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.to)
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }

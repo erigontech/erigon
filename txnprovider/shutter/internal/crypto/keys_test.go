@@ -403,28 +403,31 @@ func TestComputeEpochSecretKey(t *testing.T) {
 
 	var err error
 	_, err = ComputeEpochSecretKey([]int{0}, epochSecretKeyShares[:1], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 	_, err = ComputeEpochSecretKey([]int{0, 1, 2}, epochSecretKeyShares[:2], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 	_, err = ComputeEpochSecretKey([]int{0, 1}, epochSecretKeyShares[:1], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 	_, err = ComputeEpochSecretKey([]int{0}, epochSecretKeyShares[:2], threshold)
-	assert.NotEqual(t, err, nil)
+	assert.Error(t, err)
 
 	epochSecretKey12, err := ComputeEpochSecretKey(
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	epochSecretKey13, err := ComputeEpochSecretKey(
 		[]int{0, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	epochSecretKey23, err := ComputeEpochSecretKey(
 		[]int{1, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[1], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 
 	assert.True(t, epochSecretKey12.Equal(epochSecretKey13))
@@ -476,18 +479,21 @@ func TestFull(t *testing.T) {
 	epochSecretKey, err := ComputeEpochSecretKey(
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 
 	epochSecretKey13, err := ComputeEpochSecretKey(
 		[]int{0, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	epochSecretKey23, err := ComputeEpochSecretKey(
 		[]int{1, 2},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[1], epochSecretKeyShares[2]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	assert.True(t, epochSecretKey.Equal(epochSecretKey13))
 	assert.True(t, epochSecretKey.Equal(epochSecretKey23))

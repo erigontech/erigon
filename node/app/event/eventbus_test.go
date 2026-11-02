@@ -59,8 +59,7 @@ type testInterface2 interface {
 	test2() int
 }
 
-type testImpl struct {
-}
+type testImpl struct{}
 
 func (t *testImpl) test1() bool { return true }
 func (t *testImpl) test2() int  { return 10 }
@@ -133,6 +132,24 @@ func TestUnsubscribe(t *testing.T) {
 	}
 	if bus.Unsubscribe(handler) == nil {
 		t.Fail()
+	}
+}
+
+func TestManagedEventBusUnregisterAllReleasesLockOnError(t *testing.T) {
+	bus := NewServiceBus(&execPool{workerpool.New(runtime.NumCPU())}).GetEventBus("key")
+	owner := &struct{}{}
+	handler := func(int) {}
+	assert.NoError(t, bus.Register(owner, handler))
+	assert.NoError(t, bus.eventBus.Unsubscribe(handler))
+	assert.Error(t, bus.UnregisterAll(owner))
+
+	done := make(chan error, 1)
+	go func() { done <- bus.Register(owner, handler) }()
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Register blocked: UnregisterAll kept registrationLock after an error")
 	}
 }
 

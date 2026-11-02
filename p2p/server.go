@@ -416,7 +416,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 		return err
 	}
 	if srv.ListenAddr != "" {
-		if err := srv.setupListening(srv.quitCtx); err != nil {
+		if err := srv.setupListening(); err != nil {
 			return err
 		}
 	}
@@ -434,8 +434,8 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 func (srv *Server) updateLocalNodeStaticAddrCache() {
 	localNodeAddr := srv.localnode.Node().URLv4()
 	srv.localnodeAddrCache.Store(&localNodeAddr)
-
 }
+
 func (srv *Server) setupLocalNode() error {
 	// Create the devp2p handshake.
 	pubkey := crypto.MarshalPubkey(&srv.PrivateKey.PublicKey)
@@ -654,7 +654,7 @@ func (srv *Server) maxDialedConns() (limit int) {
 	return limit
 }
 
-func (srv *Server) setupListening(ctx context.Context) error {
+func (srv *Server) setupListening() error {
 	// Launch the listener.
 	listener, err := srv.listenFunc("tcp", srv.ListenAddr)
 	if err != nil {
@@ -887,18 +887,14 @@ func (srv *Server) listenLoop(ctx context.Context) {
 		}
 
 		remoteIP := netutil.AddrAddr(fd.RemoteAddr())
-		if err := srv.checkInboundConn(fd, remoteIP); err != nil {
+		if err := srv.checkInboundConn(remoteIP); err != nil {
 			srv.logger.Trace("Rejected inbound connection", "addr", fd.RemoteAddr(), "err", err)
 			_ = fd.Close()
 			slots.Release(1)
 			continue
 		}
 		if remoteIP.IsValid() {
-			var addr *net.TCPAddr
-			if tcp, ok := fd.RemoteAddr().(*net.TCPAddr); ok {
-				addr = tcp
-			}
-			fd = newMeteredConn(fd, true, addr)
+			fd = newMeteredConn(fd, true)
 			srv.logger.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
 		go func() {
@@ -910,7 +906,7 @@ func (srv *Server) listenLoop(ctx context.Context) {
 	}
 }
 
-func (srv *Server) checkInboundConn(fd net.Conn, remoteIP netip.Addr) error {
+func (srv *Server) checkInboundConn(remoteIP netip.Addr) error {
 	if !remoteIP.IsValid() {
 		return nil
 	}
@@ -944,14 +940,14 @@ func (srv *Server) SetupConn(fd net.Conn, flags connFlag, dialDest *enode.Node) 
 		c.transport = srv.newTransport(fd, dialDest.Pubkey())
 	}
 
-	err := srv.setupConn(c, flags, dialDest)
+	err := srv.setupConn(c, dialDest)
 	if err != nil {
 		c.close(err)
 	}
 	return err
 }
 
-func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) error {
+func (srv *Server) setupConn(c *conn, dialDest *enode.Node) error {
 	// Prevent leftover pending conns from entering the handshake.
 	if !srv.running.Load() {
 		return errServerStopped

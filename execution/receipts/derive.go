@@ -102,20 +102,9 @@ func DeriveForRange(
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
-		// Cancel watcher: abort mid-opcode if the context is cancelled
-		// (e.g. RPC timeout). Without this, a gas-heavy transaction would
-		// run to completion even after the caller has given up.
-		txDone := make(chan struct{})
-		go func() {
-			select {
-			case <-ctx.Done():
-				evm.Cancel()
-			case <-txDone:
-			}
-		}()
-
-		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
-		close(txDone)
+		receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
+			return protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
 		}
@@ -126,6 +115,14 @@ func DeriveForRange(
 	}
 
 	return receipts, nil
+}
+
+// applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it
+// mid-opcode, so a gas-heavy transaction does not run on after the caller has given up. The
+// callback is deregistered when apply returns, which a defer in the caller's loop would not do.
+func applyCancellable(ctx context.Context, evm *vm.EVM, apply func() (*types.Receipt, error)) (*types.Receipt, error) {
+	defer context.AfterFunc(ctx, evm.Cancel)()
+	return apply()
 }
 
 // DeriveBlockReceipts replays all transactions in a block and returns their receipts.

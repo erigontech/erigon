@@ -68,11 +68,7 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	var originalEvmHook tracing.EnterHook
 	entryPointTracer := EntryPointTracer{}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnEnter != nil {
-		entryPointTracer = EntryPointTracer{OnEnterSuper: originalEvmHook}
-	}
 	vmConfig.Tracer = entryPointTracer.Hooks()
 	innerEvm := vm.NewEVM(evm.Context, evm.TxContext, ibs, evm.ChainConfig(), vmConfig)
 
@@ -366,14 +362,12 @@ func PerformTxnStaticValidation(
 			"deployer data of size %d is provided but deployer address is not set",
 			len(txn.DeployerData),
 		)
-
 	}
 	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
 		return fmt.Errorf(
 			"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
 			len(txn.DeployerData), txn.PaymasterValidationGasLimit,
 		)
-
 	}
 
 	if hasPaymaster {
@@ -382,7 +376,6 @@ func PerformTxnStaticValidation(
 				"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
 				txn.Paymaster.String(),
 			)
-
 		}
 		hasCodePaymaster := paymasterCodeSize != 0
 		if !hasCodePaymaster {
@@ -390,7 +383,6 @@ func PerformTxnStaticValidation(
 				"paymaster address %s is provided but contract has no code deployed",
 				txn.Paymaster.String(),
 			)
-
 		}
 	}
 
@@ -400,7 +392,6 @@ func PerformTxnStaticValidation(
 				"deployer address %s is provided but contract has no code deployed",
 				txn.Deployer.String(),
 			)
-
 		}
 		if hasCodeSender {
 			return fmt.Errorf(

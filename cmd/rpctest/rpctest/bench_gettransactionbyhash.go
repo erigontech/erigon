@@ -18,6 +18,7 @@ package rpctest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -32,27 +33,27 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //
 // recordFile stores all eth_GetTransactioneHash returned with success
 //
 //	errorFile stores information when erigon and geth doesn't return same data
-func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
-	var teeToVegeta chan CallResult
-	var nTransactions = 0
+	var teeToPattern chan CallResult
+	nTransactions := 0
 
 	if !needCompare {
-		teeToVegeta = make(chan CallResult, 1000)
-		defer close(teeToVegeta)
-		go vegetaWrite(true, []string{"eth_getTransactionByHash"}, teeToVegeta)
+		teeToPattern = make(chan CallResult, 1000)
+		defer close(teeToPattern)
+		go writePattern(true, []string{"eth_getTransactionByHash"}, teeToPattern)
 	}
 	reqGen := &RequestGenerator{}
 
@@ -72,7 +73,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 				var request string
 				request = reqGen.getTransactionByHash(txnHash)
 				errCtx := fmt.Sprintf(" hash=%s", txnHash) //nolint:perfsprint
-				if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToVegeta,
+				if err := requestAndCompare(request, "eth_getTransactionByHash", errCtx, reqGen, needCompare, rec, errs, teeToPattern,
 					/* insertOnlyIfSuccess */ false); err != nil {
 					return err
 				}
@@ -91,7 +92,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 			continue
 		}
 		if b.Result == nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d\n", bn)
+			return fmt.Errorf("could not retrieve block (Erigon) %d", bn)
 		}
 
 		nTransactions += len(b.Result.Transactions)

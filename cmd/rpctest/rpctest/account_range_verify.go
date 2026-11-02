@@ -63,13 +63,13 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	gethKV := mdbx.New(dbcfg.ChainDB, logger).Path(gethDataDir).WithTableCfg(bucketsCfg).MustOpen()
 	defer gethKV.Close()
 
-	var client = &http.Client{
+	client := &http.Client{
 		Timeout: time.Minute * 60,
 		Transport: &http.Transport{
 			MaxResponseHeaderBytes: 256 * 1024 * 1024,
 			ReadBufferSize:         64 * 1024 * 1024,
 			DialContext: (&net.Dialer{
-				//Timeout:   60 * time.Minute,
+				// Timeout:   60 * time.Minute,
 				KeepAlive: 60 * time.Minute,
 			}).DialContext,
 			ForceAttemptHTTP2:     true,

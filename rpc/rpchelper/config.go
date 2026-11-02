@@ -28,14 +28,16 @@ import (
 const DefaultFilterTimeout = 5 * time.Minute
 
 // FiltersConfig defines resource limits for RPC filters. A value of 0 disables a limit.
-// Queue limits evict the oldest entries, while criteria limits reject oversized subscriptions.
+// Queue limits evict the oldest entries; criteria limits and the subscription count limit
+// reject the new subscription.
 type FiltersConfig struct {
-	RpcSubscriptionFiltersMaxLogs      int           // Maximum number of logs to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxHeaders   int           // Maximum number of block headers to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxTxs       int           // Maximum number of transactions to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses accepted per log subscription. Default: 0 (no limit)
-	RpcSubscriptionFiltersMaxTopics    int           // Maximum topic alternatives accepted across all positions per log subscription. Default: 0 (no limit)
-	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
+	RpcSubscriptionFiltersMaxLogs          int           // Maximum number of logs to store per subscription. Default: 10000
+	RpcSubscriptionFiltersMaxHeaders       int           // Maximum number of block headers to store per subscription. Default: 10000
+	RpcSubscriptionFiltersMaxTxs           int           // Maximum number of transactions to store per subscription. Default: 10000
+	RpcSubscriptionFiltersMaxAddresses     int           // Maximum number of addresses accepted per log subscription. Default: 0 (no limit)
+	RpcSubscriptionFiltersMaxTopics        int           // Maximum topic alternatives accepted across all positions per log subscription. Default: 0 (no limit)
+	RpcSubscriptionFiltersTimeout          time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
+	RpcSubscriptionFiltersMaxSubscriptions int           // Maximum number of live filters and subscriptions across all clients. Default: 10000; 0 disables the limit
 }
 
 // LogFilterLimits defines configured resource limits for log subscriptions.
@@ -76,12 +78,15 @@ func (config FiltersConfig) logFilterLimits() LogFilterLimits {
 // DefaultFiltersConfig defines the default settings for filter configurations.
 // Logs, headers and transactions are capped at 10000 items per subscription to prevent
 // unbounded memory growth when polling clients stop calling eth_getFilterChanges.
-// Oldest items are evicted first (FIFO) when the cap is reached.
+// Oldest items are evicted first (FIFO) when the cap is reached. The number of live filters
+// and subscriptions is capped across all clients, since the idle timeout alone cannot bound
+// memory against a client that keeps creating new ones.
 var DefaultFiltersConfig = FiltersConfig{
-	RpcSubscriptionFiltersMaxLogs:      10000,
-	RpcSubscriptionFiltersMaxHeaders:   10000,
-	RpcSubscriptionFiltersMaxTxs:       10000,
-	RpcSubscriptionFiltersMaxAddresses: 0, // no limit
-	RpcSubscriptionFiltersMaxTopics:    0, // no limit
-	RpcSubscriptionFiltersTimeout:      DefaultFilterTimeout,
+	RpcSubscriptionFiltersMaxLogs:          10000,
+	RpcSubscriptionFiltersMaxHeaders:       10000,
+	RpcSubscriptionFiltersMaxTxs:           10000,
+	RpcSubscriptionFiltersMaxAddresses:     0, // no limit
+	RpcSubscriptionFiltersMaxTopics:        0, // no limit
+	RpcSubscriptionFiltersTimeout:          DefaultFilterTimeout,
+	RpcSubscriptionFiltersMaxSubscriptions: 10000,
 }

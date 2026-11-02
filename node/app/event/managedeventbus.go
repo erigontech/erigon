@@ -78,15 +78,14 @@ func (bus *ManagedEventBus) UnregisterAll(object any) error {
 	objectPtr := objectVal.Pointer()
 
 	bus.registrationLock.Lock()
+	defer bus.registrationLock.Unlock()
 	for _, fn := range bus.registrations[objectPtr] {
 		err := bus.eventBus.Unsubscribe(fn)
-
 		if err != nil {
 			return err
 		}
 	}
 	delete(bus.registrations, objectPtr)
-	bus.registrationLock.Unlock()
 	return nil
 }
 

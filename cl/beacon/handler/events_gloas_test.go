@@ -17,11 +17,16 @@
 package handler
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 func TestGloasEventTopicsAreValid(t *testing.T) {
@@ -42,4 +47,29 @@ func TestGloasEventTopicsAreValid(t *testing.T) {
 func TestFastConfirmationTopicIsNotAdvertisedBeforeItHasAProducer(t *testing.T) {
 	_, ok := validTopics[beaconevents.EventTopic("fast_confirmation")]
 	require.False(t, ok)
+}
+
+func TestPayloadAttributesSubscriberTrackedWhileStreamIsOpen(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	emitter := beaconevents.NewEventEmitter()
+	handler := &ApiHandler{emitters: emitter, beaconChainCfg: &cfg}
+	ctx, cancel := context.WithCancel(t.Context())
+	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/eth/v1/events?topics=payload_attributes", nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.EventSourceGetV1Events(httptest.NewRecorder(), request)
+	}()
+
+	require.Eventually(t, emitter.HasPayloadAttributesSubscribers, time.Second, time.Millisecond)
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	require.False(t, emitter.HasPayloadAttributesSubscribers())
 }

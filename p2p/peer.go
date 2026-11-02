@@ -41,9 +41,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-var (
-	ErrShuttingDown = errors.New("shutting down")
-)
+var ErrShuttingDown = errors.New("shutting down")
 
 const (
 	baseProtocolVersion    = 5
@@ -516,7 +514,6 @@ func (rw *protoRW) WriteMsg(msg Msg) (err error) {
 }
 
 func (rw *protoRW) ReadMsg() (Msg, error) {
-
 	select {
 	case msg := <-rw.in:
 		msg.Code -= rw.offset

@@ -64,6 +64,7 @@ func newMockBackwardChunkProvider(chunks [][]byte) ChunkProvider {
 		return chunk, true, nil
 	}
 }
+
 func TestBackwardBlockProviderWith1Chunk(t *testing.T) {
 	// Mocks 1 chunk
 	chunk1 := createBitmap(t, []uint64{1000, 1005, 1010})
@@ -200,14 +201,14 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.Equal(0, int(results.Txs[0].Nonce))
 		require.Equal(4, int(results.Receipts[0].BlockNumber))
 		require.Equal(common.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[0].TransactionHash)
-		require.Equal(common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[0].From)
+		require.Equal(common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), *results.Receipts[0].From)
 		require.Equal(addr, *results.Receipts[0].To)
 
 		require.Equal(3, int(results.Txs[1].BlockNumber.ToInt().Uint64()))
 		require.Equal(2, int(results.Txs[1].Nonce))
 		require.Equal(3, int(results.Receipts[1].BlockNumber))
 		require.Equal(common.HexToHash("0x6e25f89e24254ba3eb460291393a4715fd3c33d805334cbd05c1b2efe1080f18"), results.Receipts[1].TransactionHash)
-		require.Equal(common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"), results.Receipts[1].From)
+		require.Equal(common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"), *results.Receipts[1].From)
 		require.Nil(results.Receipts[1].To)
 	})
 }

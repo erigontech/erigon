@@ -48,7 +48,8 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 		for range 2 {
 			txn, err := types.SignTx(
 				types.NewTransaction(block.TxNonce(testAddr), testAddr, uint256.NewInt(1), params.TxGas, nil, nil),
-				*signer, testKey)
+				*signer, testKey,
+			)
 			require.NoError(t, err)
 			block.AddTx(txn)
 		}
@@ -73,7 +74,7 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(m.Ctx, tx, m.Log)
 	require.NoError(t, err)
 	defer sd.Close()
-	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(tx))
 	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), overlayLogIdx, 0, 0, firstTxNum))
 
 	events := shards.NewEvents()
@@ -99,7 +100,8 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	m := mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
 		txn, err := types.SignTx(
 			types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate),
-			*signer, testKey)
+			*signer, testKey,
+		)
 		require.NoError(t, err)
 		block.AddTx(txn)
 	}, execmoduletester.WithEnableDomain(kv.RCacheDomain))
@@ -122,7 +124,7 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	require.Len(t, receipt.Logs, 1)
 	require.True(t, receipt.Bloom.IsEmpty(), "a receipt served from the persistent cache must not derive its bloom")
 
-	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, txn.Hash(), true, true)
+	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true, true)
 	bloom := types.CreateBloom(types.Receipts{receipt})
 	require.Equal(t, &bloom, served.LogsBloom)
 }

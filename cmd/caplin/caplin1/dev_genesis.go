@@ -62,13 +62,14 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 		return fmt.Errorf("compute genesis block root: %w", err)
 	}
 
-	log.Info("[genesis] writing genesis beacon block to DB",
+	log.Info(
+		"[genesis] writing genesis beacon block to DB",
 		"blockRoot", common.Hash(blockRoot).Hex(),
 		"stateRoot", common.Hash(stateRoot).Hex(),
 	)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, true)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
 	})
 }
 

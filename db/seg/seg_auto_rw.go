@@ -27,9 +27,8 @@ import (
 	"github.com/c2h5oh/datasize"
 )
 
-//Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
-
+// Reader and Writer - decorators on Getter and Compressor - which
+// can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
@@ -62,7 +61,10 @@ func (g *Reader) MatchCmp(buf []byte) int {
 	return cmp
 }
 
-func (g *Reader) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
+// BinarySearch seeks to the first word >= seek and returns its offset and its
+// ordinal - the index `getOffset` was called with, which callers of a positional
+// accessor need alongside the offset.
+func (g *Reader) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset, foundOrdinal uint64, ok bool) {
 	foundItem := sort.Search(count, func(i int) bool {
 		offset := getOffset(uint64(i))
 		g.Reset(offset)
@@ -72,20 +74,21 @@ func (g *Reader) BinarySearch(seek []byte, count int, getOffset func(i uint64) (
 		return false
 	})
 	if foundItem == count {
-		return 0, false
+		return 0, 0, false
 	}
 	foundOffset = getOffset(uint64(foundItem))
 	g.Reset(foundOffset)
 	if !g.HasNext() {
-		return 0, false
+		return 0, 0, false
 	}
-	return foundOffset, true
+	return foundOffset, uint64(foundItem), true
 }
 
 func (g *Reader) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
+
 func (g *Reader) MadvSequential() MadvDisabler {
 	g.d.MadvSequential()
 	return g
@@ -111,6 +114,7 @@ func (g *Reader) Reset(offset uint64) {
 	g.nextValue = false
 	g.Getter.Reset(offset)
 }
+
 func (g *Reader) Skip() (uint64, int) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -124,7 +128,6 @@ func (g *Reader) Skip() (uint64, int) {
 		return g.Getter.Skip()
 	}
 	return g.Getter.SkipUncompressed()
-
 }
 
 type Writer struct {

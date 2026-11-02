@@ -71,15 +71,15 @@ type id[T comparable] unique.Handle[components[T]]
 var _ Id = id[string]{}
 
 func (i id[T]) Domain() Domain {
-	return ((unique.Handle[components[T]])(i)).Value().domain.Value()
+	return unique.Handle[components[T]](i).Value().domain.Value()
 }
 
 func (i id[T]) Value() any {
-	return ((unique.Handle[components[T]])(i)).Value().value.Value()
+	return unique.Handle[components[T]](i).Value().value.Value()
 }
 
 func (i id[T]) String() string {
-	components := ((unique.Handle[components[T]])(i)).Value()
+	components := unique.Handle[components[T]](i).Value()
 	return fmt.Sprintf("%s:%v", components.domain.Value(), components.value.Value())
 }
 
@@ -88,7 +88,7 @@ func (i id[T]) MarshalText() (text []byte, err error) {
 }
 
 func (i id[T]) Keys() Keys {
-	value := ((unique.Handle[components[T]])(i)).Value()
+	value := unique.Handle[components[T]](i).Value()
 	return KeyArray{value.domain.Value(), value.value.Value()}
 }
 
@@ -112,8 +112,8 @@ func (i id[T]) Matches(other Id) bool {
 
 func (i id[T]) CompareTo(other any) int {
 	if other, ok := other.(id[T]); ok {
-		otherComponents := ((unique.Handle[components[T]])(other)).Value()
-		components := ((unique.Handle[components[T]])(i)).Value()
+		otherComponents := unique.Handle[components[T]](other).Value()
+		components := unique.Handle[components[T]](i).Value()
 
 		if comp := components.domain.Value().CompareTo(otherComponents.domain.Value()); comp != 0 {
 			return comp

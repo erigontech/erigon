@@ -92,7 +92,6 @@ func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 }
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
-
 	row, bm, enc := encodeCellRow(b, 16)
 
 	be := NewBranchEncoder(1024)

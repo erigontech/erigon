@@ -23,18 +23,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -68,57 +65,36 @@ func newLogIndexTestTasks(config *chain.Config) []exec.Task {
 	return tasks
 }
 
-func newParallelLogIndexTestExec(db kv.TemporalRwDB, domains *execctx.SharedDomains, calls int) *parallelExecutor {
-	logger := log.New()
-	return &parallelExecutor{
-		txExecutor: txExecutor{
-			cfg: ExecuteBlockCfg{
-				chainConfig: chain.TestChainBerlinConfig,
-				db:          db,
-				engine: &logEmittingSyscallEngine{
-					Engine:   ethash.NewFaker(),
-					contract: accounts.InternAddress(logIndexContract),
-					calls:    calls,
-				},
-				vmConfig: &vm.Config{},
-			},
-			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
-			logger: logger,
-		},
-	}
+// logEmittingSyscallEngine drives a fixed number of block-end system calls at one
+// contract, each of which emits a log.
+type logEmittingSyscallEngine struct {
+	rules.Engine
+	contract accounts.Address
+	calls    int
 }
 
-func newLogIndexTestBlock(tasks []exec.Task) *blockExecutor {
-	be := newBlockExec(newParallelTestBlockFromTasks(tasks), new(protocol.GasPool).AddGas(tasks[0].BlockGasLimit()),
-		nil, make(chan applyResult, 4), nil, false, nil)
-	be.tasks = make([]*execTask, len(tasks))
-	be.results = make([]*execResult, len(tasks))
-	for i, task := range tasks {
-		be.tasks[i] = &execTask{Task: task, index: i}
-	}
-	return be
-}
-
-func runParallelLogIndexTestBlock(t *testing.T, pe *parallelExecutor, tx kv.TemporalTx) {
-	t.Helper()
-	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
-	be := newLogIndexTestBlock(tasks)
-	for i, task := range be.tasks {
-		be.execTasks.setInProgress(i)
-		version := task.Version()
-		version.Incarnation = 1
-		res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
-			Task: &taskVersion{execTask: task, version: version},
-		}, tx)
-		require.NoError(t, err)
-		if i < len(tasks)-1 {
-			require.Nil(t, res)
-		} else {
-			require.NotNil(t, res)
-			require.NoError(t, res.Err)
+func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader,
+	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	for range e.calls {
+		if _, err := syscall(e.contract, nil); err != nil {
+			return nil, err
 		}
 	}
+	return nil, nil
+}
+
+// putLogEmittingContract writes LOG1 bytecode at addr so every system call to it
+// appends exactly one log to the caller's IntraBlockState.
+func putLogEmittingContract(putter kv.TemporalPutDel, addr common.Address) error {
+	code := []byte{byte(vm.PUSH1), logIndexTopic[31], byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
+		return err
+	}
+	return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
 }
 
 func indexedTxNums(t *testing.T, tx kv.TemporalTx, idx kv.InvertedIdx, key []byte) []uint64 {
@@ -128,6 +104,12 @@ func indexedTxNums(t *testing.T, tx kv.TemporalTx, idx kv.InvertedIdx, key []byt
 	txNums, err := stream.ToArrayU64(it)
 	require.NoError(t, err)
 	return txNums
+}
+
+func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		return putLogEmittingContract(putter, addr)
+	})
 }
 
 // Consensus system calls can emit logs after all regular transactions have
@@ -144,85 +126,10 @@ func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 	rwTx := se.applyTx.(kv.TemporalRwTx)
 	require.NoError(t, putLogEmittingContract(se.doms.AsPutDel(rwTx), logIndexContract))
 
-	block := newParallelTestBlockFromTasks(tasks)
-	_, err := se.executeBlock(t.Context(), block, tasks, false, false)
+	_, err := se.executeBlock(t.Context(), tasks, false)
 	require.NoError(t, err)
 	require.NoError(t, se.doms.Flush(t.Context(), rwTx))
 
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
-}
-
-func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
-	db := newResumeTestDB(t)
-	seedLogEmittingContract(t, db, logIndexContract)
-
-	rwTx, domains := temporaltest.NewTestTxSD(t, db)
-	pe := newParallelLogIndexTestExec(db, domains, 1)
-	runParallelLogIndexTestBlock(t, pe, rwTx)
-	require.NoError(t, domains.Flush(t.Context(), rwTx))
-
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
-}
-
-// The final virtual transaction clears the latest receipt-cache value, while
-// history preserves the last regular receipt. Indexing block-end system-call
-// logs must leave that receipt readable at its original transaction number.
-func TestParallelBlockEndLogsPreserveReceiptHistory(t *testing.T) {
-	savedRCache := statecfg.Schema.RCacheDomain
-	statecfg.EnableHistoricalRCache()
-	t.Cleanup(func() { statecfg.Schema.RCacheDomain = savedRCache })
-
-	db := newResumeTestDB(t)
-	seedLogEmittingContract(t, db, logIndexContract)
-	rwTx, domains := temporaltest.NewTestTxSD(t, db)
-	pe := newParallelLogIndexTestExec(db, domains, 1)
-	pe.rs = state.NewStateV3Buffered(state.NewStateV3(domains, true, pe.logger))
-
-	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
-	txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, pe.cfg.chainConfig, 0)}
-	for i, task := range tasks {
-		txTask := task.(*exec.TxTask)
-		txTask.TxIndex = i
-		txTask.Txs = txs
-	}
-	be := newLogIndexTestBlock(tasks)
-	regularTask, finalTask := be.tasks[0], be.tasks[1]
-	regularVersion := regularTask.Version()
-	regularVersion.Incarnation = 1
-	be.execTasks.setInProgress(0)
-	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
-		Task: &taskVersion{execTask: regularTask, version: regularVersion},
-		ExecutionResult: evmtypes.ExecutionResult{
-			ReceiptGasUsed:        21_000,
-			BlockExecutionGasUsed: 21_000,
-		},
-	}, rwTx)
-	require.NoError(t, err)
-	require.Nil(t, res)
-	cachedReceipt, _, err := domains.GetLatest(kv.RCacheDomain, rwTx, rawtemporaldb.ReceiptCacheKey)
-	require.NoError(t, err)
-	require.NotEmpty(t, cachedReceipt)
-
-	finalVersion := finalTask.Version()
-	finalVersion.Incarnation = 1
-	be.execTasks.setInProgress(1)
-	res, err = be.nextResult(t.Context(), pe, &exec.TxResult{
-		Task: &taskVersion{execTask: finalTask, version: finalVersion},
-	}, rwTx)
-	require.NoError(t, err)
-	require.NotNil(t, res)
-	require.NoError(t, res.Err)
-	require.NoError(t, domains.Flush(t.Context(), rwTx))
-
-	priorReceipt, ok, err := rwTx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, regularVersion.TxNum+1)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, cachedReceipt, priorReceipt)
-	latestReceipt, _, err := rwTx.GetLatest(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.Empty(t, latestReceipt)
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }

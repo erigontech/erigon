@@ -43,10 +43,12 @@ const (
 	AATxnType         byte = 5 // RIP-7560
 )
 
-var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
-var ErrRejected = errors.New("rejected")
-var ErrAlreadyKnown = errors.New("already known")
-var ErrRlpTooBig = errors.New("txn rlp too big")
+var (
+	ErrParseTxn     = fmt.Errorf("%w transaction", rlp.ErrParse)
+	ErrRejected     = errors.New("rejected")
+	ErrAlreadyKnown = errors.New("already known")
+	ErrRlpTooBig    = errors.New("txn rlp too big")
+)
 
 // TxnParseContext is object that is required to parse transactions and turn transaction payload into TxnSlot objects
 // usage of TxContext helps avoid extra memory allocations
@@ -197,7 +199,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		p = dataPos + dataLen
 	default:
 		// Typed tx without envelope: type byte at pos, followed by RLP list
-		listPos, listLen, err := rlp.ParseList(payload, pos+1)
+		var listPos, listLen int
+		listPos, listLen, err = rlp.ParseList(payload, pos+1)
 		if err != nil {
 			return 0, fmt.Errorf("%w: typed tx list: %s", ErrParseTxn, err) //nolint
 		}
@@ -207,7 +210,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 	// Step 2: Validate RLP if configured.
 	if ctx.validateRlp != nil {
-		if err := ctx.validateRlp(txBytes); err != nil {
+		err = ctx.validateRlp(txBytes)
+		if err != nil {
 			return 0, err
 		}
 	}
@@ -220,7 +224,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	var innerTxBytes []byte // only set for wrapped blob txns
 	if !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs {
 		// Structure: type_byte || rlp([ rlp(tx_body), [wrapper_version], blobs, commitments, proofs ])
-		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
+		var wrapperListPos, wrapperListLen int
+		wrapperListPos, wrapperListLen, err = rlp.ParseList(txBytes, 1)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob wrapper list: %s", ErrParseTxn, err) //nolint
 		}
@@ -229,7 +234,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 
 		// Parse the inner tx_payload_body (first element of the wrapper list).
-		innerBodyPos, innerBodyLen, err := rlp.ParseList(txBytes, wrapperListPos)
+		var innerBodyPos, innerBodyLen int
+		innerBodyPos, innerBodyLen, err = rlp.ParseList(txBytes, wrapperListPos)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob tx body in wrapper: %s", ErrParseTxn, err) //nolint
 		}
@@ -254,7 +260,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 		// Check for optional wrapper_version byte.
 		proofsPerBlob := 1
-		_, dvLen, err := rlp.ParseString(txBytes, wp)
+		var dvLen int
+		_, dvLen, err = rlp.ParseString(txBytes, wp)
 		if err == nil && dvLen == 1 {
 			if txBytes[wp] != 0x01 {
 				return 0, fmt.Errorf("%w: invalid wrapper version: expected 1, got %d", ErrParseTxn, txBytes[wp])
@@ -264,7 +271,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 
 		// Parse blobs list (zero-copy: slices point into original payload).
-		blobListPos, blobListLen, err := rlp.ParseList(txBytes, wp)
+		var blobListPos, blobListLen int
+		blobListPos, blobListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
 		}
@@ -286,7 +294,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		wp = blobPos
 
 		// Parse commitments list.
-		commitListPos, commitListLen, err := rlp.ParseList(txBytes, wp)
+		var commitListPos, commitListLen int
+		commitListPos, commitListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: commitments len: %s", ErrParseTxn, err) //nolint
 		}
@@ -315,7 +324,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		wp = commitPos
 
 		// Parse proofs list.
-		proofListPos, proofListLen, err := rlp.ParseList(txBytes, wp)
+		var proofListPos, proofListLen int
+		proofListPos, proofListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
@@ -369,6 +379,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
 	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
 	slot.Txn = txn
+	slot.AuthAndNonces = nil
 	hashInput := txBytes
 	if innerTxBytes != nil {
 		hashInput = innerTxBytes
@@ -376,7 +387,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	slot.IDHash = crypto.Keccak256Hash(hashInput)
 
 	if validateHash != nil {
-		if err := validateHash(slot.IDHash[:]); err != nil {
+		err = validateHash(slot.IDHash[:])
+		if err != nil {
 			return p, err
 		}
 	}
@@ -389,33 +401,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 	// Step 7: Populate fields that are kept on TxnSlot.
 	slot.Nonce = txn.GetNonce()
-
-	// Authorization signers for SetCode txns (EIP-7702).
-	// Per EIP-7702, invalid auth tuples (unrecoverable signature, out-of-range
-	// chainID, etc.) do not invalidate the enclosing transaction — at execution
-	// time the spec dictates that "if any step fails for a tuple, processing
-	// continues to the next one". We therefore skip bad tuples here instead of
-	// returning a parse error: failing the parse would (a) drop sibling txns
-	// in the same Transactions/PooledTransactions packet and (b) censor txns
-	// that other clients accept. Only successfully-recovered authorities are
-	// indexed in AuthAndNonces (used for pool-replacement bookkeeping); the
-	// original auth-list length is still available via Txn.GetAuthorizations()
-	// for gas accounting (the sender pays for every tuple regardless).
-	if txn.Type() == types.SetCodeTxType {
-		auths := txn.GetAuthorizations()
-		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
-		for i := range auths {
-			auth := &auths[i]
-			if !auth.ChainID.IsUint64() {
-				continue
-			}
-			authority, err := auth.RecoverSigner()
-			if err != nil {
-				continue
-			}
-			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority, auth.Nonce})
-		}
-	}
 
 	// Step 8: Recover sender if needed.
 	if ctx.withSender && len(sender) == length.Addr {
@@ -430,9 +415,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
 				signer = ctx.malleableSigner
 			}
-			addr, err := txn.Sender(*signer)
-			if err != nil {
-				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
+			addr, senderErr := txn.Sender(*signer)
+			if senderErr != nil {
+				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, senderErr) //nolint
 			}
 			addrBytes := addr.Value()
 			copy(sender, addrBytes[:])
@@ -456,7 +441,8 @@ type PoolBlobBundle struct {
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues.
-// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce).
+// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce)
+// and the deletion records queued for rows rejected on reload (which only use IDHash and SenderID).
 type TxnSlot struct {
 	Txn      types.Transaction // The decoded standard transaction (BlobTx, not BlobTxWrapper, for blob txns)
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
@@ -466,8 +452,13 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	BlobBundles   []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
-	AuthAndNonces []AuthAndNonce   // Recovered authority + nonce for each valid EIP-7702 auth tuple. Tuples with unrecoverable signatures are skipped (per the EIP, they don't invalidate the txn). For total auth-list length (gas billing) use Txn.GetAuthorizations().
+	BlobBundles []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
+
+	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
+	// Invalid tuples and authorizations for other chains are omitted.
+	// Gas accounting must use the full Txn.GetAuthorizations() list because
+	// EIP-7702 charges for every tuple, including invalid ones.
+	AuthAndNonces []AuthAndNonce
 }
 
 // Accessor methods that delegate to the stored Transaction.
@@ -623,7 +614,7 @@ func (s *TxnSlots) Resize(targetSize uint) {
 	for uint(len(s.IsLocal)) < targetSize {
 		s.IsLocal = append(s.IsLocal, false)
 	}
-	//todo: set nil to overflow txns
+	// todo: set nil to overflow txns
 	oldLen := uint(len(s.Txns))
 	s.Txns = s.Txns[:targetSize]
 	for i := oldLen; i < targetSize; i++ {
@@ -684,7 +675,7 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 	for uint(len(r.IsLocal)) < targetSize {
 		r.IsLocal = append(r.IsLocal, false)
 	}
-	//todo: set nil to overflow txns
+	// todo: set nil to overflow txns
 	r.Txns = r.Txns[:targetSize]
 	r.ParsedTxn = r.ParsedTxn[:targetSize]
 	r.Senders = r.Senders[:length.Addr*targetSize]

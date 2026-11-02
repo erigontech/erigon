@@ -72,14 +72,15 @@ type HttpCfg struct {
 	TLSCACert                string
 	TLSKeyFile               string
 
-	HttpServerEnabled  bool
-	HttpURL            string
-	HttpListenAddress  string
-	HttpPort           int
-	HttpCORSDomain     []string
-	HttpVirtualHost    []string
-	AuthRpcVirtualHost []string
-	HttpCompression    bool
+	HttpServerEnabled       bool
+	HttpURL                 string
+	HttpListenAddress       string
+	HttpPort                int
+	HttpCORSDomain          []string
+	HttpVirtualHost         []string
+	AuthRpcVirtualHost      []string
+	HttpCompression         bool
+	HttpCompressionLoopback bool
 
 	HttpsServerEnabled bool
 	HttpsURL           string
@@ -142,9 +143,10 @@ type HttpCfg struct {
 	LogDirPath      string
 
 	BatchLimit                  int  // Maximum number of requests in a batch
+	SubscriptionLimit           int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
 	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
 	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
-	MaxGetProofRewindBlockCount int  //Max GetProof rewind block count
+	MaxGetProofRewindBlockCount int  // Max GetProof rewind block count
 	// Ots API
 	OtsMaxPageSize uint64
 

@@ -26,7 +26,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -156,7 +156,8 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecConfigAlone(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 
 	cfg, _, err := genesiswrite.CommitGenesisBlockWithOverride(
-		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New())
+		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New(),
+	)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1765000000), *cfg.OsakaTime, "the override must reach the returned config")
 	require.Equal(t, orig, chainspec.MainnetGenesisBlock().Config.OsakaTime,
@@ -177,7 +178,8 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecGenesisAlone(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New())
+		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New(),
+	)
 	require.NoError(t, err)
 
 	after, err := chainspec.ChainSpecByName(networkname.Sepolia)
@@ -273,7 +275,8 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	// No block snapshots in this datadir either, so the head time is unknowable and the
 	// rescheduled Osaka cannot be cleared.
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger)
+		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger,
+	)
 	require.Error(t, err, "an unresolvable head time must not let a rescheduled fork through")
 
 	storedCfg := readStoredChainConfig(t, m.DB)
@@ -299,7 +302,8 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	dropHeadHeader(t, m.DB)
 
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger)
+		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger,
+	)
 	require.NoError(t, err)
 }
 
@@ -332,7 +336,7 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	//TODO: support historyV3
+	// TODO: support historyV3
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
@@ -432,13 +436,10 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
 	t.Parallel()
 
-	// Deep copy: chain.Config carries a sync.Once and a memoized map, and its own doc
-	// forbids copying it by value.
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg := chain.AllProtocolChanges.Copy()
 	zero := uint64(0)
 	cfg.AmsterdamTime = &zero
-	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: cfg})
 
 	// merge.VerifyHeader rejects an Amsterdam header without one (ErrMissingSlotNumber),
 	// and the genesis hash depends on it.
@@ -446,7 +447,7 @@ func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
 	require.Zero(t, *head.SlotNumber)
 
 	cfg.AmsterdamTime = nil
-	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: cfg})
 	require.Nil(t, head.SlotNumber, "pre-Amsterdam genesis header must not carry slotNumber")
 }
 
@@ -607,7 +608,6 @@ func TestSetupGenesis(t *testing.T) {
 			}
 
 			if genesis.Hash() != test.wantHash {
-
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
@@ -623,4 +623,45 @@ func TestSetupGenesis(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	logger := log.New()
+	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+	newGenesis := func(balance int64, code []byte, slotVal common.Hash) *types.Genesis {
+		return &types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{addr: {
+				Balance: big.NewInt(balance),
+				Code:    code,
+				Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): slotVal},
+			}},
+		}
+	}
+	stale := newGenesis(100, []byte{0x60, 0x01}, common.HexToHash("0x0a"))
+	genSpec := newGenesis(5, []byte{0x60, 0x02}, common.HexToHash("0x0b"))
+	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
+	require.NoError(t, err)
+	ibs.Close()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(stale)
+	_, ibs, err = genesiswrite.ComputeGenesisCommitment(ctx, stale, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(genSpec)
+	root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genSpec, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+	require.Equal(t, want.Root(), common.BytesToHash(root))
 }

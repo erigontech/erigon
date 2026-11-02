@@ -342,3 +342,30 @@ func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
 		require.True(t, listed[name], "%s is time-based but missing from forkTimestamps()", name)
 	}
 }
+
+// A shared config is read and copied by value from many goroutines at once, so reading the
+// blob schedule must not write to it.
+func TestGetBlobConfigDoesNotWriteConfig(t *testing.T) {
+	c := AllProtocolChanges.Copy()
+	before := *c
+	c.GetBlobConfig(0)
+	require.Equal(t, before, *c)
+}
+
+func TestIsPostMerge(t *testing.T) {
+	assert.False(t, (&Config{}).IsPostMerge(1_000_000, 1_000_000))
+
+	assert.True(t, (&Config{TerminalTotalDifficulty: uint256.NewInt(0)}).IsPostMerge(0, 0))
+
+	mergeHeight := &Config{TerminalTotalDifficulty: uint256.NewInt(1), MergeHeight: common.NewUint64(100), ShanghaiTime: common.NewUint64(1000)}
+	assert.False(t, mergeHeight.IsPostMerge(99, 0))
+	assert.True(t, mergeHeight.IsPostMerge(100, 0))
+
+	netsplit := &Config{MergeNetsplitBlock: common.NewUint64(100)}
+	assert.False(t, netsplit.IsPostMerge(99, 0))
+	assert.True(t, netsplit.IsPostMerge(100, 0))
+
+	shanghai := &Config{ShanghaiTime: common.NewUint64(1000)}
+	assert.False(t, shanghai.IsPostMerge(0, 999))
+	assert.True(t, shanghai.IsPostMerge(0, 1000))
+}

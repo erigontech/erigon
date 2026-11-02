@@ -65,7 +65,7 @@ var websocketTrackers = []string{
 // Trackers - break down by priority tier
 var Trackers = [][]string{
 	udpOrHttpTrackers,
-	//websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
+	// websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
 }
 
 func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) ([]string, error) {

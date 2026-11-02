@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 
-	_ "github.com/erigontech/erigon/db/snaptype2" //hack
+	_ "github.com/erigontech/erigon/db/snaptype2" // hack
 )
 
 func main() {

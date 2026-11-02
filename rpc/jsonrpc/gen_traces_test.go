@@ -137,7 +137,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	if err != nil {
 		t.Errorf("trace_block %d: %v", 0, err)
 	}
-	buf, err := json.Marshal(traces)
+	buf, err := jsonstream.Marshal(traces)
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
@@ -273,6 +273,8 @@ func TestGeneratedTraceApi(t *testing.T) {
 		  "result": null,
 		  "subtraces": 0,
 		  "traceAddress": [],
+		  "transactionHash": null,
+		  "transactionPosition": null,
 		  "type": "reward"
 		}
 	  ]`
@@ -333,7 +335,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
         },
         "blockHash": "0xc78e9674685b04e1300d62cafdae0708d030a9bc0ff7aa9eb9315da23de650dc",
         "blockNumber": 1,
-        "error": "contract address collision",
+        "error": "Contract address collision",
         "result": null,
         "subtraces": 0,
         "traceAddress": [

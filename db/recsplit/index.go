@@ -68,9 +68,11 @@ const (
 	LessFalsePositives Features = 0b10 //
 )
 
-// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
-var SupportedFeatures = []Features{Enums, LessFalsePositives}
-var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return ErrIncompatible and recommend for user manually delete file
+var (
+	SupportedFeatures = []Features{Enums, LessFalsePositives}
+	ErrIncompatible   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+)
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -166,7 +168,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 }
 
 func (idx *Index) init() (err error) {
-	var validationPassed = false
+	validationPassed := false
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if rec := recover(); rec != nil {
@@ -193,7 +195,7 @@ func (idx *Index) init() (err error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, IncompatibleErr, offset)
+		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, ErrIncompatible, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -237,7 +239,7 @@ func (idx *Index) init() (err error) {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
-			return fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
+			return fmt.Errorf("%w. size of existence filter %d != keys count %d", ErrIncompatible, arrSz, idx.keyCount)
 		}
 		idx.existenceV0 = idx.data[offset : offset+int(arrSz)]
 		offset += int(arrSz)
@@ -273,7 +275,7 @@ func (idx *Index) init() (err error) {
 			}
 			offset += sz
 		default:
-			return fmt.Errorf("%w. unsupported existence filter version %d", IncompatibleErr, idx.dataStructureVersion)
+			return fmt.Errorf("%w. unsupported existence filter version %d", ErrIncompatible, idx.dataStructureVersion)
 		}
 	}
 
@@ -300,6 +302,7 @@ func (idx *Index) init() (err error) {
 	validationPassed = true
 	return nil
 }
+
 func (idx *Index) ForceExistenceFilterWillNeed() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -327,6 +330,7 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+
 func (idx *Index) ForceExistenceFilterRandom() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -340,6 +344,7 @@ func (idx *Index) ForceExistenceFilterRandom() {
 		idx.existenceV2.MadvRandom()
 	}
 }
+
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -359,7 +364,7 @@ func onlyKnownFeatures(features Features) error {
 		features &^= f
 	}
 	if features != No {
-		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
+		return fmt.Errorf("%w. unknown features bitmap: %b", ErrIncompatible, features)
 	}
 	return nil
 }
@@ -586,6 +591,7 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
+
 func (idx *Index) MadvSequential() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -594,6 +600,7 @@ func (idx *Index) MadvSequential() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvNormal() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -602,6 +609,7 @@ func (idx *Index) MadvNormal() *Index {
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvWillNeed() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx

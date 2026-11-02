@@ -339,7 +339,7 @@ func TestUnwind(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	//check that at unwind disabled stage not appear
+	// check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
 	_ = state.UnwindTo(100, UnwindReason{}, tx)
@@ -352,7 +352,6 @@ func TestUnwind(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedFlow, flow)
-
 }
 
 func TestUnwindEmptyUnwinder(t *testing.T) {
@@ -599,7 +598,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
-	assert.Error(t, errInterrupted, err)
+	assert.ErrorIs(t, err, errInterrupted)
 
 	//state = NewState(s)
 	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}

@@ -6,7 +6,7 @@ sidebar_position: 1
 
 # Gnosis Chain with an external CL
 
-Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
+Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of a configuration with **Lighthouse**.
 
 ### 1. Start Erigon:
 
@@ -38,7 +38,7 @@ another machine, and protect the endpoint when you do:
 
 ### 2. Install Lighthouse
 
-Install Lighthouse, following instructions at [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html).
+Install Lighthouse, following the instructions at [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html).
 
 The official pre-built binaries already support Gnosis Chain and Chiado, so no special build is required. You can confirm this with `lighthouse --help`, which lists `gnosis` and `chiado` among the accepted `--network` values.
 
@@ -64,7 +64,7 @@ env FEATURES=gnosis make
 Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints, for example:
 
 1. `https://checkpoint.gnosischain.com` for Gnosis Chain;
-2. `https://checkpoint.chiadochain.net` for Chiado testnet.
+2. `https://checkpoint.chiadochain.net` for the Chiado testnet.
 
 ### 4. Set the Erigon JWT secret path in Lighthouse
 
