@@ -184,17 +184,28 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 					return err
 				}
-				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+				hasAcc, err := hasCommittedAccount(domains, roTx, address[:])
+				if err != nil {
 					return err
 				}
-				if pureDelete {
+				if !hasAcc {
+					if err := assertNoCommittedStorage(domains, roTx, address[:], "selfDestruct"); err != nil {
+						return err
+					}
+					if pureDelete {
+						continue
+					}
+				} else if pureDelete {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 					}
+					// Deleting the account also deletes its storage prefix.
 					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
 					continue
+				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+					return err
 				}
 				// Otherwise: cleanup code+storage before recreating account
 				// (originalIncarnation > account.Incarnation case).

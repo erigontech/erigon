@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -178,4 +179,32 @@ func TestApplyWrites_SelfDestructedAddressIsPureDelete(t *testing.T) {
 	s2, _, err := domains.GetLatest(kv.StorageDomain, tx, append(append([]byte{}, av[:]...), kr[:]...))
 	require.NoError(t, err)
 	assert.Empty(t, s2, "same-tx slot write must be dropped")
+}
+
+// An address with no committed account owns no committed storage, so its self-destruct must not walk
+// the storage prefix: the walk seeks every storage file. The orphan slot below breaks that invariant on
+// purpose, so it survives only if the walk is skipped.
+func TestApplyWrites_SelfDestructWithoutCommittedAccountSkipsStorageWalk(t *testing.T) {
+	assertWas := dbg.AssertEnabled
+	dbg.AssertEnabled = false // the assert panics on the orphan slot this test plants
+	t.Cleanup(func() { dbg.AssertEnabled = assertWas })
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x5DEAD"))
+	av := addr.Value()
+	slot := common.HexToHash("0x02")
+	storageKey := append(append([]byte{}, av[:]...), slot[:]...)
+	domains.SetTxNum(1)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{0x42}, 1, nil))
+
+	ver := Version{TxIndex: 1}
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+
+	domains.SetTxNum(2)
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+
+	v, _, err := domains.GetLatest(kv.StorageDomain, tx, storageKey)
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0x42}, v, "self-destruct of an address without a committed account walked its storage prefix")
 }
