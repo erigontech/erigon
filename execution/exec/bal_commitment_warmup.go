@@ -248,13 +248,23 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	keep := make([]bool, len(keys))
 	check := func(tx kv.TemporalTx, from, to int) {
 		compact := make([]byte, 0, 128)
+		// Keys are sorted, so keys sharing a branch are adjacent: read it once.
+		var lastPrefix []byte
+		var bits uint16
 		for i := from; i < to && ctx.Err() == nil; i++ {
 			k := keys[i]
 			if depth >= len(k) {
 				continue
 			}
-			branch, _, err := tx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
-			keep[i] = err == nil && len(branch) >= 4 && binary.BigEndian.Uint16(branch[2:4])&(uint16(1)<<k[depth]) != 0
+			if lastPrefix == nil || !bytes.Equal(lastPrefix, k[:depth]) {
+				branch, _, err := tx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
+				bits = 0
+				if err == nil && len(branch) >= 4 {
+					bits = binary.BigEndian.Uint16(branch[2:4])
+				}
+				lastPrefix = k[:depth]
+			}
+			keep[i] = bits&(uint16(1)<<k[depth]) != 0
 		}
 	}
 	par := max(1, min(prefetchPar, len(keys)/256))
