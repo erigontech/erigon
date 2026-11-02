@@ -745,3 +745,15 @@ func TestBranchCache_FillRacingUnwindCommitted(t *testing.T) {
 		wg.Wait()
 	}
 }
+
+func TestTailLRU_GrowsBeforeMaxCapacity(t *testing.T) {
+	tl := newTailLRU(16 * tailStartCapacity)
+	defer tl.Close()
+	const n = 8 * tailStartCapacity
+	rng := rand.New(rand.NewSource(1))
+	for range n {
+		tl.Add(rng.Uint64(), &branchCacheEntry{})
+	}
+	require.Greater(t, tl.curCap.Load(), uint32(tailStartCapacity))
+	require.Greater(t, tl.Len(), 2*tailStartCapacity, "a growing tail must keep entries instead of evicting at its start capacity")
+}

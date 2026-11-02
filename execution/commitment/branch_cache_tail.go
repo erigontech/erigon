@@ -40,6 +40,8 @@ type tailLRU struct {
 	resizeMu sync.Mutex
 	curCap   atomic.Uint32
 	reserved int64
+	// addsUntilCheck counts down to the next Len() check, which locks every shard.
+	addsUntilCheck atomic.Int64
 }
 
 func newTailLRU(maxCapacity uint32) *tailLRU {
@@ -49,6 +51,7 @@ func newTailLRU(maxCapacity uint32) *tailLRU {
 	cachebudget.Global.Take(t.reserved)
 	t.curCap.Store(start)
 	t.cur.Store(newTailShards(start))
+	t.addsUntilCheck.Store(int64(start))
 	return t
 }
 
@@ -68,8 +71,7 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
-	// Avoid lru.Len() locks once fully grown.
-	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {
+	if t.curCap.Load() < t.maxCap && t.addsUntilCheck.Add(-1) <= 0 {
 		t.maybeGrow()
 		lru = t.cur.Load()
 	}
@@ -82,12 +84,17 @@ func (t *tailLRU) maybeGrow() {
 
 	old := t.cur.Load()
 	curCap := t.curCap.Load()
-	if curCap >= t.maxCap || old.Len() < int(curCap) {
+	if curCap >= t.maxCap {
+		return
+	}
+	if n := old.Len(); n < int(curCap) {
+		t.scheduleCheck(curCap, n)
 		return
 	}
 	newCap := min(curCap*tailGrowFactor, t.maxCap)
 	delta := int64(newCap-curCap) * tailEntryBytes
 	if !cachebudget.Global.Reserve(delta) {
+		t.scheduleCheck(curCap, 0)
 		return
 	}
 	next := newTailShards(newCap)
@@ -99,6 +106,13 @@ func (t *tailLRU) maybeGrow() {
 	t.cur.Store(next)
 	t.curCap.Store(newCap)
 	t.reserved += delta
+	t.scheduleCheck(newCap, next.Len())
+}
+
+// scheduleCheck defers the next Len() by the tail's free room, at least capacity/16
+// adds: shards fill unevenly, so Len can stay just below capacity for long.
+func (t *tailLRU) scheduleCheck(capacity uint32, n int) {
+	t.addsUntilCheck.Store(max(int64(capacity)-int64(n), int64(capacity/16), 1))
 }
 
 func (t *tailLRU) Remove(key uint64) {
@@ -113,6 +127,7 @@ func (t *tailLRU) reset() {
 	t.reserved = int64(start) * tailEntryBytes
 	t.curCap.Store(start)
 	t.cur.Store(newTailShards(start))
+	t.addsUntilCheck.Store(int64(start))
 }
 
 func (t *tailLRU) Len() int {
