@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -71,13 +73,21 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 // or whose parent state is gone, ignores the sidecar.
 //
 // The sidecars of a block share one read. It runs under the service context, not a caller's, so one canceled
-// validation does not fail the others; each caller waits for it under its own context.
+// validation does not fail the others; each caller waits for it under its own context. The read runs on its own
+// goroutine, outside the gossip validator's recovery, where singleflight makes a panic fatal, so it recovers one
+// itself and ignores the sidecar.
 func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	key := expectedProposerKey{parentRoot: parentRoot, slot: slot}
 	if proposer, ok := e.results.Get(key); ok {
 		return proposer, nil
 	}
-	read := e.reads.DoChan(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (any, error) {
+	read := e.reads.DoChan(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (result any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[dataColumnSidecarService] panic reading the expected proposer", "parentRoot", parentRoot, "slot", slot, "err", r, "stack", dbg.Stack())
+				result, err = uint64(0), fmt.Errorf("%w: expected proposer read panicked: %v", ErrIgnore, r)
+			}
+		}()
 		if proposer, ok := e.results.Get(key); ok {
 			return proposer, nil
 		}

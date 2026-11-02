@@ -351,3 +351,52 @@ func TestExpectedProposerSharedReadOutlivesTheFirstWaitersCancellation(t *testin
 		t.Fatal("the shared read did not finish")
 	}
 }
+
+// A panic in the shared read runs outside the gossip validator's recovery, so the read recovers it: every waiter gets
+// IGNORE, the rebuild permit is returned, and nothing is cached.
+func TestExpectedProposerReadPanicIsIgnoredNotFatal(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	slot := (state.Epoch(parentState)+1)*cfg.SlotsPerEpoch - 1
+	started, release := make(chan struct{}), make(chan struct{})
+	releaseRead := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseRead)
+	var panicking atomic.Bool
+	panicking.Store(true)
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		if panicking.Load() {
+			close(started)
+			<-release
+			panic("replay failed")
+		}
+		return fn(parentState)
+	}
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	get := func() <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+			done <- err
+		}()
+		return done
+	}
+
+	first := get()
+	<-started
+	second := get()
+	releaseRead()
+	for _, done := range []<-chan error{first, second} {
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, ErrIgnore)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a waiter was not released after the read panicked")
+		}
+	}
+	require.Zero(t, len(proposers.rebuilds), "the panicking read kept its rebuild permit")
+
+	panicking.Store(false)
+	_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+	require.NoError(t, err, "the panicked read was cached")
+}
