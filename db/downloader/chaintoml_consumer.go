@@ -110,7 +110,7 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		defer t.Drop()
 	} else if !t.Complete().Bool() {
 		// AddTorrentOpt keeps the original storage, so we cannot safely resume an existing torrent.
-		return nil, fmt.Errorf("chain.toml torrent already exists and is incomplete")
+		return nil, fmt.Errorf("requested torrent already exists and is incomplete")
 	}
 
 	if added && peer != nil {
@@ -160,8 +160,12 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	if !added {
 		// The local file may have changed since the torrent was marked complete.
 		// Verify the bytes we return, since a separate file read could see different contents.
-		if int64(len(data)) != info.Length || info.PieceLength <= 0 {
+		if int64(len(data)) != info.Length {
 			return nil, fmt.Errorf("chain.toml does not match torrent length")
+		}
+		// GeneratePieces loops indefinitely when the piece length is zero.
+		if info.PieceLength <= 0 {
+			return nil, fmt.Errorf("invalid chain.toml torrent piece length: %d", info.PieceLength)
 		}
 		pieces, hashErr := metainfo.GeneratePieces(bytes.NewReader(data), info.PieceLength, nil)
 		if hashErr != nil {

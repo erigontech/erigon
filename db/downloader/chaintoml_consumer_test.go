@@ -167,7 +167,7 @@ func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	_, err = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, tmpDir, nil)
-	require.ErrorContains(t, err, "already exists and is incomplete")
+	require.EqualError(t, err, "requested torrent already exists and is incomplete")
 	got, ok := client.Torrent(infoHash)
 	require.True(t, ok, "the existing torrent must remain registered")
 	assert.Same(t, existing, got)
@@ -221,6 +221,23 @@ func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
 			assert.Empty(t, entries)
 		})
 	}
+}
+
+func TestDownloadChainTomlByInfoHashRejectsZeroPieceLength(t *testing.T) {
+	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
+	client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
+	require.NoError(t, err)
+	defer client.Close()
+	infoBytes, err := bencode.Marshal(metainfo.Info{Name: ChainTomlFileName, PieceLength: 0})
+	require.NoError(t, err)
+	mi := metainfo.MetaInfo{InfoBytes: infoBytes}
+	existing, err := client.AddTorrent(&mi)
+	require.NoError(t, err)
+	require.True(t, existing.Complete().Bool())
+
+	_, err = DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), snapDir, tmpDir, nil)
+	require.EqualError(t, err, "invalid chain.toml torrent piece length: 0")
 }
 
 func TestParseChainToml(t *testing.T) {
