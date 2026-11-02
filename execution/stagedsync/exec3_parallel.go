@@ -272,7 +272,7 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
-// handled the receipt cache, so finalize only writes log indexes.
+// handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
