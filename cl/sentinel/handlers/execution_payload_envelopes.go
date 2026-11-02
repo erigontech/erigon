@@ -234,6 +234,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 
 	served := 0
+	rebuilt := false
 	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range responseCandidates {
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
@@ -248,9 +249,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			err = prepareErr
 			if err == nil && prepared != nil {
 				envelope, err = c.tryRebuildEnvelope(requestCtx, peerID, prepared)
+				rebuilt = rebuilt || err == nil
 			}
 		}
-		if errors.Is(err, errNoRebuildCredit) {
+		if rebuilt && errors.Is(err, errNoRebuildCredit) {
 			c.refundRateLimit(s, cost, served)
 		}
 		if err != nil || envelope == nil {
@@ -401,6 +403,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
+	rebuilt := false
 	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range rebuildCandidates {
 		if count >= int(maxPayloads) {
@@ -416,9 +419,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			continue
 		}
 		envelope, err := c.tryRebuildEnvelope(requestCtx, peerID, prepared)
-		if errors.Is(err, errNoRebuildCredit) {
+		if rebuilt && errors.Is(err, errNoRebuildCredit) {
 			c.refundRateLimit(s, cost, count)
 		}
+		rebuilt = rebuilt || err == nil
 		if err != nil {
 			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
 			break

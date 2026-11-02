@@ -233,6 +233,8 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 
 // refundRateLimit returns the tokens charged by consumeRateLimit for items a
 // response did not serve, keeping at least the admission token charged.
+// Handlers refund only after rebuilding an envelope, so a request refused at
+// its first rebuild still pays for the history it read.
 func (c *ConsensusHandlers) refundRateLimit(s network.Stream, cost, served int) {
 	c.rateLimiter.refundTokens(s.Conn().RemotePeer().String(), string(s.Protocol()), min(cost, cost+1-served))
 }

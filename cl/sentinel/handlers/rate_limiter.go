@@ -68,6 +68,10 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 func (tb *tokenBucket) refund(n int) {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
+	// A future lastRefill marks a punishment drain that may not be in the punished map yet.
+	if tb.lastRefill.After(time.Now()) {
+		return
+	}
 	tb.tokens = min(tb.tokens+float64(n), tb.maxTokens)
 }
 

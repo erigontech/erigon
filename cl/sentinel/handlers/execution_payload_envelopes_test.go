@@ -1515,6 +1515,57 @@ func TestExecutionPayloadEnvelopesByRangeRetryAfterRebuildLimit(t *testing.T) {
 }
 
 func TestExecutionPayloadEnvelopesByRootRetryAfterRebuildLimit(t *testing.T) {
+	c, cfg, roots, rebuilder := newRootHistoryHandler(t)
+	testRetryAfterRebuildLimit(t, c, cfg, rebuilder, communication.ExecutionPayloadEnvelopesByRootProtocolV1, func(skip, count int) []byte {
+		return runRootHistoryRequest(t, c, cfg, roots[skip:skip+count])
+	})
+}
+
+func TestExecutionPayloadEnvelopesByRangeRebuildRefusalKeepsCharge(t *testing.T) {
+	testRebuildRefusalKeepsCharge(t, func(t *testing.T) (*ConsensusHandlers, string, func()) {
+		c, _, _, _, _, stream := newRangeHistoryHandler(t, 129, 128)
+		return c, string(stream.protocol), func() { stream.run(t, c) }
+	})
+}
+
+func TestExecutionPayloadEnvelopesByRootRebuildRefusalKeepsCharge(t *testing.T) {
+	testRebuildRefusalKeepsCharge(t, func(t *testing.T) (*ConsensusHandlers, string, func()) {
+		c, cfg, roots, _ := newRootHistoryHandler(t)
+		return c, communication.ExecutionPayloadEnvelopesByRootProtocolV1, func() { runRootHistoryRequest(t, c, cfg, roots) }
+	})
+}
+
+// testRebuildRefusalKeepsCharge expects a full request whose first rebuild is
+// refused to keep its whole item charge, so the history scan is not free.
+func testRebuildRefusalKeepsCharge(t *testing.T, setup func(t *testing.T) (*ConsensusHandlers, string, func())) {
+	refusals := map[string]func(*tokenBucket){
+		"credit exhausted":    func(b *tokenBucket) { b.tokens = -1 },
+		"rebuild in progress": func(b *tokenBucket) { b.inUse = true },
+	}
+	for name, refuse := range refusals {
+		t.Run(name, func(t *testing.T) {
+			c, protocolName, run := setup(t)
+			now := time.Now()
+			c.rateLimiter.now = func() time.Time { return now }
+			peerID := peer.ID("history-peer").String()
+			refuse(c.rateLimiter.envelopeRebuildBucket(peerID))
+			require.True(t, c.rateLimiter.allowRequest(peerID, protocolName, 1))
+
+			run()
+
+			bucketI, ok := c.rateLimiter.buckets.Load(peerProtocolKey{peerID: peerID, protocol: protocolName})
+			require.True(t, ok)
+			bucket := bucketI.(*tokenBucket)
+			bucket.mu.Lock()
+			tokens := bucket.tokens
+			bucket.mu.Unlock()
+			require.Less(t, tokens, 1.0, "refused rebuild refunded the item charge")
+		})
+	}
+}
+
+func newRootHistoryHandler(t *testing.T) (*ConsensusHandlers, *clparams.BeaconChainConfig, []common.Hash, *testEnvelopeRebuilder) {
+	t.Helper()
 	ctx := t.Context()
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
@@ -1529,13 +1580,16 @@ func TestExecutionPayloadEnvelopesByRootRetryAfterRebuildLimit(t *testing.T) {
 	fc := mock_services.NewForkChoiceStorageMock(t)
 	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
 	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
-	testRetryAfterRebuildLimit(t, c, cfg, rebuilder, communication.ExecutionPayloadEnvelopesByRootProtocolV1, func(skip, count int) []byte {
-		requestRoots := solid.NewHashList(int(cfg.MaxRequestPayloads))
-		for _, root := range roots[skip : skip+count] {
-			requestRoots.Append(root)
-		}
-		return newRootHandlerTestStream(requestRoots, peer.ID("history-peer")).run(t, c)
-	})
+	return c, cfg, roots, rebuilder
+}
+
+func runRootHistoryRequest(t *testing.T, c *ConsensusHandlers, cfg *clparams.BeaconChainConfig, roots []common.Hash) []byte {
+	t.Helper()
+	requestRoots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+	for _, root := range roots {
+		requestRoots.Append(root)
+	}
+	return newRootHandlerTestStream(requestRoots, peer.ID("history-peer")).run(t, c)
 }
 
 // testRetryAfterRebuildLimit fills the item quota with one full request that
