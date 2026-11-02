@@ -17,12 +17,21 @@
 package receipts
 
 import (
+	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // DeriveFields must fill Bloom: finalize-produced and cache-read receipts
@@ -63,4 +72,51 @@ func TestDeriveFieldsPreservesExistingBloom(t *testing.T) {
 	DeriveFields(types.Receipts{withPresetBloom}, common.HexToHash("0xabc"))
 
 	assert.Equal(t, preset, withPresetBloom.Bloom)
+}
+
+type fundedReader struct {
+	*state.NoopReader
+	funded accounts.Address
+}
+
+func (r fundedReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr != r.funded {
+		return nil, nil
+	}
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
+	return &acc, nil
+}
+
+// A later tx must see the earlier ones on a versioned state, whether they produce receipts or
+// only warm the state up: the second transfer needs the first one's nonce.
+func TestDeriveForRangeVersionedMatchesMaterialized(t *testing.T) {
+	t.Parallel()
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+	cfg := chain.TestChainBerlinConfig
+	signer := types.LatestSignerForChainID(cfg.ChainID)
+	to := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	var txns types.Transactions
+	for nonce := range uint64(2) {
+		txn, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(7), 21_000, uint256.NewInt(1), nil), *signer, key)
+		require.NoError(t, err)
+		txns = append(txns, txn)
+	}
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 1_000_000}
+	derive := func(ibs *state.IntraBlockState, fromIdx int) types.Receipts {
+		defer ibs.Close()
+		gp := new(protocol.GasPool).AddGas(header.GasLimit)
+		receipts, err := DeriveForRange(context.Background(), cfg, ethash.NewFaker(), header, txns, fromIdx, len(txns), ibs, gp, nil)
+		require.NoError(t, err)
+		return receipts
+	}
+	reader := fundedReader{NoopReader: state.NewNoopReader(), funded: sender}
+	for _, fromIdx := range []int{0, 1} {
+		want := derive(state.New(reader), fromIdx)
+		got := derive(state.NewWithVersionMap(reader, state.NewVersionMap(nil)), fromIdx)
+		require.Len(t, got, len(txns)-fromIdx)
+		require.Equal(t, want, got, "fromIdx=%d", fromIdx)
+	}
 }
