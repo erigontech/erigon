@@ -254,12 +254,21 @@ func raiseGomaxprocsForIO(logger log.Logger) {
 		return
 	}
 	base := runtime.GOMAXPROCS(0)
-	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", (estimate.IOOverlapFactor-1)*base)
+	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", ioOverlapExtraPs(base, runtime.NumCPU()))
 	if extra <= 0 {
 		return
 	}
 	runtime.GOMAXPROCS(base + extra)
 	logger.Info("[gomaxprocs] raised for io overlap", "from", base, "to", base+extra)
+}
+
+// ioOverlapExtraPs is zero under a CPU quota: the runtime already caps GOMAXPROCS
+// below the CPU count there, and Ps above the quota only get throttled.
+func ioOverlapExtraPs(base, cpus int) int {
+	if base < cpus {
+		return 0
+	}
+	return (estimate.IOOverlapFactor - 1) * base
 }
 
 // SetupWithPrefix is Setup with an explicit log-file prefix, for binaries other than erigon.
