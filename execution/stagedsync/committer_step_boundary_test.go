@@ -583,13 +583,18 @@ func TestOwnsChangeset(t *testing.T) {
 // commitment calculator needs for its own read tx.
 func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
+	return setupStepTestWithStepSize(t, 16)
+}
+
+func setupStepTestWithStepSize(t *testing.T, stepSize uint64) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx)
+	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -977,13 +982,12 @@ func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
 	require.False(t, pending, "the rejected round's output must be released")
 }
 
-// A mid-block step checkpoint already folds the keys dirtied before the edge, so the
-// block-end compute must fold only the keys dirtied after it, and reach the same root
-// as a block that does not straddle an edge.
-func TestHandleMessage_BlockEndFoldsOnlyKeysDirtiedAfterStepCheckpoint(t *testing.T) {
-	run := func(block2Start uint64) (blockEndUpdates uint64, root []byte) {
+// A step checkpoint folds only the keys dirtied after the previous checkpoint, and the
+// block roots match a run whose blocks cross no step edge.
+func TestHandleMessage_StepCheckpointFoldsOnlyKeysSinceThePreviousOne(t *testing.T) {
+	run := func(stepSize uint64) (secondCheckpointUpdates uint64, roots [3][]byte) {
 		ctx := context.Background()
-		db, tx, doms := setupStepTest(t)
+		db, tx, doms := setupStepTestWithStepSize(t, stepSize)
 		doms.SavePastChangesetAccumulator(common.Hash{0x01}, 1, &changeset.StateChangeSet{})
 		doms.SavePastChangesetAccumulator(common.Hash{0x02}, 2, &changeset.StateChangeSet{})
 		in := make(chan applyResult, 64)
@@ -994,38 +998,38 @@ func TestHandleMessage_BlockEndFoldsOnlyKeysDirtiedAfterStepCheckpoint(t *testin
 		require.NoError(t, err)
 
 		rnd := rand.New(rand.NewSource(42))
-		write := func(i, txNum, blockNum uint64) {
+		write := func(txNum, blockNum uint64) {
 			addrBytes := make([]byte, length.Addr)
 			rnd.Read(addrBytes)
 			addr := accounts.InternAddress([20]byte(addrBytes))
-			bal := *uint256.NewInt(i * 1000)
-			acc := accounts.Account{Nonce: i, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
 			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
-			cc.handleMessage(ctx, &txResult{blockNum: blockNum, blockHash: common.Hash{byte(blockNum)}, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, i, bal)})
+			cc.handleMessage(ctx, &txResult{blockNum: blockNum, blockHash: common.Hash{byte(blockNum)}, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)})
+			if txNum == 31 {
+				secondCheckpointUpdates = cc.lastCommitProgress.UpdateCount
+			}
 		}
-		for i := uint64(1); i <= 10; i++ {
-			write(i, i, 1)
+		for txNum := uint64(1); txNum <= 10; txNum++ {
+			write(txNum, 1)
 		}
 		cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 10})
-		for i := uint64(0); i < 10; i++ {
-			write(11+i, block2Start+i, 2)
+		for txNum := uint64(11); txNum <= 40; txNum++ { // step edges at 15 and 31
+			write(txNum, 2)
 		}
-		cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: block2Start + 9})
-		blockEndUpdates = cc.lastCommitProgress.UpdateCount
+		cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: 40})
 		cc.Stop()
 		for len(out) > 0 {
 			r := <-out
 			require.ErrorIs(t, r.err, ErrWrongTrieRoot)
-			if r.blockNum == 2 {
-				root = r.rootHash
-			}
+			roots[r.blockNum] = r.rootHash
 		}
-		return blockEndUpdates, root
+		return secondCheckpointUpdates, roots
 	}
 
-	straddlingUpdates, straddlingRoot := run(11) // txNums 11..20 cross the step edge at 15
-	_, plainRoot := run(16)                      // txNums 16..25 stay inside step 1
-	require.NotEmpty(t, plainRoot)
-	require.Equal(t, plainRoot, straddlingRoot)
-	require.Equal(t, uint64(5), straddlingUpdates, "the block-end fold must skip the 5 keys the step checkpoint already folded")
+	updates, roots := run(16)
+	_, plainRoots := run(1 << 20)
+	require.NotEmpty(t, plainRoots[2])
+	require.Equal(t, plainRoots, roots)
+	require.Equal(t, uint64(16), updates, "the second checkpoint must fold only txNums 16..31")
 }

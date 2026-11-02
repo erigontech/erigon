@@ -79,6 +79,10 @@ type calcState struct {
 	// storageRoot) is not mistaken for touched-empty.
 	fieldMask map[accounts.Address]uint8
 
+	// setAside holds the block flags of keys a mid-block checkpoint already folded,
+	// so the block-end fold still covers the whole block.
+	setAside blockFlags
+
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
@@ -90,6 +94,13 @@ type calcState struct {
 	logPrefix string
 
 	prefetch func(plainKey []byte)
+}
+
+type blockFlags struct {
+	accounts     map[accounts.Address]struct{}
+	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
+	sdSubtree    map[accounts.Address]bool
+	fieldMask    map[accounts.Address]uint8
 }
 
 // LazyLoadErr returns the first lazy-load error, or nil. The calculator must
@@ -407,7 +418,76 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
 
 // ResetBlockFlags clears the per-block dirty flags while keeping the accumulated
 // state values, preparing for the next block.
+// SetAsideBlockFlags clears the flags after a mid-block flush, so the next
+// checkpoint folds only keys dirtied after it, and keeps them for RestoreBlockFlags.
+func (cs *calcState) SetAsideBlockFlags() {
+	sa := &cs.setAside
+	if sa.accounts == nil {
+		sa.accounts = make(map[accounts.Address]struct{}, len(cs.dirtyAccounts))
+		sa.storageDirty = make(map[accounts.Address]map[accounts.StorageKey]bool)
+		sa.sdSubtree = make(map[accounts.Address]bool)
+		sa.fieldMask = make(map[accounts.Address]uint8)
+	}
+	for _, addr := range cs.dirtyAccounts {
+		sa.accounts[addr] = struct{}{}
+	}
+	for addr, slots := range cs.storageDirty {
+		dst := sa.storageDirty[addr]
+		if dst == nil {
+			dst = make(map[accounts.StorageKey]bool, len(slots))
+			sa.storageDirty[addr] = dst
+		}
+		for key := range slots {
+			dst[key] = true
+		}
+	}
+	for addr, v := range cs.sdSubtree {
+		sa.sdSubtree[addr] = sa.sdSubtree[addr] || v
+	}
+	for addr, m := range cs.fieldMask {
+		sa.fieldMask[addr] |= m
+	}
+	cs.clearBlockFlags()
+}
+
+// RestoreBlockFlags merges the set-aside flags back, so the block-end fold sees
+// every key dirtied in the block.
+func (cs *calcState) RestoreBlockFlags() {
+	sa := &cs.setAside
+	if sa.accounts == nil {
+		return
+	}
+	for addr := range sa.accounts {
+		if acc := cs.accounts[addr]; !acc.dirty {
+			acc.dirty = true
+			cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+		}
+	}
+	for addr, slots := range sa.storageDirty {
+		dst := cs.storageDirty[addr]
+		if dst == nil {
+			dst = make(map[accounts.StorageKey]bool, len(slots))
+			cs.storageDirty[addr] = dst
+		}
+		for key := range slots {
+			dst[key] = true
+		}
+	}
+	for addr, v := range sa.sdSubtree {
+		cs.sdSubtree[addr] = cs.sdSubtree[addr] || v
+	}
+	for addr, m := range sa.fieldMask {
+		cs.fieldMask[addr] |= m
+	}
+	cs.setAside = blockFlags{}
+}
+
 func (cs *calcState) ResetBlockFlags() {
+	cs.setAside = blockFlags{}
+	cs.clearBlockFlags()
+}
+
+func (cs *calcState) clearBlockFlags() {
 	for _, addr := range cs.dirtyAccounts {
 		cs.accounts[addr].dirty = false
 	}
