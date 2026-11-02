@@ -892,3 +892,24 @@ func TestErigonGetLogsFromLatest(t *testing.T) {
 	require.Len(t, logs, 1)
 	require.Equal(t, hexutil.Uint64(2), logs[0].BlockNumber)
 }
+
+func TestGetReceiptDoesNotCacheReceiptReadFromAnotherFork(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	base, doms, _, _ := newPublishedOverlayTestBase(t, m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block, err := base.blockByNumberWithSenders(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum++
+	chainConfig, err := base.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteCanonicalHash(doms.BlockOverlay(), common.Hash{0xf0}, 1))
+
+	_, err = base.receiptsGenerator.GetReceipt(m.Ctx, chainConfig, tx, block.HeaderNoCopy(), block.Transactions()[0], 0, txNum, nil)
+	require.NoError(t, err)
+	_, cached := base.receiptsGenerator.TryGetCachedReceipt(block.Hash(), txNum, 0)
+	require.False(t, cached)
+}
