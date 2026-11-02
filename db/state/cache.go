@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -42,11 +43,35 @@ func newDomainVisible(name kv.Domain, compression seg.FileCompression, files vis
 		files: files,
 	}
 	if domainGetFromFileCacheSize > 0 && name != kv.CommitmentDomain && !compression.Has(seg.CompressVals) {
+		d.readOnce = &readOnceFilter{}
 		d.cache = cache.NewByteLRU(domainGetFromFileCacheSize, func(_ uint64, it domainGetFromFileCacheItem) int64 {
 			return cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(it))
 		})
 	}
 	return d
+}
+
+// readOnceFilter keeps a key out of the cache until its second read: an otter insert costs
+// far more than a lookup, and most keys are read once.
+type readOnceFilter struct {
+	bits    [1 << 14]atomic.Uint64
+	sampled atomic.Int64
+}
+
+func (f *readOnceFilter) readBefore(hi uint64) bool {
+	i := hi & (uint64(len(f.bits))*64 - 1)
+	bit := uint64(1) << (i % 64)
+	if f.bits[i/64].Or(bit)&bit != 0 {
+		return true
+	}
+	// Counts 1/64 of the new bits to keep the counter off the hot path; clears at half full.
+	if hi>>58 == 0 && f.sampled.Add(1) > int64(len(f.bits))/2 {
+		f.sampled.Store(0)
+		for j := range f.bits {
+			f.bits[j].Store(0)
+		}
+	}
+	return false
 }
 
 var (

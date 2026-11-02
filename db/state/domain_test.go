@@ -1124,6 +1124,8 @@ func TestDomain_LatestFromFilesCacheServesOtherTxs(t *testing.T) {
 	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 	first := d.beginFilesRo(dv, hv, iv)
+	_, _, _, _, err := first.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
 	got, found, _, _, err := first.getLatestFromFiles(key, nil, kv.NoStepBound)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -1146,6 +1148,24 @@ func TestDomain_LatestFromFilesCacheServesOtherTxs(t *testing.T) {
 	require.Equal(t, cached.v, got, "a lookup must be served from the cache")
 }
 
+func TestDomain_LatestFromFilesCacheAdmitsOnSecondRead(t *testing.T) {
+	t.Parallel()
+	d, key, _ := testDomainKeyInFiles(t)
+	dt := d.beginForTests()
+	defer dt.Close()
+	hi, _ := dt.ht.iit.hashKey(key)
+
+	_, _, _, _, err := dt.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	_, ok := dt.visible.cache.Get(hi)
+	require.False(t, ok, "a key read once must not be cached")
+
+	_, _, _, _, err = dt.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	_, ok = dt.visible.cache.Get(hi)
+	require.True(t, ok, "a key read twice must be cached")
+}
+
 func TestDomain_LatestFromFilesCacheKeepsMissesMissing(t *testing.T) {
 	t.Parallel()
 	d, _, _ := testDomainKeyInFiles(t)
@@ -1153,6 +1173,8 @@ func TestDomain_LatestFromFilesCacheKeepsMissesMissing(t *testing.T) {
 	absent := []byte("absent")
 
 	first := d.beginFilesRo(dv, hv, iv)
+	_, _, _, _, err := first.getLatestFromFiles(absent, nil, kv.NoStepBound)
+	require.NoError(t, err)
 	_, found, _, _, err := first.getLatestFromFiles(absent, nil, kv.NoStepBound)
 	require.NoError(t, err)
 	require.False(t, found)

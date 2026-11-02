@@ -109,9 +109,10 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files visibleFiles
-	name  kv.Domain
-	cache *cache.ByteLRU[domainGetFromFileCacheItem] // nil when disabled
+	files    visibleFiles
+	name     kv.Domain
+	cache    *cache.ByteLRU[domainGetFromFileCacheItem] // nil when disabled
+	readOnce *readOnceFilter
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -1708,7 +1709,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 		}
 
-		if useCache {
+		if useCache && dt.visible.readOnce.readBefore(hi) {
 			dt.visible.cache.Add(hi, domainGetFromFileCacheItem{found: true, lvl: uint8(i), lo: lo, v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
@@ -1717,7 +1718,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))
 	}
 
-	if useCache {
+	if useCache && dt.visible.readOnce.readBefore(hi) {
 		dt.visible.cache.Add(hi, domainGetFromFileCacheItem{lo: lo})
 	}
 	return nil, false, 0, 0, nil
