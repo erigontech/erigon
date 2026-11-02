@@ -561,3 +561,40 @@ func TestApplySubFieldWrites_BlockBeginCodeHashKeepsOwnIndex(t *testing.T) {
 	// cell — the wipe is resolved by the lifecycle, not by field synthesis.
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "a destroyed account has an empty code hash")
 }
+
+// A wiped read after a destruct and a revival records the SelfDestruct memo it
+// reads through, so HasSelfdestructed in the same tx must see the revival.
+func TestWipedReadAfterRevivalKeepsSelfDestructFalse(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(120)
+	staleKey := accounts.InternKey(common.Hash{31: 1})
+	freshKey := accounts.InternKey(common.Hash{31: 2})
+	for _, tc := range []struct {
+		name string
+		read func(ibs *IntraBlockState) error
+	}{
+		{"stale storage cell", func(ibs *IntraBlockState) error { _, err := ibs.GetState(addr, staleKey); return err }},
+		{"storage with no cell", func(ibs *IntraBlockState) error { _, err := ibs.GetState(addr, freshKey); return err }},
+		{"code", func(ibs *IntraBlockState) error { _, err := ibs.GetCode(addr); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(nil)
+			writeFor(vm, addr, StoragePath, staleKey, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+			writeFor(vm, addr, CodePath, accounts.NilKey, Version{TxIndex: 0}, accounts.NewCode([]byte{0x60, 0x00}), true)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+			fresh := accounts.NewAccount()
+			fresh.Balance = *uint256.NewInt(1)
+			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+			writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 2}, &fresh, true)
+
+			ibs := NewWithVersionMap(newAccountStateReader(addr), vm)
+			ibs.SetTxContext(1, 3)
+			ibs.SetVersion(0)
+			require.NoError(t, tc.read(ibs))
+			destructed, err := ibs.HasSelfdestructed(addr)
+			require.NoError(t, err)
+			require.False(t, destructed, "the account was revived by tx 2, so it is not self-destructed")
+		})
+	}
+}

@@ -640,6 +640,11 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 	}
 
 	for _, writes := range blockWrites {
+		// Balance and nonce writes only name the account: range the keys, not the resolved values.
+		keys := writes
+		if v, ok := writes.(*versionMapWriteView); ok {
+			keys = v.keys
+		}
 		for addr, write := range writes.Codes() {
 			acc, err := account(addr)
 			if err != nil {
@@ -656,14 +661,14 @@ func (rs *StateV3) NotifyAccumulator(accumulator *shards.Accumulator, roTx kv.Te
 				accumulator.ChangeStorage(addr.Value(), acc.Incarnation, key.Value(), write.Val.Bytes())
 			}
 		}
-		for addr := range writes.Balances() {
+		for addr := range keys.Balances() {
 			acc, err := account(addr)
 			if err != nil {
 				return err
 			}
 			accumulator.ChangeAccount(addr.Value(), acc.Incarnation, accounts.SerialiseV3(&acc))
 		}
-		for addr := range writes.Nonces() {
+		for addr := range keys.Nonces() {
 			acc, err := account(addr)
 			if err != nil {
 				return err

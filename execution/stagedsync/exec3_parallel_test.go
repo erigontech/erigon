@@ -1886,7 +1886,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		pe.blockExecMetrics = newBlockExecMetrics()
 		pe.workersCtx = t.Context()
 		header := &types.Header{Number: *uint256.NewInt(1)}
-		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, nil))
 		be := pe.blockExecutors[1]
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
@@ -1914,7 +1914,7 @@ func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
 	be := pe.blockExecutors[1]
 	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
@@ -1939,6 +1939,6 @@ func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
 	pe.workersCtx = t.Context()
 	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}})
+	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
 	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
 }
