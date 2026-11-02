@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -532,6 +533,8 @@ func (s *simulator) sanitizeCall(
 type diffTrackingWriter struct {
 	delegate    *state.Writer
 	touchedKeys keysByAccount
+	txNum       uint64
+	base        *simulationIntraBlockStateReader // nil when the simulation runs on the latest state
 }
 
 type (
@@ -545,6 +548,7 @@ func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64, touchedKeys keysB
 	return &diffTrackingWriter{
 		delegate:    state.NewWriter(tx, nil, txNum),
 		touchedKeys: touchedKeys,
+		txNum:       txNum,
 	}
 }
 
@@ -574,6 +578,11 @@ func (w diffTrackingWriter) DeleteAccount(address accounts.Address, original *ac
 	err := w.delegate.DeleteAccount(address, original)
 	if err != nil {
 		return err
+	}
+	if w.base != nil {
+		if err := w.base.deleteBaseLeftovers(address, w.txNum); err != nil {
+			return err
+		}
 	}
 	if _, ok := w.touchedKeys[address]; !ok {
 		w.touchedKeys[address] = storageKeys{}
@@ -747,6 +756,9 @@ func (s *simulator) simulateBlock(
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
 	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum, s.touchedKeys)
+	if !latest {
+		stateWriter.base = newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum)
+	}
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
 
 	// Override the state before block execution.
@@ -1296,6 +1308,44 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 		firstMinTxNum: firstMinTxNum,
 		composite:     make([]byte, 20+32),
 	}
+}
+
+// deleteBaseLeftovers tombstones what a deleted account still shows from the base block.
+// SharedDomains takes the previous value of a delete from the head state, so a key the
+// canonical chain removed after the base gets no tombstone and reads back from the base.
+func (r *simulationIntraBlockStateReader) deleteBaseLeftovers(address accounts.Address, txNum uint64) error {
+	addressValue := address.Value()
+	enc, err := r.getEncoded(kv.AccountsDomain, addressValue[:])
+	if err != nil {
+		return err
+	}
+	if len(enc) > 0 {
+		if err := r.sd.DomainDel(kv.AccountsDomain, r.roTx, addressValue[:], txNum, enc); err != nil {
+			return err
+		}
+	}
+	to, _ := kv.NextSubtree(addressValue[:])
+	it, err := r.roTx.RangeAsOf(kv.StorageDomain, addressValue[:], to, r.firstMinTxNum, order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return err
+		}
+		enc, err := r.getEncoded(kv.StorageDomain, k)
+		if err != nil {
+			return err
+		}
+		if len(enc) > 0 {
+			if err := r.sd.DomainDel(kv.StorageDomain, r.roTx, k, txNum, enc); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // getEncoded returns the encoded value for a domain key: checks mem batch first, then falls back to GetAsOf.
