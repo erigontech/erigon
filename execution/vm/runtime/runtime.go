@@ -138,7 +138,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.NewWithVersionMap(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewVersionMap(nil))
+		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	}
 	var (
 		address = contractAsAddress
@@ -200,7 +200,7 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.NewWithVersionMap(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewVersionMap(nil))
+		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	}
 	var (
 		vmenv  = NewEnv(cfg)
