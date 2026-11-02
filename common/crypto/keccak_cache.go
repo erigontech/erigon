@@ -59,6 +59,8 @@ func prefault(buckets *[1 << 17]keccakBucket) {
 	for i := 0; i < len(buckets); i += perPage {
 		buckets[i].seq.CompareAndSwap(0, 0)
 	}
+	last := &buckets[len(buckets)-1]
+	last.in[len(last.in)-1].CompareAndSwap(0, 0) // the trailing page when the array is not page-aligned
 }
 
 // tailWord returns the last, partial 8 bytes of an input, zero-padded.
