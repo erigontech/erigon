@@ -76,6 +76,7 @@ func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
 	reader := &countingAccountReader{}
 
 	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	require.Zero(t, reader.reads)
 }
@@ -319,22 +320,4 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	acc, ok = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
-}
-
-// TestSeedEmptyRemovals_SkipsBaseReadWhenCellsDecide pins that an account whose BAL cells
-// already show it non-empty is not read from the base: the seed runs serially at block start.
-func TestSeedEmptyRemovals_SkipsBaseReadWhenCellsDecide(t *testing.T) {
-	t.Parallel()
-
-	funded := accounts.InternAddress(common.HexToAddress("0xd7a5"))
-	bumped := accounts.InternAddress(common.HexToAddress("0xd7a6"))
-	bal := types.BlockAccessList{
-		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(3)}}},
-		{Address: bumped.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}},
-	}
-	reader := &countingAccountReader{}
-	vm := NewVersionMap(bal)
-	vm.SeedAddresses()
-	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
-	require.Zero(t, reader.reads)
 }

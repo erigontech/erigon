@@ -1787,3 +1787,80 @@ func TestCalcFees_RevivedCoinbaseShadowsStaleNonce(t *testing.T) {
 	require.True(t, ok, "the revival shadows the stale nonce")
 	require.Equal(t, uint64(0), nonce.Val)
 }
+
+// destroyedOut is a worker write-set that removed addr and stamped a non-empty code hash.
+func destroyedOut(addr accounts.Address, version state.Version, codeHash accounts.CodeHash) *state.WriteSet {
+	out := &state.WriteSet{}
+	out.SetEmptyRemoval(addr, version)
+	out.SetCodeHash(addr, &state.VersionedWrite[accounts.CodeHash]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeHashPath, Version: version},
+		Val:         codeHash,
+	})
+	return out
+}
+
+func requireContractRemoval(t *testing.T, writes *state.WriteSet, addr accounts.Address) {
+	t.Helper()
+	sd, ok := writes.GetSelfDestruct(addr)
+	require.True(t, ok, "removal carries a selfdestruct marker")
+	require.True(t, sd.Val)
+	ch, ok := writes.GetCodeHash(addr)
+	require.True(t, ok, "a contract removal stamps the code hash")
+	require.True(t, ch.Deletes(), "the stamped code hash is ValueDeleted")
+}
+
+// A worker code-hash write marks a codeless-in-state coinbase as a contract, so its removal is a contract removal.
+func TestCalcFees_CoinbaseCodeHashWriteMakesContractRemoval(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+	result, task := coinbaseTipResult(coinbase, 1_000)
+	result.TxOut = destroyedOut(coinbase, task.Version(), accounts.InternCodeHash(common.Hash{1}))
+
+	writes, err := result.calcFees(task, state.NewVersionMap(nil), newMapStateReader(), &chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	requireContractRemoval(t, writes, coinbase)
+}
+
+// A worker code-hash write marks a codeless-in-state burnt recipient as a contract, so its removal is a contract removal.
+func TestCalcFees_BurntCodeHashWriteMakesContractRemoval(t *testing.T) {
+	t.Parallel()
+	coinbase, burnt := fAddr("coinbase"), fAddr("burnt")
+	result, task := coinbaseTipResult(coinbase, 0)
+	result.ExecutionResult.BurntContractAddress = burnt
+	result.TxOut = destroyedOut(burnt, task.Version(), accounts.InternCodeHash(common.Hash{1}))
+
+	writes, err := result.calcFees(task, state.NewVersionMap(nil), newMapStateReader(), &chain.Rules{IsSpuriousDragon: true, IsLondon: true})
+	require.NoError(t, err)
+	requireContractRemoval(t, writes, burnt)
+}
+
+// A removed coinbase that held code in state is removed as a contract.
+func TestCalcFees_RemovedContractCoinbaseIsContractRemoval(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+	result, task := coinbaseTipResult(coinbase, 1_000)
+	result.TxOut = &state.WriteSet{}
+	result.TxOut.SetEmptyRemoval(coinbase, task.Version())
+	sr := newMapStateReader()
+	sr.accounts[coinbase] = &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(common.Hash{1})}
+
+	writes, err := result.calcFees(task, state.NewVersionMap(nil), sr, &chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	requireContractRemoval(t, writes, coinbase)
+}
+
+// A removed burnt recipient that held code in state is removed as a contract.
+func TestCalcFees_RemovedContractBurntIsContractRemoval(t *testing.T) {
+	t.Parallel()
+	coinbase, burnt := fAddr("coinbase"), fAddr("burnt")
+	result, task := coinbaseTipResult(coinbase, 0)
+	result.ExecutionResult.BurntContractAddress = burnt
+	result.TxOut = &state.WriteSet{}
+	result.TxOut.SetEmptyRemoval(burnt, task.Version())
+	sr := newMapStateReader()
+	sr.accounts[burnt] = &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(common.Hash{1})}
+
+	writes, err := result.calcFees(task, state.NewVersionMap(nil), sr, &chain.Rules{IsSpuriousDragon: true, IsLondon: true})
+	require.NoError(t, err)
+	requireContractRemoval(t, writes, burnt)
+}
