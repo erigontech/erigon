@@ -976,3 +976,56 @@ func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
 	require.Zero(t, rejected, "a rejected root must leave no branch record in the commitment domain")
 	require.False(t, pending, "the rejected round's output must be released")
 }
+
+// A mid-block step checkpoint already folds the keys dirtied before the edge, so the
+// block-end compute must fold only the keys dirtied after it, and reach the same root
+// as a block that does not straddle an edge.
+func TestHandleMessage_BlockEndFoldsOnlyKeysDirtiedAfterStepCheckpoint(t *testing.T) {
+	run := func(block2Start uint64) (blockEndUpdates uint64, root []byte) {
+		ctx := context.Background()
+		db, tx, doms := setupStepTest(t)
+		doms.SavePastChangesetAccumulator(common.Hash{0x01}, 1, &changeset.StateChangeSet{})
+		doms.SavePastChangesetAccumulator(common.Hash{0x02}, 2, &changeset.StateChangeSet{})
+		in := make(chan applyResult, 64)
+		out := make(chan commitmentResult, 64)
+		// In-window blocks, as at the chain tip; the zero header roots make every
+		// block-end compute publish its root as a mismatch.
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+
+		rnd := rand.New(rand.NewSource(42))
+		write := func(i, txNum, blockNum uint64) {
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(i * 1000)
+			acc := accounts.Account{Nonce: i, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+			cc.handleMessage(ctx, &txResult{blockNum: blockNum, blockHash: common.Hash{byte(blockNum)}, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, i, bal)})
+		}
+		for i := uint64(1); i <= 10; i++ {
+			write(i, i, 1)
+		}
+		cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 10})
+		for i := uint64(0); i < 10; i++ {
+			write(11+i, block2Start+i, 2)
+		}
+		cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: block2Start + 9})
+		blockEndUpdates = cc.lastCommitProgress.UpdateCount
+		cc.Stop()
+		for len(out) > 0 {
+			r := <-out
+			require.ErrorIs(t, r.err, ErrWrongTrieRoot)
+			if r.blockNum == 2 {
+				root = r.rootHash
+			}
+		}
+		return blockEndUpdates, root
+	}
+
+	straddlingUpdates, straddlingRoot := run(11) // txNums 11..20 cross the step edge at 15
+	_, plainRoot := run(16)                      // txNums 16..25 stay inside step 1
+	require.NotEmpty(t, plainRoot)
+	require.Equal(t, plainRoot, straddlingRoot)
+	require.Equal(t, uint64(5), straddlingUpdates, "the block-end fold must skip the 5 keys the step checkpoint already folded")
+}

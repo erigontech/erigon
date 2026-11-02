@@ -381,8 +381,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// benign — both emit identical values at the same txNum.
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			// Checkpoint commitment at a mid-block step edge without advancing
-			// lastComputedBlock or resetting block flags — the block-end fold still
-			// needs the pre-edge dirty keys.
+			// lastComputedBlock; the block-end fold then covers only keys dirtied after it.
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 		}
 
@@ -737,7 +736,7 @@ func targetOf(br *blockResult) commitTarget {
 // decided by ownsChangeset.
 type computeMode struct {
 	label       string // error-message context, e.g. "step-boundary "
-	midBlock    bool   // mid-block checkpoint: keep block flags dirty and don't advance lastComputedBlock (block-end otherwise)
+	midBlock    bool   // mid-block checkpoint: don't advance lastComputedBlock (block-end otherwise)
 	checkRoot   bool   // compare the computed root against target.stateRoot
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
@@ -785,9 +784,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.finishPrefetch()
 	cc.state.flushToUpdates(cc.updates)
-	if !m.midBlock {
-		cc.state.ResetBlockFlags()
-	}
+	cc.state.ResetBlockFlags()
 
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.handOffUpdates())
