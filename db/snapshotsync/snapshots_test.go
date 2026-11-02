@@ -309,6 +309,28 @@ func TestMergeKeepsFinishedRangesOnLaterFailure(t *testing.T) {
 	}
 }
 
+func TestMergeSubSegmentClosesOutputOnIndexFailure(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	for i := range uint64(2) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	var toMerge []*DirtySegment
+	s.dirty[snaptype2.Enums.Headers].Scan(func(seg *DirtySegment) bool {
+		toMerge = append(toMerge, seg)
+		return true
+	})
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	seg, err := merger.mergeSubSegment(t.Context(), snaptype2.Headers.FileInfo(dir, 0, 20_000), toMerge, dir, true, nil)
+	require.ErrorContains(t, err, "salt not found") // the index build fails without salt-blocks.txt
+	require.True(t, seg == nil || seg.Decompressor == nil, "a failed merge output must be closed")
+}
+
 // A frozen merge output retires only the non-frozen segments it covers, not ones below its range.
 func TestIntegrateFrozenMergeKeepsSegmentsBelowItsRange(t *testing.T) {
 	logger := log.New()
