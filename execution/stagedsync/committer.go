@@ -67,6 +67,8 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 type commitmentCalculator struct {
 	applyWritesDur time.Duration
 	applyWritesN   int
+	firstTxAt      time.Time
+	lastTxAt       time.Time
 	doms           *execctx.SharedDomains
 	db             kv.TemporalRoDB
 	chainConfig    *chain.Config
@@ -371,6 +373,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// it only affects the lazy-load path, never the trie fold.
 		if r.writes != nil && !r.writes.IsEmpty() {
 			t0 := time.Now()
+			if cc.applyWritesN == 0 {
+				cc.firstTxAt = t0
+			}
+			cc.lastTxAt = t0
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.state.ApplyWrites(r.writes)
@@ -453,7 +459,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				gap = -d
 			}
 			residual := stageWall - execActive - commitActive + overlap - gap
-			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum])
+			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum], "firstTxAfterExecStart", cc.firstTxAt.Sub(r.execStartedAt), "lastTxAfterExecEnd", cc.lastTxAt.Sub(r.execEndedAt))
 			cc.applyWritesDur, cc.applyWritesN = 0, 0
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
