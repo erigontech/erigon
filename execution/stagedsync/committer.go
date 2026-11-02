@@ -67,6 +67,7 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 type commitmentCalculator struct {
 	probeApply time.Duration
 	probeCkpt  time.Duration
+	probePref  time.Duration
 	probeCkptN int
 	probeArr   []time.Time
 	probeDone  []time.Time
@@ -468,9 +469,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
-				"ckpt", cc.probeCkpt, "ckptN", cc.probeCkptN, "arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
+				"ckpt", cc.probeCkpt, "ckptPrefetchWait", cc.probePref, "ckptN", cc.probeCkptN, "arr", probeHist(cc.probeArr, r.execStartedAt), "done", probeHist(cc.probeDone, r.execStartedAt))
 			cc.probeArr, cc.probeDone = cc.probeArr[:0], cc.probeDone[:0]
-			cc.probeCkpt, cc.probeCkptN = 0, 0
+			cc.probeCkpt, cc.probeCkptN, cc.probePref = 0, 0, 0
 			cc.probeApply, cc.probeTxs = 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
@@ -804,7 +805,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// empty→removal here.
 	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
 	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
+	tp := time.Now()
 	cc.finishPrefetch()
+	if m.midBlock {
+		cc.probePref += time.Since(tp)
+	}
 	cc.state.flushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
