@@ -44,6 +44,7 @@ type BlockReadAheader struct {
 	warmupGate   *semaphore.Weighted
 	warmupMu     sync.Mutex
 	cancelWarmup context.CancelFunc
+	warmupDone   chan struct{} // closed when the running warmup ends
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -104,6 +105,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view     cache.ReadView
+	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
@@ -117,13 +119,17 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	if !kv.UnderlyingTxIsWritable(ttx) {
+		getter.snapshot = frontier
+	}
+	return getter
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
-		readTxNum := step.LastTxNum(cpg.stepSize)
+		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
 			var codeHash common.Hash
@@ -167,6 +173,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	bra.warmupMu.Lock()
 	bra.cancelWarmup = cancel
 	bra.warmupMu.Unlock()
+	done := bra.markWarmupRunning()
 	var bal types.BlockAccessList
 	if header.HasNonEmptyBAL() {
 		balSidecar, ok := bra.bals.Get(blockHash)
@@ -187,6 +194,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	}
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer close(done)
 		defer cancel()
 		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
@@ -206,8 +214,10 @@ func (bra *BlockReadAheader) startWarmup(warm func()) bool {
 	if !bra.warmupGate.TryAcquire(1) {
 		return false
 	}
+	done := bra.markWarmupRunning()
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer close(done)
 		warm()
 	}()
 	return true
@@ -223,6 +233,28 @@ func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) 
 		return nil, err
 	}
 	return sync.OnceFunc(func() { bra.warmupGate.Release(1) }), nil
+}
+
+// WaitForRunningWarmup waits until no warmup is running, or until the context is cancelled.
+func (bra *BlockReadAheader) WaitForRunningWarmup(ctx context.Context) {
+	bra.warmupMu.Lock()
+	done := bra.warmupDone
+	bra.warmupMu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (bra *BlockReadAheader) markWarmupRunning() chan struct{} {
+	done := make(chan struct{})
+	bra.warmupMu.Lock()
+	bra.warmupDone = done
+	bra.warmupMu.Unlock()
+	return done
 }
 
 // WaitForWarmup waits until neither a warmup nor a suspension owns the permit,

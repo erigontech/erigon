@@ -53,6 +53,10 @@ func (s *SentinelClientDirect) BanPeer(ctx context.Context, p *sentinelproto.Pee
 	return s.server.BanPeer(ctx, p)
 }
 
+func (s *SentinelClientDirect) BanPeerForInvalidData(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	return s.server.BanPeerForInvalidData(ctx, p)
+}
+
 func (s *SentinelClientDirect) UnbanPeer(ctx context.Context, p *sentinelproto.Peer, opts ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	return s.server.UnbanPeer(ctx, p)
 }
