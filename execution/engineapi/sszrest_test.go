@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"testing/iotest"
 
@@ -51,17 +52,19 @@ func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
 
 type bodiesExecutionModule struct {
 	execmodule.ExecutionModule
-	bodies        []*execmodule.PayloadBody
+	bodies        map[common.Hash]*execmodule.PayloadBody
 	headers       map[uint64]*types.Header
 	headersByHash map[common.Hash]*types.Header
+	bodyRequests  [][]common.Hash
 }
 
-func (m *bodiesExecutionModule) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*execmodule.PayloadBody, error) {
-	return m.bodies, nil
-}
-
-func (m *bodiesExecutionModule) GetPayloadBodiesByRange(context.Context, uint64, uint64) ([]*execmodule.PayloadBody, error) {
-	return m.bodies, nil
+func (m *bodiesExecutionModule) GetPayloadBodiesByHash(_ context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
+	m.bodyRequests = append(m.bodyRequests, slices.Clone(hashes))
+	bodies := make([]*execmodule.PayloadBody, len(hashes))
+	for i, hash := range hashes {
+		bodies[i] = m.bodies[hash]
+	}
+	return bodies, nil
 }
 
 func (m *bodiesExecutionModule) GetHeader(_ context.Context, hash *common.Hash, blockNumber *uint64) (*types.Header, error) {
@@ -529,11 +532,10 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 	cancun := &types.Header{Time: 200}
 	prague := &types.Header{Time: 300}
 	module := &bodiesExecutionModule{
-		bodies: []*execmodule.PayloadBody{
-			{Transactions: [][]byte{{0x03}}},
-			{Transactions: [][]byte{{0x02}}},
-			{Transactions: [][]byte{{0x01}}},
-			nil,
+		bodies: map[common.Hash]*execmodule.PayloadBody{
+			prague.Hash():   {Transactions: [][]byte{{0x03}}},
+			cancun.Hash():   {Transactions: [][]byte{{0x02}}},
+			shanghai.Hash(): {Transactions: [][]byte{{0x01}}},
 		},
 		headersByHash: map[common.Hash]*types.Header{
 			shanghai.Hash(): shanghai,
@@ -550,6 +552,7 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/bodies/hash", "cancun", body))
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, [][]common.Hash{{cancun.Hash()}}, module.bodyRequests)
 	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
 	require.NoError(t, err)
 	require.Len(t, entries, len(hashes))
@@ -566,19 +569,20 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 }
 
 func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
+	headers := map[uint64]*types.Header{
+		10: {Number: *uint256.NewInt(10), Time: 199},
+		11: {Number: *uint256.NewInt(11), Time: 200},
+		12: {Number: *uint256.NewInt(12), Time: 299},
+		13: {Number: *uint256.NewInt(13), Time: 300},
+	}
 	module := &bodiesExecutionModule{
-		bodies: []*execmodule.PayloadBody{
-			{Transactions: [][]byte{{0x01}}},
-			{Transactions: [][]byte{{0x02}}},
-			{Transactions: [][]byte{{0x03}}},
-			{Transactions: [][]byte{{0x04}}},
+		bodies: map[common.Hash]*execmodule.PayloadBody{
+			headers[10].Hash(): {Transactions: [][]byte{{0x01}}},
+			headers[11].Hash(): {Transactions: [][]byte{{0x02}}},
+			headers[12].Hash(): {Transactions: [][]byte{{0x03}}},
+			headers[13].Hash(): {Transactions: [][]byte{{0x04}}},
 		},
-		headers: map[uint64]*types.Header{
-			10: {Number: *uint256.NewInt(10), Time: 199},
-			11: {Number: *uint256.NewInt(11), Time: 200},
-			12: {Number: *uint256.NewInt(12), Time: 299},
-			13: {Number: *uint256.NewInt(13), Time: 300},
-		},
+		headers: headers,
 	}
 	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
 	rec := httptest.NewRecorder()
@@ -586,6 +590,7 @@ func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
 		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=5", "cancun", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, [][]common.Hash{{headers[11].Hash(), headers[12].Hash()}}, module.bodyRequests)
 	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
 	require.NoError(t, err)
 	require.Len(t, entries, 4)
@@ -598,6 +603,55 @@ func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
 			require.Empty(t, entries[i].Withdrawals)
 			require.Empty(t, entries[i].BlockAccessList)
 		}
+	}
+}
+
+func TestSSZRESTBodiesSkipRetrievalOutsideForkEra(t *testing.T) {
+	headers := map[uint64]*types.Header{
+		10: {Number: *uint256.NewInt(10), Time: 500},
+		11: {Number: *uint256.NewInt(11), Time: 501},
+	}
+	body, err := encodeHashListRequest([]common.Hash{headers[10].Hash(), headers[11].Hash(), {0xff}}, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name        string
+		method      string
+		path        string
+		body        []byte
+		wantEntries int
+	}{
+		{"hash", http.MethodPost, "/engine/v1/bodies/hash", body, 3},
+		{"range", http.MethodGet, "/engine/v1/bodies?from=10&count=3", nil, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &bodiesExecutionModule{
+				bodies: map[common.Hash]*execmodule.PayloadBody{
+					headers[10].Hash(): {Transactions: [][]byte{{0x01}}},
+					headers[11].Hash(): {Transactions: [][]byte{{0x02}}},
+				},
+				headers: headers,
+				headersByHash: map[common.Hash]*types.Header{
+					headers[10].Hash(): headers[10],
+					headers[11].Hash(): headers[11],
+				},
+			}
+			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec,
+				newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Empty(t, module.bodyRequests)
+			entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+			require.NoError(t, err)
+			require.Len(t, entries, tc.wantEntries)
+			for _, entry := range entries {
+				require.False(t, entry.Available)
+				require.Empty(t, entry.Transactions)
+				require.Empty(t, entry.Withdrawals)
+				require.Empty(t, entry.BlockAccessList)
+			}
+		})
 	}
 }
 
@@ -661,10 +715,11 @@ func TestSSZRESTBodiesByRangePreservesTrailingUnavailableBody(t *testing.T) {
 		from      = uint64(10)
 		blockTime = uint64(250)
 	)
+	header := &types.Header{Number: *uint256.NewInt(from), Time: blockTime}
 	module := &bodiesExecutionModule{
-		bodies: []*execmodule.PayloadBody{{Transactions: [][]byte{{0x01}}}},
+		bodies: map[common.Hash]*execmodule.PayloadBody{header.Hash(): {Transactions: [][]byte{{0x01}}}},
 		headers: map[uint64]*types.Header{
-			from:     {Number: *uint256.NewInt(from), Time: blockTime},
+			from:     header,
 			from + 1: {Number: *uint256.NewInt(from + 1), Time: blockTime},
 		},
 	}

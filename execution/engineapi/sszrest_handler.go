@@ -365,22 +365,29 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 		writeProblem(w, http.StatusBadRequest, problemSSZDecodeError, "")
 		return
 	}
-	bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), blockHashes)
-	if err != nil {
-		writeEngineProblem(w, err)
-		return
-	}
-	// blocks outside the header fork's time range come back as available=false
+	// Body retrieval can re-execute blocks to recover missing access lists.
 	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(blockHashes))
-	for i := range blockHashes {
-		if i >= len(bodies) || bodies[i] == nil {
-			continue
-		}
-		header := e.chainRW.GetHeaderByHash(r.Context(), blockHashes[i])
+	hashes := make([]common.Hash, 0, len(blockHashes))
+	positions := make([]int, 0, len(blockHashes))
+	for i, hash := range blockHashes {
+		header := e.chainRW.GetHeaderByHash(r.Context(), hash)
 		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
 			continue
 		}
-		entries[i] = bodies[i]
+		hashes = append(hashes, hash)
+		positions = append(positions, i)
+	}
+	if len(hashes) > 0 {
+		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), hashes)
+		if err != nil {
+			writeEngineProblem(w, err)
+			return
+		}
+		for i, position := range positions {
+			if i < len(bodies) {
+				entries[position] = bodies[i]
+			}
+		}
 	}
 	out, err := encodeBodiesResponse(entries, version)
 	if err != nil {
@@ -411,25 +418,31 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 	}
 	// Pin each body to the header used for fork filtering, even if the canonical
 	// chain changes between reads.
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, 0, count)
 	hashes := make([]common.Hash, 0, count)
-	timestamps := make([]uint64, 0, count)
+	positions := make([]int, 0, count)
 	for i := range count {
 		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
 		if header == nil {
 			break
 		}
+		entries = append(entries, nil)
+		if forkNameAtTime(e.config, header.Time) != forkName {
+			continue
+		}
 		hashes = append(hashes, header.Hash())
-		timestamps = append(timestamps, header.Time)
+		positions = append(positions, len(entries)-1)
 	}
-	bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), hashes)
-	if err != nil {
-		writeEngineProblem(w, err)
-		return
-	}
-	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(hashes))
-	for i, timestamp := range timestamps {
-		if i < len(bodies) && forkNameAtTime(e.config, timestamp) == forkName {
-			entries[i] = bodies[i]
+	if len(hashes) > 0 {
+		bodies, err := e.chainRW.GetPayloadBodiesByHash(r.Context(), hashes)
+		if err != nil {
+			writeEngineProblem(w, err)
+			return
+		}
+		for i, position := range positions {
+			if i < len(bodies) {
+				entries[position] = bodies[i]
+			}
 		}
 	}
 	out, err := encodeBodiesResponse(entries, version)
