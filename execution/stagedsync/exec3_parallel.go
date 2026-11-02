@@ -1695,6 +1695,7 @@ type txResult struct {
 	// so its indexing skips the receipt cache; its logs are the block-end syscall
 	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
 	isFinalize bool
+	origins    *state.VersionMap
 }
 
 type balTx struct {
@@ -3301,6 +3302,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			result := be.finalizedResults[tx]
 
 			applyResult := txResult{
+				origins:               be.versionMap,
 				blockNum:              be.blockNum,
 				blockHash:             be.blockHash,
 				traceFroms:            map[accounts.Address]struct{}{},

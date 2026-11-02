@@ -372,6 +372,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
+			cc.state.origins = r.origins
 			t0 := time.Now()
 			cc.state.ApplyWrites(r.writes)
 			cc.probeApply += time.Since(t0)
