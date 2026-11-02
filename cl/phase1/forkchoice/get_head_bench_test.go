@@ -99,6 +99,7 @@ func BenchmarkGetHeadPreGloas(b *testing.B) {
 	justified.Epoch = 10
 	graph.headers[justified.Root].Slot = 320
 	f.justifiedCheckpoint.Store(justified)
+	graph.currentJustified = justified
 	f.unrealizedJustifications.Store(justified.Root, justified)
 	parent := justified.Root
 	var roots []common.Hash
@@ -132,6 +133,7 @@ func BenchmarkGetHeadPreGloas(b *testing.B) {
 func BenchmarkGetHeadGloas(b *testing.B) {
 	v := newViabilityTree(b)
 	f := v.store
+	v.graph.currentJustified = v.justified
 	parent := v.justified.Root
 	var roots []common.Hash
 	for i := range 96 {
@@ -143,7 +145,9 @@ func BenchmarkGetHeadGloas(b *testing.B) {
 	slot := uint64(33 + 95)
 	f.timeMs.Store((slot + 1) * f.beaconCfg.SecondsPerSlot * 1000)
 
-	message := func(root common.Hash) LatestMessage { return LatestMessage{Slot: slot, Root: root} }
+	message := func(root common.Hash) LatestMessage {
+		return LatestMessage{Slot: slot, Root: root, PayloadPresent: true}
+	}
 	votes := newHeadBenchVotes(f, roots[len(roots)-32:], message)
 	f.checkpointStates.Store(v.justified, votes.cs)
 	runHeadBench(b, func(b *testing.B) {

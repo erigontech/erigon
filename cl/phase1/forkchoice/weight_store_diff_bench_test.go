@@ -67,15 +67,15 @@ func BenchmarkGloasWeightTreePrepare(b *testing.B) {
 	defer f.mu.Unlock()
 	f.gloasWeightTree.prepare(justified, cs)
 
-	dirtyOne := uint64(0)
-	dirtyTenPercent := make([]uint64, 0, cs.validatorSetSize/10)
-	dirtyAll := make([]uint64, 0, cs.validatorSetSize)
+	updateOne := uint64(0)
+	updateTenPercent := make([]uint64, 0, cs.validatorSetSize/10)
+	updateAll := make([]uint64, 0, cs.validatorSetSize)
 	for i := 0; i < cs.validatorSetSize; i++ {
 		vi := uint64(i)
-		if len(dirtyTenPercent) < cs.validatorSetSize/10 {
-			dirtyTenPercent = append(dirtyTenPercent, vi)
+		if len(updateTenPercent) < cs.validatorSetSize/10 {
+			updateTenPercent = append(updateTenPercent, vi)
 		}
-		dirtyAll = append(dirtyAll, vi)
+		updateAll = append(updateAll, vi)
 	}
 
 	b.Run("clean", func(b *testing.B) {
@@ -83,23 +83,23 @@ func BenchmarkGloasWeightTreePrepare(b *testing.B) {
 			f.gloasWeightTree.prepare(justified, cs)
 		}
 	})
-	b.Run("dirty-one", func(b *testing.B) {
+	b.Run("update-one", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.update(dirtyOne)
+			f.gloasWeightTree.update(updateOne)
 			f.gloasWeightTree.prepare(justified, cs)
 		}
 	})
-	b.Run("dirty-10pct", func(b *testing.B) {
+	b.Run("update-10pct", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			for _, vi := range dirtyTenPercent {
+			for _, vi := range updateTenPercent {
 				f.gloasWeightTree.update(vi)
 			}
 			f.gloasWeightTree.prepare(justified, cs)
 		}
 	})
-	b.Run("dirty-all", func(b *testing.B) {
+	b.Run("update-all", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			for _, vi := range dirtyAll {
+			for _, vi := range updateAll {
 				f.gloasWeightTree.update(vi)
 			}
 			f.gloasWeightTree.prepare(justified, cs)
