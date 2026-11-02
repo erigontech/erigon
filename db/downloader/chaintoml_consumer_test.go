@@ -13,7 +13,72 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
+
+func TestChainTomlDiscoveryUsesTempDir(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		discover func(*Downloader, context.Context, string, NodeSource)
+	}{
+		{name: "acquire", discover: (*Downloader).acquireChainToml},
+		{name: "verify", discover: (*Downloader).verifyChainToml},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.Dirs{Snap: t.TempDir(), Tmp: t.TempDir()}
+			cfg := newTestClientConfig(t, dirs.Snap)
+			cfg.Slogger = slog.Default()
+			store, client, err := newTorrentClient(dirs.Snap, cfg)
+			require.NoError(t, err)
+			defer store.Close()
+			defer client.Close()
+			d := &Downloader{
+				cfg:           &downloadercfg.Cfg{Dirs: dirs},
+				torrentClient: client,
+				logger:        log.New(),
+			}
+			infoHash := metainfo.Hash{1}
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			node := makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: infoHash})
+			ns := &mockNodeSource{nodes: []*enode.Node{node}}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				tc.discover(d, ctx, "testnet", ns)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+			require.Eventually(t, func() bool {
+				_, ok := client.Torrent(infoHash)
+				return ok
+			}, 5*time.Second, time.Millisecond)
+
+			entries, err := os.ReadDir(dirs.Tmp)
+			require.NoError(t, err)
+			require.Len(t, entries, 1, "downloads must use the directory cleaned on startup")
+			assert.True(t, entries[0].IsDir())
+			entries, err = os.ReadDir(dirs.Snap)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+
+			cancel()
+			<-done
+			entries, err = os.ReadDir(dirs.Tmp)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
+	}
+}
 
 func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
 	for _, hashMatches := range []bool{true, false} {
@@ -23,6 +88,7 @@ func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			snapDir := t.TempDir()
+			tmpDir := t.TempDir()
 			settingsPath := filepath.Join(snapDir, "erigondb.toml")
 			settings := []byte("step_size = 1562500\n")
 			require.NoError(t, os.WriteFile(settingsPath, settings, 0o644))
@@ -49,7 +115,7 @@ func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
 			var downloadErr error
 			go func() {
 				defer close(done)
-				_, downloadErr = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, nil)
+				_, downloadErr = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, tmpDir, nil)
 			}()
 			defer func() {
 				cancel()
@@ -82,12 +148,16 @@ func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, entries, 1)
 			assert.Equal(t, "erigondb.toml", entries[0].Name())
+			entries, err = os.ReadDir(tmpDir)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
 		})
 	}
 }
 
 func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
 	snapDir := t.TempDir()
+	tmpDir := t.TempDir()
 	client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
 	require.NoError(t, err)
 	defer client.Close()
@@ -96,12 +166,12 @@ func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	_, err = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, nil)
+	_, err = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, tmpDir, nil)
 	require.ErrorContains(t, err, "already exists and is incomplete")
 	got, ok := client.Torrent(infoHash)
 	require.True(t, ok, "the existing torrent must remain registered")
 	assert.Same(t, existing, got)
-	entries, err := filepath.Glob(filepath.Join(snapDir, ".chaintoml-download-*"))
+	entries, err := os.ReadDir(tmpDir)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 }
@@ -119,6 +189,7 @@ func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapDir := t.TempDir()
+			tmpDir := t.TempDir()
 			require.NoError(t, SaveChainToml(snapDir, data))
 			client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
 			require.NoError(t, err)
@@ -131,7 +202,7 @@ func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
 				require.NoError(t, SaveChainToml(snapDir, tc.replacement))
 			}
 
-			got, err := DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), snapDir, nil)
+			got, err := DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), snapDir, tmpDir, nil)
 			if tc.replacement == nil {
 				require.NoError(t, err)
 				assert.Equal(t, data, got)
@@ -145,7 +216,7 @@ func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
 			registered, ok := client.Torrent(mi.HashInfoBytes())
 			require.True(t, ok)
 			assert.Same(t, existing, registered)
-			entries, err := filepath.Glob(filepath.Join(snapDir, ".chaintoml-download-*"))
+			entries, err := os.ReadDir(tmpDir)
 			require.NoError(t, err)
 			assert.Empty(t, entries)
 		})

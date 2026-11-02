@@ -31,6 +31,7 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	// Create temp dirs for seeder and leecher.
 	seederDir := t.TempDir()
 	leecherDir := t.TempDir()
+	tmpDir := t.TempDir()
 
 	// Create a test file to share.
 	testData := []byte("hello from the seeder — this is a snapshot manifest")
@@ -73,14 +74,14 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	require.NoError(t, err)
 	defer leecher.Close()
 
-	downloaded, err := DownloadChainTomlByInfoHash(ctx, leecher, infoHash, leecherDir, best)
+	downloaded, err := DownloadChainTomlByInfoHash(ctx, leecher, infoHash, leecherDir, tmpDir, best)
 	require.NoError(t, err)
 	assert.Equal(t, testData, downloaded)
 	got, err := os.ReadFile(ChainTomlPath(leecherDir))
 	require.NoError(t, err)
 	assert.Equal(t, localData, got)
 	assert.Empty(t, leecher.Torrents())
-	entries, err := filepath.Glob(filepath.Join(leecherDir, ".chaintoml-download-*"))
+	entries, err := os.ReadDir(tmpDir)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 }

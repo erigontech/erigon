@@ -88,15 +88,20 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 
 // DownloadChainTomlByInfoHash downloads chain.toml or verifies a completed local copy.
 // New torrents use temporary storage and are dropped on return; existing torrents remain registered.
+// tmpDir must be cleared on startup so downloads left by a crash are removed.
 // A non-nil peer is used only for new torrents, if its ENR advertises a BitTorrent endpoint.
-func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string, peer *ChainTomlPeer) ([]byte, error) {
+func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir, tmpDir string, peer *ChainTomlPeer) ([]byte, error) {
 	// The torrent library opens files from metadata before the filename check below.
 	// Keep these writes isolated so rejected metadata cannot modify snapshot files.
-	downloadDir, err := os.MkdirTemp(snapDir, ".chaintoml-download-")
+	downloadDir, err := os.MkdirTemp(tmpDir, ".chaintoml-download-")
 	if err != nil {
 		return nil, fmt.Errorf("creating chain.toml download directory: %w", err)
 	}
-	defer func() { _ = dir.RemoveAll(downloadDir) }()
+	defer func() {
+		if cleanupErr := dir.RemoveAll(downloadDir); cleanupErr != nil {
+			log.Warn("[chaintoml] failed to remove download directory", "path", downloadDir, "err", cleanupErr)
+		}
+	}()
 	store := storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: downloadDir})
 	defer store.Close()
 
@@ -316,7 +321,7 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		"knownTx", best.ChainToml.KnownBlocks,
 		"infoHash", hex.EncodeToString(best.ChainToml.InfoHash[:]))
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
+	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), d.cfg.Dirs.Tmp, best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to download chain.toml", "err", err)
 		return
@@ -358,7 +363,7 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 		return
 	}
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
+	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), d.cfg.Dirs.Tmp, best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] verify: failed to download chain.toml", "err", err)
 		return
