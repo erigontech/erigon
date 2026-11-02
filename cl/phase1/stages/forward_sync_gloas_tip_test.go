@@ -42,16 +42,14 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// forwardSyncTipSentinel serves firstBlocks, then laterBlocks (empty by default). It keeps the anchor EMPTY by
-// answering the first envelope request, the anchor's, with an envelope that fails the anchor bid check.
+// forwardSyncTipSentinel serves firstBlocks, then laterBlocks (empty by default), and envelopeResponse for every
+// envelope request.
 type forwardSyncTipSentinel struct {
 	sentinelproto.SentinelClient
-	firstBlocks            []byte
-	laterBlocks            []byte
-	anchorEnvelopeResponse []byte
-	envelopeResponse       []byte
-	blockCalls             atomic.Int32
-	envelopeCalls          atomic.Int32
+	firstBlocks      []byte
+	laterBlocks      []byte
+	envelopeResponse []byte
+	blockCalls       atomic.Int32
 }
 
 func (s *forwardSyncTipSentinel) SendRequest(_ context.Context, request *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
@@ -63,11 +61,7 @@ func (s *forwardSyncTipSentinel) SendRequest(_ context.Context, request *sentine
 		}
 		return &sentinelproto.ResponseData{Data: response, Peer: &sentinelproto.Peer{Pid: fmt.Sprintf("peer-%d", call)}}, nil
 	}
-	response := s.envelopeResponse
-	if s.envelopeCalls.Add(1) == 1 {
-		response = s.anchorEnvelopeResponse
-	}
-	return &sentinelproto.ResponseData{Data: response, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
+	return &sentinelproto.ResponseData{Data: s.envelopeResponse, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
 }
 
 func (*forwardSyncTipSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
@@ -119,10 +113,13 @@ func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoic
 	anchorMessage := *envelope.Message
 	anchorMessage.BeaconBlockRoot = cfg.forkChoice.AnchorRoot()
 	anchorEnvelope.Message = &anchorMessage
+	// An anchor envelope that fails the anchor bid check keeps the anchor EMPTY without a network fetch.
+	graph.envelopesMu.Lock()
+	graph.envelopes[cfg.forkChoice.AnchorRoot()] = &anchorEnvelope
+	graph.envelopesMu.Unlock()
 	f.sentinel = &forwardSyncTipSentinel{
-		firstBlocks:            f.encode(t, tip),
-		anchorEnvelopeResponse: f.encode(t, &anchorEnvelope),
-		envelopeResponse:       f.encode(t, envelope),
+		firstBlocks:      f.encode(t, tip),
+		envelopeResponse: f.encode(t, envelope),
 	}
 	f.clock = &steppedClock{EthereumClock: clock, slotsPerEpoch: cfg.beaconCfg.SlotsPerEpoch}
 	f.clock.slot.Store(currentSlot)
