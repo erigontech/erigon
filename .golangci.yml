@@ -65,6 +65,10 @@ linters:
         - name: unconditional-recursion
         - name: useless-fallthrough
         - name: waitgroup-by-value
+        - name: unreachable-code
+        - name: defer
+          arguments:
+            - ["immediate-recover", "return"]
     loggercheck:
       rules:
         - (github.com/erigontech/erigon/common/log/v3.Logger).Trace
@@ -85,7 +89,9 @@ linters:
         - github.com/erigontech/erigon/common/log/v3.New
     gosec:
       includes:
+        - G102
         - G106
+        - G107
         - G108
         - G109
         - G110
@@ -102,6 +108,7 @@ linters:
         - G203
         - G303
         - G305
+        - G307
         - G402
         - G403
         - G405
@@ -110,7 +117,12 @@ linters:
         - G503
         - G504
         - G506
+        - G701
+        - G702
         - G704
+        - G706
+        - G707
+        - G708
         - G709
         - G710
     usetesting:
@@ -179,15 +191,11 @@ linters:
         - -ST1029
         - -ST5011
     govet:
-      enable:
-        - nilness
-        - unusedwrite
-        - shadow
-        - sortslice
-        - unsafeptr
+      enable-all: true
       disable:
         - deepequalerrors
         - fieldalignment
+        - reflectvaluecompare
   exclusions:
     generated: lax
     presets:
@@ -208,7 +216,7 @@ linters:
       - linters:
           - govet
         text: "^shadow:"
-        path-except: "^(db|common|diagnostics|internal|plugins)/"
+        path-except: "^(db|common|diagnostics|internal|node|plugins|txnprovider)/"
       # Bootstrap exclusion: files with baseline shadow findings, migrated one
       # file per PR. Remove a file from the list once it is clean; a file that is
       # not listed is gated, so a fixed file cannot silently regress.
@@ -293,6 +301,8 @@ linters:
           |db/test/domain_shared_bench_test\\.go\
           |db/test/domains_restart_test\\.go\
           |db/test/lifecycle_bench_test\\.go\
+          |node/eth/backend\\.go\
+          |txnprovider/txpool/pool\\.go\
           )$"
       - linters:
           - gosec

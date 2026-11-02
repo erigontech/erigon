@@ -16,6 +16,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1295,4 +1296,42 @@ func TestSimulatedBlockUnmarshalKeepsOverrides(t *testing.T) {
 	require.NotNil(t, account.Balance)
 	assert.Equal(t, uint64(1), (*account.Balance).ToInt().Uint64())
 	require.Len(t, b.Calls, 1)
+}
+
+// A simulation on a historical base must not store head-state fields for an account it
+// changes only partly: the next simulated block reads the account back from the overlay.
+func TestSimulateV1HistoricalBasePartialAccountWriteKeepsNonce(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	aliceKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	bank, alice := crypto.PubkeyToAddress(bankKey.PublicKey), crypto.PubkeyToAddress(aliceKey.PublicKey)
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{Config: chain.TestChainOsakaConfig.Copy(), Alloc: types.GenesisAlloc{bank: {Balance: funds}, alice: {Balance: funds}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	sink := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	cp, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: b.TxNonce(alice), To: &sink, Value: *uint256.NewInt(7), GasLimit: 21_000},
+			ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+			FeeCap:   *uint256.NewInt(1_000_000_000_000),
+		}, *signer, aliceKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(cp))
+
+	gas := hexutil.Uint64(21_000)
+	fee := hexutil.U256(*uint256.NewInt(1_000_000_000_000))
+	tip := hexutil.U256(*uint256.NewInt(0))
+	val := hexutil.U256(*uint256.NewInt(7))
+	bankNonce, aliceNonce := hexutil.Uint64(0), hexutil.Uint64(1)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	_, err = api.SimulateV1(context.Background(), SimulationRequest{Validation: true, BlockStateCalls: []SimulatedBlock{
+		{Calls: []ethapi.CallArgs{{From: &bank, To: &alice, Gas: &gas, Nonce: &bankNonce, MaxFeePerGas: &fee, MaxPriorityFeePerGas: &tip, Value: &val}}},
+		{Calls: []ethapi.CallArgs{{From: &alice, To: &sink, Gas: &gas, Nonce: &aliceNonce, MaxFeePerGas: &fee, MaxPriorityFeePerGas: &tip, Value: &val}}},
+	}}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
 }

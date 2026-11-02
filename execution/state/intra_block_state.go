@@ -2920,6 +2920,14 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 			}
 			continue
 		}
+		// See updateAccount: the account write of a recreate below the original incarnation clears
+		// the old code and storage, so it must land before the new ones.
+		downRev := original.Incarnation > account.Incarnation
+		if downRev {
+			if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+				return err
+			}
+		}
 		if code, ok := writes.GetCode(addr); ok {
 			if err := stateWriter.UpdateAccountCode(addr, account.Incarnation, account.CodeHash, code.Val.Bytes); err != nil {
 				return err
@@ -2935,8 +2943,10 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 				return err
 			}
 		}
-		if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
-			return err
+		if !downRev {
+			if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
