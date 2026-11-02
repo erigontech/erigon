@@ -113,7 +113,7 @@ func TestDomainCache_NewWithByteCapacity(t *testing.T) {
 }
 
 func TestDomainCache_GetPut(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
+	c := closeOnCleanup(t, NewDomainCacheMode(64*datasize.KB, ModeEvictLRU))
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -132,7 +132,7 @@ func TestDomainCache_GetPut(t *testing.T) {
 }
 
 func TestDomainCache_PutUpdateValue(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
+	c := closeOnCleanup(t, NewDomainCacheMode(64*datasize.KB, ModeEvictLRU))
 
 	addr := makeAddr(1)
 	value1 := []byte{1, 2, 3, 4, 5, 6, 7, 8} // 8 bytes
@@ -148,12 +148,24 @@ func TestDomainCache_PutUpdateValue(t *testing.T) {
 	assert.Equal(t, value2, v)
 }
 
+// A replacement too big for the whole cache must not leave the old value live.
+func TestDomainCache_OversizedPutDropsOldValue(t *testing.T) {
+	c := closeOnCleanup(t, NewDomainCacheMode(datasize.KB, ModeEvictLRU))
+
+	addr := makeAddr(1)
+	c.Put(addr, []byte{1, 2, 3}, 0)
+	c.Put(addr, make([]byte, 2*datasize.KB), 1)
+
+	_, ok := c.Get(addr)
+	assert.False(t, ok)
+}
+
 func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
 	// ModeNoOp keeps the historical fill-and-freeze behaviour: once
 	// full, new keys are silently dropped. Counted via the dropped metric.
-	// Entry overhead is 20 (addr key) + 3 (value) + 24 = 47 bytes per entry.
-	// Two entries take 94 bytes; cap at 100 leaves no room for a third.
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeNoOp))
+	// The budget fits two entries and not a third.
+	two := 2 * oneEntryBytes(makeAddr(1), makeValue(1))
+	c := closeOnCleanup(t, NewDomainCacheMode(two+two/4, ModeNoOp))
 
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
@@ -165,7 +177,7 @@ func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
 	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
 
-	// Updating an existing key always succeeds in either mode.
+	// Updating an existing key succeeds while the update fits.
 	newValue := []byte{100, 101, 102}
 	c.Put(makeAddr(1), newValue, 0)
 	v, ok := c.Get(makeAddr(1))
@@ -173,38 +185,44 @@ func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
 	assert.Equal(t, newValue, v)
 }
 
-func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
-	// ModeEvictLRU lets the per-shard LRU evict on insert when its
-	// entry-count cap is reached. Eviction is per-shard, not globally
-	// LRU (a known trade-off of freelru.ShardedLRU; see policy.go).
-	//
-	// Build with capacityEntries=2 so that a third insert forces an
-	// eviction event. Capacity-bytes is unused for the eviction
-	// decision and is only carried for telemetry.
-	c := &DomainCache{
-		GenericCache: newGenericCacheEntries[[]byte](1<<20, 2, func(v []byte) int { return len(v) }, ModeEvictLRU),
-	}
+func TestDomainCache_GrowingUpdateKeepsOtherKeys_NoOpMode(t *testing.T) {
+	two := 2 * oneEntryBytes(makeAddr(1), makeValue(1))
+	c := closeOnCleanup(t, NewDomainCacheMode(two+two/4, ModeNoOp))
+	c.Put(makeAddr(1), makeValue(1), 0)
+	c.Put(makeAddr(2), makeValue(2), 0)
 
+	c.Put(makeAddr(1), make([]byte, len(makeValue(1))+int(two/2)), 0)
+	c.data.c.CleanUp()
+
+	v, ok := c.Get(makeAddr(2))
+	require.True(t, ok, "an update that does not fit must not evict another key")
+	require.Equal(t, makeValue(2), v)
+	_, ok = c.Get(makeAddr(1))
+	require.False(t, ok, "the old value of an updated key must not stay live")
+}
+
+func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
+	c := &DomainCache{GenericCache: fixedGenericCache(t, 16*oneEntryBytes(makeAddr(1), makeValue(1)), ModeEvictLRU)}
 	for i := 1; i <= 64; i++ {
 		c.Put(makeAddr(i), makeValue(i), 0)
 	}
-	// The newest entry must still be findable.
-	v, ok := c.Get(makeAddr(64))
-	assert.True(t, ok, "newest key must be present after eviction")
-	assert.Equal(t, makeValue(64), v)
-
-	// At least some early entries must have been evicted by now.
-	missingCount := 0
-	for i := 1; i <= 32; i++ {
-		if _, ok := c.Get(makeAddr(i)); !ok {
-			missingCount++
+	c.data.c.CleanUp()
+	// Residency stays bounded without collapsing. Which keys survive is
+	// W-TinyLFU's choice, not recency, so their identity is not asserted.
+	assert.Positive(t, c.Len())
+	assert.Less(t, c.Len(), 64)
+	admitted := 0
+	for i := 1; i <= 64; i++ {
+		if v, ok := c.Get(makeAddr(i)); ok {
+			assert.Equal(t, makeValue(i), v)
+			admitted++
 		}
 	}
-	assert.Positive(t, missingCount, "ModeEvictLRU should have evicted some early entries")
+	assert.Positive(t, admitted)
 }
 
 func TestDomainCache_Delete(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
+	c := closeOnCleanup(t, NewDomainCacheMode(64*datasize.KB, ModeEvictLRU))
 
 	addr := makeAddr(1)
 	c.Put(addr, makeValue(1), 0)
@@ -218,7 +236,7 @@ func TestDomainCache_Delete(t *testing.T) {
 }
 
 func TestDomainCache_Clear(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
+	c := closeOnCleanup(t, NewDomainCacheMode(64*datasize.KB, ModeEvictLRU))
 
 	c.Put(makeAddr(1), makeValue(1), 0)
 	c.Put(makeAddr(2), makeValue(2), 0)
@@ -229,7 +247,7 @@ func TestDomainCache_Clear(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
+	c := closeOnCleanup(t, NewDomainCacheMode(64*datasize.KB, ModeEvictLRU))
 
 	// Generate some hits and misses
 	c.Put(makeAddr(1), makeValue(1), 0)
@@ -245,7 +263,7 @@ func TestDomainCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestDomainCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(100, ModeEvictLRU))
+	c := closeOnCleanup(t, NewDomainCacheMode(64*datasize.KB, ModeEvictLRU))
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset("test")
 }
@@ -341,6 +359,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	for i := range 1100 {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
+	c.addrToHash.c.CleanUp()
 
 	// Residency stays bounded: the cache neither holds all 1100 nor collapses
 	// to nothing. Which addresses survive is W-TinyLFU's choice, not recency,
@@ -381,6 +400,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
 	c.Put(makeAddr(3), makeCode(3), 0)
+	c.codeHashToCode.c.CleanUp()
 
 	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
@@ -494,7 +514,7 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -512,7 +532,7 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
@@ -538,7 +558,7 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	// ReceiptDomain is not supported
 	c.put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
@@ -548,7 +568,7 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 }
 
 func TestStateCache_Delete(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	addr := makeAddr(1)
 	c.put(kv.AccountsDomain, addr, makeValue(1), 0)
@@ -562,7 +582,7 @@ func TestStateCache_Delete(t *testing.T) {
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
 // the caller unnecessarily falls through to the DB on every read.
 func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	key[0] = 0x1d
@@ -577,7 +597,7 @@ func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 
 // Same test for []byte{} (zero-length but non-nil).
 func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	key := make([]byte, 52)
 	key[0] = 0x1d
@@ -591,14 +611,14 @@ func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	// Should not panic
 	c.deleteKey(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	c.put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
 	c.put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
@@ -616,7 +636,7 @@ func TestStateCache_Clear(t *testing.T) {
 }
 
 func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c := closeOnCleanup(t, NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 64*datasize.KB))
 
 	// Domain >= DomainLen should return nil
 	cache := c.getCache(kv.DomainLen)
@@ -906,7 +926,8 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // check (absent), lose the CPU to the authoritative writer's insert, then
 // clobber it — the prefetch-vs-flush staleness this cache guards against.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
+	// Room for every round, so admission never refuses the key under test.
+	c := closeOnCleanup(t, NewDomainCacheMode(16*datasize.MB, ModeEvictLRU))
 	fresh := []byte("fresh")
 	stale := []byte("stale")
 	addr := make([]byte, 20)
@@ -1331,9 +1352,9 @@ func TestStateCache_AccountDeleteDropsCodeBinding(t *testing.T) {
 }
 
 // A Delete racing an update-in-place put must not double-subtract the
-// displaced entry's size: freelru's OnEvict subtracts it for the Remove, and
-// put's update delta subtracts it again unless the two writers share the
-// key's stripe.
+// displaced entry's size: the deletion handler refunds it for the Remove, and
+// put's update delta subtracts it again unless the two writes are serialized
+// on the key.
 func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
@@ -1350,16 +1371,15 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-// The lazy stale-drop inside GetWithTxNum removes entries; an unstriped
-// Remove racing put's read-modify-write double-subtracts the displaced
-// entry's size. Exactly one live entry remains after every round, so drift
+// The lazy stale-drop inside GetWithTxNum removes entries; a Remove racing
+// put's read-modify-write would double-subtract the displaced entry's size. Exactly one live entry remains after every round, so drift
 // shows as a size mismatch.
 func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
-	wantSize := int64(len(addr) + len(v1) + 24)
+	wantSize := int64(oneEntryBytes(addr, v1))
 	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		c.Unwind(5)
@@ -1371,15 +1391,13 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-// A Clear racing a put must not leave phantom bytes: unless Clear excludes
-// writers via the put stripes, a put that loaded the retiring generation
-// lands its entry where no reader sees it and adds the entry's size after
-// Clear zeroed the counter — inflating SizeBytes for an invisible entry.
+// A Clear racing a put must not leave phantom bytes: the counter must agree
+// with the entry's presence whether the put landed before or after the wipe.
 func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
-	entrySize := int64(len(addr) + len(v1) + 24)
+	entrySize := int64(oneEntryBytes(addr, v1))
 	for round := range 20000 {
 		var wg sync.WaitGroup
 		wg.Go(func() { c.Put(addr, v1, 10) })
@@ -1587,6 +1605,7 @@ func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
 		sizes[uint64(i)] = n
 		b.Add(uint64(i), make([]byte, n))
 	}
+	b.c.CleanUp()
 
 	var resident int64
 	survivors := map[uint64]bool{}
@@ -1635,6 +1654,17 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 
 	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
 	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
+}
+
+// A payload of 4 GiB or more must not wrap to a small weight and slip past the byte bound.
+func TestGenericCache_HugePayloadIsNotAdmitted(t *testing.T) {
+	c := NewGenericCache(datasize.MB, func(int) int { return 1 << 32 }, ModeEvictLRU)
+	t.Cleanup(c.Close)
+
+	c.Put([]byte("k"), 1, 0)
+
+	_, ok := c.Get([]byte("k"))
+	assert.False(t, ok)
 }
 
 // A value written at txNum 5 is the value as of any later txNum, not as of 5 itself.
