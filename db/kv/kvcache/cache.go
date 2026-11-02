@@ -302,7 +302,8 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				for _, change := range sc.Changes[i].StorageChanges {
 					loc := gointerfaces.ConvertH256ToHash(change.Location)
-					c.add(append(addr[:], loc[:]...), change.Data, r, id) // StorageDomain key: no incarnation
+					// evict, don't cache: a later selfdestruct in the same block can undo this write
+					c.evictKey(append(addr[:], loc[:]...), r)
 				}
 			}
 		}
@@ -421,6 +422,12 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	defer c.lock.Unlock()
 	v = c.addCode(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
+}
+
+func (c *Coherent) evictKey(k []byte, r *CoherentRoot) {
+	if e, ok := r.cache.Delete(&Element{K: k}); ok {
+		c.stateEvict.Remove(e)
+	}
 }
 
 func (c *Coherent) removeOldest(r *CoherentRoot) {

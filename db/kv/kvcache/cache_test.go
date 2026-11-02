@@ -626,3 +626,85 @@ func TestValidateCurrentRootWithStreamedStorage(t *testing.T) {
 		return nil
 	}))
 }
+
+// A slot read in one block and changed by the next must not be served from the cache.
+func TestStorageChangedByNextBlockIsNotStale(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	acc, loc := common.Address{1}, common.Hash{2}
+	slot := append(acc[:], loc[:]...)
+	put := func(v byte, txNum uint64) {
+		require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+			if err != nil {
+				return err
+			}
+			defer d.Close()
+			if err := d.DomainPut(kv.StorageDomain, tx, slot, []byte{v}, txNum, nil); err != nil {
+				return err
+			}
+			return d.Flush(ctx, tx)
+		}))
+	}
+
+	put(0x01, 1)
+	var id uint64
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		var err error
+		id, err = tx.ReadSequence(string(kv.PlainStateVersion))
+		require.NoError(err)
+		c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: id})
+		v, err := c.Get(slot, tx, id)
+		require.NoError(err)
+		require.Equal([]byte{0x01}, v)
+		return nil
+	}))
+
+	put(0x02, 2)
+	c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: id + 1, ChangeBatch: []*remoteproto.StateChange{{
+		Direction: remoteproto.Direction_FORWARD,
+		Changes: []*remoteproto.AccountChange{{
+			Action:         remoteproto.Action_STORAGE,
+			Address:        gointerfaces.ConvertAddressToH160(acc),
+			Incarnation:    1,
+			StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(loc), Data: []byte{0x02}}},
+		}},
+	}}})
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		v, err := c.Get(slot, tx, id+1)
+		require.NoError(err)
+		require.Equal([]byte{0x02}, v)
+		return nil
+	}))
+}
+
+// Streamed storage writes can be undone later in the block (selfdestruct), so the
+// cache must read the slot from the DB instead of serving the streamed value.
+func TestStreamedStorageValueIsNotServed(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	acc, loc := common.Address{1}, common.Hash{2}
+
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		id, err := tx.ReadSequence(string(kv.PlainStateVersion))
+		require.NoError(err)
+		c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: id, ChangeBatch: []*remoteproto.StateChange{{
+			Direction: remoteproto.Direction_FORWARD,
+			Changes: []*remoteproto.AccountChange{{
+				Action:         remoteproto.Action_STORAGE,
+				Address:        gointerfaces.ConvertAddressToH160(acc),
+				StorageChanges: []*remoteproto.StorageChange{{Location: gointerfaces.ConvertHashToH256(loc), Data: []byte{0x07}}},
+			}},
+		}}})
+		v, err := c.Get(append(acc[:], loc[:]...), tx, id)
+		require.NoError(err)
+		require.Empty(v)
+		return nil
+	}))
+}
