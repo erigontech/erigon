@@ -70,6 +70,7 @@ func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
 			if err == nil {
 				require.ErrorContains(t, downloadErr, `chain.toml torrent names "erigondb.toml"`)
 			} else {
+				// The torrent library may reject mismatched metadata before opening storage.
 				require.False(t, hashMatches, "valid metadata must reach the filename check")
 			}
 

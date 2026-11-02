@@ -86,13 +86,12 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 	return
 }
 
-// DownloadChainTomlByInfoHash downloads chain.toml from the BitTorrent network using its info-hash.
-// New downloads use temporary storage. Completed local manifests are read without dropping their torrent.
-//
-// If peer is non-nil, it is used to directly add the peer's torrent endpoint via AddPeers,
-// bypassing the need for DHT or tracker discovery.
+// DownloadChainTomlByInfoHash downloads chain.toml or verifies a completed local copy.
+// New torrents use temporary storage and are dropped on return; existing torrents remain registered.
+// A non-nil peer is used only for new torrents, if its ENR advertises a BitTorrent endpoint.
 func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string, peer *ChainTomlPeer) ([]byte, error) {
-	// Metadata opens file storage before the torrent's name can be checked.
+	// The torrent library opens files from metadata before the filename check below.
+	// Keep these writes isolated so rejected metadata cannot modify snapshot files.
 	downloadDir, err := os.MkdirTemp(snapDir, ".chaintoml-download-")
 	if err != nil {
 		return nil, fmt.Errorf("creating chain.toml download directory: %w", err)
@@ -105,10 +104,10 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	if added {
 		defer t.Drop()
 	} else if !t.Complete().Bool() {
+		// AddTorrentOpt keeps the original storage, so we cannot safely resume an existing torrent.
 		return nil, fmt.Errorf("chain.toml torrent already exists and is incomplete")
 	}
 
-	// If the peer advertised a BT port in their ENR, add them directly as a torrent peer.
 	if added && peer != nil {
 		addTorrentPeerFromENR(t, peer)
 	}
@@ -154,6 +153,8 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
 	}
 	if !added {
+		// The local file may have changed since the torrent was marked complete.
+		// Verify the bytes we return, since a separate file read could see different contents.
 		if int64(len(data)) != info.Length || info.PieceLength <= 0 {
 			return nil, fmt.Errorf("chain.toml does not match torrent length")
 		}
@@ -169,9 +170,7 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	return data, nil
 }
 
-// addTorrentPeerFromENR extracts the BT port and IP from a peer's ENR record
-// and adds them as a direct torrent peer. The IP defaults to the node's
-// advertised IP if not separately specified.
+// addTorrentPeerFromENR adds the peer using the IP and BitTorrent port advertised in its ENR.
 func addTorrentPeerFromENR(t *torrent.Torrent, peer *ChainTomlPeer) {
 	var bt enr.BT
 	if err := peer.Node.Record().Load(&bt); err != nil {
