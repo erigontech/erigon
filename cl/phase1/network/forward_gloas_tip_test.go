@@ -253,36 +253,62 @@ func TestForwardBeaconDownloaderBoundsHeldGloasTipEnvelopeFetch(t *testing.T) {
 	require.Less(t, time.Since(start), budget+budget/2)
 }
 
-// A tip that processing rejected or did not reach is not reported as imported, and it is tried again only in a later
-// slot.
+// A tip that processing did not reach is kept and tried again only in a later slot.
 func TestForwardBeaconDownloaderRetriesHeldGloasTipInNextSlot(t *testing.T) {
-	for name, processErr := range map[string]error{"no progress": nil, "error": errors.New("invalid block")} {
+	cfg := gloasFromGenesisConfig()
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
+	var currentSlot atomic.Uint64
+	currentSlot.Store(11)
+	downloader.SetCurrentSlotSampler(currentSlot.Load)
+	processed := 0
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed++
+		return highest, nil
+	})
+	importTip := func() bool {
+		_, imported := downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond)
+		return imported
+	}
+
+	require.False(t, importTip())
+	require.False(t, importTip())
+	require.Equal(t, 1, processed)
+	currentSlot.Store(12)
+	require.False(t, importTip())
+	require.Equal(t, 2, processed)
+	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
+	require.Same(t, tip, downloader.gloasLookahead)
+}
+
+// A tip that processing rejected is dropped like a rejected batch: its peer is banned unless the error cannot be
+// attributed to it.
+func TestForwardBeaconDownloaderDropsRejectedHeldGloasTip(t *testing.T) {
+	for name, test := range map[string]struct {
+		err        error
+		wantBanned []string
+	}{
+		"invalid block":    {err: errors.New("invalid block"), wantBanned: []string{"tip-peer"}},
+		"invalid envelope": {err: fmt.Errorf("%w: invalid envelope", ErrUnattributableProcess)},
+	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
 			tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
 			client, _ := newNoPeersRPC(t, cfg)
 			downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
-			var currentSlot atomic.Uint64
-			currentSlot.Store(11)
-			downloader.SetCurrentSlotSampler(currentSlot.Load)
-			processed := 0
+			downloader.SetCurrentSlotSampler(func() uint64 { return 11 })
+			var banned []string
+			downloader.banPeer = func(peer string) { banned = append(banned, peer) }
 			downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-				processed++
-				return highest, processErr
+				return highest, test.err
 			})
-			importTip := func() bool {
-				_, imported := downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond)
-				return imported
-			}
 
-			require.False(t, importTip())
-			require.False(t, importTip())
-			require.Equal(t, 1, processed)
-			currentSlot.Store(12)
-			require.False(t, importTip())
-			require.Equal(t, 2, processed)
+			_, imported := downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond)
+			require.False(t, imported)
+			require.Equal(t, test.wantBanned, banned)
+			require.Nil(t, downloader.gloasLookahead)
 			require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
-			require.Same(t, tip, downloader.gloasLookahead)
 		})
 	}
 }
@@ -323,4 +349,107 @@ func TestForwardBeaconDownloaderHTTPPreferredReportsGloasTip(t *testing.T) {
 	start := time.Now()
 	require.True(t, requestMoreWithin(t, downloader))
 	require.GreaterOrEqual(t, time.Since(start), forwardRequestRetryInterval)
+}
+
+// Far from the current slot, an empty beacon API answer only moves the scan, without the retry pause.
+func TestForwardBeaconDownloaderHTTPPreferredScansOnWithoutPause(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	downloader := newHeldTipDownloader(t, cfg, nil, tip, "http-fallback")
+	downloader.SetCurrentSlotSampler(func() uint64 { return 100 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+
+	start := time.Now()
+	require.False(t, requestMoreWithin(t, downloader))
+	require.Less(t, time.Since(start), forwardRequestRetryInterval)
+	require.Greater(t, downloader.gloasNextUnscanned, uint64(11))
+}
+
+// The P2P requests fail, and the HTTP fallback answers empty for the slots after the tip: the tip is reported.
+func TestForwardBeaconDownloaderHTTPFallbackReportsGloasTip(t *testing.T) {
+	previousInterval, previousDelay := forwardBeaconRequestInterval, forwardBeaconFallbackDelay
+	forwardBeaconRequestInterval, forwardBeaconFallbackDelay = time.Millisecond, time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval, forwardBeaconFallbackDelay = previousInterval, previousDelay })
+
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	downloader := newHeldTipDownloader(t, gloasFromGenesisConfig(), nil, tip, "tip-peer")
+	downloader.SetCurrentSlotSampler(func() uint64 { return 12 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return nil, "", errors.New("no peers")
+	}
+
+	require.True(t, requestMoreWithin(t, downloader))
+}
+
+// Without a held Gloas block, RequestMore never reports a tip.
+func TestForwardBeaconDownloaderReportsNoTipWithoutGloasLookahead(t *testing.T) {
+	previousInterval, previousTimeout := forwardBeaconRequestInterval, forwardBeaconRequestTimeout
+	forwardBeaconRequestInterval, forwardBeaconRequestTimeout = time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval, forwardBeaconRequestTimeout = previousInterval, previousTimeout })
+
+	downloader := NewForwardBeaconDownloader(t.Context(), nil, &clparams.MainnetBeaconConfig)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 12 })
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "range-peer", nil
+	}
+
+	require.False(t, requestMoreWithin(t, downloader))
+}
+
+// A beacon API batch asked through the current slot; its block can appear later, so the scan asks for that slot
+// again even after the clock moved on.
+func TestForwardBeaconDownloaderRescansSlotInProgressAtHTTPRequest(t *testing.T) {
+	first := makeGloasBlock(9, hash(0x09), hash(0x01))
+	tip := makeGloasBlock(10, hash(0x10), hash(0x02))
+	successor := makeGloasBlock(12, hash(0x12), hash(0x03))
+	linkBeaconBlocks(t, first, tip, successor)
+	encoded := map[uint64][]byte{}
+	for _, block := range []*cltypes.SignedBeaconBlock{first, tip, successor} {
+		data, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		encoded[block.Block.Slot] = data
+	}
+	var successorPublished atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var slot uint64
+		_, _ = fmt.Sscanf(r.URL.Path, "/eth/v2/beacon/blocks/%d", &slot)
+		if data, ok := encoded[slot]; ok && (slot != successor.Block.Slot || successorPublished.Load()) {
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	var currentSlot atomic.Uint64
+	currentSlot.Store(12)
+	downloader := NewForwardBeaconDownloader(t.Context(), nil, gloasFromGenesisConfig())
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(currentSlot.Load)
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+	var processedSlots []uint64
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processedSlots = append(processedSlots, block.Block.Slot)
+			highest = block.Block.Slot
+		}
+		currentSlot.Store(14)
+		successorPublished.Store(true)
+		return highest, nil
+	})
+
+	require.False(t, requestMoreWithin(t, downloader))
+	require.Equal(t, tip.Block.Slot, downloader.gloasLookahead.Block.Slot)
+	require.False(t, requestMoreWithin(t, downloader))
+	require.Equal(t, []uint64{9, 10}, processedSlots)
+	require.Equal(t, successor.Block.Slot, downloader.gloasLookahead.Block.Slot)
 }

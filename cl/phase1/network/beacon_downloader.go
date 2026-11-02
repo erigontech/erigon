@@ -152,6 +152,7 @@ type peerAndBlocks struct {
 	fromHTTP               bool
 	rangeStart             uint64
 	rangeCount             uint64
+	completedCount         uint64
 	hadGloasPending        bool
 }
 
@@ -180,7 +181,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	var answeredEmpty atomic.Bool
-	commitHTTPBlocks := func(sampledHighestSlot, httpStart, httpCount uint64, hadGloasPending bool, blocks []*cltypes.SignedBeaconBlock) bool {
+	commitHTTPBlocks := func(sampledHighestSlot, httpStart, httpCount, completedHTTPCount uint64, hadGloasPending bool, blocks []*cltypes.SignedBeaconBlock) bool {
 		if len(blocks) == 0 {
 			return false
 		}
@@ -198,6 +199,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 			fromHTTP:               true,
 			rangeStart:             httpStart,
 			rangeCount:             httpCount,
+			completedCount:         completedHTTPCount,
 			hadGloasPending:        hadGloasPending,
 		})
 		return true
@@ -216,15 +218,18 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 		httpBlocks, httpErr := fetchBlocksFromBeaconAPI(requestCtx, f.httpFallbackURL, httpStart, httpCount, f.beaconCfg)
 		switch {
 		case httpErr == nil && len(httpBlocks) > 0:
-			if !commitHTTPBlocks(highestSlotProcessed, httpStart, httpCount, hadGloasPending, httpBlocks) {
+			if !commitHTTPBlocks(highestSlotProcessed, httpStart, httpCount, completedHTTPCount, hadGloasPending, httpBlocks) {
 				f.httpPreferred.Store(false)
 			}
 		case httpErr == nil && hadGloasPending:
 			if completedHTTPCount > 0 {
 				f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount))
 			}
-			waitForForwardRequestRetry(ctx)
-			return f.scanReachedCurrentSlot()
+			if f.scanReachedCurrentSlot() {
+				waitForForwardRequestRetry(ctx)
+				return true
+			}
+			return false
 		default:
 			// HTTP failed — fall back to P2P probing.
 			f.httpPreferred.Store(false)
@@ -331,6 +336,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) (atGloasTip b
 							fromHTTP:               true,
 							rangeStart:             httpStart,
 							rangeCount:             httpCount,
+							completedCount:         completedHTTPCount,
 							hadGloasPending:        hadGloasPending,
 						}
 						acceptedResponse = &response
@@ -550,7 +556,9 @@ Process:
 		// A Gloas block needs its successor to determine whether its envelope exists.
 		processCount := min(int(count), len(processBlocks)-1)
 		nextGloasLookahead = processBlocks[processCount]
-		if pid != "http-fallback" || processCount+1 < len(processBlocks) {
+		if pid == "http-fallback" && processCount+1 == len(processBlocks) {
+			nextGloasCursor = nextSlotAfterRange(resp.rangeStart, resp.completedCount)
+		} else {
 			nextGloasCursor = saturatingIncrement(nextGloasLookahead.Block.Slot)
 		}
 		fullRoots := determineFullGloasRoots(processBlocks, processCount)
@@ -799,6 +807,15 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	if err != nil || highestSlotProcessed < tip.Block.Slot {
 		if f.currentSlot != nil {
 			f.gloasTipRetrySlot = saturatingIncrement(f.currentSlot())
+		}
+		if err != nil {
+			if tipPeer == "http-fallback" {
+				f.httpPreferred.Store(false)
+			}
+			if shouldBanProcessPeer(tipPeer, err) && f.banPeer != nil {
+				f.banPeer(tipPeer)
+			}
+			f.clearGloasScan()
 		}
 		return root, false
 	}

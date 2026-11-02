@@ -87,6 +87,7 @@ type forwardSyncTipFixture struct {
 	cfg         *Cfg
 	tip         *cltypes.SignedBeaconBlock
 	tipRoot     common.Hash
+	envelope    *cltypes.SignedExecutionPayloadEnvelope
 	successor   *cltypes.SignedBeaconBlock
 	emptyChild  *cltypes.SignedBeaconBlock
 	currentSlot uint64
@@ -114,7 +115,7 @@ func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoic
 	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg.beaconCfg)
 	digest, err := clock.ComputeForkDigest(tip.Block.Slot / cfg.beaconCfg.SlotsPerEpoch)
 	require.NoError(t, err)
-	f := &forwardSyncTipFixture{cfg: cfg, tip: tip, tipRoot: tipRoot, successor: successor, emptyChild: emptyChild, currentSlot: currentSlot, digest: digest}
+	f := &forwardSyncTipFixture{cfg: cfg, tip: tip, tipRoot: tipRoot, envelope: envelope, successor: successor, emptyChild: emptyChild, currentSlot: currentSlot, digest: digest}
 	anchorEnvelope := *envelope
 	anchorMessage := *envelope.Message
 	anchorMessage.BeaconBlockRoot = cfg.forkChoice.AnchorRoot()
@@ -192,6 +193,20 @@ func TestForwardSyncKeepsSyncingWhenForkChoiceRejectsGloasTip(t *testing.T) {
 
 	require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
 	require.Zero(t, f.cfg.forwardSyncTipRoot)
+}
+
+// The tip's envelope passes the bid check but fork choice rejects it: ForwardSync does not end at the tip.
+func TestForwardSyncKeepsSyncingWhenTipEnvelopeIsRejected(t *testing.T) {
+	f := newForwardSyncTipFixture(t, 2, false)
+	badEnvelope := *f.envelope
+	badEnvelope.Signature[0] ^= 0xff
+	f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+
+	require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+	require.Zero(t, f.cfg.forwardSyncTipRoot)
+	require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
 }
 
 // The marker holds for less than an epoch after it was recorded, and only while no newer block is seen.
