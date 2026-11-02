@@ -286,7 +286,7 @@ func TestSharedDomain_IteratePrefixAfterUnwindSeesRewrite(t *testing.T) {
 
 	got := map[string][]byte{}
 	require.NoError(t, domains.IteratePrefix(kv.StorageDomain, addr[:], rwTx, func(k, v []byte) (bool, error) {
-		got[string(k)] = common.Copy(v)
+		got[string(k)] = bytes.Clone(v)
 		return true, nil
 	}))
 	require.Equal(t, map[string][]byte{string(key): {0x05}}, got)
