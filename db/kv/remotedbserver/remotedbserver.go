@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -67,7 +68,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.2.0 - Add MaxPrunableStepsBacklog
 // 7.3.0 - Remove HasPrefix from the remote KV service
 // 7.3.1 - Include pinned history-file generations in transaction replies
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 1}
+// 7.3.2 - Add IndexJoin
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 2}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -660,6 +662,82 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 		return nil, err
 	}
 	return reply, nil
+}
+
+func (s *KvServer) IndexJoin(ctx context.Context, req *remoteproto.IndexJoinReq) (*remoteproto.IndexRangeReply, error) {
+	q := kv.IndexQuery{Clauses: make([][]kv.IndexKey, len(req.Clauses)), FromTs: int(req.FromTs), ToTs: int(req.ToTs), Asc: order.By(req.OrderAscend)}
+	for i, clause := range req.Clauses {
+		q.Clauses[i] = make([]kv.IndexKey, len(clause.Keys))
+		for j, k := range clause.Keys {
+			ii, err := kv.String2InvertedIdx(k.Table)
+			if err != nil {
+				return nil, err
+			}
+			q.Clauses[i][j] = kv.IndexKey{Idx: ii, Key: k.K}
+		}
+	}
+	if req.PageToken != "" {
+		var pagination remoteproto.IndexPagination
+		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
+			return nil, err
+		}
+		q.FromTs = int(pagination.NextTimeStamp)
+	}
+	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
+		req.PageSize = PageSizeLimit
+	}
+
+	reply := &remoteproto.IndexRangeReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		it, err := kv.JoinIndexRanges(q, func(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+			it, err := tx.IndexRange(name, k, fromTs, toTs, asc, limit)
+			return &ctxU64{U64: it, ctx: ctx}, err
+		})
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if len(reply.Timestamps) == int(req.PageSize) {
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v)})
+				return err
+			}
+			reply.Timestamps = append(reply.Timestamps, v)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+// ctxU64 stops a stream once ctx is done: a join can scan far more entries than it returns.
+type ctxU64 struct {
+	stream.U64
+	ctx context.Context
+}
+
+func (it *ctxU64) Next() (uint64, error) {
+	if err := it.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return it.U64.Next()
+}
+
+func (it *ctxU64) CanSeek() bool {
+	s, ok := it.U64.(stream.Seeker[uint64])
+	return ok && s.CanSeek()
+}
+
+func (it *ctxU64) Seek(v uint64) error {
+	if err := it.ctx.Err(); err != nil {
+		return err
+	}
+	return it.U64.(stream.Seeker[uint64]).Seek(v)
 }
 
 func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRangeReq) (*remoteproto.Pairs, error) {
