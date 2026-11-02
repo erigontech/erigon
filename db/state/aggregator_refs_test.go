@@ -178,3 +178,19 @@ func TestPublishClosesCachesOfUnreadSupersededSet(t *testing.T) {
 		require.Equal(t, readers > 0, visibleSetCached(old), "readers=%d", readers)
 	}
 }
+
+// Between a release that drops a set to zero readers and its superseded check, a new reader may pin
+// the set and a publish may supersede it: the cache stays while that reader holds the set.
+func TestSupersededSetWithReaderKeepsItsCaches(t *testing.T) {
+	v, cur := newCachedVisibleSetForTest(t), newCachedVisibleSetForTest(t)
+	v.next = cur
+	v.refcnt.Store(1)
+	a := &Aggregator{oldestVisible: v}
+	a.visible.Store(cur)
+
+	a.closeCachesIfUnread(v)
+	require.True(t, visibleSetCached(v), "a reader still holds the set")
+	v.refcnt.Store(0)
+	a.closeCachesIfUnread(v)
+	require.False(t, visibleSetCached(v))
+}

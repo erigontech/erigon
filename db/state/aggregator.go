@@ -1908,9 +1908,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
-	if old.refcnt.Load() == 0 {
-		old.closeCaches()
-	}
+	a.closeCachesIfUnread(old)
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
@@ -2536,10 +2534,16 @@ func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 // releaseVisibleFiles drops a pin taken by acquireVisibleFiles. Last reader: delete files
 func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
 	if v.refcnt.Add(-1) == 0 {
-		if v != a.visible.Load() {
-			v.closeCaches()
-		}
+		a.closeCachesIfUnread(v)
 		a.reclaimRetired()
+	}
+}
+
+// closeCachesIfUnread closes v's caches once v is superseded and unread. The refcnt is read after the
+// superseded check: a reader may pin v after its last release and before a publish supersedes it.
+func (a *Aggregator) closeCachesIfUnread(v *aggregatorVisible) {
+	if v != a.visible.Load() && v.refcnt.Load() == 0 {
+		v.closeCaches()
 	}
 }
 
@@ -2555,8 +2559,7 @@ func (a *Aggregator) reclaimRetiredLocked() (toReclaim retiredFiles) {
 	return toReclaim
 }
 
-// closeCaches releases what this set cached once it is superseded and unread: new readers attach only
-// to the current set. Its files stay until the set leaves the chain.
+// closeCaches releases what this set cached. Its files stay until the set leaves the chain.
 func (v *aggregatorVisible) closeCaches() {
 	for _, d := range v.d {
 		if d != nil && d.cache != nil {
