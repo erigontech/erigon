@@ -30,12 +30,15 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	xsha3 "golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -445,4 +448,12 @@ func TestKeccak256HashMatchesReference(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestKeccakCachePrefault(t *testing.T) {
+	prefaultKeccakCache()
+	buckets := unsafe.Slice((*byte)(unsafe.Pointer(keccakCacheBuckets)), unsafe.Sizeof(*keccakCacheBuckets))
+	resident, err := mmap.Resident(buckets)
+	require.NoError(t, err)
+	require.True(t, resident, "keccak cache pages must be resident after prefault")
 }

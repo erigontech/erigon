@@ -19,7 +19,9 @@ package crypto
 import (
 	"encoding/binary"
 	"hash/maphash"
+	"os"
 	"sync/atomic"
+	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
 
@@ -46,6 +48,18 @@ var (
 	keccakCacheSeed    = maphash.MakeSeed()
 	keccakCacheBuckets = new([1 << 17]keccakBucket)
 )
+
+func init() { go prefaultKeccakCache() }
+
+// prefaultKeccakCache writes every page of the cache once, so the first blocks after a start do not
+// pay a copy-on-write page fault per cold page. CompareAndSwap(0, 0) faults a page in without
+// changing a bucket that is already in use.
+func prefaultKeccakCache() {
+	perPage := max(1, os.Getpagesize()/int(unsafe.Sizeof(keccakBucket{})))
+	for i := 0; i < len(keccakCacheBuckets); i += perPage {
+		keccakCacheBuckets[i].seq.CompareAndSwap(0, 0)
+	}
+}
 
 // tailWord returns the last, partial 8 bytes of an input, zero-padded.
 func tailWord(rest []byte) uint64 {
