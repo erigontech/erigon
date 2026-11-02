@@ -164,14 +164,14 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	var totalBytes atomic.Int64
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
-			txn, err := dkp.decryptTxn(ipToKey, encryptedTxn)
-			if err != nil {
+			txn, decryptErr := dkp.decryptTxn(ipToKey, encryptedTxn)
+			if decryptErr != nil {
 				dkp.logger.Debug(
 					"failed to decrypt transaction - skipping",
 					"slot", slot,
 					"eonIndex", eonIndex,
 					"txnIndex", encryptedTxn.TxnIndex,
-					"err", err,
+					"err", decryptErr,
 				)
 				// we do not return err here since as per protocol we skip bad decryption
 				// we also do not want to interrupt other decryption goroutines
