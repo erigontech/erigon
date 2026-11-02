@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -768,6 +770,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			default:
 			}
 			go warmTxsHashes(b, te.cfg.chainConfig.ChainID)
+			if prepassSenders && exec.RecoversSenders(b.HeaderNoCopy()) {
+				recoverSendersParallel(b, te.cfg.chainConfig)
+			}
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
@@ -999,4 +1004,33 @@ func changesetWindowStart(alwaysGenerateChangesets bool, maxReorgDepth uint64, f
 		return math.MaxUint64
 	}
 	return windowStart
+}
+
+var prepassSenders = dbg.EnvBool("EXEC_PREPASS_SENDERS", true)
+
+// recoverSendersParallel recovers a block's senders on all Ps before its txs are scheduled,
+// so exec workers do not recover them on the apply loop's critical path.
+func recoverSendersParallel(b *types.Block, cfg *chain.Config) {
+	txs := b.Transactions()
+	if len(txs) < 64 {
+		return
+	}
+	signer := *types.MakeSigner(cfg, b.NumberU64(), b.Time())
+	n := runtime.GOMAXPROCS(0)
+	chunk := (len(txs) + n - 1) / n
+	var wg sync.WaitGroup
+	for i := 0; i < len(txs); i += chunk {
+		part := txs[i:min(i+chunk, len(txs))]
+		wg.Go(func() {
+			for _, t := range part {
+				if _, ok := t.GetSender(); ok {
+					continue
+				}
+				if s, err := t.Sender(signer); err == nil {
+					t.SetSender(s)
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
