@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"os"
+	"runtime"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -175,7 +177,13 @@ func (pt *poolTask) waitThen(t, next int) bool {
 
 const poolNamedReruns = 3
 
+var poolRerunTrace = dbg.EnvBool("POOL_RERUN_TRACE", false)
+
 func (pt *poolTask) rerunAfter(named int) bool {
+	if poolRerunTrace {
+		_, _, line, _ := runtime.Caller(1)
+		fmt.Fprintf(os.Stderr, "POOLRERUN block=%d tx=%d inc=%d line=%d named=%d reruns=%d\n", pt.be.blockNum, pt.tv.index, pt.tv.version.Incarnation, line, named, pt.reruns)
+	}
 	pt.reruns++
 	if pt.reruns <= poolNamedReruns {
 		pt.next = psReexec
