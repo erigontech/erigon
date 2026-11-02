@@ -17,14 +17,20 @@
 package handler
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 // A stream that asked only for state topics is not subscribed to the operation feed, so gossip traffic never reaches
@@ -81,5 +87,70 @@ func TestEventStreamTopicsAreListedUnderTheFeedThatEmitsThem(t *testing.T) {
 		listed, ok := validTopics[topic]
 		require.True(t, ok, "topic %s is emitted but not listed", topic)
 		require.Equal(t, feed, listed, "topic %s is listed under the wrong feed", topic)
+	}
+}
+
+// collectingStreamWriter keeps everything an event stream writes, safe to read while the stream runs.
+type collectingStreamWriter struct {
+	header http.Header
+	mu     sync.Mutex
+	body   bytes.Buffer
+}
+
+func (w *collectingStreamWriter) Header() http.Header { return w.header }
+
+func (w *collectingStreamWriter) WriteHeader(int) {}
+
+func (w *collectingStreamWriter) Flush() {}
+
+func (w *collectingStreamWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.Write(b)
+}
+
+func (w *collectingStreamWriter) count(topic beaconevents.EventTopic) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Count(w.body.String(), "event: "+string(topic)+"\n")
+}
+
+// A stream of state and operation topics delivers both: its operation buffer is drained, so more operation events than
+// the buffer holds reach the client without blocking the emitter, and the head event arrives with them.
+func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
+	w := &collectingStreamWriter{header: http.Header{}}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/events?topics=head,single_attestation", nil)
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		a.EventSourceGetV1Events(w, req)
+	}()
+	require.Eventually(t, func() bool {
+		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
+	}, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
+
+	attestations := 2 * eventStreamFeedBuffer
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		for range attestations {
+			a.emitters.Operation().SendSingleAttestation(&beaconevents.SingleAttestationData{})
+		}
+	}()
+	select {
+	case <-sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation events blocked the emitter: the stream does not drain its operation buffer")
+	}
+
+	require.Eventually(t, func() bool {
+		return w.count(beaconevents.OpSingleAttestation) == attestations && w.count(beaconevents.StateHead) == 1
+	}, 5*time.Second, 10*time.Millisecond, "the stream did not deliver every event")
+	select {
+	case <-handlerDone:
+		t.Fatal("event stream closed")
+	default:
 	}
 }
