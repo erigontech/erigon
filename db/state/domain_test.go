@@ -4280,3 +4280,65 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
 	}
 }
+
+// A key flushed twice within one step must keep one value at that step, also once the
+// flush skips its same-step lookup for keys it has not flushed in the step.
+func TestDomainFlush_SameStepRewriteKeepsOneValue(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	ctx := t.Context()
+	key := []byte("key")
+	flush := func(txNum uint64, v string) {
+		require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+			dt := d.beginForTests()
+			defer dt.Close()
+			w := dt.NewWriter(db)
+			defer w.Close()
+			if err := w.PutWithPrev(key, []byte(v), txNum, nil); err != nil {
+				return err
+			}
+			return w.Flush(ctx, tx)
+		}))
+	}
+	valuesAtStep := func(step uint64) (vals []string) {
+		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+			c, err := tx.CursorDupSort(d.ValuesTable)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			for k, v, err := c.SeekExact(key); k != nil; k, v, err = c.NextDup() {
+				if err != nil {
+					return err
+				}
+				if ^binary.BigEndian.Uint64(v[:8]) == step {
+					vals = append(vals, string(v[8:]))
+				}
+			}
+			return nil
+		}))
+		return vals
+	}
+
+	flush(5, "a")  // step 0
+	flush(20, "b") // step 1
+	flush(21, "c") // step 1 again: replaces "b"
+	require.Equal(t, []string{"c"}, valuesAtStep(1))
+
+	flush(22, "d") // still step 1, after other flushes of the step
+	require.Equal(t, []string{"d"}, valuesAtStep(1))
+	require.Equal(t, []string{"a"}, valuesAtStep(0))
+}
+
+func TestFlushedStepKeysTrust(t *testing.T) {
+	t.Parallel()
+	var f flushedStepKeys
+	require.True(t, f.mayHave([]byte("a"), 0), "the first step seen may predate the process")
+	require.True(t, f.mayHave([]byte("b"), 0))
+	require.False(t, f.mayHave([]byte("a"), 1), "a step that began in this process knows its keys")
+	require.True(t, f.mayHave([]byte("a"), 1), "a key flushed in the step is looked up")
+	require.True(t, f.mayHave([]byte("c"), 0), "an older step is always looked up")
+	f.distrust()
+	require.True(t, f.mayHave([]byte("d"), 1), "an unwind may have written keys the filter never saw")
+	require.False(t, f.mayHave([]byte("d"), 2), "trust returns with the next step")
+}

@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"math"
 	"os"
 	"path/filepath"
@@ -75,6 +76,8 @@ var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", "
 type Domain struct {
 	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
+
+	stepKeys flushedStepKeys
 
 	// Schema:
 	//  - .kv - key -> value
@@ -621,8 +624,58 @@ func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *Domain
 		largeVals: dt.d.LargeValues,
 		name:      dt.d.Name,
 		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
+		stepKeys:  &dt.d.stepKeys,
 	}
 	return w
+}
+
+// flushedStepKeys is a bit filter over the keys flushed at the newest step seen. A key it
+// misses has no value at that step in the DB, so its flush can skip the same-step lookup.
+// It is trusted only for a step that began in this process with no unwind since: a step
+// already in the DB at start, or one an unwind wrote, may hold keys it never saw.
+type flushedStepKeys struct {
+	mu      sync.Mutex
+	step    kv.Step
+	seen    bool
+	trusted bool
+	bits    []uint64
+}
+
+const flushedStepKeysBits = 64 * 1024 * 1024
+
+var flushedStepKeysSeed = maphash.MakeSeed()
+
+// mayHave reports whether k may already have a value at step in the DB, and records k.
+func (f *flushedStepKeys) mayHave(k []byte, step kv.Step) bool {
+	switch {
+	case !f.seen:
+		f.seen, f.step = true, step
+		return true
+	case step > f.step:
+		if f.bits == nil {
+			f.bits = make([]uint64, flushedStepKeysBits/64)
+		} else {
+			clear(f.bits)
+		}
+		f.step, f.trusted = step, true
+	case step < f.step:
+		return true
+	}
+	h := maphash.Bytes(flushedStepKeysSeed, k)
+	i1, i2 := (h>>32)%flushedStepKeysBits, (h&0xffffffff)%flushedStepKeysBits
+	if !f.trusted {
+		return true
+	}
+	had := f.bits[i1/64]&(1<<(i1%64)) != 0 && f.bits[i2/64]&(1<<(i2%64)) != 0
+	f.bits[i1/64] |= 1 << (i1 % 64)
+	f.bits[i2/64] |= 1 << (i2 % 64)
+	return had
+}
+
+func (f *flushedStepKeys) distrust() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.trusted = false
 }
 
 type DomainBufferedWriter struct {
@@ -638,6 +691,7 @@ type DomainBufferedWriter struct {
 	aux       []byte  // auxilary buffer for key1 + key2
 	aux2      []byte  // auxilary buffer for step + val
 	diff      *kv.DomainDiff
+	stepKeys  *flushedStepKeys
 
 	h *historyBufferedWriter
 }
@@ -677,7 +731,12 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	defer valuesCursor.Close()
+	w.stepKeys.mu.Lock()
+	defer w.stepKeys.mu.Unlock()
 	if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if !w.stepKeys.mayHave(k, kv.Step(^binary.BigEndian.Uint64(v[:8]))) {
+			return valuesCursor.Put(k, v)
+		}
 		foundVal, err := valuesCursor.SeekBothRange(k, v[:8])
 		if err != nil {
 			return err
@@ -1558,6 +1617,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
+	d.stepKeys.distrust()
 	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
 	if err != nil {
 		return err
