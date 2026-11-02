@@ -2425,7 +2425,8 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 	return g.None[bool]()
 }
 
-// setOverrideGenesis must run after the chain defaults are applied.
+// setOverrideGenesis must run after chain defaults so they cannot replace
+// the supplied genesis or network ID, or restore default DNS discovery.
 func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
 	// An explicitly empty path must fail instead of selecting the default chain.
 	if !ctx.IsSet(OverrideGenesisFlag.Name) {
@@ -2440,7 +2441,8 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
 	}
 	if !ctx.IsSet(NetworkIdFlag.Name) {
 		networkID := genesis.Config.ChainID.Uint64()
-		// Sentry rejects a zero network id in the eth handshake.
+		// Sentry treats local status with network ID 0 as incomplete,
+		// so it cannot proceed with peer handshakes.
 		if networkID == 0 {
 			return fmt.Errorf("--%s: genesis chain id %v maps to network id 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
 		}

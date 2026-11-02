@@ -1168,7 +1168,9 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 	return chainConfig, genesis, nil
 }
 
-// Explicit genesis files must reach the writer for validation on restart.
+// selectGenesis returns an explicit genesis for the writer to validate.
+// Otherwise, any stored genesis replaces config.Genesis. If block 0 exists,
+// this path returns nil so the writer uses the stored block.
 func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
 	if config.GenesisFromFile {
 		return config.Genesis, nil

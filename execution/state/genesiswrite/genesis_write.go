@@ -80,19 +80,11 @@ func (e *GenesisMismatchError) Error() string {
 	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
 
-// CommitGenesisBlock writes or updates the genesis block in db.
-// The block that will be used is:
-//
-//	                     genesis == nil       genesis != nil
-//	                  +------------------------------------------
-//	db has no genesis |  main-net          |  genesis
-//	db has genesis    |  from DB           |  genesis (if compatible)
-//
-// The stored chain configuration will be updated if it is compatible (i.e. does not
-// specify a fork block below the local head block). In case of a conflict, the
-// error is a *params.ConfigCompatError and the new, unwritten config is returned.
-//
-// The returned chain configuration is never nil.
+// CommitGenesisBlock writes genesis or updates the stored chain configuration.
+// If the DB already has genesis, a supplied genesis must have the same block hash.
+// If genesis is nil, it uses the stored block, or mainnet genesis for an empty DB.
+// Above block 0, conflicting configuration changes return *chain.ConfigCompatError
+// and the rejected configuration. Other errors may return a nil configuration.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
