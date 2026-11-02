@@ -396,6 +396,11 @@ var (
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
 		Value: true,
 	}
+	HttpCompressionLoopbackFlag = cli.BoolFlag{
+		Name:  "http.compression.loopback",
+		Usage: "Also compress HTTP-RPC responses to clients connecting from a loopback address (127.0.0.1, ::1). Off by default: on loopback compression only costs CPU and latency. Requests with an X-Forwarded-For or Forwarded header are treated as remote. Enable it when a reverse proxy on the same host sets neither header and does not compress itself",
+		Value: false,
+	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
 		Usage: "Enable compression over WebSocket (enabled by default in case WS-RPC is enabled). Use --ws.enabled=false to disable it",
@@ -1635,10 +1640,6 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
 			szLimit, DbSizeLimitFlag.Usage)
-	}
-
-	if err := cfg.Dirs.RenameOldVersions(false); err != nil {
-		return fmt.Errorf("failed to rename old versions: %w", err)
 	}
 
 	return nil

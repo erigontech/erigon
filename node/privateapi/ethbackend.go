@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -567,6 +568,7 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	}
 	ibs := state.New(reader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 	// The validation hook forbids BLOCKHASH, but cancellation does not stop
 	// the current opcode from calling GetHash.
 	rejectBlockHash := func(uint64) (common.Hash, error) {

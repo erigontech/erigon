@@ -110,8 +110,8 @@ func TestRemoteFrameAdmissionReleasesQueue(t *testing.T) {
 				known, err := pool.IdHashKnown(nil, frame.IDHash[:])
 				require.NoError(t, err)
 				require.True(t, known, "in-flight frames remain known after leaving the input queue")
-				_, _, hashes := pool.AppendAllAnnouncements(nil, nil, nil)
-				require.Empty(t, hashes)
+				_, _, announcedHashes := pool.AppendAllAnnouncements(nil, nil, nil)
+				require.Empty(t, announcedHashes)
 				pool.AddRemoteTxns(ctx, txns, peer, sentry)
 				require.Empty(t, pool.unprocessedRemoteTxns.Txns, "a duplicate must not consume another queue slot")
 			}

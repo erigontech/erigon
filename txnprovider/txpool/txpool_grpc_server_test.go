@@ -264,7 +264,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	})
 
 	// Apply state change
-	if err := pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}); err != nil {
+	if err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}); err != nil {
 		t.Fatalf("OnNewBlock: %v", err)
 	}
 

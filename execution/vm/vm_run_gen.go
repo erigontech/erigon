@@ -303,6 +303,13 @@ run:
 					pc++
 					continue run
 				}
+			case PUSH0:
+				if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().Clear()
+					pc++
+					continue run
+				}
 			case MCOPY:
 				if sLen >= 3 && jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 					gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
@@ -674,13 +681,6 @@ run:
 						pc++
 						continue run
 					}
-				case PUSH0:
-					if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
-						gasLeft -= GasQuickStep
-						callContext.Stack.pushRef().Clear()
-						pc++
-						continue run
-					}
 				case PC:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
@@ -772,6 +772,15 @@ run:
 						} else {
 							idx.Clear()
 						}
+						pc++
+						continue run
+					}
+				case CLZ:
+					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
+						gasLeft -= GasFastStep
+						x := callContext.Stack.peek()
+
+						x.SetUint64(256 - uint64(x.BitLen()))
 						pc++
 						continue run
 					}
@@ -976,7 +985,6 @@ var isColdOp = [256]bool{
 	CHAINID:        true,
 	BASEFEE:        true,
 	BLOBBASEFEE:    true,
-	PUSH0:          true,
 	PC:             true,
 	MSIZE:          true,
 	GAS:            true,
@@ -984,6 +992,7 @@ var isColdOp = [256]bool{
 	CODECOPY:       true,
 	RETURNDATACOPY: true,
 	BLOBHASH:       true,
+	CLZ:            true,
 	DUPN:           true,
 	SWAPN:          true,
 	EXCHANGE:       true,

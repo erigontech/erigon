@@ -320,8 +320,8 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
-		limits, err := protocol.TransactionGasLimits(txn, isAmsterdam)
-		if err != nil {
+		limits, gasErr := protocol.TransactionGasLimits(txn, isAmsterdam)
+		if gasErr != nil {
 			continue
 		}
 		executionGas, stateGas := limits.Execution, limits.State

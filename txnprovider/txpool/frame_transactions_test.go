@@ -430,8 +430,8 @@ func TestFramePoolDiscardRefreshesSenderNonceChain(t *testing.T) {
 				otherSender := common.Address{0x55}
 				var other TxnSlots
 				other.Append(framePoolSlot(t, otherSender, 1, 2, uint256.Int{1}), otherSender[:], true)
-				reasons, err := pool.AddLocalTxns(ctx, other)
-				require.NoError(t, err)
+				reasons, addErr := pool.AddLocalTxns(ctx, other)
+				require.NoError(t, addErr)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 				wantSelected = 1
 			}
@@ -936,8 +936,8 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 					successors.Append(txn, sender[:], true)
 				}
 			} else {
-				wrapped, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
-				require.NoError(t, err)
+				wrapped, parseErr := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
+				require.NoError(t, parseErr)
 				wrapper := wrapped.(*types.BlobTxWrapper)
 				wrapper.Tx.Nonce = 1
 				var encoded bytes.Buffer
@@ -945,8 +945,8 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 				blob := &TxnSlot{}
 				parser := NewTxnParseContext(*uint256.NewInt(1))
 				parser.WithSender(false)
-				_, err = parser.ParseTransaction(encoded.Bytes(), 0, blob, nil, false, true, nil)
-				require.NoError(t, err)
+				_, parseErr = parser.ParseTransaction(encoded.Bytes(), 0, blob, nil, false, true, nil)
+				require.NoError(t, parseErr)
 				successors.Append(blob, sender[:], true)
 			}
 			reasons, err = pool.AddLocalTxns(ctx, successors)
@@ -1309,11 +1309,11 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			}
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
-				persisted, err := tx.Has(kv.PoolTransaction, frame.IDHash[:])
-				require.NoError(t, err)
+				persisted, readErr := tx.Has(kv.PoolTransaction, frame.IDHash[:])
+				require.NoError(t, readErr)
 				require.True(t, persisted)
-				known, err := pool.IdHashKnown(tx, frame.IDHash[:])
-				require.NoError(t, err)
+				known, readErr := pool.IdHashKnown(tx, frame.IDHash[:])
+				require.NoError(t, readErr)
 				require.False(t, known)
 				return nil
 			}))

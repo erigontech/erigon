@@ -505,10 +505,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		if path == CodePath || path == CodeSizePath {
 			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
 				if !commited {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        r.life.state == LifecycleAbsent,
-					})
+					recordWipedSelfDestruct(s, addr, r.life)
 					recordWipedCodeRead(s, addr, path, Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc})
 				}
 				r.outcome = outcomeReturnDefault
@@ -524,22 +521,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// otherwise make validation disagree forever and livelock.
 		if path == StoragePath || path == NoncePath {
 			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
-				destructVer := Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}
 				if !commited {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-						Val:        r.life.state == LifecycleAbsent,
-					})
-					// Record the wiped slot read anchored on the destruct version, matching
-					// liveStorage: a later store above the destruct resolves there and
-					// version-mismatches this read, so it invalidates by version alone. The
-					// destruct is stable, so this needs no value tiebreaker to survive the
-					// revival tx's incarnation churn.
+					recordWipedSelfDestruct(s, addr, r.life)
 					if path == StoragePath {
-						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
-							ReadHeader: ReadHeader{Source: MapRead, Version: destructVer},
-							Val:        uint256.Int{},
-						})
+						recordWipedStorageRead(s, addr, key, r.life)
 					}
 				}
 				r.outcome = outcomeReturnZero
@@ -652,14 +637,8 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
-				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
-					Val:        r.life.state == LifecycleAbsent,
-				})
-				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
-					ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: r.life.destroyedAt, Incarnation: r.life.wipeInc}},
-					Val:        uint256.Int{},
-				})
+				recordWipedSelfDestruct(s, addr, r.life)
+				recordWipedStorageRead(s, addr, key, r.life)
 			}
 			r.outcome = outcomeReturnZero
 			r.source = MapRead
@@ -1229,6 +1208,23 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	default:
 		panic(fmt.Sprintf("refreshIncarnation: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// recordWipedSelfDestruct records the SelfDestruct cell a wiped read resolves
+// through; after a revival that cell holds false.
+func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lifecycleVerdict) {
+	s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: life.canonicalVer},
+		Val:        life.state == LifecycleAbsent,
+	})
+}
+
+// recordWipedStorageRead records a zero slot read at the destruct that wiped it,
+// as liveStorage resolves it, so a later store above the destruct invalidates it.
+func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
+	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},
+	})
 }
 
 // recordWipedCodeRead records an empty code / zero code-size read at the destruct that

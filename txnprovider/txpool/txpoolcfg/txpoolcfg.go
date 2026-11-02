@@ -131,6 +131,7 @@ const (
 	TipAboveFeeCap             // EIP-1559: max priority fee per gas cannot exceed max fee per gas
 	DelegatedNonceGap          // Delegated account transaction nonce is not currently executable
 	DelegatedTxnLimit          // Delegated account already has an executable transaction
+	BlobSlotsOverflow
 )
 
 func (r DiscardReason) String() string {
@@ -189,6 +190,8 @@ func (r DiscardReason) String() string {
 		return "can't replace blob-txn with a non-blob-txn"
 	case BlobPoolOverflow:
 		return "blobs limit in txpool is full"
+	case BlobSlotsOverflow:
+		return "sender blob limit exceeded"
 	case NoAuthorizations:
 		return "EIP-7702 transactions with an empty authorization list are invalid"
 	case GasLimitTooHigh:
