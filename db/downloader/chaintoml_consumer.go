@@ -14,8 +14,10 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -84,16 +86,29 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 }
 
 // DownloadChainTomlByInfoHash downloads chain.toml from the BitTorrent network using its info-hash.
-// The file is downloaded to snapDir, read, and the torrent is dropped afterward.
+// New downloads use temporary storage. Completed local manifests are read without dropping their torrent.
 //
 // If peer is non-nil, it is used to directly add the peer's torrent endpoint via AddPeers,
 // bypassing the need for DHT or tracker discovery.
 func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string, peer *ChainTomlPeer) ([]byte, error) {
-	t, _ := client.AddTorrentInfoHash(infoHash)
-	defer t.Drop()
+	// Metadata opens file storage before the torrent's name can be checked.
+	downloadDir, err := os.MkdirTemp(snapDir, ".chaintoml-download-")
+	if err != nil {
+		return nil, fmt.Errorf("creating chain.toml download directory: %w", err)
+	}
+	defer func() { _ = dir.RemoveAll(downloadDir) }()
+	store := storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: downloadDir})
+	defer store.Close()
+
+	t, added := client.AddTorrentOpt(torrent.AddTorrentOpts{InfoHash: infoHash, Storage: store})
+	if added {
+		defer t.Drop()
+	} else if !t.Complete().Bool() {
+		return nil, fmt.Errorf("chain.toml torrent already exists and is incomplete")
+	}
 
 	// If the peer advertised a BT port in their ENR, add them directly as a torrent peer.
-	if peer != nil {
+	if added && peer != nil {
 		addTorrentPeerFromENR(t, peer)
 	}
 
@@ -122,17 +137,20 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q", info.Name, ChainTomlFileName)
 	}
 
-	t.DownloadAll()
-
-	select {
-	case <-t.Complete().On():
-	case <-dlCtx.Done():
-		return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
+	filePath := ChainTomlPath(downloadDir)
+	if added {
+		t.DownloadAll()
+		select {
+		case <-t.Complete().On():
+		case <-dlCtx.Done():
+			return nil, fmt.Errorf("downloading chain.toml torrent: %w", dlCtx.Err())
+		}
+	} else {
+		filePath = ChainTomlPath(snapDir)
 	}
 
 	// Read the downloaded chain.toml file. The validation above guarantees
 	// the torrent wrote to this path.
-	filePath := ChainTomlPath(snapDir)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)

@@ -34,8 +34,10 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 
 	// Create a test file to share.
 	testData := []byte("hello from the seeder — this is a snapshot manifest")
-	testFile := "test-chain.toml"
+	testFile := ChainTomlFileName
 	require.NoError(t, os.WriteFile(filepath.Join(seederDir, testFile), testData, 0o644))
+	localData := []byte("existing local manifest")
+	require.NoError(t, os.WriteFile(ChainTomlPath(leecherDir), localData, 0o644))
 
 	// Start seeder torrent client.
 	seederCfg := newTestClientConfig(t, seederDir)
@@ -71,31 +73,16 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	require.NoError(t, err)
 	defer leecher.Close()
 
-	// Add the torrent by info-hash (leecher doesn't have the metainfo yet).
-	leecherTorrent, _ := leecher.AddTorrentInfoHash(infoHash)
-
-	// Use the ENR BT port to add the seeder as a direct peer.
-	addTorrentPeerFromENR(leecherTorrent, best)
-
-	// Wait for metainfo exchange.
-	select {
-	case <-leecherTorrent.GotInfo():
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for torrent info from seeder")
-	}
-
-	// Download the file.
-	leecherTorrent.DownloadAll()
-	select {
-	case <-leecherTorrent.Complete().On():
-	case <-ctx.Done():
-		t.Fatal("timed out downloading from seeder")
-	}
-
-	// Verify the downloaded content matches.
-	downloaded, err := os.ReadFile(filepath.Join(leecherDir, testFile))
+	downloaded, err := DownloadChainTomlByInfoHash(ctx, leecher, infoHash, leecherDir, best)
 	require.NoError(t, err)
 	assert.Equal(t, testData, downloaded)
+	got, err := os.ReadFile(ChainTomlPath(leecherDir))
+	require.NoError(t, err)
+	assert.Equal(t, localData, got)
+	assert.Empty(t, leecher.Torrents())
+	entries, err := filepath.Glob(filepath.Join(leecherDir, ".chaintoml-download-*"))
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 // TestBTPeerDiscovery_NoBTPort verifies that when a peer doesn't advertise
