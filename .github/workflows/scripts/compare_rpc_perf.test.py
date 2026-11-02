@@ -31,11 +31,11 @@ def check(name, cond, detail=""):
         print(f"FAIL {name} {detail}")
 
 
-def rep(p50_ms, p95_ms, max_ms, success=1.0):
+def rep(p50_ms, p95_ms, max_ms, success=1.0, rpc_success=1.0):
     return {"vegetaReport": {
         "latencies": {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)},
         "success": success,
-    }}
+    }, "rpcSuccessRatio": rpc_success}
 
 
 def write_result(root, client, label, results):
@@ -98,6 +98,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("clients in fixed order", [r.split("|")[2].strip() for r in eth_rows[:3]] == ["erigon", "geth", "nethermind"], md)
     check("latencies rendered in ms", "| 1000 | erigon | 4.00 | 5.00 | 6.00 | 100.00% |" in md, md)
     check("one section per test", md.count("### eth_call") == 1 and md.count("### mixed") == 1, md)
+
+# --- RPC success: the worst repetition, rendered apart from the HTTP one ---------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "5", "testRepetitions": [rep(1, 2, 3, 1.0, 0.25), rep(1, 2, 3, 1.0, 0.06), rep(1, 2, 3, 1.0, 0.5)]},
+    ])
+    res = mod.load_results(tmp)
+    check("rpc success is the worst repetition", res["trace_block_struct_log"]["reth"]["5"]["rpc_success"] == 0.06, res)
+    md = mod.render(res)
+    check("rpc success rendered next to http success", "| 100.00% | 6.00% |" in md, md)
 
 # --- main ---------------------------------------------------------------------
 

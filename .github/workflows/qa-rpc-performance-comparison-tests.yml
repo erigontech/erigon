@@ -307,11 +307,11 @@ jobs:
             --counts 20000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_wide_gen_latest.jsonl"
           # The patterns that trace recent blocks are generated last, in the reverse order of their run.
-          # blocks=32 keeps the traced blocks inside the recent state that full nodes keep (e.g. 128 blocks for Geth).
+          # --max-blocks 32 keeps the traced blocks inside the recent state that full nodes keep (e.g. 128 blocks for Geth).
           for tracer in callTracer structLog; do
             option=""
             [ "$tracer" = callTracer ] && option="tracer=callTracer"
-            printf '[methods]\ndebug_traceBlockByNumber 100%% %s blocks=32\n' "$option" > "$RUNNER_TEMP/trace_block_$tracer.profile"
+            printf '[methods]\ndebug_traceBlockByNumber 100%% %s\n' "$option" > "$RUNNER_TEMP/trace_block_$tracer.profile"
           done
           ./build/bin/rpc_pattern_gen --profile "$RUNNER_TEMP/trace_block_structLog.profile" --url http://localhost:8545 \
             --counts 50 --block-tag latest --verify --keep ok --max-blocks 32 \

@@ -25,13 +25,12 @@ def load_results(root):
         label = os.path.basename(path)[len(client) + 1:-len("-result.json")]
         for step in report["results"]:
             reps = [r["vegetaReport"] for r in step["testRepetitions"]]
-            rpc = [r["rpcSuccessRatio"] for r in step["testRepetitions"] if "rpcSuccessRatio" in r]
             results.setdefault(label, {}).setdefault(client, {})[step["qps"]] = {
                 "p50": statistics.median(r["latencies"]["50th"] for r in reps) / 1e6,
                 "p95": statistics.median(r["latencies"]["95th"] for r in reps) / 1e6,
                 "max": max(r["latencies"]["max"] for r in reps) / 1e6,
                 "success": min(r["success"] for r in reps),
-                "rpc_success": min(rpc) if rpc else None,
+                "rpc_success": min(r["rpcSuccessRatio"] for r in step["testRepetitions"]),
             }
     return results
 
@@ -52,9 +51,8 @@ def render(results):
             for client in clients:
                 s = results[label][client].get(qps)
                 if s:
-                    rpc = "n/a" if s["rpc_success"] is None else f"{s['rpc_success']:.2%}"
                     lines.append(f"| {qps} | {client} | {s['p50']:.2f} | {s['p95']:.2f} | {s['max']:.2f} "
-                                 f"| {s['success']:.2%} | {rpc} |")
+                                 f"| {s['success']:.2%} | {s['rpc_success']:.2%} |")
         lines.append("")
     return "\n".join(lines)
 
