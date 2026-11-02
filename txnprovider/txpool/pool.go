@@ -1003,7 +1003,14 @@ func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uin
 func (p *TxPool) CountContent() (int, int, int) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
+	queued := p.queued.Len()
+	// Include parked frames in the queued count, matching their RPC listing.
+	for _, mt := range p.all.senderIDFrameTxn {
+		if mt.currentSubPool == 0 {
+			queued++
+		}
+	}
+	return p.pending.Len(), p.baseFee.Len(), queued
 }
 
 func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
@@ -3111,9 +3118,15 @@ func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t S
 
 	p.all.ascendAll(func(mt *metaTxn) bool {
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
+			subPool := mt.currentSubPool
+			if subPool == 0 && mt.TxnSlot.TxType() == FrameTxnType {
+				// Parked frames appear as queued in RPC, but stay outside the
+				// scheduling sub-pools until validation succeeds.
+				subPool = QueuedSubPool
+			}
 			txns = append(txns, mt)
 			senders = append(senders, sender)
-			subPoolTypes = append(subPoolTypes, mt.currentSubPool)
+			subPoolTypes = append(subPoolTypes, subPool)
 			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
 		}
 
