@@ -43,14 +43,14 @@ func (cc *commitmentCalculator) clearTouched() {
 // marked only when it actually changed; a true SelfDestruct marks the subtree reset. A
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
-func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
+func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, base state.StateReader) {
 	if cc.touchedAccounts == nil {
 		cc.touchedAccounts = map[accounts.Address]struct{}{}
 		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
 		cc.destructed = map[accounts.Address]struct{}{}
 	}
 	for a := range writes.AccountChanges() {
-		cc.addTouchedAccount(a)
+		cc.addTouchedAccount(a, base)
 	}
 	for a, vw := range writes.SelfDestructs() {
 		if vw.Val {
@@ -58,7 +58,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 		}
 	}
 	for a, slots := range writes.StorageChanges() {
-		cc.addTouchedAccount(a)
+		cc.addTouchedAccount(a, base)
 		m := cc.touchedStorage[a]
 		if m == nil {
 			m = map[accounts.StorageKey]struct{}{}
@@ -77,11 +77,16 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 	}
 }
 
-func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address) {
+func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state.StateReader) {
 	if _, seen := cc.touchedAccounts[a]; seen {
 		return
 	}
 	cc.touchedAccounts[a] = struct{}{}
+	if base != nil {
+		if acc, err := base.ReadAccountData(a); err == nil {
+			cc.baseAccounts[a] = acc
+		}
+	}
 	if cc.prefetchFn != nil {
 		address := a.Value()
 		cc.prefetchFn(address[:])
@@ -134,4 +139,31 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		}
 	}
 	return view.Err()
+}
+
+func (cc *commitmentCalculator) setBlockBase(baseTxNum uint64, base state.StateReader) {
+	cc.blockBaseTxNum, cc.blockBase = baseTxNum, base
+	if cc.baseAccounts == nil {
+		cc.baseAccounts = map[accounts.Address]*accounts.Account{}
+	}
+	clear(cc.baseAccounts)
+}
+
+func (cc *commitmentCalculator) foldView(vm *state.VersionMap, lastTxNum uint64, base state.StateReader) *state.VersionMapView {
+	if len(cc.baseAccounts) > 0 && vm.BaseTxNum() == cc.blockBaseTxNum {
+		base = &cachedAccountReader{StateReader: base, accounts: cc.baseAccounts}
+	}
+	return vm.View(lastTxNum, base)
+}
+
+type cachedAccountReader struct {
+	state.StateReader
+	accounts map[accounts.Address]*accounts.Account
+}
+
+func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if acc, ok := r.accounts[addr]; ok {
+		return acc, nil
+	}
+	return r.StateReader.ReadAccountData(addr)
 }

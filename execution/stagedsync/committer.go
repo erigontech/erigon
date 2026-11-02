@@ -108,6 +108,9 @@ type commitmentCalculator struct {
 	touchedAccounts map[accounts.Address]struct{}
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey]struct{}
 	destructed      map[accounts.Address]struct{}
+	blockBase       state.StateReader
+	blockBaseTxNum  uint64
+	baseAccounts    map[accounts.Address]*accounts.Account
 	// curVersionMap is the block currently being folded; emitTouched reads it.
 	curVersionMap *state.VersionMap
 
@@ -371,12 +374,17 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
+		var base state.StateReader
 		if r.versionMap != nil {
 			cc.curVersionMap = r.versionMap
+			if bt := r.versionMap.BaseTxNum(); cc.blockBase == nil || bt != cc.blockBaseTxNum {
+				cc.setBlockBase(bt, cc.asOfReader.dr.StateReaderAt(bt))
+			}
+			base = cc.blockBase
 		}
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
-			cc.accumulateTouched(r.writes)
+			cc.accumulateTouched(r.writes, base)
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -649,8 +657,8 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	cc.clearTouched()
-	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex))
-	err := cc.emitTouched(vm.View(t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
+	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex), nil)
+	err := cc.emitTouched(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
 	cc.clearTouched()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
@@ -684,7 +692,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	// Recompute block r the raw-view way (emitTouched over the version map) to
 	// cross-check against the BAL-driven root.
 	cc.asOfReader.txNum = r.lastTxNum + 1
-	err := cc.emitTouched(cc.curVersionMap.View(r.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
+	err := cc.emitTouched(cc.foldView(cc.curVersionMap, r.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	cc.clearTouched()
 	incUpdates := cc.handOffUpdates()
 	if err != nil {
@@ -792,7 +800,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
-	emitErr := cc.emitTouched(cc.curVersionMap.View(t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
+	emitErr := cc.emitTouched(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	if !m.midBlock {
 		cc.clearTouched()
 	}

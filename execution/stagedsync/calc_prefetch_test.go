@@ -51,13 +51,13 @@ func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 	slotValue := slot.Value()
 	want := [][]byte{payer[:], contract[:], append(contract[:], slotValue[:]...)}
 
-	cc.accumulateTouched(writes(1))
-	cc.accumulateTouched(writes(2))
+	cc.accumulateTouched(writes(1), nil)
+	cc.accumulateTouched(writes(2), nil)
 	require.ElementsMatch(t, want, got, "a key touched twice in one block is prefetched once")
 
 	got = nil
 	cc.clearTouched()
-	cc.accumulateTouched(writes(3))
+	cc.accumulateTouched(writes(3), nil)
 	require.ElementsMatch(t, want, got, "the next block prefetches the key again")
 }
 

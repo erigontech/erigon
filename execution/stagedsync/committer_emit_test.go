@@ -229,7 +229,7 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 	t.Run("account", func(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		cc := &commitmentCalculator{}
-		cc.accumulateTouched(newWS().nonce(addr, ver, 1).build())
+		cc.accumulateTouched(newWS().nonce(addr, ver, 1).build(), nil)
 		err := cc.emitTouched(vm.View(txIdx+1, &failingAccountReader{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
 		require.ErrorIs(t, err, boom)
 	})
@@ -239,8 +239,57 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		vm.FlushVersionedWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
 		cc := &commitmentCalculator{}
-		cc.accumulateTouched(ws)
+		cc.accumulateTouched(ws, nil)
 		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
 		require.ErrorIs(t, err, boom)
 	})
+}
+
+type countingAccountReader struct {
+	*mapStateReader
+	reads int
+}
+
+func (r *countingAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	r.reads++
+	return r.mapStateReader.ReadAccountData(addr)
+}
+
+// TestEmitTouched_FoldReusesFirstTouchBaseRead pins that the fold composes from the base
+// account read when the account was first touched, instead of reading the base again at
+// block end, and that a fold over another block's version map reads its own base.
+func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	ver := state.Version{TxIndex: txIdx}
+	addr := accounts.InternAddress([20]byte{0xf1})
+	av := addr.Value()
+	acc := accounts.NewAccount()
+	acc.Nonce = 3
+	acc.Balance = *uint256.NewInt(1)
+
+	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).build()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true)
+	base := &countingAccountReader{mapStateReader: newMapStateReader()}
+	base.accounts[addr] = &acc
+
+	cc := &commitmentCalculator{}
+	cc.setBlockBase(vm.BaseTxNum(), base)
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), base)
+	readsBeforeFold := base.reads
+
+	u := newTestUpdates()
+	require.NoError(t, cc.emitTouched(cc.foldView(vm, txIdx+1, base), u))
+	require.Equal(t, readsBeforeFold, base.reads, "the fold must not read the base again")
+	got := collectUpdates(t, u)[string(av[:])]
+	require.Equal(t, *uint256.NewInt(5), got.Balance)
+	require.Equal(t, uint64(3), got.Nonce)
+
+	other := state.NewVersionMap(nil)
+	other.SetBaseTxNum(100)
+	other.FlushVersionedWrites(ws, true)
+	require.NoError(t, cc.emitTouched(cc.foldView(other, 100+txIdx+1, base), newTestUpdates()))
+	require.Equal(t, readsBeforeFold+1, base.reads, "a fold over another block must read its own base")
 }

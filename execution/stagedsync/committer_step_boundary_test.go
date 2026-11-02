@@ -312,8 +312,8 @@ func TestHandleMessage_BaseReadErrorFailsTheBlock(t *testing.T) {
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], []byte{0, 0, 0}, 0, nil))
 	ws := &state.WriteSet{}
 	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
-	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, common.Hash{0x01}, 1, &chain.Rules{}, ws))
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 1})
+	cc.handleMessage(ctx, recordTx(newRawViewVM(2), 1, common.Hash{0x01}, 2, &chain.Rules{}, ws))
+	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 2})
 
 	require.Len(t, out, 1)
 	require.ErrorContains(t, (<-out).err, "base read failed")

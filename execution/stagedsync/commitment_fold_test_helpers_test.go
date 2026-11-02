@@ -46,7 +46,7 @@ func emitTouchedUpdates(t *testing.T, vm *state.VersionMap, lastTxNum uint64, ba
 	t.Helper()
 	cc := &commitmentCalculator{}
 	for _, w := range writes {
-		cc.accumulateTouched(w)
+		cc.accumulateTouched(w, nil)
 	}
 	u := newTestUpdates()
 	require.NoError(t, cc.emitTouched(vm.View(lastTxNum, base), u))
