@@ -218,10 +218,6 @@ type failOnceEnvelopeForkGraph struct {
 	failed atomic.Bool
 }
 
-type prunedAfterDumpEnvelopeForkGraph struct {
-	*persistingEnvelopeForkGraph
-}
-
 type hasEnvelopeCountdownForkGraph struct {
 	*persistingEnvelopeForkGraph
 	remaining atomic.Int32
@@ -426,14 +422,6 @@ func (g *failOnceEnvelopeForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelop
 		return g.err
 	}
 	return g.persistingEnvelopeForkGraph.DumpEnvelopeOnDisk(root, envelope)
-}
-
-func (*prunedAfterDumpEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
-	return false
-}
-
-func (*prunedAfterDumpEnvelopeForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	return nil, errors.New("envelope pruned after dump")
 }
 
 func (g *hasEnvelopeCountdownForkGraph) HasEnvelope(root common.Hash) bool {
@@ -1926,7 +1914,7 @@ func TestIndexRepairSurvivesIndexWritePanic(t *testing.T) {
 func TestOnExecutionPayloadIndexesEnvelopePrunedBeforeIndexWrite(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
-	f.forkGraph = &prunedAfterDumpEnvelopeForkGraph{persistingEnvelopeForkGraph: graph}
+	f.forkGraph = &hasEnvelopeCountdownForkGraph{persistingEnvelopeForkGraph: graph}
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	f.db = db
 
