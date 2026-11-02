@@ -130,6 +130,11 @@ func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
 	}, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
+	// The stream starts reading only after it has subscribed both feeds, so a delivered head event means the operation
+	// feed is subscribed too and no attestation below is sent to zero subscribers.
+	require.Eventually(t, func() bool {
+		return w.count(beaconevents.StateHead) == 1
+	}, 5*time.Second, 10*time.Millisecond, "the stream did not deliver the head event")
 
 	attestations := 2 * eventStreamFeedBuffer
 	sent := make(chan struct{})
@@ -146,8 +151,9 @@ func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
 	}
 
 	require.Eventually(t, func() bool {
-		return w.count(beaconevents.OpSingleAttestation) == attestations && w.count(beaconevents.StateHead) == 1
-	}, 5*time.Second, 10*time.Millisecond, "the stream did not deliver every event")
+		return w.count(beaconevents.OpSingleAttestation) == attestations
+	}, 5*time.Second, 10*time.Millisecond, "the stream did not deliver every attestation")
+	require.Equal(t, 1, w.count(beaconevents.StateHead))
 	select {
 	case <-handlerDone:
 		t.Fatal("event stream closed")
