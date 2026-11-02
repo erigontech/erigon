@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -154,6 +155,18 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
+	}
+	if !added {
+		if int64(len(data)) != info.Length || info.PieceLength <= 0 {
+			return nil, fmt.Errorf("chain.toml does not match torrent length")
+		}
+		pieces, hashErr := metainfo.GeneratePieces(bytes.NewReader(data), info.PieceLength, nil)
+		if hashErr != nil {
+			return nil, fmt.Errorf("hashing local chain.toml: %w", hashErr)
+		}
+		if !bytes.Equal(pieces, info.Pieces) {
+			return nil, fmt.Errorf("chain.toml does not match torrent pieces")
+		}
 	}
 
 	return data, nil

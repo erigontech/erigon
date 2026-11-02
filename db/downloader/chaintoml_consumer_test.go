@@ -106,26 +106,49 @@ func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
 }
 
 func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
-	snapDir := t.TempDir()
 	data := BuildTomlFromMap(map[string]string{"snapshot.seg": "abc123"})
-	require.NoError(t, os.WriteFile(ChainTomlPath(snapDir), data, 0o644))
-	client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
-	require.NoError(t, err)
-	defer client.Close()
-	mi := buildTestMetainfo(t, snapDir, ChainTomlFileName)
-	existing, err := client.AddTorrent(&mi)
-	require.NoError(t, err)
-	require.True(t, existing.Complete().Bool())
+	for _, tc := range []struct {
+		name        string
+		replacement []byte
+	}{
+		{name: "unchanged"},
+		{name: "rewritten", replacement: BuildTomlFromMap(map[string]string{"snapshot.seg": "def456"})},
+		{name: "shorter", replacement: []byte{}},
+		{name: "longer", replacement: BuildTomlFromMap(map[string]string{"snapshot.seg": "abc123", "extra.seg": "def456"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapDir := t.TempDir()
+			require.NoError(t, SaveChainToml(snapDir, data))
+			client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
+			require.NoError(t, err)
+			defer client.Close()
+			mi := buildTestMetainfo(t, snapDir, ChainTomlFileName)
+			existing, err := client.AddTorrent(&mi)
+			require.NoError(t, err)
+			require.True(t, existing.Complete().Bool())
+			if tc.replacement != nil {
+				require.NoError(t, SaveChainToml(snapDir, tc.replacement))
+			}
 
-	got, err := DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), snapDir, nil)
-	require.NoError(t, err)
-	assert.Equal(t, data, got)
-	registered, ok := client.Torrent(mi.HashInfoBytes())
-	require.True(t, ok)
-	assert.Same(t, existing, registered)
-	entries, err := filepath.Glob(filepath.Join(snapDir, ".chaintoml-download-*"))
-	require.NoError(t, err)
-	assert.Empty(t, entries)
+			got, err := DownloadChainTomlByInfoHash(t.Context(), client, mi.HashInfoBytes(), snapDir, nil)
+			if tc.replacement == nil {
+				require.NoError(t, err)
+				assert.Equal(t, data, got)
+			} else {
+				require.ErrorContains(t, err, "chain.toml does not match torrent")
+				assert.Nil(t, got)
+				onDisk, readErr := os.ReadFile(ChainTomlPath(snapDir))
+				require.NoError(t, readErr)
+				assert.Equal(t, tc.replacement, onDisk)
+			}
+			registered, ok := client.Torrent(mi.HashInfoBytes())
+			require.True(t, ok)
+			assert.Same(t, existing, registered)
+			entries, err := filepath.Glob(filepath.Join(snapDir, ".chaintoml-download-*"))
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
+	}
 }
 
 func TestParseChainToml(t *testing.T) {
