@@ -1983,6 +1983,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 	}
 
 	if dbg.AssertEnabled {
+		sd.MergePendingWrites()
 		forgotten := 0
 		if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte) (bool, error) {
 			forgotten++

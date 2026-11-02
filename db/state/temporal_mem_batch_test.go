@@ -274,3 +274,54 @@ func TestDeferredStorageReachesReadersAtMerge(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "s1", string(before))
 }
+
+func TestDeferredWritesCountSizesLikeDirectWrites(t *testing.T) {
+	t.Parallel()
+	for _, inMemHistoryReads := range []bool{true, false} {
+		t.Run(fmt.Sprintf("inMemHistoryReads=%t", inMemHistoryReads), func(t *testing.T) {
+			t.Parallel()
+			newBatch := func() *TemporalMemBatch {
+				sd := &TemporalMemBatch{
+					stepSize:          16,
+					storage:           btree2.NewMap[string, []dataWithTxNum](128),
+					metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+					inMemHistoryReads: inMemHistoryReads,
+				}
+				for d := range sd.domains {
+					sd.domains[d] = map[string][]dataWithTxNum{}
+				}
+				return sd
+			}
+			writes := func(sd *TemporalMemBatch) {
+				for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+					sd.putLatest(d, "k", []byte("v1"), 1)
+					sd.MergePendingWrites()
+					sd.putLatest(d, "k", []byte("v2-long"), 2)
+					sd.MergePendingWrites()
+					sd.putLatest(d, "k", []byte("v2"), 2)
+					sd.putLatest(d, "k", []byte("v3"), 3)
+					sd.MergePendingWrites()
+				}
+			}
+			direct, deferred := newBatch(), newBatch()
+			writes(direct)
+			deferred.DeferWrites(true)
+			writes(deferred)
+			require.Equal(t, direct.metrics.CachePutKeySize, deferred.metrics.CachePutKeySize)
+			require.Equal(t, direct.metrics.CachePutValueSize, deferred.metrics.CachePutValueSize)
+			if !inMemHistoryReads {
+				return
+			}
+			for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+				for _, ts := range []uint64{2, 3, 4} {
+					want, wantOk, err := direct.GetAsOf(d, []byte("k"), ts)
+					require.NoError(t, err)
+					got, gotOk, err := deferred.GetAsOf(d, []byte("k"), ts)
+					require.NoError(t, err)
+					require.Equal(t, wantOk, gotOk)
+					require.Equal(t, string(want), string(got), "domain %s as of %d", d, ts)
+				}
+			}
+		})
+	}
+}

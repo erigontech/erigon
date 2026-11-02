@@ -199,7 +199,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
 	var putKeySize, putValueSize int
 	if p := sd.pending[domain]; p != nil {
-		sameTxNumUpdate, putKeySize, putValueSize = sd.putPending(p, key, valWithStep)
+		sameTxNumUpdate, putKeySize, putValueSize = sd.putPending(domain, p, key, valWithStep)
 	} else {
 		sameTxNumUpdate, putKeySize, putValueSize = sd.putLatestLocked(domain, key, valWithStep)
 	}
@@ -261,12 +261,25 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	return sameTxNumUpdate, putKeySize, putValueSize
 }
 
-func (sd *TemporalMemBatch) putPending(p map[string][]dataWithTxNum, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
+// putPending counts sizes and detects same-txNum updates as putLatestLocked does,
+// so a merge between two writes of a key changes neither.
+func (sd *TemporalMemBatch) putPending(domain kv.Domain, p map[string][]dataWithTxNum, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
 	old, ok := p[key]
-	switch {
-	case !ok:
+	if !ok {
 		p[key] = []dataWithTxNum{valWithStep}
-		return false, len(key), len(valWithStep.data)
+		last, published := sd.publishedLast(domain, key)
+		switch {
+		case !published:
+			return false, len(key), len(valWithStep.data)
+		case last.txNum == valWithStep.txNum:
+			return true, 0, len(valWithStep.data) - len(last.data)
+		case sd.inMemHistoryReads:
+			return false, 0, len(valWithStep.data)
+		default:
+			return false, 0, len(valWithStep.data) - len(last.data)
+		}
+	}
+	switch {
 	case old[len(old)-1].txNum == valWithStep.txNum:
 		putValueSize = len(valWithStep.data) - len(old[len(old)-1].data)
 		old[len(old)-1] = valWithStep
@@ -280,6 +293,22 @@ func (sd *TemporalMemBatch) putPending(p map[string][]dataWithTxNum, key string,
 		p[key] = old[:1]
 		return false, 0, putValueSize
 	}
+}
+
+func (sd *TemporalMemBatch) publishedLast(domain kv.Domain, key string) (dataWithTxNum, bool) {
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
+	var vs []dataWithTxNum
+	var ok bool
+	if domain == kv.StorageDomain {
+		vs, ok = sd.storage.Get(key)
+	} else {
+		vs, ok = sd.domains[domain][key]
+	}
+	if !ok {
+		return dataWithTxNum{}, false
+	}
+	return vs[len(vs)-1], true
 }
 
 var deferredDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}

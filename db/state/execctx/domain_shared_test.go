@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -1458,6 +1459,15 @@ func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
 			}
 			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
 		}},
+		{name: "del-merge-put", second: func(domains *execctx.SharedDomains, rwTx kv.TemporalRwTx, key []byte, v1 []byte) error {
+			domains.DeferWrites(true)
+			defer domains.DeferWrites(false)
+			if err := domains.DomainDel(kv.AccountsDomain, rwTx, key, 10, nil); err != nil {
+				return err
+			}
+			domains.MergePendingWrites()
+			return domains.DomainPut(kv.AccountsDomain, rwTx, key, v1, 10, nil)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1492,6 +1502,27 @@ func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
 			require.Empty(t, got, "GetAsOf(5) is before the first write")
 		})
 	}
+}
+
+func TestDomainDelPrefix_DeferredTombstonesPassAssert(t *testing.T) { //nolint:paralleltest // sets dbg.AssertEnabled
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	ctx := t.Context()
+	db := newTestDb(t, 1000)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0xAB
+	slot := append(bytes.Clone(addr), make([]byte, length.Hash)...)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, slot, []byte{1}, 1, nil))
+	domains.DeferWrites(true)
+	defer domains.DeferWrites(false)
+	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, rwTx, addr, 2))
 }
 
 func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
