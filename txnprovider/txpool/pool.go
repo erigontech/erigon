@@ -2509,12 +2509,27 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		p.discardLocked(tx, txpoolcfg.BaseFeePoolOverflow)
 	}
 
-	// Discard worst transactions from the queued sub pool until it is within its capacity limits
+	// Restoring nonce chains are temporarily queued until their frame predecessor
+	// is re-admitted. Apply the queued limit to other transactions during that wait.
+	var restoring []*metaTxn
+	if len(p.frameRestorations) > 0 && p.queued.Len() > p.queued.limit {
+		for _, tx := range p.queued.best.ms {
+			if !tx.keyedNonce && p.frameRestorations[p.senders.senderID2Addr[tx.TxnSlot.SenderID]] > 0 {
+				restoring = append(restoring, tx)
+			}
+		}
+		for _, tx := range restoring {
+			p.queued.Remove(tx, "frame restoration pending", logger)
+		}
+	}
 	for p.queued.Len() > p.queued.limit {
 		tx := p.queued.PopWorst()
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
-	p.evictWithParkedFrames(pendingBaseFee)
+	for _, tx := range restoring {
+		p.queued.Add(tx, "frame restoration pending", logger)
+	}
+	p.enforceTotalCapacity(pendingBaseFee)
 }
 
 // Run - does:

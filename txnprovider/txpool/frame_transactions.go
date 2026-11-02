@@ -397,9 +397,9 @@ func (p *TxPool) checkFrameReservation(v *protocol.FrameValidation, previous *me
 	return txpoolcfg.NotSet
 }
 
-// Parked frames count toward total capacity but cannot enter a sub-pool until
-// validated. Compare them with the sub-pools' worst entries when reclaiming space.
-func (p *TxPool) evictWithParkedFrames(pendingBaseFee uint64) {
+// Restoring nonce chains may exceed the queued limit, and parked frames are
+// outside the sub-pools. Both still count toward total capacity.
+func (p *TxPool) enforceTotalCapacity(pendingBaseFee uint64) {
 	excess := len(p.byHash) - p.pending.limit - p.baseFee.limit - p.queued.limit
 	if excess <= 0 {
 		return
@@ -412,12 +412,19 @@ func (p *TxPool) evictWithParkedFrames(pendingBaseFee uint64) {
 	}
 	fee := *uint256.NewInt(pendingBaseFee)
 	sort.Slice(parked, func(i, j int) bool { return parked[i].worse(parked[j], fee) })
-	for excess > 0 && len(parked) > 0 {
-		worst := parked[0]
+	for excess > 0 && (len(parked) > 0 || len(p.frameRestorations) > 0) {
+		var worst *metaTxn
+		if len(parked) > 0 {
+			worst = parked[0]
+		}
 		for _, candidate := range []*metaTxn{p.pending.Worst(), p.baseFee.Worst(), p.queued.Worst()} {
-			if candidate != nil && candidate.worse(worst, fee) {
+			if candidate != nil && (worst == nil || candidate.worse(worst, fee)) {
 				worst = candidate
 			}
+		}
+		// Ordinary transactions can also remain indexed outside the sub-pools.
+		if worst == nil {
+			break
 		}
 		reason := txpoolcfg.QueuedPoolOverflow
 		switch worst.currentSubPool {
@@ -426,10 +433,10 @@ func (p *TxPool) evictWithParkedFrames(pendingBaseFee uint64) {
 		case BaseFeeSubPool:
 			reason = txpoolcfg.BaseFeePoolOverflow
 		}
-		if worst == parked[0] {
+		if worst.currentSubPool == 0 {
 			parked = parked[1:]
 		} else {
-			p.removeFromSubPool(worst, "pool overflow with parked frames")
+			p.removeFromSubPool(worst, "total pool overflow")
 			p.frameAccountsToRefresh[p.senders.senderID2Addr[worst.TxnSlot.SenderID]] = struct{}{}
 		}
 		p.discardLocked(worst, reason)

@@ -1040,6 +1040,7 @@ func TestFramePoolUnwindPreservesLocalFlag(t *testing.T) {
 
 func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.queued.limit = 0
 	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
 	frame := framePoolSlot(t, sender, 1, 2)
 	blob := &TxnSlot{}
@@ -1140,6 +1141,7 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 				require.Equal(t, txpoolcfg.Success, reason)
 			}
 			require.Equal(t, len(successors.Txns), pool.pending.Len())
+			pool.queued.limit = 0
 
 			backend.onValidate = func() {
 				for _, txn := range successors.Txns {
@@ -1183,6 +1185,88 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 				require.Equal(t, txn.BlobBundles, mt.TxnSlot.BlobBundles)
 			}
 		})
+	}
+}
+
+func TestFramePoolUnwindKeepsUnrelatedQueueLimit(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	otherSender := common.Address{2}
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender, otherSender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 2, 0, 1
+
+	successor := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	successor.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(successor, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	backend.onValidate = func() {
+		var unrelated TxnSlots
+		for nonce := uint64(2); nonce <= 3; nonce++ {
+			txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+			txn.IDHash[0] = byte(nonce)
+			unrelated.Append(txn, otherSender[:], false)
+		}
+		reasons, err := pool.AddLocalTxns(ctx, unrelated)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.QueuedPoolOverflow}, reasons)
+		require.Contains(t, pool.byHash, string(successor.IDHash[:]))
+		require.Equal(t, 2, pool.queued.Len(), "restoring chains must not consume the unrelated queue's allowance")
+	}
+	var unwound TxnSlots
+	frame := framePoolSlot(t, sender, 1, 2)
+	unwound.Append(frame, sender[:], false)
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwound, TxnSlots{}, TxnSlots{}))
+	require.Empty(t, pool.frameRestorations)
+	require.Equal(t, 2, pool.pending.Len())
+	require.Equal(t, 1, pool.queued.Len())
+}
+
+func TestFramePoolUnwindKeepsTotalCapacity(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 2, 0, 0
+	frame := framePoolSlot(t, sender, 1, 2)
+	var frameTxns TxnSlots
+	frameTxns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, frameTxns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, frameTxns))
+
+	successor := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	successor.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(successor, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	backend.onValidate = func() {
+		var later TxnSlots
+		for nonce := uint64(2); nonce <= 3; nonce++ {
+			txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+			txn.IDHash[0] = byte(nonce)
+			later.Append(txn, sender[:], true)
+		}
+		reasons, err := pool.AddLocalTxns(ctx, later)
+		require.NoError(t, err)
+		require.Len(t, pool.byHash, 2, "restoring chains still count toward total capacity")
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.QueuedPoolOverflow}, reasons)
+	}
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	require.NoError(t, pool.OnNewBlock(ctx, change, frameTxns, TxnSlots{}, TxnSlots{}))
+	require.Empty(t, pool.frameRestorations)
+	require.Equal(t, 2, pool.pending.Len())
+	require.Zero(t, pool.queued.Len())
+	for _, txn := range []*TxnSlot{frame, successor} {
+		require.Contains(t, pool.byHash, string(txn.IDHash[:]))
 	}
 }
 
