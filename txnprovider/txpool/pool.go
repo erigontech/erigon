@@ -2984,12 +2984,12 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		restored.Append(txn, addr[:], false)
 	}
 
-	var ordinary TxnSlots
-	ordinary, *deferredTxns = p.splitRestoredTxns(restored)
+	var immediate TxnSlots
+	immediate, *deferredTxns = p.splitRestoredTxns(restored)
 	var txns TxnSlots
-	for i, txn := range ordinary.Txns {
-		addr := ordinary.Senders.AddressAt(i)
-		isLocalTx := ordinary.IsLocal[i]
+	for i, txn := range immediate.Txns {
+		addr := immediate.Senders.AddressAt(i)
+		isLocalTx := immediate.IsLocal[i]
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 
 		reason, err := p.validateTx(txn, isLocalTx, cacheView)

@@ -60,18 +60,23 @@ type FrameCreationNonce struct {
 // simulation shares the consensus executor without restricting mined transactions.
 type frameValidationTracer struct {
 	FrameValidation
-	evm          *vm.EVM
-	end          int
-	deploy       int
-	err          error
-	dependencies map[common.Address]struct{}
-	creations    map[common.Address]frameCreationTrace
+	evm             *vm.EVM
+	paymentFrame    int
+	deploymentFrame int // -1 when the prefix has no deployment frame
+	err             error
+	dependencies    map[common.Address]struct{}
+	creations       map[common.Address]frameCreationTrace
 }
 
 type frameCreationTrace struct {
 	count uint64
 	exact bool
 }
+
+const (
+	maxFrameValidationExecutionGas = 100_000
+	maxFrameValidationStateGas     = 500_000
+)
 
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
@@ -137,7 +142,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	if len(tx.Frames) == 0 {
 		return nil, invalid
 	}
-	v := &frameValidationTracer{deploy: -1}
+	v := &frameValidationTracer{deploymentFrame: -1}
 	i := 0
 	if f := &tx.Frames[0]; f.IsExpiryVerifier() {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
@@ -147,7 +152,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 		i++
 	}
 	if i < len(tx.Frames) && tx.Frames[i].Mode == types.FrameDefault && tx.Frames[i].Flags == 0 {
-		v.deploy = i
+		v.deploymentFrame = i
 		i++
 	}
 	if i >= len(tx.Frames) {
@@ -167,22 +172,23 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	default:
 		return nil, invalid
 	}
-	v.end = i
+	v.paymentFrame = i
 	var execution, state uint64
 	for _, sig := range tx.Signatures {
 		execution += sig.VerificationGas()
-		if execution > 100_000 {
+		if execution > maxFrameValidationExecutionGas {
 			return nil, errors.New("frame signature validation exceeds gas limit")
 		}
 	}
 	for j, frame := range tx.Frames {
-		if j > i {
+		if j > v.paymentFrame {
 			if frame.Mode == types.FrameVerify {
 				return nil, invalid
 			}
 			continue
 		}
-		if frame.Limits.Execution > 100_000-execution || frame.Limits.State > 500_000-state {
+		if frame.Limits.Execution > maxFrameValidationExecutionGas-execution ||
+			frame.Limits.State > maxFrameValidationStateGas-state {
 			return nil, errors.New("frame validation exceeds gas limit")
 		}
 		execution += frame.Limits.Execution
@@ -235,7 +241,7 @@ func (v *frameValidationTracer) beforeFrame() error {
 	f := &ctx.Transaction.Frames[ctx.Index]
 	target := accounts.InternAddress(f.ResolvedTarget(ctx.Transaction.SenderAddress))
 	v.checkTarget(target, true)
-	if ctx.Index == v.end {
+	if ctx.Index == v.paymentFrame {
 		// APPROVE debits MaxCost. Reservations need the payer's balance before
 		// that debit so the same transaction is not counted twice.
 		var err error
@@ -260,10 +266,12 @@ func (v *frameValidationTracer) afterFrame() error {
 	}
 	ctx := v.evm.FrameContext
 	f := &ctx.Transaction.Frames[ctx.Index]
-	if f.Flags&types.FrameApproveExecution != 0 && !ctx.SenderApproved || f.Flags&types.FrameApprovePayment != 0 && ctx.Payer.IsNil() {
+	missingExecutionApproval := f.Flags&types.FrameApproveExecution != 0 && !ctx.SenderApproved
+	missingPaymentApproval := f.Flags&types.FrameApprovePayment != 0 && ctx.Payer.IsNil()
+	if missingExecutionApproval || missingPaymentApproval {
 		return errors.New("validation frame did not approve its scope")
 	}
-	if ctx.Index == v.deploy {
+	if ctx.Index == v.deploymentFrame {
 		hash, err := v.evm.IntraBlockState().GetCodeHash(accounts.InternAddress(ctx.Transaction.SenderAddress))
 		if err != nil {
 			return err
@@ -281,7 +289,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		return
 	}
 	ctx := v.evm.FrameContext
-	deploy := ctx.Index == v.deploy
+	deploying := ctx.Index == v.deploymentFrame
 	stack := scope.StackData()
 	banned := false
 	switch vm.OpCode(op) {
@@ -298,7 +306,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 			banned = next != vm.CALL && next != vm.CALLCODE && next != vm.DELEGATECALL && next != vm.STATICCALL
 		}
 	case vm.CREATE, vm.CREATE2:
-		banned = !deploy
+		banned = !deploying
 		// Helper balances are not allowed dependencies under EIP-8141's pool policy:
 		// https://eips.ethereum.org/EIPS/eip-8141#policy-summary
 		if len(stack) > 0 && !stack[len(stack)-1].IsZero() {
@@ -316,7 +324,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 			v.creations[address] = creation
 		}
 	case vm.SSTORE:
-		banned = !deploy || scope.Address().Value() != ctx.Transaction.SenderAddress
+		banned = !deploying || scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.SLOAD:
 		banned = scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.EXTCODESIZE, vm.EXTCODEHASH, vm.EXTCODECOPY:
@@ -348,7 +356,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 func (v *frameValidationTracer) onEnter(depth int, typ byte, from, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	ctx := v.evm.FrameContext
 	if typ == byte(vm.CREATE) || typ == byte(vm.CREATE2) {
-		if ctx.Index != v.deploy || to.Value() != ctx.Transaction.SenderAddress {
+		if ctx.Index != v.deploymentFrame || to.Value() != ctx.Transaction.SenderAddress {
 			v.fail(errors.New("validation may only create the sender account"))
 		}
 	} else if !value.IsZero() {

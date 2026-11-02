@@ -193,7 +193,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			if err := validation.afterFrame(); err != nil {
 				return nil, err
 			}
-			if i == validation.end {
+			if i == validation.paymentFrame {
 				return nil, nil
 			}
 		}
