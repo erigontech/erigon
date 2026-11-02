@@ -1723,7 +1723,7 @@ func (f *ForkChoiceStore) ensureKnownExecutionPayloadEnvelopeIndices(ctx context
 }
 
 func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndicesWithTrust(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied, knownPersisted bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
-	if f.db == nil || (!applied && !f.forkGraph.HasEnvelope(blockRoot)) {
+	if f.db == nil || (!applied && !knownPersisted && !f.forkGraph.HasEnvelope(blockRoot)) {
 		return signedEnvelope, applied, nil
 	}
 	retried := false
