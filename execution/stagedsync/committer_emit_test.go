@@ -276,7 +276,7 @@ func TestEmitTouched_FoldReusesFirstTouchBaseRead(t *testing.T) {
 	base.accounts[addr] = &acc
 
 	cc := &commitmentCalculator{}
-	cc.setBlockBase(vm.BaseTxNum(), base)
+	cc.setBlockBase(vm, base)
 	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), base)
 	readsBeforeFold := base.reads
 

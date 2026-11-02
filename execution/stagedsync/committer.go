@@ -109,7 +109,7 @@ type commitmentCalculator struct {
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 	destructed      map[accounts.Address]struct{}
 	blockBase       state.StateReader
-	blockBaseTxNum  uint64
+	blockBaseVM     *state.VersionMap
 	baseAccounts    map[accounts.Address]*accounts.Account
 	// curVersionMap is the block currently being folded; emitTouched reads it.
 	curVersionMap *state.VersionMap
@@ -377,8 +377,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		var base state.StateReader
 		if r.versionMap != nil {
 			cc.curVersionMap = r.versionMap
-			if bt := r.versionMap.BaseTxNum(); cc.blockBase == nil || bt != cc.blockBaseTxNum {
-				cc.setBlockBase(bt, cc.asOfReader.dr.StateReaderAt(bt))
+			if r.versionMap != cc.blockBaseVM {
+				cc.setBlockBase(r.versionMap, cc.asOfReader.dr.StateReaderAt(r.txNum))
 			}
 			base = cc.blockBase
 		}

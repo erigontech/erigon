@@ -151,8 +151,8 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 	return view.Err()
 }
 
-func (cc *commitmentCalculator) setBlockBase(baseTxNum uint64, base state.StateReader) {
-	cc.blockBaseTxNum, cc.blockBase = baseTxNum, base
+func (cc *commitmentCalculator) setBlockBase(vm *state.VersionMap, base state.StateReader) {
+	cc.blockBaseVM, cc.blockBase = vm, base
 	if cc.baseAccounts == nil {
 		cc.baseAccounts = map[accounts.Address]*accounts.Account{}
 	}
@@ -160,7 +160,7 @@ func (cc *commitmentCalculator) setBlockBase(baseTxNum uint64, base state.StateR
 }
 
 func (cc *commitmentCalculator) foldView(vm *state.VersionMap, lastTxNum uint64, base state.StateReader) *state.VersionMapView {
-	if len(cc.baseAccounts) > 0 && vm.BaseTxNum() == cc.blockBaseTxNum {
+	if len(cc.baseAccounts) > 0 && vm == cc.blockBaseVM {
 		base = &cachedAccountReader{StateReader: base, accounts: cc.baseAccounts}
 	}
 	return vm.View(lastTxNum, base)

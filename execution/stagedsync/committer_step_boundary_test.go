@@ -1050,3 +1050,35 @@ func TestHandleMessage_ComputedAheadBlockSkipsTouchedUnion(t *testing.T) {
 		}
 	}
 }
+
+// A block resumed mid-block carries no cells for the txs a previous run already
+// committed; the fold must still see their domain writes in each touched account's base.
+func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	addr := accounts.InternAddress([20]byte{0xe4})
+	av := addr.Value()
+	before := accounts.NewAccount()
+	before.Nonce, before.Balance = 5, *uint256.NewInt(100)
+	committedInBlock := accounts.NewAccount()
+	committedInBlock.Nonce, committedInBlock.Balance = 6, *uint256.NewInt(90)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&before), 0, nil))
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&committedInBlock), 11, nil))
+
+	vm := newRawViewVM(11)
+	ws := &state.WriteSet{}
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 1}}, Val: *uint256.NewInt(95)})
+	cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, 12, &chain.Rules{}, ws))
+
+	acc, ok := cc.foldView(vm, 12, cc.asOfReader.dr.StateReaderAt(13)).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(95), acc.Balance)
+	require.Equal(t, uint64(6), acc.Nonce, "the nonce committed by the block's earlier tx comes from the base")
+}
