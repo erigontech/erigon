@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
@@ -175,6 +176,14 @@ func (pt *poolTask) waitThen(t, next int) bool {
 
 var poolNamedReruns = dbg.EnvInt("POOL_NAMED_RERUNS", 3)
 
+var poolRerunTrace = dbg.EnvBool("POOL_RERUN_TRACE", false)
+
+func traceRerun(path string, tx, waitFor int, err error) {
+	if poolRerunTrace {
+		log.Info("[pool] rerun", "path", path, "tx", tx, "waitFor", waitFor, "err", err)
+	}
+}
+
 func (pt *poolTask) rerunAfter(named int) bool {
 	t := pt.tv.index - 1
 	if pt.reruns < poolNamedReruns {
@@ -241,6 +250,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	result := wk.w.RunTxTask(tv)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
+		traceRerun("sender", tv.index, tv.index-1, result.Err)
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Err != nil {
@@ -248,9 +258,11 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 			pt.send(p, result)
 			return false
 		}
+		traceRerun("err", tv.index, tv.index-1, result.Err)
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Dep >= 0 {
+		traceRerun("dep", tv.index, be.taskIndexOf(result.Dep), nil)
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
@@ -258,6 +270,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {
+		traceRerun("invalid", tv.index, blocker, nil)
 		return pt.rerunAfter(blocker)
 	}
 	return pt.settle(p, result, target)
