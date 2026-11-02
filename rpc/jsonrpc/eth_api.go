@@ -429,23 +429,6 @@ func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, n
 	return api.headerByHashAndNumber(ctx, tx, hash, number)
 }
 
-func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.NumberU64(), nil
-		}
-	}
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
-	if err != nil {
-		return 0, err
-	}
-
-	if number == nil {
-		return 0, errors.New("header number not found")
-	}
-	return *number, nil
-}
-
 // canonicalHeaderByNumberOrHash resolves the selector and header through tx.
 // It never selects an overlay, so callers can keep dependent reads on one view.
 func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
@@ -502,6 +485,26 @@ const defaultUnsettledPreMergeTTL = time.Second
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
+
+// checkTxIndex accepts -1 (the whole block) and txCount (state after the last transaction).
+func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
+	if txIndex < -1 || txIndex > txCount {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNum)}
+	}
+	return nil
+}
+
+func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) error {
+	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	maxTxNum, err := api._txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return err
+	}
+	return checkTxIndex(blockNum, txIndex, int(maxTxNum-minTxNum)-1)
+}
 
 // checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {

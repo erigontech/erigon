@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"runtime"
+	"slices"
 	"sync"
 
 	blst "github.com/supranational/blst/bindings/go"
@@ -18,6 +20,17 @@ const (
 	scalarBytes     = 32
 	randBitsEntropy = 64
 )
+
+// blst_p1s_add puts min(n, 1024) points of scratch, 144 bytes each, on the C stack, and cgo threads
+// get the libc default stack, 128 KiB on musl (https://github.com/supranational/blst/issues/142).
+// One batch of 512 keys needs 72 KiB.
+const (
+	blstP1ScratchBytes    = 144
+	muslThreadStackBytes  = 128 << 10
+	maxPublicKeysPerBatch = 512
+)
+
+const _ = uint(muslThreadStackBytes - maxPublicKeysPerBatch*blstP1ScratchBytes)
 
 // ETH2 uses BLS12381-G2 Curve
 var eth2Curve = []byte("BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_")
@@ -46,11 +59,42 @@ func NewSignatureFromBytes(b []byte) (*Signature, error) {
 
 // VerifyAggregate verify signature against many public keys.
 func (s Signature) VerifyAggregate(msg []byte, publicKeys []PublicKey) bool {
-	affines := make([]*blst.P1Affine, 0, len(publicKeys))
-	for _, publicKey := range publicKeys {
-		affines = append(affines, publicKey)
+	if len(publicKeys) == 0 || slices.Contains(publicKeys, nil) {
+		return false
 	}
-	return s.affine.FastAggregateVerify(true, affines, msg, eth2Curve)
+	return s.affine.Verify(true, aggregatePublicKeys(publicKeys).ToAffine(), false, msg, eth2Curve)
+}
+
+func aggregatePublicKeys(publicKeys []PublicKey) *blst.P1 {
+	chunkCount := (len(publicKeys) + maxPublicKeysPerBatch - 1) / maxPublicKeysPerBatch
+	partials := make([]*blst.P1, chunkCount)
+	workerCount := min(runtime.GOMAXPROCS(0), chunkCount)
+	addChunks := func(worker int) {
+		affines := make(blst.P1Affines, min(maxPublicKeysPerBatch, len(publicKeys)-worker*maxPublicKeysPerBatch))
+		for chunk := worker; chunk < chunkCount; chunk += workerCount {
+			start := chunk * maxPublicKeysPerBatch
+			end := min(start+maxPublicKeysPerBatch, len(publicKeys))
+			for i, publicKey := range publicKeys[start:end] {
+				affines[i] = *publicKey
+			}
+			partials[chunk] = affines[:end-start].Add()
+		}
+	}
+	if workerCount == 1 {
+		addChunks(0)
+	} else {
+		var workers sync.WaitGroup
+		for worker := range workerCount {
+			workers.Go(func() { addChunks(worker) })
+		}
+		workers.Wait()
+	}
+
+	aggregate := partials[0]
+	for _, partial := range partials[1:] {
+		aggregate.AddAssign(partial)
+	}
+	return aggregate
 }
 
 // Verify verify signature against one public key.

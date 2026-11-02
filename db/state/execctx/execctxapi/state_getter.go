@@ -20,6 +20,7 @@ import "github.com/erigontech/erigon/db/kv"
 
 type StateGetterOptions struct {
 	metrics kv.GetLatestMetrics
+	codeBuf *[]byte
 }
 
 func (opts StateGetterOptions) WithMetrics(metrics kv.GetLatestMetrics) StateGetterOptions {
@@ -29,6 +30,15 @@ func (opts StateGetterOptions) WithMetrics(metrics kv.GetLatestMetrics) StateGet
 
 func (opts StateGetterOptions) Metrics() kv.GetLatestMetrics {
 	return opts.metrics
+}
+
+func (opts StateGetterOptions) WithCodeBuf(buf *[]byte) StateGetterOptions {
+	opts.codeBuf = buf
+	return opts
+}
+
+func (opts StateGetterOptions) CodeBuf() *[]byte {
+	return opts.codeBuf
 }
 
 // StateGetter provides execution-aware reads over temporal state.

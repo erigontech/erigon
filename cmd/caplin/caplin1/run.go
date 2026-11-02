@@ -392,6 +392,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
 	}
+	go forkChoice.RunNextEpochPrecompute(ctx)
 	bls.SetEnabledCaching(true)
 
 	forkDigest, err := ethClock.CurrentForkDigest()
@@ -499,9 +500,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(beaconConfig, networkConfig, syncedDataManager, gossipManager, aggregationPool)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
-	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
-	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
+	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters, gossipManager)
+	blockService := services.NewBlockService(ctx, indexDB, forkChoice, engine, dataColumnSidecarService, syncedDataManager, ethClock, beaconConfig, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, aggregationPool, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
