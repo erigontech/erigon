@@ -1358,7 +1358,7 @@ func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNu
 	}
 	address := accounts.InternAddress(common.BytesToAddress(prefix))
 	to, _ := kv.NextSubtree(prefix)
-	it, err := p.view.roTx.RangeAsOf(kv.StorageDomain, prefix, to, p.view.firstMinTxNum, order.Asc, -1)
+	it, err := p.view.roTx.RangeAsOf(kv.StorageDomain, prefix, to, p.view.firstMinTxNum, order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}

@@ -1413,3 +1413,46 @@ func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
 		require.Equal(t, want.Root(), result[i].StateRoot, "block %d", want.NumberU64())
 	}
 }
+
+// A state override on a historical base replaces the account's whole storage, including the
+// base block's slots of an account the canonical chain deleted after the base.
+func TestSimulateV1HistoricalBaseStateOverrideClearsBaseStorage(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	doomed := common.HexToAddress("0x00000000000000000000000000000000000000dd")
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+		bank:   {Balance: funds},
+		doomed: {Code: append(append([]byte{0x73}, beneficiary[:]...), 0xff), Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	cp, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		to := beneficiary
+		if i == 1 {
+			to = doomed
+		}
+		txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), to, uint256.NewInt(0), 100_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(cp))
+
+	readSlot0 := hexutil.Bytes{0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(doomed): {Code: &readSlot0, State: &map[common.Hash]common.Hash{}}}
+	gas := hexutil.Uint64(100_000)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: []SimulatedBlock{
+		{StateOverrides: &overrides},
+		{Calls: []ethapi.CallArgs{{From: &bank, To: &doomed, Gas: &gas}}},
+	}}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	require.Len(t, result[1].Calls, 1)
+	ret := common.FromHex(result[1].Calls[0].ReturnData)
+	require.Len(t, ret, 32)
+	require.Zero(t, new(big.Int).SetBytes(ret).Sign(), "the overridden storage has no base slot")
+}
