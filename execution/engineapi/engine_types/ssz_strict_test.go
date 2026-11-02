@@ -132,6 +132,33 @@ func TestExecutionPayloadDecodeSSZStrictRoundTrip(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadDecodeSSZAboveConsensusTransactionLimit(t *testing.T) {
+	transaction := make(hexutil.Bytes, (15<<20)+1)
+	transaction[0], transaction[len(transaction)-1] = 0x01, 0x02
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			payload := NewExecutionPayloadSSZ(version)
+			payload.Transactions = []hexutil.Bytes{transaction}
+			encoded, err := payload.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			for _, test := range []struct {
+				name   string
+				decode func(*ExecutionPayload, []byte, int) error
+			}{
+				{name: "regular", decode: (*ExecutionPayload).DecodeSSZ},
+				{name: "strict", decode: (*ExecutionPayload).DecodeSSZStrict},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					decoded := NewExecutionPayloadSSZ(version)
+					require.NoError(t, test.decode(decoded, encoded, int(version)))
+					require.Equal(t, payload.Transactions, decoded.Transactions)
+				})
+			}
+		})
+	}
+}
+
 func TestPayloadAttributesDecodeSSZStrictRoundTrip(t *testing.T) {
 	tests := []struct {
 		name        string
