@@ -633,7 +633,9 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 
 	pruneDiffsLimit := 200_000
 	pruneBalLimit := 10_000
-	if s.CurrentSyncCycle.IsInitialCycle {
+	// Under --exec.no-prune only changesets are pruned; a startup backlog must not stall the first FCU.
+	aggressive := s.CurrentSyncCycle.IsInitialCycle && !dbg.NoPrune()
+	if aggressive {
 		pruneDiffsLimit = math.MaxInt
 		pruneBalLimit = math.MaxInt
 		stagePruneTimeout = 12 * time.Hour
@@ -645,7 +647,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		// each prune step gets the full long budget instead of sharing it. Sharing
 		// here would let earlier steps eat into the budget and drop PruneSmallBatches
 		// below the furious-prune threshold (>5h) or skip it entirely.
-		if s.CurrentSyncCycle.IsInitialCycle {
+		if aggressive {
 			return stagePruneTimeout
 		}
 		remaining := stagePruneTimeout - time.Since(stagePruneStartTime)
