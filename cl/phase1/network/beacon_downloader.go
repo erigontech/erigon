@@ -732,7 +732,10 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 			p2pCtx,
 			f.rpc,
 			fullRoots,
-			newEnvelopeCommitmentValidator(f.beaconCfg, blocks),
+			newEnvelopeValidator(blocks, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+				return ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope)
+			}),
+			nil,
 			blocks...,
 		)
 		if envErr != nil {

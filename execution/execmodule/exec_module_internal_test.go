@@ -32,11 +32,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type headerNumberErrorReader struct {
@@ -151,6 +154,62 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 	scDefault := newDomainStateCache(0)
 	require.NotNil(t, scDefault, "zero budget means the production default, not no cache")
 	scDefault.Close()
+}
+
+func TestCacheViewWithoutOverlayUsesSnapshotBoundedCache(t *testing.T) {
+	previous := dbg.UseStateCache
+	dbg.SetUseStateCache(true)
+	t.Cleanup(func() { dbg.SetUseStateCache(previous) })
+
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	stateCache := newDomainStateCache(datasize.MB)
+	t.Cleanup(stateCache.Close)
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	commitValue := func(txNum uint64, value, previous []byte) {
+		t.Helper()
+		tx, sd := temporaltest.NewTestTxSD(t, db)
+		sd.BindStateCache(stateCache)
+		sd.SetTxNum(txNum)
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, value, txNum, previous))
+		require.NoError(t, sd.Commit(ctx, tx))
+	}
+	commitValue(10, []byte{1}, nil)
+
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	counting := &countingLatestTx{TemporalTx: tx}
+	pinned := rpchelper.PinToOverlay(counting, nil)
+	liveDomains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer liveDomains.Close()
+	liveDomains.SetTxNum(20)
+	require.NoError(t, liveDomains.DomainPut(kv.AccountsDomain, tx, key, []byte{3}, 20, []byte{1}))
+	rpcCache := &Cache{execModule: &ExecModule{stateCache: stateCache, currentContext: liveDomains}}
+	rpcCache.SetPublishedSD(func() *execctx.SharedDomains {
+		t.Fatal("an explicit no-overlay pin must not consult the published SD")
+		return nil
+	})
+	view, err := rpcCache.View(ctx, pinned)
+	require.NoError(t, err)
+	value, err := view.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, value)
+	require.Zero(t, counting.reads, "the explicit no-overlay view must retain valid shared-cache hits")
+
+	commitValue(30, []byte{2}, []byte{1})
+	cached, hit := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, hit)
+	require.Equal(t, []byte{2}, cached)
+	value, err = view.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, value, "a later cache publication must not change the pinned state")
+	require.Equal(t, 1, counting.reads, "a newer cache entry must fall back to the original transaction")
+	cached, hit = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, hit)
+	require.Equal(t, []byte{2}, cached, "a stale read must not replace the newer cache entry")
 }
 
 func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {

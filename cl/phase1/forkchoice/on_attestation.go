@@ -401,9 +401,8 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 		if blockHeader.Slot == attestation.Data.Slot && attestation.Data.CommitteeIndex != 0 {
 			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
 		}
-		// PTC attestation (index 1): payload must be verified
-		if attestation.Data.CommitteeIndex == 1 && !f.IsPayloadVerified(attestation.Data.BeaconBlockRoot) {
-			return errors.New("PTC attestation requires verified payload envelope")
+		if attestation.Data.CommitteeIndex == 1 && !f.isPayloadAvailable(attestation.Data.BeaconBlockRoot) {
+			return errors.New("attestation with index 1 requires an imported payload")
 		}
 	}
 
