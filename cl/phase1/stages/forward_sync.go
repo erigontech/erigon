@@ -301,14 +301,14 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	}
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
+	endedAtTip := false
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
 		if downloader.RequestMore(ctx) {
 			if root, imported := downloader.ImportHeldGloasTip(ctx, gloasPayloadRetryBudget); imported {
 				if header, known := cfg.forkChoice.GetHeader(root); known {
-					cfg.forwardSyncTipRoot = root
-					cfg.forwardSyncTipSlot = cfg.ethClock.GetCurrentSlot()
+					endedAtTip = true
 					logger.Info("[Caplin] Forward sync ended at a Gloas tip without a successor", "slot", header.Slot)
 					break
 				}
@@ -357,6 +357,10 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		if err := cfg.blockCollector.Flush(ctx); err != nil {
 			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
 		}
+	}
+	if endedAtTip {
+		cfg.forwardSyncTipRoot = cfg.forkChoice.HighestSeenRoot()
+		cfg.forwardSyncTipSlot = cfg.ethClock.GetCurrentSlot()
 	}
 	requestCustodyBackfill(cfg, startSlot, currentSlot.Load())
 	return nil

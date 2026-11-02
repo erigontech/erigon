@@ -43,9 +43,8 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// forwardSyncTipSentinel serves firstBlocks for the first block range request and laterBlocks, empty by default, for
-// every later one. The first envelope request, which asks for the anchor's envelope, gets an envelope that fails the
-// anchor bid check, so the anchor stays EMPTY; later envelope requests get the tip's envelope.
+// forwardSyncTipSentinel serves firstBlocks, then laterBlocks (empty by default). It keeps the anchor EMPTY by
+// answering the first envelope request, the anchor's, with an envelope that fails the anchor bid check.
 type forwardSyncTipSentinel struct {
 	sentinelproto.SentinelClient
 	firstBlocks            []byte
@@ -89,6 +88,7 @@ type forwardSyncTipFixture struct {
 	tip         *cltypes.SignedBeaconBlock
 	tipRoot     common.Hash
 	successor   *cltypes.SignedBeaconBlock
+	emptyChild  *cltypes.SignedBeaconBlock
 	currentSlot uint64
 	sentinel    *forwardSyncTipSentinel
 	digest      common.Bytes4
@@ -99,7 +99,7 @@ type forwardSyncTipFixture struct {
 func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoice bool) *forwardSyncTipFixture {
 	t.Helper()
 
-	cfg, graph, tipRoot, successor, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	cfg, graph, tipRoot, successor, emptyChild, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	tip := graph.parents[tipRoot]
 	envelope := graph.envelopes[tipRoot]
 	delete(graph.parents, tipRoot)
@@ -114,7 +114,7 @@ func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoic
 	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg.beaconCfg)
 	digest, err := clock.ComputeForkDigest(tip.Block.Slot / cfg.beaconCfg.SlotsPerEpoch)
 	require.NoError(t, err)
-	f := &forwardSyncTipFixture{cfg: cfg, tip: tip, tipRoot: tipRoot, successor: successor, currentSlot: currentSlot, digest: digest}
+	f := &forwardSyncTipFixture{cfg: cfg, tip: tip, tipRoot: tipRoot, successor: successor, emptyChild: emptyChild, currentSlot: currentSlot, digest: digest}
 	anchorEnvelope := *envelope
 	anchorMessage := *envelope.Message
 	anchorMessage.BeaconBlockRoot = cfg.forkChoice.AnchorRoot()
@@ -219,6 +219,58 @@ func TestForwardSyncTipMarkerExpires(t *testing.T) {
 
 	require.NoError(t, f.cfg.forkChoice.OnBlock(ctx, f.successor, false, false, false))
 	require.False(t, argsAt(expirySlot-1).atForwardSyncTip)
+}
+
+// Fork choice has seen a block above the tip that the peers do not serve. The marker records the highest seen block,
+// so the stage loop does not go back to ForwardSync.
+func TestForwardSyncMarkerHoldsWhenHighestSeenIsAboveTip(t *testing.T) {
+	f := newForwardSyncTipFixture(t, 2*32, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, f.cfg.forkChoice.OnBlock(ctx, f.emptyChild, false, false, false))
+	childRoot, err := f.emptyChild.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(childRoot), f.cfg.forkChoice.HighestSeenRoot())
+
+	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+	args := ConsensusClStages().ArgsFunc(ctx, f.cfg)
+	require.True(t, args.atForwardSyncTip)
+	require.Equal(t, ForkChoice, ConsensusClStages().Stages[ForwardSync].TransitionFunc(f.cfg, args, nil))
+}
+
+type steppedClock struct {
+	eth_clock.EthereumClock
+	slot          atomic.Uint64
+	slotsPerEpoch uint64
+}
+
+func (c *steppedClock) GetCurrentSlot() uint64  { return c.slot.Load() }
+func (c *steppedClock) GetCurrentEpoch() uint64 { return c.slot.Load() / c.slotsPerEpoch }
+
+type flushHookCollector struct {
+	gloasCollectorTest
+	onFlush func()
+}
+
+func (c *flushHookCollector) Flush(ctx context.Context) error {
+	c.onFlush()
+	return c.gloasCollectorTest.Flush(ctx)
+}
+
+// The marker's epoch starts when ForwardSync returns, after the block collector flush, which can take long.
+func TestForwardSyncDatesTipMarkerAfterFlush(t *testing.T) {
+	f := newForwardSyncTipFixture(t, 2, true)
+	f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+	clock := &steppedClock{EthereumClock: f.cfg.ethClock, slotsPerEpoch: f.cfg.beaconCfg.SlotsPerEpoch}
+	clock.slot.Store(f.currentSlot)
+	f.cfg.ethClock = clock
+	afterFlush := f.currentSlot + f.cfg.beaconCfg.SlotsPerEpoch
+	f.cfg.blockCollector = &flushHookCollector{onFlush: func() { clock.slot.Store(afterFlush) }}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+	require.Equal(t, afterFlush, f.cfg.forwardSyncTipSlot)
 }
 
 // More than an epoch of empty slots after the tip keeps the seen epoch behind the target epoch. The stage loop must

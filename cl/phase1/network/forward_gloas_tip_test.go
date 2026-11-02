@@ -253,25 +253,74 @@ func TestForwardBeaconDownloaderBoundsHeldGloasTipEnvelopeFetch(t *testing.T) {
 	require.Less(t, time.Since(start), budget+budget/2)
 }
 
-// A tip that processing rejected or did not reach is not reported as imported, and it is not processed again.
-func TestForwardBeaconDownloaderTriesHeldGloasTipOnce(t *testing.T) {
+// A tip that processing rejected or did not reach is not reported as imported, and it is tried again only in a later
+// slot.
+func TestForwardBeaconDownloaderRetriesHeldGloasTipInNextSlot(t *testing.T) {
 	for name, processErr := range map[string]error{"no progress": nil, "error": errors.New("invalid block")} {
 		t.Run(name, func(t *testing.T) {
+			cfg := gloasFromGenesisConfig()
 			tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
-			downloader := newHeldTipDownloader(t, gloasFromGenesisConfig(), nil, tip, "tip-peer")
+			client, _ := newNoPeersRPC(t, cfg)
+			downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
+			var currentSlot atomic.Uint64
+			currentSlot.Store(11)
+			downloader.SetCurrentSlotSampler(currentSlot.Load)
 			processed := 0
 			downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
 				processed++
 				return highest, processErr
 			})
-
-			for range 2 {
+			importTip := func() bool {
 				_, imported := downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond)
-				require.False(t, imported)
+				return imported
 			}
+
+			require.False(t, importTip())
+			require.False(t, importTip())
 			require.Equal(t, 1, processed)
+			currentSlot.Store(12)
+			require.False(t, importTip())
+			require.Equal(t, 2, processed)
 			require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
 			require.Same(t, tip, downloader.gloasLookahead)
 		})
 	}
+}
+
+// When P2P does not serve the tip's envelope, the beacon API still gets part of the budget.
+func TestForwardBeaconDownloaderFetchesHeldGloasTipEnvelopeFromHTTPAfterP2P(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	tip, envelope, root := makeFullGloasTipAndEnvelope(t, cfg, 10)
+	envelopeBytes, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	client, sentinel := newNoPeersRPC(t, cfg)
+	downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
+	downloader.SetHTTPFallbackURL(newEnvelopeServer(t, root, envelopeBytes).URL)
+	var processedEnvelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processedEnvelopes = envelopes
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	_, imported := downloader.ImportHeldGloasTip(t.Context(), 400*time.Millisecond)
+	require.True(t, imported)
+	require.NotZero(t, sentinel.calls.Load())
+	require.NotNil(t, processedEnvelopes[root])
+}
+
+// In HTTP-preferred mode an empty beacon API answer reports the tip, paced like a P2P retry so that a tip that cannot
+// be imported does not make the caller loop without a pause.
+func TestForwardBeaconDownloaderHTTPPreferredReportsGloasTip(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	tip := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	downloader := newHeldTipDownloader(t, cfg, nil, tip, "http-fallback")
+	downloader.SetCurrentSlotSampler(func() uint64 { return 12 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+
+	start := time.Now()
+	require.True(t, requestMoreWithin(t, downloader))
+	require.GreaterOrEqual(t, time.Since(start), forwardRequestRetryInterval)
 }
