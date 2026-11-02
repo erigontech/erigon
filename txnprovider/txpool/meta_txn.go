@@ -129,8 +129,10 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	}
 
 	switch mt.currentSubPool {
-	case PendingSubPool:
-		if mt.minFeeCap != than.minFeeCap {
+	case 0, PendingSubPool:
+		// Parked frames have no sub-pool. Keep pending fee ordering while their
+		// eligibility markers qualify, even though they cannot be selected yet.
+		if (mt.currentSubPool == PendingSubPool || subPool >= BaseFeePoolBits+EnoughFeeCapBlock) && mt.minFeeCap != than.minFeeCap {
 			return mt.minFeeCap.Cmp(&than.minFeeCap) < 0
 		}
 		if mt.nonceDistance != than.nonceDistance {

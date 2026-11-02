@@ -397,9 +397,9 @@ func (p *TxPool) checkFrameReservation(v *protocol.FrameValidation, previous *me
 	return txpoolcfg.NotSet
 }
 
-// Parked frames still count toward total capacity. Ordinary transactions can also
-// remain outside the sub-pools, so the excess may exceed the number of parked frames.
-func (p *TxPool) evictParkedFrames(pendingBaseFee uint64) {
+// Parked frames count toward total capacity but cannot enter a sub-pool until
+// validated. Compare them with the sub-pools' worst entries when reclaiming space.
+func (p *TxPool) evictWithParkedFrames(pendingBaseFee uint64) {
 	excess := len(p.byHash) - p.pending.limit - p.baseFee.limit - p.queued.limit
 	if excess <= 0 {
 		return
@@ -412,8 +412,28 @@ func (p *TxPool) evictParkedFrames(pendingBaseFee uint64) {
 	}
 	fee := *uint256.NewInt(pendingBaseFee)
 	sort.Slice(parked, func(i, j int) bool { return parked[i].worse(parked[j], fee) })
-	for _, mt := range parked[:min(excess, len(parked))] {
-		p.discardLocked(mt, txpoolcfg.QueuedPoolOverflow)
+	for excess > 0 && len(parked) > 0 {
+		worst := parked[0]
+		for _, candidate := range []*metaTxn{p.pending.Worst(), p.baseFee.Worst(), p.queued.Worst()} {
+			if candidate != nil && candidate.worse(worst, fee) {
+				worst = candidate
+			}
+		}
+		reason := txpoolcfg.QueuedPoolOverflow
+		switch worst.currentSubPool {
+		case PendingSubPool:
+			reason = txpoolcfg.PendingPoolOverflow
+		case BaseFeeSubPool:
+			reason = txpoolcfg.BaseFeePoolOverflow
+		}
+		if worst == parked[0] {
+			parked = parked[1:]
+		} else {
+			p.removeFromSubPool(worst, "pool overflow with parked frames")
+			p.frameAccountsToRefresh[p.senders.senderID2Addr[worst.TxnSlot.SenderID]] = struct{}{}
+		}
+		p.discardLocked(worst, reason)
+		excess--
 	}
 }
 

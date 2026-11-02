@@ -2386,7 +2386,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		// through this transaction's nonce to be present.
 		mt.subPool &^= NoNonceGaps
 		if noGapsNonce == mt.TxnSlot.Nonce {
-			if !nonceChainBlocked {
+			// Parking blocks selection and successors, but keeps the frame's own
+			// nonce readiness for eviction ordering.
+			if !nonceChainBlocked || (mt.currentSubPool == 0 && mt.TxnSlot.TxType() == FrameTxnType) {
 				mt.subPool |= NoNonceGaps
 			}
 			noGapsNonce++
@@ -2512,7 +2514,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 		tx := p.queued.PopWorst()
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
-	p.evictParkedFrames(pendingBaseFee)
+	p.evictWithParkedFrames(pendingBaseFee)
 }
 
 // Run - does:

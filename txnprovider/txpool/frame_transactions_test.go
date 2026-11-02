@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"sync"
@@ -379,7 +380,7 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 	}
 }
 
-func TestFramePoolDiscardRefreshesSenderNonceChain(t *testing.T) {
+func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 	for _, action := range []string{"revalidation rejected", "expired", "parked pool overflow"} {
 		t.Run(action, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
@@ -434,13 +435,16 @@ func TestFramePoolDiscardRefreshesSenderNonceChain(t *testing.T) {
 				reasons, addErr := pool.AddLocalTxns(ctx, other)
 				require.NoError(t, addErr)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+				require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]), "evict the blocked successor before its parked predecessor")
 				wantSelected = 1
+			} else {
+				require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+				mt := pool.byHash[string(ordinary.IDHash[:])]
+				require.NotNil(t, mt)
+				require.Equal(t, QueuedSubPool, mt.currentSubPool, "nonce 1 cannot execute without nonce 0")
+				require.Zero(t, mt.subPool&NoNonceGaps)
 			}
-			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
-			mt := pool.byHash[string(ordinary.IDHash[:])]
-			require.NotNil(t, mt)
-			require.Equal(t, QueuedSubPool, mt.currentSubPool, "nonce 1 cannot execute without nonce 0")
-			require.Zero(t, mt.subPool&NoNonceGaps)
 			var selected TxnsRlp
 			_, count, err := pool.best(ctx, 10, &selected, 1, nil,
 				mdgas.FullMdGas{MdGas: mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}}, nil, 1_000_000)
@@ -1539,6 +1543,58 @@ func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
 	require.Equal(t, 2, pool.pending.Len())
 }
 
+func TestFramePoolParkedEvictionPriority(t *testing.T) {
+	for _, nonceMode := range []string{"legacy", "keyed"} {
+		for _, frameFee := range []uint64{2, 10} {
+			t.Run(fmt.Sprintf("%s/frame fee %d", nonceMode, frameFee), func(t *testing.T) {
+				ctx, pool, sender := keyedFramePoolEnv(t)
+				backend := pool.ethBackend.(*frameValidationBackend)
+				ordinarySender := common.Address{2}
+				change := newBlockChangeForAccounts(common.Hash{1}, 0, ordinarySender)
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 0, 0
+
+				key := uint256.Int{}
+				if nonceMode == "keyed" {
+					key.SetUint64(1)
+				}
+				frame := framePoolSlot(t, sender, 1, frameFee, key)
+				var frames TxnSlots
+				frames.Append(frame, sender[:], false)
+				reasons, err := pool.addNewTxns(ctx, frames, nil, false)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+				backend.err = context.DeadlineExceeded
+				change = newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+
+				ordinary := newTestTxnSlot(0, 0, 1, 5, 21_000)
+				ordinary.IDHash[0] = 1
+				var txns TxnSlots
+				txns.Append(ordinary, ordinarySender[:], false)
+				reasons, err = pool.addNewTxns(ctx, txns, nil, false)
+				require.NoError(t, err)
+				require.Len(t, pool.byHash, 1)
+				if frameFee > 5 {
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.PendingPoolOverflow}, reasons)
+					require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+					require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
+					require.Zero(t, pool.pending.Len())
+					require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+				} else {
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+					require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+					require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
+					require.Equal(t, 1, pool.pending.Len())
+					require.Empty(t, pool.frameReservations)
+				}
+			})
+		}
+	}
+}
+
 func TestFramePoolParkedCapacity(t *testing.T) {
 	ctx, pool, payer := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
@@ -1548,7 +1604,7 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 	for i := byte(1); i <= 8; i++ {
 		backend.err = nil
 		sender := common.Address{100, i}
-		frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+		frame := framePoolSlot(t, sender, 1, uint64(i)+1, uint256.Int{1})
 		frames = append(frames, frame)
 		var txns TxnSlots
 		txns.Append(frame, sender[:], false)
@@ -1567,8 +1623,10 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 	}
 
 	var reserved uint256.Int
-	for _, frame := range frames {
-		if _, retained := pool.byHash[string(frame.IDHash[:])]; retained {
+	for i, frame := range frames {
+		_, retained := pool.byHash[string(frame.IDHash[:])]
+		require.Equal(t, i >= len(frames)-capacity, retained, "retain the highest-fee frames")
+		if retained {
 			require.Contains(t, pool.all.senderIDFrameTxn, frame.SenderID)
 			reserved.Add(&reserved, &frame.frameValidation.MaxCost)
 		} else {
@@ -1630,12 +1688,20 @@ func TestFramePoolParkedCapacityWithOrdinaryOrphan(t *testing.T) {
 				reasons, err = pool.AddLocalTxns(ctx, txns)
 			})
 			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
 			require.Equal(t, 1, pool.pending.Len())
-			require.Equal(t, 1, pool.baseFee.Len())
-			require.Equal(t, 1, pool.queued.Len())
-			require.Empty(t, pool.all.senderIDFrameTxn)
-			require.Empty(t, pool.frameReservations)
+			if name == "one parked frame" {
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.BaseFeePoolOverflow, txpoolcfg.QueuedPoolOverflow}, reasons)
+				require.Zero(t, pool.baseFee.Len()+pool.queued.Len())
+				require.Len(t, pool.byHash, 3)
+				require.Len(t, pool.all.senderIDFrameTxn, 1)
+				require.Contains(t, pool.frameReservations, payer)
+			} else {
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success, txpoolcfg.Success}, reasons)
+				require.Equal(t, 1, pool.baseFee.Len())
+				require.Equal(t, 1, pool.queued.Len())
+				require.Empty(t, pool.all.senderIDFrameTxn)
+				require.Empty(t, pool.frameReservations)
+			}
 		})
 	}
 }
