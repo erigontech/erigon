@@ -347,9 +347,15 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	}
 	var stats [4]prefetchStats
 	var g errgroup.Group
-	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
-	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
-	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
+	if dbg.EnvBool("BAL_PREFETCH_ACC", true) {
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
+	}
+	if dbg.EnvBool("BAL_PREFETCH_SLOT", true) {
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	}
+	if dbg.EnvBool("BAL_PREFETCH_TRIE", true) {
+		g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
+	}
 	if prefetchCode {
 		g.Go(func() error { return prefetchDomain(ctx, db, kv.CodeDomain, accs, &stats[3]) })
 	}
