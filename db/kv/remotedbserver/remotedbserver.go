@@ -778,17 +778,15 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 			reply.Keys = append(reply.Keys, bytes.Clone(k))
 			reply.Values = append(reply.Values, bytes.Clone(v))
 			limit--
-
-			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				nextK, _, err := it.Next()
-				if err != nil {
-					return err
-				}
-				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-				if err != nil {
-					return err
-				}
-				break
+		}
+		if len(reply.Keys) == PageSizeLimit && it.HasNext() {
+			nextK, _, err := it.Next()
+			if err != nil {
+				return err
+			}
+			reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
+			if err != nil {
+				return err
 			}
 		}
 		return nil

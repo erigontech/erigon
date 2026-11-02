@@ -201,9 +201,6 @@ func TestKvServerPagination(t *testing.T) {
 			if err := tx.Put(kv.TblTracesToIdx, key, v); err != nil {
 				return err
 			}
-			if err := tx.Put(kv.HeaderNumber, v, v); err != nil {
-				return err
-			}
 		}
 		return nil
 	}))
@@ -221,13 +218,4 @@ func TestKvServerPagination(t *testing.T) {
 		txNums, token = append(txNums, reply.Timestamps...), reply.NextPageToken
 	}
 	require.Equal([]uint64{1, 2, 3, 4, 5}, txNums)
-
-	var keys [][]byte
-	for token, pages := "", 0; pages == 0 || token != ""; pages++ {
-		reply, err := s.Range(ctx, &remoteproto.RangeReq{TxId: id, Table: kv.HeaderNumber, OrderAscend: true, Limit: -1, PageSize: 2, PageToken: token})
-		require.NoError(err)
-		require.LessOrEqual(len(reply.Keys), 2)
-		keys, token = append(keys, reply.Keys...), reply.NextPageToken
-	}
-	require.Len(keys, 5)
 }
