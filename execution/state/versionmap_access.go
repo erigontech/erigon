@@ -30,7 +30,6 @@ import (
 // TxIndex -1), so a global txNum maps to the block-relative TxIndex:
 // txNum = baseTxNum + TxIndex + 1.
 func (vm *VersionMap) SetBaseTxNum(baseTxNum uint64) { vm.baseTxNum.Store(baseTxNum) }
-func (vm *VersionMap) BaseTxNum() uint64             { return vm.baseTxNum.Load() }
 
 // VersionMapView is a post-seal, data-only read over the version map pinned at a
 // global txNum. It composes each account/slot from the map cells, falling back to base

@@ -24,11 +24,8 @@ type WriteSetView interface {
 	// StorageChanges is Storages without the writes that leave the stored value
 	// as it was. Only the domain and commitment paths may use it.
 	StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]
-	// AccountChanges yields each address whose account leaf this write set changes: a
-	// balance/nonce/codeHash write whose value equals the committed one (ValueUnchanged)
-	// is a no-op and is skipped, mirroring StorageChanges; a create/incarnation/code/
-	// self-destruct write is always structural. The commitment folds exactly these, so a
-	// bare touch that changes nothing produces no leaf.
+	// AccountChanges yields each address whose account leaf this write set changes.
+	// The commitment folds exactly these, so a bare touch that changes nothing produces no leaf.
 	AccountChanges() iter.Seq[accounts.Address]
 	IsEmpty() bool
 	Count() int
@@ -36,23 +33,21 @@ type WriteSetView interface {
 
 var _ WriteSetView = (*WriteSet)(nil)
 
-// accountChangeAddrs is the shared AccountChanges implementation over any view: it reads
-// each field's value status, so a net-zero (ValueUnchanged) balance/nonce/codeHash write
-// never marks the account changed, while the put-only fields always do.
+// accountChangeAddrs is the shared AccountChanges implementation over any view.
 func accountChangeAddrs(v, structural WriteSetView) iter.Seq[accounts.Address] {
 	return func(yield func(accounts.Address) bool) {
-		for a, vw := range v.Balances() {
-			if vw.valStatus != ValueUnchanged && !yield(a) {
+		for a := range v.Balances() {
+			if !yield(a) {
 				return
 			}
 		}
-		for a, vw := range v.Nonces() {
-			if vw.valStatus != ValueUnchanged && !yield(a) {
+		for a := range v.Nonces() {
+			if !yield(a) {
 				return
 			}
 		}
-		for a, vw := range v.CodeHashes() {
-			if vw.valStatus != ValueUnchanged && !yield(a) {
+		for a := range v.CodeHashes() {
+			if !yield(a) {
 				return
 			}
 		}

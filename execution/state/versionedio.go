@@ -1378,7 +1378,6 @@ func (ws *WriteSet) SetContractRemoval(addr accounts.Address, version Version) {
 // MarkSelfDestructDeleted retracts a removal a worker already emitted: it stamps the
 // SelfDestruct cell ValueDeleted, which the lifecycle reads as retracted — the account
 // stays live and keeps its storage, while the cell still records that a wipe happened.
-// calcFees uses it when a fee credit revives a touched-empty recipient the worker removed.
 func (ws *WriteSet) MarkSelfDestructDeleted(addr accounts.Address, version Version) {
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
 		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: version, valStatus: ValueDeleted},

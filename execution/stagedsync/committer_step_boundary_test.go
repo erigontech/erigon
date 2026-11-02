@@ -79,7 +79,11 @@ func recordTx(vm *state.VersionMap, blockNum uint64, blockHash common.Hash, txNu
 	var writes state.WriteSetView
 	if ws != nil {
 		vm.FlushVersionedWrites(ws, true)
-		writes = state.NewVersionMapWriteView(ws, vm, int(txNum-vm.BaseTxNum())-1)
+		txIdx := 0
+		for _, vw := range ws.Balances() {
+			txIdx = vw.Version.TxIndex
+		}
+		writes = state.NewVersionMapWriteView(ws, vm, txIdx)
 	}
 	return &txResult{blockNum: blockNum, blockHash: blockHash, txNum: txNum, rules: rules, writes: writes, versionMap: vm}
 }
