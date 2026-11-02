@@ -539,3 +539,47 @@ func TestCode(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestValidateCurrentRootWithStorage(t *testing.T) {
+	require, ctx := require.New(t), t.Context()
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	acc := [20]byte{1}
+	slot := append(acc[:], make([]byte, 32)...)
+
+	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.AccountsDomain, tx, acc[:], []byte{0x01}, 0, nil); err != nil {
+			return err
+		}
+		if err := d.DomainPut(kv.StorageDomain, tx, slot, []byte{0x02}, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	}))
+
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		stateID, err := tx.ReadSequence(string(kv.PlainStateVersion))
+		require.NoError(err)
+		c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: stateID})
+		view, err := c.View(ctx, tx)
+		require.NoError(err)
+		_, err = view.Get(acc[:])
+		require.NoError(err)
+		_, err = view.Get(slot)
+		require.NoError(err)
+
+		result, err := c.ValidateCurrentRoot(ctx, tx)
+		require.NoError(err)
+		require.False(result.LatestStateBehind)
+		require.Empty(result.StateKeysOutOfSync)
+		require.False(result.CacheCleared)
+		return nil
+	}))
+}

@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"encoding/binary"
 	"errors"
 	"runtime"
 	"testing"
@@ -188,4 +189,45 @@ func TestKVServerSnapshotsReturnsEmptyIfNoBlockSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, reply.BlocksFiles)
 	require.Empty(t, reply.HistoryFiles)
+}
+
+func TestKvServerPagination(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require, ctx, db := require.New(t), t.Context(), temporaltest.NewTestDB(t, dirs)
+	key := []byte{0xaa}
+	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
+		for i := uint64(1); i <= 5; i++ {
+			v := binary.BigEndian.AppendUint64(nil, i)
+			if err := tx.Put(kv.TblTracesToIdx, key, v); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.HeaderNumber, v, v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	s := NewKvServer(ctx, db, nil, nil, log.New())
+	id, err := s.begin(ctx)
+	require.NoError(err)
+	defer s.rollback(id)
+
+	var txNums []uint64
+	for token, pages := "", 0; pages == 0 || token != ""; pages++ {
+		reply, err := s.IndexRange(ctx, &remoteproto.IndexRangeReq{TxId: id, Table: "tracesto", K: key, FromTs: 0, ToTs: -1, OrderAscend: true, Limit: -1, PageSize: 2, PageToken: token})
+		require.NoError(err)
+		require.LessOrEqual(len(reply.Timestamps), 2)
+		txNums, token = append(txNums, reply.Timestamps...), reply.NextPageToken
+	}
+	require.Equal([]uint64{1, 2, 3, 4, 5}, txNums)
+
+	var keys [][]byte
+	for token, pages := "", 0; pages == 0 || token != ""; pages++ {
+		reply, err := s.Range(ctx, &remoteproto.RangeReq{TxId: id, Table: kv.HeaderNumber, OrderAscend: true, Limit: -1, PageSize: 2, PageToken: token})
+		require.NoError(err)
+		require.LessOrEqual(len(reply.Keys), 2)
+		keys, token = append(keys, reply.Keys...), reply.NextPageToken
+	}
+	require.Len(keys, 5)
 }

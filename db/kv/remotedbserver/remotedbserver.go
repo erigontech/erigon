@@ -648,7 +648,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 			limit--
 
 			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				next, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -728,7 +732,11 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			limit--
 
 			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: k, Limit: int64(limit)})
+				nextK, _, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -761,23 +769,26 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
 				return err
 			}
-			reply.Keys = append(reply.Keys, k)
-			reply.Values = append(reply.Values, v)
+			reply.Keys = append(reply.Keys, bytes.Clone(k))
+			reply.Values = append(reply.Values, bytes.Clone(v))
 			limit--
-		}
-		if len(reply.Keys) == PageSizeLimit && it.HasNext() {
-			nextK, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-			if err != nil {
-				return err
+
+			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
+				nextK, _, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
 			}
 		}
 		return nil
