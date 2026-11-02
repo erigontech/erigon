@@ -370,6 +370,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
+			cc.state.origins = r.origins
 			cc.state.ApplyWrites(r.writes)
 		}
 

@@ -81,6 +81,8 @@ type calcState struct {
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
+	// origins is the block's versionMap; its origin accounts are the pre-block values exec read.
+	origins *state.VersionMap
 
 	// lazyLoadErr is the first error from a lazy-load, sticky so the calculator
 	// fails the next compute instead of computing on a missing baseline.
@@ -119,7 +121,9 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
 	}
-	if cs.domainReader != nil {
+	if o, ok := cs.loadOrigin(addr); ok {
+		acc.Balance, acc.Nonce, acc.CodeHash, acc.Incarnation = o.Balance, o.Nonce, o.CodeHash.Value(), o.Incarnation
+	} else if cs.domainReader != nil {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
 		if err != nil {
 			if cs.lazyLoadErr == nil {
@@ -137,6 +141,14 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	}
 	cs.accounts[addr] = acc
 	return acc
+}
+
+func (cs *calcState) loadOrigin(addr accounts.Address) (*accounts.Account, bool) {
+	if cs.origins == nil {
+		return nil, false
+	}
+	o, ok := cs.origins.LoadOriginAccount(addr)
+	return o, ok && o != nil
 }
 
 // markDirty flags acc changed this block and records it once in dirtyAccounts.

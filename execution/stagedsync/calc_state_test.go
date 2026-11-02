@@ -918,3 +918,25 @@ func TestApplyWrites_ReadsBaselineWhenWritesIncomplete(t *testing.T) {
 	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "the write wins over the baseline")
 	assert.Equal(t, uint64(7), acc.Nonce, "the untouched nonce comes from the baseline")
 }
+
+func TestEnsureAccount_LoadsUnwrittenFieldsFromOrigin(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress([20]byte{0x0a})
+	codeHash := accounts.NewCode([]byte{0x60, 0x00}).Hash
+	vm := state.NewVersionMap(nil)
+	vm.StoreOriginAccount(addr, &accounts.Account{Nonce: 3, Incarnation: 2, CodeHash: codeHash, Balance: *uint256.NewInt(7)})
+	cs.origins = vm
+
+	ws := &state.WriteSet{}
+	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath},
+		Val:         *uint256.NewInt(9),
+	})
+	cs.ApplyWrites(ws)
+
+	acc := cs.accounts[addr]
+	require.Equal(t, uint64(9), acc.Balance.Uint64())
+	require.Equal(t, uint64(3), acc.Nonce, "an unwritten field comes from the block's origin account")
+	require.Equal(t, uint64(2), acc.Incarnation)
+	require.Equal(t, codeHash.Value(), common.Hash(acc.CodeHash))
+}
