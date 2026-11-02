@@ -255,6 +255,7 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		break
 	}
 	if err := n.config.Dirs.RenameOldVersions(false); err != nil {
+		n.closeDataDir()
 		return fmt.Errorf("failed to rename old versions: %w", err)
 	}
 

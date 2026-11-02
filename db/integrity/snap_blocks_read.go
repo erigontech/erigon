@@ -56,7 +56,7 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservi
 			}
 			return nil
 		}); err != nil {
-			return err
+			return errors.Join(err, probs.verdict(string(Blocks)))
 		}
 
 		select {
