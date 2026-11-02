@@ -641,11 +641,11 @@ func (c *component) AwaitState(ctx context.Context, state State) (State, error) 
 	}
 
 	err := c.serviceBus().Register(c, subscriber)
+	c.RUnlock()
 	if err != nil {
 		return Unknown, err
 	}
 
-	c.RUnlock()
 	//fmt.Printf("%T:%p (%v) Await: %v\n", component, component, component.State(), state)
 	result, ok := <-statechan
 
