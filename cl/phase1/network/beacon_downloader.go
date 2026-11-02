@@ -556,29 +556,16 @@ Process:
 				}
 			} else {
 				var envErr error
-				envelopes, envErr = requestEnvelopesFranticallyWithValidator(
+				envelopes, envErr = RequestEnvelopesFrantically(
 					ctx,
 					f.rpc,
 					fullRoots,
-					newEnvelopeValidator(processBlocks, func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-						return ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope)
-					}),
+					NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(processBlocks)),
 					nil,
 					processBlocks...,
 				)
 				if envErr != nil {
 					log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
-				}
-				for _, block := range processBlocks {
-					root, err := block.Block.HashSSZ()
-					if err != nil {
-						continue
-					}
-					if envelope := envelopes[root]; envelope != nil {
-						if err := ValidateDownloadedGloasEnvelope(f.beaconCfg, block, envelope); err != nil {
-							delete(envelopes, root)
-						}
-					}
 				}
 				// HTTP fallback for envelopes when P2P returned incomplete results
 				if f.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
