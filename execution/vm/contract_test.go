@@ -20,18 +20,21 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
-func TestJumpDestCacheSizeBytes(t *testing.T) {
+func TestJumpDestCacheComparesWholeHash(t *testing.T) {
 	t.Parallel()
 	c := newJumpDestCache()
-	t.Cleanup(c.Close)
-	key := []byte("code hash")
+	var h, sameSlot common.Hash
+	h[0], h[31] = 1, 1
+	sameSlot[0], sameSlot[31] = 1, 2
 
-	c.Put(key, make(bitvec, 1), 0)
-	small := c.SizeBytes()
-	c.Put(key, make(bitvec, 512), 0)
-	require.Equal(t, int64(511*8), c.SizeBytes()-small, "replacement")
-	c.Delete(key)
-	require.Zero(t, c.SizeBytes(), "removal")
+	c.Add(h, make(bitvec, 3))
+	got, ok := c.Get(h)
+	require.True(t, ok)
+	require.Len(t, got, 3)
+	_, ok = c.Get(sameSlot)
+	require.False(t, ok, "a hash sharing the first 8 bytes must miss")
 }
