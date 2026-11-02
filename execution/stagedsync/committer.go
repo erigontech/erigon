@@ -53,6 +53,8 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+var probeBALPrefetch = dbg.EnvBool("PROBE_BAL_PREFETCH", false)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -263,7 +265,7 @@ func newCommitmentCalculator(
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
 		cc.state.prefetch = func(plainKey []byte) {
-			if !cc.balBlock {
+			if !cc.balBlock || probeBALPrefetch {
 				cc.prefetchKey(workCtx, plainKey)
 			}
 		}
