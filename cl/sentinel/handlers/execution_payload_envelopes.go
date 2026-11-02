@@ -85,6 +85,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	needsCanonicalParent := c.envelopeRebuilder != nil && startSlot < lowestAvailableSlot
+	peerID := s.Conn().RemotePeer().String()
 
 	head, headSlot, err := c.forkChoiceReader.GetHeadNode()
 	if err != nil {
@@ -148,6 +149,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		}
 		if needsCanonicalParent {
 			needsCanonicalParent = false
+			if !c.forkChoiceReader.HasEnvelope(root) && !c.rateLimiter.envelopeRebuildReady(peerID) {
+				c.refundRateLimit(s, cost, 1)
+				canonicalUnavailable = true
+				return false
+			}
 			if slot > startSlot {
 				parentRoot := block.Block.ParentRoot
 				parentSlot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, parentRoot)
@@ -235,7 +241,6 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 
 	served := 0
 	rebuilt := false
-	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range responseCandidates {
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
 		if c.forkChoiceReader.HasEnvelope(candidate.root) {
@@ -252,7 +257,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 				rebuilt = rebuilt || err == nil
 			}
 		}
-		if rebuilt && errors.Is(err, errNoRebuildCredit) {
+		if rebuilt && isRebuildRefusal(err) {
 			c.refundRateLimit(s, cost, served)
 		}
 		if err != nil || envelope == nil {
@@ -352,6 +357,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return true
 	}
 
+	peerID := s.Conn().RemotePeer().String()
+	rebuildReady := c.envelopeRebuilder != nil && c.rateLimiter.envelopeRebuildReady(peerID)
+	deferredRebuilds := 0
 	rebuildCandidates := make([]rebuildCandidate, 0, req.Length())
 	stopped := false
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
@@ -386,8 +394,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			}
 		}
 		if envelope == nil {
-			if c.envelopeRebuilder != nil {
+			if rebuildReady {
 				rebuildCandidates = append(rebuildCandidates, rebuildCandidate{blockRoot: blockRoot, slot: *slot, epoch: epoch})
+			} else if c.envelopeRebuilder != nil {
+				deferredRebuilds++
 			}
 			return true
 		}
@@ -402,9 +412,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	if stopped {
 		return nil
 	}
+	if deferredRebuilds > 0 {
+		c.refundRateLimit(s, cost, req.Length()-deferredRebuilds)
+	}
 
 	rebuilt := false
-	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range rebuildCandidates {
 		if count >= int(maxPayloads) {
 			break
@@ -419,7 +431,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			continue
 		}
 		envelope, err := c.tryRebuildEnvelope(requestCtx, peerID, prepared)
-		if rebuilt && errors.Is(err, errNoRebuildCredit) {
+		if rebuilt && isRebuildRefusal(err) {
 			c.refundRateLimit(s, cost, count)
 		}
 		rebuilt = rebuilt || err == nil
@@ -450,6 +462,10 @@ func (c *ConsensusHandlers) tryRebuildEnvelope(ctx context.Context, peerID strin
 		charge = false
 	}
 	return envelope, err
+}
+
+func isRebuildRefusal(err error) bool {
+	return errors.Is(err, errNoRebuildCredit) || errors.Is(err, envelope_history.ErrRebuildBusy)
 }
 
 func minExecutionPayloadServeEpoch(beaconConfig *clparams.BeaconChainConfig, currentEpoch, finalizedEpoch uint64) uint64 {

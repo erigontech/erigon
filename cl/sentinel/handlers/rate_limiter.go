@@ -92,15 +92,25 @@ func (tb *tokenBucket) refill(now time.Time) {
 func (tb *tokenBucket) tryStartRebuild(now time.Time) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	if tb.inUse {
-		return false
-	}
-	tb.refill(now)
-	if tb.tokens < 0 {
+	if !tb.rebuildReadyLocked(now) {
 		return false
 	}
 	tb.inUse = true
 	return true
+}
+
+func (tb *tokenBucket) rebuildReady(now time.Time) bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	return tb.rebuildReadyLocked(now)
+}
+
+func (tb *tokenBucket) rebuildReadyLocked(now time.Time) bool {
+	if tb.inUse {
+		return false
+	}
+	tb.refill(now)
+	return tb.tokens >= 0
 }
 
 func (tb *tokenBucket) finishRebuild(now time.Time, held float64, charge bool) {
@@ -217,6 +227,10 @@ func (rl *peerRateLimiter) tryStartEnvelopeRebuild(peerID string) *tokenBucket {
 		return nil
 	}
 	return bucket
+}
+
+func (rl *peerRateLimiter) envelopeRebuildReady(peerID string) bool {
+	return rl.envelopeRebuildBucket(peerID).rebuildReady(rl.now())
 }
 
 func (rl *peerRateLimiter) finishEnvelopeRebuild(bucket *tokenBucket, elapsed time.Duration, charge bool) {
