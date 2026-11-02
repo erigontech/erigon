@@ -255,7 +255,7 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 }
 
 // A speculative run whose state recorded a read dependency is discarded, so the executor that
-// opts in stops it at the next jump; any other caller keeps running.
+// opts in cancels it at the next call frame; any other caller keeps running.
 func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 	t.Parallel()
 
@@ -272,7 +272,9 @@ func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 	_, err := ibs.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, ibs.HadInvalidRead(), "reading a contract an unflushed earlier tx deploys is a dependency")
+	evm.cancelOnReadDependency()
 	require.False(t, evm.Cancelled(), "an EVM that did not opt in must keep running")
 	evm.SetAbortOnDependency(true)
+	evm.cancelOnReadDependency()
 	require.True(t, evm.Cancelled())
 }

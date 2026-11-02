@@ -495,6 +495,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
+	evm.cancelOnReadDependency()
 	tracer := evm.config.Tracer
 	debug := tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
 	trace := dbg.TraceInstructions && evm.intraBlockState.Trace()

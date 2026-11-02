@@ -102,8 +102,8 @@ type EVM struct {
 	config Config
 	// abort is used to abort the EVM calling operations
 	abort atomic.Bool
-	// abortOnDependency also cancels once the state recorded a read dependency: the
-	// run's result is discarded and re-executed, so finishing it is wasted work.
+	// abortOnDependency cancels once the state recorded a read dependency: the run's
+	// result is discarded and re-executed, so finishing it is wasted work.
 	abortOnDependency bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
@@ -189,13 +189,19 @@ func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtype
 func (evm *EVM) Cancel() { evm.abort.Store(true) }
 
 // Cancelled reports whether cancellation is currently requested.
-func (evm *EVM) Cancelled() bool {
-	return evm.abort.Load() || (evm.abortOnDependency && evm.intraBlockState.HadInvalidRead())
-}
+func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
-// SetAbortOnDependency makes Cancelled report true once the state recorded a read
-// dependency. Only for executors that discard and re-run such results.
+// SetAbortOnDependency makes each call frame cancel the run once the state recorded a
+// read dependency. Only for executors that discard and re-run such results.
 func (evm *EVM) SetAbortOnDependency(on bool) { evm.abortOnDependency = on }
+
+// cancelOnReadDependency runs once per frame, not per jump: a check in the jump path
+// costs every loop.
+func (evm *EVM) cancelOnReadDependency() {
+	if evm.abortOnDependency && evm.intraBlockState.HadInvalidRead() {
+		evm.abort.Store(true)
+	}
+}
 
 func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, err error, snapshot int, entryStateReservoir uint64) {
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
