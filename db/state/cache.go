@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
@@ -33,16 +34,16 @@ type domainGetFromFileCacheItem struct {
 
 var domainGetFromFileCacheSize = dbg.EnvDataSize("D_LRU_SIZE", 320*datasize.MB) / datasize.ByteSize(kv.DomainLen-1)
 
-// newDomainVisible gives each visible files set one cache shared by all its txs: a value may point into a file of the set,
-// and those files stay open while any tx can reach the set.
-func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
+// newDomainVisible gives each visible files set one cache shared by all its txs. It holds only values that point
+// into the mmap of a file of the set, which stays open while any tx can reach the set: compressed values are heap copies.
+func newDomainVisible(name kv.Domain, compression seg.FileCompression, files visibleFiles) *domainVisible {
 	d := &domainVisible{
 		name:  name,
 		files: files,
 	}
-	if domainGetFromFileCacheSize > 0 && name != kv.CommitmentDomain {
+	if domainGetFromFileCacheSize > 0 && name != kv.CommitmentDomain && !compression.Has(seg.CompressVals) {
 		d.cache = cache.NewByteLRU(domainGetFromFileCacheSize, func(_ uint64, it domainGetFromFileCacheItem) int64 {
-			return int64(len(it.v)) + cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(it))
+			return cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(it))
 		})
 	}
 	return d

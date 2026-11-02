@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -548,7 +549,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	dv := newDomainVisible(d.Name, d.Compression, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }

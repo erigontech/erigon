@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -143,7 +144,7 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 func TestReclaimClosesCachesOfUnreadSets(t *testing.T) {
 	newSet := func() *aggregatorVisible {
 		v := &aggregatorVisible{}
-		v.d[kv.AccountsDomain] = newDomainVisible(kv.AccountsDomain, nil)
+		v.d[kv.AccountsDomain] = newDomainVisible(kv.AccountsDomain, seg.CompressNone, nil)
 		return v
 	}
 	pinned, unread, cur := newSet(), newSet(), newSet()

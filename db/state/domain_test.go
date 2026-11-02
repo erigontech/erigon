@@ -4369,3 +4369,17 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
 	}
 }
+
+// The cache keeps the value slice it was given, so it may only hold values that point into
+// the file's mmap: a decompressed value would be a heap copy kept alive by the cache.
+func TestDomain_LatestFromFilesCacheOnlyForMmapValues(t *testing.T) {
+	t.Parallel()
+	_, code := testDbAndDomainOfStep(t, statecfg.Schema.CodeDomain, 16, log.New())
+	require.True(t, code.Compression.Has(seg.CompressVals))
+	dv, _, _ := code.calcVisibleFiles(0)
+	require.Nil(t, dv.cache, "a domain with compressed values must not get the cache")
+
+	_, accounts := testDbAndDomain(t, log.New())
+	dv, _, _ = accounts.calcVisibleFiles(0)
+	require.NotNil(t, dv.cache)
+}
