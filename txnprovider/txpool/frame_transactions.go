@@ -177,20 +177,7 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots, waitForHead b
 	if !slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
 		return frameValidationBatch{}
 	}
-	p.lock.Lock()
-	batch := frameValidationBatch{generation: p.stateGeneration, results: make(map[*TxnSlot]frameValidationResult)}
-	stateBlockHash := p.stateBlockHash
-	for i, txn := range txns.Txns {
-		if txn.TxType() != FrameTxnType {
-			continue
-		}
-		if generation, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && generation == batch.generation {
-			batch.results[txn] = frameValidationResult{reason: txpoolcfg.InvalidFrame}
-			continue
-		}
-		batch.results[txn] = frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
-	}
-	p.lock.Unlock()
+	batch, stateBlockHash := p.precheckFrames(txns)
 	for _, txn := range txns.Txns {
 		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
 			result = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
@@ -201,6 +188,23 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots, waitForHead b
 		}
 	}
 	return batch
+}
+
+func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Hash) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	batch := frameValidationBatch{generation: p.stateGeneration, results: make(map[*TxnSlot]frameValidationResult)}
+	for i, txn := range txns.Txns {
+		if txn.TxType() != FrameTxnType {
+			continue
+		}
+		if generation, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && generation == batch.generation {
+			batch.results[txn] = frameValidationResult{reason: txpoolcfg.InvalidFrame}
+			continue
+		}
+		batch.results[txn] = frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
+	}
+	return batch, p.stateBlockHash
 }
 
 // Execution can publish a head before the pool receives its notification. Wait

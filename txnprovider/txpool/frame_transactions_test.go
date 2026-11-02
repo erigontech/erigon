@@ -176,6 +176,20 @@ func TestFramePoolDirectAdmissionChecksSignatures(t *testing.T) {
 	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
 }
 
+func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
+	// Force a panic during the locked policy checks.
+	pool.chainConfig = nil
+	require.Panics(t, func() { pool.prepareFrames(ctx, txns, false) })
+	unlocked := pool.lock.TryLock()
+	if unlocked {
+		pool.lock.Unlock()
+	}
+	require.True(t, unlocked, "panic recovery must be able to acquire the pool lock")
+}
+
 func TestFramePoolBudgetDoesNotRestrictMinedTransactions(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
