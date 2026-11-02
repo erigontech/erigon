@@ -201,3 +201,27 @@ func TestServerCallLimit(t *testing.T) {
 	var resp echoResult
 	require.ErrorIs(t, client.CallContext(ctx, &resp, "test_echo", "hello", 10, &echoArgs{"world"}), context.DeadlineExceeded)
 }
+
+// A call waiting for a slot must not stop the connection's read loop: WebSocket reads its
+// control frames there, so a blocked loop misses the pong and the ping closes the connection.
+func TestStartCallProcWaitsOffTheReadLoop(t *testing.T) {
+	h := &handler{rootCtx: context.Background(), callSlots: make(chan struct{}, 1)}
+	h.callSlots <- struct{}{}
+	ran, returned := make(chan struct{}), make(chan struct{})
+	go func() {
+		h.startCallProc(func(*callProc) { close(ran) }, func() {})
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("startCallProc blocked while every call slot was busy")
+	}
+	<-h.callSlots
+	select {
+	case <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the call did not run once a slot freed")
+	}
+	h.callWG.Wait()
+}

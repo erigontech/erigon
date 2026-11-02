@@ -534,14 +534,14 @@ func (h *handler) startCallProc(fn func(*callProc), done func()) {
 		return
 	}
 	if h.callSlots != nil {
-		// Waiting here stops the connection's read loop, so a busy client backs off.
-		select {
-		case h.callSlots <- struct{}{}:
-		case <-h.rootCtx.Done():
-			done()
-			return
-		}
+		// The wait for a slot runs off the read loop: WebSocket reads its pongs there.
 		h.callWG.Go(func() {
+			select {
+			case h.callSlots <- struct{}{}:
+			case <-h.rootCtx.Done():
+				done()
+				return
+			}
 			defer func() { <-h.callSlots }()
 			run()
 		})
