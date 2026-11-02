@@ -67,6 +67,8 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 type commitmentCalculator struct {
 	probeApply time.Duration
 	probeTxs   int
+	probeFirst time.Time
+	probeLast  time.Time
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
@@ -373,6 +375,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			t0 := time.Now()
+			if cc.probeFirst.IsZero() {
+				cc.probeFirst = t0
+			}
+			cc.probeLast = t0
 			cc.state.ApplyWrites(r.writes)
 			cc.probeApply += time.Since(t0)
 			cc.probeTxs++
@@ -455,8 +461,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			residual := stageWall - execActive - commitActive + overlap - gap
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
-				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs)
-			cc.probeApply, cc.probeTxs = 0, 0
+				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
+				"firstTx", cc.probeFirst.Sub(r.execStartedAt), "lastTx", cc.probeLast.Sub(r.execStartedAt))
+			cc.probeApply, cc.probeTxs, cc.probeFirst = 0, 0, time.Time{}
 		}
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
