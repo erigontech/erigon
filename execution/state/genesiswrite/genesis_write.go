@@ -265,8 +265,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
-		if compatibilityErr != nil &&
-			(compatibilityErr.RewindTo != 0 || compatibilityErr.HasTimestampConflict()) {
+		if compatibilityErr != nil {
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
