@@ -606,6 +606,48 @@ func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
 	}
 }
 
+func TestSSZRESTBodiesRejectHeaderReadErrors(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(10), Time: 200}
+	hash := header.Hash()
+	body, err := encodeHashListRequest([]common.Hash{hash, {0xff}}, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	headerErr := errors.New("header lookup failed")
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"hash", http.MethodPost, "/engine/v1/bodies/hash", body},
+		{"range", http.MethodGet, "/engine/v1/bodies?from=10&count=2", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bodiesRead := false
+			module := &stubExecutionModule{
+				getHeaderFunc: func(_ context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
+					if (blockHash != nil && *blockHash == hash) || (blockNumber != nil && *blockNumber == 10) {
+						return header, nil
+					}
+					return nil, headerErr
+				},
+				getPayloadBodiesByHashFunc: func(_ context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
+					bodiesRead = true
+					return make([]*execmodule.PayloadBody, len(hashes)), nil
+				},
+			}
+			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec,
+				newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
+
+			require.Equal(t, http.StatusInternalServerError, rec.Code)
+			require.Equal(t, problemInternal, problemType(t, rec))
+			require.Contains(t, rec.Body.String(), headerErr.Error())
+			require.False(t, bodiesRead)
+		})
+	}
+}
+
 func TestSSZRESTBodiesSkipRetrievalOutsideForkEra(t *testing.T) {
 	headers := map[uint64]*types.Header{
 		10: {Number: *uint256.NewInt(10), Time: 500},

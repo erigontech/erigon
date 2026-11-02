@@ -365,7 +365,11 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 	matchingHashes := make([]common.Hash, 0, len(blockHashes))
 	responsePositions := make([]int, 0, len(blockHashes))
 	for i, hash := range blockHashes {
-		header := e.chainRW.GetHeaderByHash(r.Context(), hash)
+		header, err := e.executionService.GetHeader(r.Context(), &hash, nil)
+		if err != nil {
+			writeEngineProblem(w, err)
+			return
+		}
 		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
 			continue
 		}
@@ -417,7 +421,12 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 	matchingHashes := make([]common.Hash, 0, count)
 	responsePositions := make([]int, 0, count)
 	for i := range count {
-		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
+		number := from + i
+		header, err := e.executionService.GetHeader(r.Context(), nil, &number)
+		if err != nil {
+			writeEngineProblem(w, err)
+			return
+		}
 		if header == nil {
 			break
 		}
