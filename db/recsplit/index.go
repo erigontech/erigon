@@ -517,6 +517,13 @@ func (idx *Index) OrdinalLookup(i uint64) uint64 {
 	return idx.offsetEf.Get(i)
 }
 
+func (idx *Index) Has(bucketHash, i uint64) bool {
+	if idx.lessFalsePositives {
+		return idx.existenceV0[i] == byte(bucketHash)
+	}
+	return true
+}
+
 func (idx *Index) ExtractOffsets() map[uint64]uint64 {
 	m := map[uint64]uint64{}
 	pos := 1 + 8 + idx.bytesPerRec
