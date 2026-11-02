@@ -172,8 +172,11 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 // not revive a self-destructed address; for any other address a field write
 // (even zero) clears Deleted.
 func (cs *calcState) ApplyWrites(writes state.WriteSetView) {
-	sdThisCall := make(map[accounts.Address]bool)
+	var sdThisCall map[accounts.Address]bool // nil until a self-destruct: most txs have none
 	for addr, vw := range writes.SelfDestructs() {
+		if sdThisCall == nil {
+			sdThisCall = make(map[accounts.Address]bool)
+		}
 		sdThisCall[addr] = vw.Val
 		if vw.Val {
 			acc := cs.ensureAccount(addr)
