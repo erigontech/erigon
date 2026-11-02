@@ -75,7 +75,6 @@ type syncCommitteeMessagesService struct {
 	batchSignatureVerifier    *BatchSignatureVerifier
 	test                      bool
 
-	mu     sync.Mutex
 	poolMu sync.Mutex
 	// cleanedAtHeadSlot is the head slot of the last cleanup of seenSyncCommitteeMessages, guarded by poolMu.
 	cleanedAtHeadSlot uint64
@@ -151,6 +150,12 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 // storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
 // if another message for them was verified at the same time and recorded first.
 func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
+	// A verification that ended after the head moved two slots past the message is outside the slot window the gossip
+	// checks admitted it for. Recording it would add an entry this head slot's cleanup has already passed, and the
+	// cleanup may have removed the record of an earlier message from the validator for that slot.
+	if isStaleSyncCommitteeMessageSlot(msg.Slot, s.syncedDataManager.HeadSlot()) {
+		return ErrIgnore
+	}
 	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
 	verified, loaded := s.seenSyncCommitteeMessages.LoadOrStore(key, verifiedSyncCommitteeMessage{
 		beaconBlockRoot: msg.BeaconBlockRoot,
@@ -178,9 +183,6 @@ func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *
 // checkMessage runs the gossip checks that need no signature and returns the signature to verify, or nil for a
 // duplicate of an already verified message that has not been published yet.
 func (s *syncCommitteeMessagesService) checkMessage(subnet *uint64, msg *SyncCommitteeMessageForGossip) (*AggregateVerificationData, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	var aggregateVerificationData *AggregateVerificationData
 	err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
@@ -274,7 +276,7 @@ func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	entriesToRemove := []seenSyncCommitteeMessage{}
 	s.seenSyncCommitteeMessages.Range(func(key, value any) bool {
 		k := key.(seenSyncCommitteeMessage)
-		if headSlot > k.slot+1 {
+		if isStaleSyncCommitteeMessageSlot(k.slot, headSlot) {
 			entriesToRemove = append(entriesToRemove, k)
 		}
 		return true
@@ -282,6 +284,11 @@ func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	for _, k := range entriesToRemove {
 		s.seenSyncCommitteeMessages.Delete(k)
 	}
+}
+
+// isStaleSyncCommitteeMessageSlot reports whether messages of slot are older than the previous slot of the head.
+func isStaleSyncCommitteeMessageSlot(slot, headSlot uint64) bool {
+	return headSlot > slot+1
 }
 
 // verifySyncCommitteeMessageSignature verifies the signature of a sync committee message

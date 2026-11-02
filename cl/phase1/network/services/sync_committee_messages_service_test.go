@@ -431,8 +431,9 @@ func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidat
 	}
 }
 
-// Adding a verified message to the pool holds no service lock, so other messages are checked meanwhile.
-func TestSyncCommitteesPoolAddDoesNotBlockOtherMessages(t *testing.T) {
+// Adding a verified message to the pool does not hold up the gossip checks: a duplicate of it, which returns from
+// checkMessage on the seen-map hit, is answered while the addition waits for the pool.
+func TestSyncCommitteesPoolAddDoesNotBlockDuplicateCheck(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
@@ -552,10 +553,10 @@ func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
 // reports it.
 func waitForBlockedGoroutine(t *testing.T, state, frame string) {
 	t.Helper()
+	buf := make([]byte, 1<<22)
 	require.Eventually(t, func() bool {
-		buf := make([]byte, 1<<22)
-		buf = buf[:runtime.Stack(buf, true)]
-		for goroutine := range strings.SplitSeq(string(buf), "\n\n") {
+		n := runtime.Stack(buf, true)
+		for goroutine := range strings.SplitSeq(string(buf[:n]), "\n\n") {
 			if strings.Contains(goroutine, "["+state) && strings.Contains(goroutine, frame) {
 				return true
 			}
@@ -564,10 +565,10 @@ func waitForBlockedGoroutine(t *testing.T, state, frame string) {
 	}, 5*time.Second, time.Millisecond, "no goroutine blocked in %s at %s", state, frame)
 }
 
-func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, subnet, except uint64) uint64 {
+func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, subnet uint64, except ...uint64) uint64 {
 	t.Helper()
 	for index := range uint64(s.ValidatorLength()) {
-		if index == except {
+		if slices.Contains(except, index) {
 			continue
 		}
 		validatorSubnets, err := subnets.ComputeSubnetsForSyncCommittee(s, slot, index)
@@ -580,7 +581,8 @@ func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, sub
 	return 0
 }
 
-// Entries go stale only when the head slot advances, so the seen map is cleaned once per head slot.
+// Entries go stale only when the head slot advances, so the seen map is cleaned once per head slot, and again after
+// the head moves.
 func TestSyncCommitteesCleansStaleMessagesOncePerHeadSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
@@ -611,4 +613,79 @@ func TestSyncCommitteesCleansStaleMessagesOncePerHeadSlot(t *testing.T) {
 	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), other))
 	_, kept = seen.Load(staleKey(2))
 	require.True(t, kept, "the seen map was scanned again at the same head slot")
+
+	nextHead, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, nextHead.SetSlot(headState.Slot()+2))
+	require.NoError(t, synced.OnHeadState(nextHead))
+	staleForNextHead := seenSyncCommitteeMessage{slot: nextHead.Slot() - 2, validatorIndex: 3}
+	seen.Store(staleForNextHead, verifiedSyncCommitteeMessage{})
+	third := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            nextHead.Slot(),
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex: otherValidatorOnSubnet(t, nextHead, nextHead.Slot(), 0,
+				msg.SyncCommitteeMessage.ValidatorIndex, other.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), third))
+	_, kept = seen.Load(staleForNextHead)
+	require.False(t, kept, "a stale entry outlived the first cleanup after the head moved")
+	_, kept = seen.Load(staleKey(2))
+	require.False(t, kept, "an entry stale since the earlier head outlived the cleanup after the head moved")
+}
+
+// A message whose verification ends after the head has moved two slots past it is outside the slot window the gossip
+// checks admitted it for. It is ignored, not recorded and not added to the pool: a recorded stale entry would outlive
+// this head slot's cleanup, and a record removed by that cleanup would let another message from the validator in.
+func TestSyncCommitteesIgnoresMessageVerifiedAfterTheHeadMovedPastIt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseVerification := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseVerification)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		close(entered)
+		<-release
+		return true, nil
+	}
+	var poolAdds atomic.Int32
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			poolAdds.Add(1)
+			return nil
+		}).AnyTimes()
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("message processing ended before verification: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("verification did not start")
+	}
+	nextHead, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, nextHead.SetSlot(msg.SyncCommitteeMessage.Slot+2))
+	require.NoError(t, synced.OnHeadState(nextHead))
+	releaseVerification()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("message processing did not finish")
+	}
+	require.Zero(t, poolAdds.Load())
+	key := seenSyncCommitteeMessage{slot: msg.SyncCommitteeMessage.Slot, validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex}
+	_, recorded := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
+	require.False(t, recorded)
 }
