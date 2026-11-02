@@ -2178,7 +2178,9 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		setDevnetEthConfig(ctx, cfg, logger)
 	}
 
-	setOverrideGenesis(ctx, cfg)
+	if err := setOverrideGenesis(ctx, cfg); err != nil {
+		Fatalf("%v", err)
+	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
 		v := ctx.Uint64(OverrideOsakaFlag.Name)
@@ -2426,26 +2428,33 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 // setOverrideGenesis applies --override.genesis. It must run after the --chain
 // defaults are applied, as it replaces the ones that belong to the default
 // --chain network rather than to the given genesis.
-func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) {
-	path := ctx.String(OverrideGenesisFlag.Name)
-	if path == "" {
-		return
+func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
+	// Check whether the flag was given, not whether its value is empty: an empty
+	// path, e.g. from an unset variable in a wrapper script, must fail rather
+	// than silently start the default --chain network.
+	if !ctx.IsSet(OverrideGenesisFlag.Name) {
+		return nil
 	}
 	if ctx.IsSet(ChainFlag.Name) {
-		Fatalf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
+		return fmt.Errorf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
 	}
-	genesis, err := ReadGenesisFile(path)
+	genesis, err := ReadGenesisFile(ctx.String(OverrideGenesisFlag.Name))
 	if err != nil {
-		Fatalf("%v", err)
+		return err
+	}
+	if !ctx.IsSet(NetworkIdFlag.Name) {
+		// Sentry rejects a zero network id in the eth handshake.
+		if genesis.Config.ChainID.IsZero() {
+			return fmt.Errorf("--%s: genesis chain id is 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, NetworkIdFlag.Name)
+		}
+		cfg.NetworkID = genesis.Config.ChainID.Uint64()
 	}
 	cfg.Genesis = genesis
 	cfg.GenesisFromFile = true
-	if !ctx.IsSet(NetworkIdFlag.Name) {
-		cfg.NetworkID = genesis.Config.ChainID.Uint64()
-	}
 	if !ctx.IsSet(DNSDiscoveryFlag.Name) && !ctx.Bool(NoDiscoverFlag.Name) {
 		cfg.EthDiscoveryURLs = nil
 	}
+	return nil
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
