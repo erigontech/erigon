@@ -62,6 +62,10 @@ type verifiedSyncCommitteeMessage struct {
 	published bool
 }
 
+func (v verifiedSyncCommitteeMessage) matches(beaconBlockRoot common.Hash, signature common.Bytes96) bool {
+	return v.beaconBlockRoot == beaconBlockRoot && v.signature == signature
+}
+
 type syncCommitteeMessagesService struct {
 	seenSyncCommitteeMessages sync.Map
 	syncedDataManager         *synced_data.SyncedDataManager
@@ -164,8 +168,7 @@ func (s *syncCommitteeMessagesService) recordVerifiedMessage(subnet uint64, msg 
 
 	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
 	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok {
-		v := verified.(verifiedSyncCommitteeMessage)
-		if v.beaconBlockRoot != msg.BeaconBlockRoot || v.signature != msg.Signature {
+		if !verified.(verifiedSyncCommitteeMessage).matches(msg.BeaconBlockRoot, msg.Signature) {
 			return false, ErrIgnore
 		}
 		return false, nil
@@ -217,7 +220,7 @@ func (s *syncCommitteeMessagesService) checkMessage(subnet *uint64, msg *SyncCom
 		// nil so a caller whose earlier admission attempt failed gets another chance.
 		if verified, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
 			v := verified.(verifiedSyncCommitteeMessage)
-			if v.beaconBlockRoot != msg.SyncCommitteeMessage.BeaconBlockRoot || v.signature != msg.SyncCommitteeMessage.Signature {
+			if !v.matches(msg.SyncCommitteeMessage.BeaconBlockRoot, msg.SyncCommitteeMessage.Signature) {
 				return ErrIgnore
 			}
 			if v.published {
@@ -256,7 +259,7 @@ func (s *syncCommitteeMessagesService) MarkPublished(subnet, slot, validatorInde
 		return
 	}
 	v := verified.(verifiedSyncCommitteeMessage)
-	if v.beaconBlockRoot != beaconBlockRoot || v.signature != signature || v.published {
+	if !v.matches(beaconBlockRoot, signature) || v.published {
 		return
 	}
 	v.published = true
