@@ -593,7 +593,7 @@ func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile b
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
 
 	// TODO get results back
 
@@ -655,29 +655,6 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 			require.Len(t, pe.execWorkers, tc.poolSize)
 		})
 	}
-}
-
-// Tasks waiting for an execution slot must not take worker contexts. A worker holds
-// its context briefly after giving back its slot, so a few extra contexts are
-// expected; one per queued task is the regression.
-func TestQueuedTasksDoNotGrowWorkerPool(t *testing.T) {
-	sender := func(i int) accounts.Address {
-		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1000 + i))))
-	}
-	ownSlot := func(i int, j int, _ int) opkey {
-		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1_000_000 + i))))
-		return opkey{addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(j)))), state.StoragePath}
-	}
-	tasks, _ := taskFactory(1000, sender, 2, 2, 1, ownSlot, readTime, writeTime, nonIOTime)
-	noExtraContexts := func(pe *parallelExecutor) error {
-		pe.mintMu.Lock()
-		defer pe.mintMu.Unlock()
-		if n := len(pe.mintedWorkers); n > pe.workerCount {
-			return fmt.Errorf("%d extra worker contexts for independent tasks", n)
-		}
-		return nil
-	}
-	runParallel(t, tasks, composeValidations([]propertyCheck{defaultChecks, noExtraContexts}), log.New())
 }
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
@@ -1526,7 +1503,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1609,7 +1586,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1703,7 +1680,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, gasPool, nil, discardConsumers(4), false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1799,7 +1776,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(0, common.Hash{}, gasPool, nil, discardConsumers(1), false, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
@@ -1848,7 +1825,7 @@ func TestParallelNextResultDropsUnmaterializedNetZeroWrite(t *testing.T) {
 	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
 	pending := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
 	pe, roTx := newResumeTestExec(t, db, config)
-	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil, nil)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil)
 	be.tasks = []*execTask{eTask, pending}
 	be.results = []*execResult{nil, nil}
 	be.execTasks.setInProgress(0)
@@ -1916,14 +1893,52 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
 	t.Run("scheduleNextPending", func(t *testing.T) {
-		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil, nil)
+		be := newBlockExec(1, common.Hash{}, nil, nil, nil, false, nil)
 		pe := &parallelExecutor{
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},
 		}
-		pe.scheduleNextPending(t.Context())
+		require.NoError(t, pe.scheduleNextPending(t.Context()))
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
+}
+
+func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+	be := pe.blockExecutors[1]
+	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
+	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
+
+	be.versionMap = state.NewVersionMap(bal)
+	require.NoError(t, pe.startBlock(t.Context(), be))
+	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
+	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
+}
+
+func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a4"))
+	av := addr.Value()
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		return putter.DomainPut(kv.AccountsDomain, av[:], []byte{0, 0, 0}, 0, nil)
+	})
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}})
+	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
 }

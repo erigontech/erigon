@@ -25,22 +25,18 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestSetEmptyRemoval pins how the two kinds of account removal are encoded. Both stamp
-// the balance ValueDeleted verdict (commitment and the domain apply read it to drop the
-// leaf) and clear the whole footprint — but a genuine self-destruct keeps its
-// SelfDestruct marker (calcFees burns its delayed fee, the read path pins the absence),
-// while an EIP-161 touched-empty EOA carries none and must not gain one.
 func TestSetEmptyRemoval(t *testing.T) {
 	t.Parallel()
 	ver := Version{TxIndex: 1}
 
-	t.Run("self-destruct keeps its marker", func(t *testing.T) {
-		addr := accounts.InternAddress([20]byte{0x5d})
+	t.Run("removal stamps the self-destruct marker and clears the footprint", func(t *testing.T) {
+		addr := accounts.InternAddress([20]byte{0xe0})
 		ws := &WriteSet{}
-		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
 		ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: 1})
 		ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: ver}})
 
@@ -49,25 +45,11 @@ func TestSetEmptyRemoval(t *testing.T) {
 		bal, ok := ws.GetBalance(addr)
 		require.True(t, ok && bal.Deletes(), "removal stamps the balance-deleted verdict")
 		sd, ok := ws.GetSelfDestruct(addr)
-		require.True(t, ok && sd.Val, "a self-destruct keeps its marker across the removal")
+		require.True(t, ok && sd.Val, "the removal carries the self-destruct wipe marker")
 		_, ok = ws.GetAddress(addr)
 		require.False(t, ok, "the whole-account AddressPath cell is cleared (no metamorphic false-revival)")
 		_, ok = ws.GetNonce(addr)
 		require.False(t, ok, "the footprint is cleared")
-	})
-
-	t.Run("EIP-161 empty gains the self-destruct marker", func(t *testing.T) {
-		addr := accounts.InternAddress([20]byte{0xe0})
-		ws := &WriteSet{}
-		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}})
-		ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}})
-
-		ws.SetEmptyRemoval(addr, ver)
-
-		bal, ok := ws.GetBalance(addr)
-		require.True(t, ok && bal.Deletes(), "removal stamps the balance-deleted verdict")
-		sd, ok := ws.GetSelfDestruct(addr)
-		require.True(t, ok && sd.Val, "the removal carries the self-destruct wipe marker")
 		_, ok = ws.GetCodeHash(addr)
 		require.False(t, ok, "a touched-empty EOA was not a contract, so no code-deleted marker")
 	})
@@ -88,50 +70,28 @@ func TestSetEmptyRemoval(t *testing.T) {
 	})
 }
 
-// TestSnapshotSelfDestructPreserveNonceRestamp pins the re-stamp gate for a
-// balance-preserving self-destruct (EIP-8246): at end-of-tx the account resolves to a
-// codeless EOA, so Snapshot drops the per-field writes and the domain apply rebuilds
-// NewAccount+balance. For a PRE-EXISTING account the commitment would otherwise read the
-// stale base nonce/codeHash, so Snapshot re-stamps nonce 0 / EmptyCodeHash. For an account
-// CREATED this block there is no base — the commitment composes the codeless-EOA defaults
-// itself, and re-stamping nonce 0 would leak a net-zero nonce change (0->1->0) into the
-// block access list, diverging the BAL hash and the trie root.
+// TestSnapshotSelfDestructPreserveNonceRestamp pins that Snapshot does not re-stamp nonce
+// 0 / EmptyCodeHash for a balance-preserving self-destruct (EIP-8246) of an account created
+// this block: it has no base, so the re-stamp would leak a net-zero nonce change (0->1->0)
+// into the block access list. TestEIP8246PreserveSelfDestruct covers the pre-existing case.
 func TestSnapshotSelfDestructPreserveNonceRestamp(t *testing.T) {
 	t.Parallel()
 	ver := Version{TxIndex: 1}
 
-	build := func(created bool) *WriteSet {
-		addr := accounts.InternAddress([20]byte{0x82})
-		ws := &WriteSet{}
-		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
-		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(7)})
-		ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: 1})
-		ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: accounts.EmptyCodeHash})
-		if created {
-			ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
-		}
-		return ws
-	}
+	addr := accounts.InternAddress([20]byte{0x82})
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(7)})
+	ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: 1})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: accounts.EmptyCodeHash})
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
 
-	t.Run("pre-existing re-stamps cleared nonce and codeHash", func(t *testing.T) {
-		addr := accounts.InternAddress([20]byte{0x82})
-		out := build(false).Snapshot()
+	out := ws.Snapshot()
 
-		n, ok := out.GetNonce(addr)
-		require.True(t, ok && n.Val == 0, "a pre-existing SD-preserve account re-stamps nonce 0 over the stale base")
-		ch, ok := out.GetCodeHash(addr)
-		require.True(t, ok && ch.Val == accounts.EmptyCodeHash, "and re-stamps EmptyCodeHash over the stale base code")
-	})
-
-	t.Run("created-this-block emits no nonce or codeHash change", func(t *testing.T) {
-		addr := accounts.InternAddress([20]byte{0x82})
-		out := build(true).Snapshot()
-
-		_, ok := out.GetNonce(addr)
-		require.False(t, ok, "a created-this-block SD-preserve account has no base, so no nonce re-stamp -> no net-zero BAL nonceChange")
-		_, ok = out.GetCodeHash(addr)
-		require.False(t, ok, "and no codeHash re-stamp")
-	})
+	_, ok := out.GetNonce(addr)
+	require.False(t, ok, "a created-this-block SD-preserve account has no base, so no nonce re-stamp -> no net-zero BAL nonceChange")
+	_, ok = out.GetCodeHash(addr)
+	require.False(t, ok, "and no codeHash re-stamp")
 }
 
 func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
@@ -149,8 +109,6 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	bal, hasBalance := writes.GetBalance(addr)
 	require.True(t, hasBalance && bal.Deletes(),
 		"a withheld created-empty account emits the balance-deleted removal verdict, overriding its lingering during-tx cells")
-	sd, hasDelete := writes.GetSelfDestruct(addr)
-	require.True(t, hasDelete && sd.Val, "the removal carries the self-destruct wipe marker")
 
 	vm.FlushVersionedWrites(writes, true)
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
@@ -191,8 +149,6 @@ func TestFinalizedWritesEmptyRemovalClearsWholeAccountCell(t *testing.T) {
 	require.False(t, hasAddress,
 		"empty removal must not leave a whole-account AddressPath cell alongside the removal "+
 			"(same layout as a metamorphic recreate -> AccountLifecycleAt would read it as Revived)")
-	sd, hasDelete := writes.GetSelfDestruct(addr)
-	require.True(t, hasDelete && sd.Val, "the removal is encoded as a self-destruct wipe marker plus the balance-deleted verdict")
 }
 
 func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
@@ -500,4 +456,49 @@ func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 	})
 	_, ok := writes.GetAddress(params.SystemAddress)
 	require.True(t, ok)
+}
+
+// TestRecreateAfterEmptyRemovalShadowsBalanceDelete pins that an account removed as an
+// EIP-161 empty and re-created by a later tx with no balance write reads present: the
+// re-creation must supersede the removal's ValueDeleted balance.
+func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
+	t.Parallel()
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	delegation := types.AddressToDelegation(accounts.InternAddress(common.Address{0xde}))
+
+	for _, tc := range []struct {
+		name     string
+		recreate func(*IntraBlockState, accounts.Address) error
+	}{
+		{"nonce only", func(ibs *IntraBlockState, addr accounts.Address) error {
+			return ibs.SetNonce(addr, 1, tracing.NonceChangeUnspecified)
+		}},
+		{"delegation then nonce", func(ibs *IntraBlockState, addr accounts.Address) error {
+			if err := ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization); err != nil {
+				return err
+			}
+			return ibs.SetNonce(addr, 1, tracing.NonceChangeAuthorization)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := accounts.InternAddress([20]byte{0xe4})
+			vm := NewVersionMap(nil)
+
+			touch := NewWithVersionMap(&minimalStateReader{}, vm)
+			t.Cleanup(touch.Close)
+			touch.SetTxContext(1, 0)
+			require.NoError(t, touch.TouchAccount(addr))
+			vm.FlushVersionedWrites(finalizedWrites(t, touch, rules), true)
+
+			recreate := NewWithVersionMap(&minimalStateReader{}, vm)
+			t.Cleanup(recreate.Close)
+			recreate.SetTxContext(1, 1)
+			require.NoError(t, tc.recreate(recreate, addr))
+			vm.FlushVersionedWrites(finalizedWrites(t, recreate, rules), true)
+
+			acc, ok := vm.View(2, &minimalStateReader{}).GetAccount(addr)
+			require.True(t, ok, "the re-created account must read present to commitment")
+			require.Equal(t, uint64(1), acc.Nonce)
+		})
+	}
 }

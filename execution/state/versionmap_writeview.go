@@ -157,9 +157,8 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			}
 			scratch = scratch[:len(inner)]
 			i := 0
-			for key := range inner {
-				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+			for key, kw := range inner {
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -191,8 +190,7 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 				if kw.valStatus == ValueUnchanged {
 					continue
 				}
-				val, _ := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
-				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
 				out[key] = &scratch[i]
 				i++
 			}
@@ -207,7 +205,7 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 }
 
 func (v *versionMapWriteView) AccountChanges() iter.Seq[accounts.Address] {
-	return accountChangeAddrs(v)
+	return accountChangeAddrs(v, v.keys)
 }
 
 var _ WriteSetView = (*versionMapWriteView)(nil)
@@ -239,8 +237,10 @@ func vanishedInTx(ws *WriteSet, vm *VersionMap, addr accounts.Address, txIdx int
 	if sd, res, ok := vm.ReadSelfDestruct(addr, txIdx+1); !ok || !res.resolved() || !sd {
 		return false, nil
 	}
-	if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
-		return false, nil
+	if bal, ok := ws.GetBalance(addr); !ok || !bal.Deletes() {
+		if cc, ok := ws.GetCreateContract(addr); !ok || !cc.Val {
+			return false, nil
+		}
 	}
 	if bal, res, ok := vm.ReadBalance(addr, txIdx+1); eip8246 && ok && (!res.resolved() || !bal.IsZero()) {
 		return false, nil

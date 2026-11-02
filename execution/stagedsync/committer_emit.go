@@ -17,56 +17,11 @@
 package stagedsync
 
 import (
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// committedAccountReader serves the committed base account and storage for the
-// VersionMapView's cascade tail, reading the accounts/storage domains through the
-// calculator's as-of reader. It is the base the view composes over for fields the
-// version map has no cell for; in a cross-block batch it resolves earlier blocks'
-// accounts, their seeded removals, and their storage through the prevBlocks chain.
-type committedAccountReader struct{ reader *asOfStateReader }
-
-func (r *committedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
-	addrVal := addr.Value()
-	enc, _, err := r.reader.Read(kv.AccountsDomain, addrVal[:], 0)
-	if err != nil {
-		return nil, err
-	}
-	if len(enc) == 0 {
-		return nil, nil
-	}
-	acc := new(accounts.Account)
-	if err := accounts.DeserialiseV3(acc, enc); err != nil {
-		return nil, err
-	}
-	return acc, nil
-}
-
-// ReadStorage serves a touched slot's committed value for emitTouched's cross-block
-// resolution: in a batch the touched union spans earlier blocks whose storage writes
-// are not in curVersionMap, so a slot with no cell this block takes its value from the
-// committed base, mirroring the account read-through.
-func (r *committedAccountReader) ReadStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	av := addr.Value()
-	kh := key.Value()
-	composite := make([]byte, 20+32)
-	copy(composite, av[:])
-	copy(composite[20:], kh[:])
-	enc, _, err := r.reader.Read(kv.StorageDomain, composite, 0)
-	if err != nil || len(enc) == 0 {
-		return uint256.Int{}, false, err
-	}
-	var val uint256.Int
-	val.SetBytes(enc)
-	return val, true, nil
-}
 
 // The commitment path folds a block's updates straight from the version map instead of
 // accumulating per-field values. accumulateTouched collects the block's key-only touched
@@ -75,14 +30,6 @@ func (r *committedAccountReader) ReadStorage(addr accounts.Address, key accounts
 // GetAccount/GetStorage and writes one Update per key. The version map already carries
 // the EIP-161 / self-destruct existence verdict, so this path has no EIP knowledge and
 // no re-derivation.
-
-func (cc *commitmentCalculator) ensureTouched() {
-	if cc.touchedAccounts == nil {
-		cc.touchedAccounts = map[accounts.Address]struct{}{}
-		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
-		cc.destructed = map[accounts.Address]struct{}{}
-	}
-}
 
 func (cc *commitmentCalculator) clearTouched() {
 	clear(cc.touchedAccounts)
@@ -97,10 +44,11 @@ func (cc *commitmentCalculator) clearTouched() {
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
-	if writes == nil || writes.IsEmpty() {
-		return
+	if cc.touchedAccounts == nil {
+		cc.touchedAccounts = map[accounts.Address]struct{}{}
+		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
+		cc.destructed = map[accounts.Address]struct{}{}
 	}
-	cc.ensureTouched()
 	addAccount := func(a accounts.Address) {
 		if _, seen := cc.touchedAccounts[a]; seen {
 			return
@@ -144,7 +92,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 // predecessor maps → shared domain): an account absent in the view removes its leaf
 // (and subtree), a present one writes its full account; a storage slot cleared to zero
 // removes its leaf, a non-zero one writes it.
-func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) {
+func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) error {
 	for addr := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update
@@ -156,11 +104,13 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 				Nonce:    acc.Nonce,
 				CodeHash: acc.CodeHash.Value(),
 			}
+			if acc.CodeHash.IsEmpty() {
+				u.CodeHash = empty.CodeHash
+			}
 		} else {
-			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash}
-			u.DeleteStorageSubtree = true
+			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
 		}
-		if view.WasDestroyed(addr) {
+		if _, ok := cc.destructed[addr]; ok || view.WasDestroyed(addr) {
 			u.DeleteStorageSubtree = true
 		}
 		updates.TouchPlainKeyDirect(string(address[:]), &u)
@@ -169,9 +119,6 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		address := addr.Value()
 		for slot := range slots {
 			slotVal := slot.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, address[:])
-			copy(composite[20:], slotVal[:])
 			var u commitment.Update
 			val, ok := view.GetStorage(addr, slot)
 			if ok && !val.IsZero() {
@@ -182,7 +129,8 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 			} else {
 				u.Flags = commitment.DeleteUpdate
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyDirect(string(address[:])+string(slotVal[:]), &u)
 		}
 	}
+	return view.Err()
 }

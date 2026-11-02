@@ -216,11 +216,10 @@ func TestVersionMapWriteView_BalanceKeepsDeleteStamp(t *testing.T) {
 	require.Equal(t, 2, seen)
 }
 
-// An account the tx creates and self-destructs folds to the uniform balance-deleted
-// removal verdict — whether it was absent before the tx, funded at base, funded by an
-// earlier tx of the block, or left empty by an earlier tx. The removal is encoded as
-// data (so commitment reads it absent without lifecycle re-derivation), not dropped;
-// WithoutVanished leaves that verdict in place.
+// An account the tx creates and self-destructs publishes no writes when it was absent
+// before the tx. When it was funded at base, funded by an earlier tx of the block, or
+// left empty by an earlier tx, it folds to the balance-deleted removal verdict, which
+// WithoutVanished leaves in place.
 func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0xC4EA7ED"))
@@ -244,7 +243,12 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 		bal, ok := ws.GetBalance(addr)
 		return ok && bal.Deletes()
 	}
-	require.True(t, removed(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx: folds to the removal verdict")
+	vanished := func(ws *WriteSet) bool {
+		_, sd := ws.GetSelfDestruct(addr)
+		_, bal := ws.GetBalance(addr)
+		return !sd && !bal
+	}
+	require.True(t, vanished(run(t, &minimalStateReader{}, NewVersionMap(nil))), "absent before the tx: no writes")
 	require.True(t, removed(run(t, newAccountStateReader(addr), NewVersionMap(nil))), "a CREATE onto a pre-funded address deletes it")
 
 	funded := NewVersionMap(nil)
@@ -259,6 +263,33 @@ func TestWithoutVanished_CreatedAndDestroyedInTx(t *testing.T) {
 	w.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash}})
 	empty.FlushVersionedWrites(w, true)
 	require.True(t, removed(run(t, &minimalStateReader{}, empty)), "an earlier tx of the block left an empty account")
+}
+
+func TestWithoutVanished_CreatedEmptyTouch(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xE4E7"))
+	run := func(t *testing.T, reader StateReader) *WriteSet {
+		t.Helper()
+		vm := NewVersionMap(nil)
+		ibs := NewWithVersionMap(reader, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 1)
+		require.NoError(t, ibs.TouchAccount(addr))
+		ws := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
+		vm.FlushVersionedWrites(ws, true)
+		out, err := WithoutVanished(ws, vm, 1, false, reader)
+		require.NoError(t, err)
+		return out
+	}
+	out := run(t, &minimalStateReader{})
+	_, sd := out.GetSelfDestruct(addr)
+	_, bal := out.GetBalance(addr)
+	require.False(t, sd || bal, "a touch of an absent account publishes no writes")
+
+	existing := accounts.NewAccount()
+	out = run(t, &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &existing}})
+	b, ok := out.GetBalance(addr)
+	require.True(t, ok && b.Deletes(), "a touched existing empty account keeps its removal")
 }
 
 // The view's value iterators reuse one VersionedWrite per call, so ranging one costs
@@ -310,17 +341,15 @@ func TestVersionMapWriteView_IteratorsDoNotAllocatePerElement(t *testing.T) {
 	}
 }
 
-// The version map is the sole value source: a net-zero (ValueUnchanged) write publishes
-// the version-map value even when the write-set value it carries differs, and
-// StorageChanges filters the net-zero write from the leaf set.
-func TestVersionMapWriteView_NetZeroStorageReadsVersionMapValue(t *testing.T) {
+// A net-zero (ValueUnchanged) write publishes the write-set value it carries, not the
+// version-map value, and StorageChanges filters the net-zero write from the leaf set.
+func TestVersionMapWriteView_NetZeroStorageWritePublishesItsValue(t *testing.T) {
 	t.Parallel()
 
 	const txIdx = 1
 	addr := getAddress(3)
 	key := accounts.InternKey(common.Hash{0x04})
-	seed := *uint256.NewInt(42)
-	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: txIdx + 1, Value: seed}}}}}})
+	vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: key, Changes: []*types.StorageChange{{Index: txIdx + 1, Value: *uint256.NewInt(42)}}}}}})
 	keys := &WriteSet{}
 	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: txIdx}, valStatus: ValueUnchanged},
@@ -334,7 +363,7 @@ func TestVersionMapWriteView_NetZeroStorageReadsVersionMapValue(t *testing.T) {
 	published := 0
 	for _, inner := range view.Storages() {
 		for _, vw := range inner {
-			require.Equal(t, seed, vw.Val, "net-zero write publishes the version-map value, not the write-set value")
+			require.Equal(t, *uint256.NewInt(5), vw.Val)
 			published++
 		}
 	}

@@ -36,16 +36,20 @@ import (
 // version map from the BAL, stamp the EIP-161 removals into it as data, then emit each
 // touched key via GetAccount. base supplies untouched fields; a high fold txNum reads the
 // block-end floor. Returns the emitted leaf updates keyed by plain key.
-func balFoldUpdates(t *testing.T, blockBAL types.BlockAccessList, eip161Enabled, isAura bool, base state.AccountBaseReader) map[string]commitment.Update {
+func balFoldUpdates(t *testing.T, blockBAL types.BlockAccessList, eip161Enabled, isAura bool, base state.StateReader) map[string]commitment.Update {
 	t.Helper()
 	const foldTxNum = 1 << 20 // above every BAL change index → GetAccount reads the block-end floor
 	vm := state.NewVersionMap(blockBAL)
-	vm.SetBaseTxNum(0)
-	vm.SeedEmptyRemovals(blockBAL, eip161Enabled, isAura, base)
+	require.NoError(t, vm.SeedEmptyRemovals(eip161Enabled, isAura, base))
 	return emitTouchedUpdates(t, vm, foldTxNum, base, bal.ToWriteSet(blockBAL, math.MaxUint32))
 }
 
 func acctPlainKey(addr accounts.Address) string { v := addr.Value(); return string(v[:]) }
+
+func storPlainKey(addr accounts.Address, slot accounts.StorageKey) string {
+	av, sv := addr.Value(), slot.Value()
+	return string(av[:]) + string(sv[:])
+}
 
 // TestBALFold_EmptyAccountBecomesDelete pins the EIP-161 reconstruction on the BAL path:
 // the BAL carries no deletion marker, so a touched account whose block-end state is empty
