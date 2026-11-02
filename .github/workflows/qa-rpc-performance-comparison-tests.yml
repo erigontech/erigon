@@ -294,6 +294,9 @@ jobs:
           ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
             --counts 600000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.jsonl"
+          ./build/bin/rpc_pattern_gen eth_createAccessList --url http://localhost:8545 \
+            --counts 400000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_createAccessList_gen_latest.jsonl"
           ./build/bin/rpc_pattern_gen eth_getLogs --url http://localhost:8545 \
             --counts 100000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_gen_latest.jsonl"
@@ -306,17 +309,15 @@ jobs:
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_wide.profile" --url http://localhost:8545 \
             --counts 20000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_wide_gen_latest.jsonl"
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/eth_getLogs_latest.profile" --url http://localhost:8545 \
+            --counts 200000 --block-tag latest --verify --keep ok --fees drop \
+            --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_latest_gen_latest.jsonl"
           # The patterns that trace recent blocks are generated last, in the reverse order of their run.
           # --max-blocks 32 keeps the traced blocks inside the recent state that full nodes keep (e.g. 128 blocks for Geth).
-          for tracer in callTracer structLog; do
-            option=""
-            [ "$tracer" = callTracer ] && option="tracer=callTracer"
-            printf '[methods]\ndebug_traceBlockByNumber 100%% %s\n' "$option" > "$RUNNER_TEMP/trace_block_$tracer.profile"
-          done
-          ./build/bin/rpc_pattern_gen --profile "$RUNNER_TEMP/trace_block_structLog.profile" --url http://localhost:8545 \
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/debug_traceBlockByNumber_structLog.profile" --url http://localhost:8545 \
             --counts 50 --block-tag latest --verify --keep ok --max-blocks 32 \
             --out "perf/pattern/$CHAIN/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl"
-          ./build/bin/rpc_pattern_gen --profile "$RUNNER_TEMP/trace_block_callTracer.profile" --url http://localhost:8545 \
+          ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/debug_traceBlockByNumber_callTracer.profile" --url http://localhost:8545 \
             --counts 600 --block-tag latest --verify --keep ok --max-blocks 32 \
             --out "perf/pattern/$CHAIN/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
@@ -330,10 +331,12 @@ jobs:
           name: latest-patterns-${{ github.run_attempt }}
           path: |
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_call_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_createAccessList_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_head_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_topics_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_wide_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_latest_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl
@@ -455,6 +458,16 @@ jobs:
         continue-on-error: true
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 eth_call_gen
 
+      - name: Sync clients before eth_createAccessList_gen
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK"
+
+      - name: Run eth_createAccessList_gen
+        id: perf_eth_createAccessList_gen
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_createAccessList stress_test_eth_createAccessList_gen_latest 10000:20,20000:20 eth_createAccessList_gen
+
       - name: Sync clients before eth_getLogs_gen
         if: needs.setup.outputs.coordinated == 'true'
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
@@ -495,6 +508,16 @@ jobs:
         continue-on-error: true
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 eth_getLogs_wide
 
+      - name: Sync clients before eth_getLogs_latest
+        if: needs.setup.outputs.coordinated == 'true'
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK"
+
+      - name: Run eth_getLogs_latest
+        id: perf_eth_getLogs_latest
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_latest_gen_latest 2000:20,10000:20 eth_getLogs_latest
+
       - name: Collect the benchmark results
         id: collect_results
         if: always() && steps.prepare_perf.outcome == 'success'
@@ -504,10 +527,12 @@ jobs:
             trace_block_call_tracer=${{ steps.perf_trace_block_call_tracer.outcome }}
             trace_block_struct_log=${{ steps.perf_trace_block_struct_log.outcome }}
             eth_call_gen=${{ steps.perf_eth_call_gen.outcome }}
+            eth_createAccessList_gen=${{ steps.perf_eth_createAccessList_gen.outcome }}
             eth_getLogs_gen=${{ steps.perf_eth_getLogs_gen.outcome }}
             eth_getLogs_head=${{ steps.perf_eth_getLogs_head.outcome }}
             eth_getLogs_topics=${{ steps.perf_eth_getLogs_topics.outcome }}
             eth_getLogs_wide=${{ steps.perf_eth_getLogs_wide.outcome }}
+            eth_getLogs_latest=${{ steps.perf_eth_getLogs_latest.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"
@@ -608,7 +633,8 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           for run_id in "$RUN_ID" "$RUN_ID-trace_block_call_tracer" "$RUN_ID-trace_block_struct_log" "$RUN_ID-eth_call_gen" \
-            "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" "$RUN_ID-eth_getLogs_wide"; do
+            "$RUN_ID-eth_createAccessList_gen" "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" \
+            "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_latest"; do
             python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
