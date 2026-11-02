@@ -97,12 +97,7 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-// SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
-// not: the archive backfill stop condition asks how far data has been dumped, not how
-// far it is readable.
-func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	return s.DirtySegmentsMax(snaptype.CaplinEnums.BeaconBlocks)
-}
+func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
@@ -148,8 +143,6 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-// OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
-// segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
 func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
 
 func (s *CaplinSnapshots) OpenBeaconBlocks() error {
@@ -294,10 +287,11 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
+	stagingPath := f.Path + ".tmp"
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", f.Path, tmpDir, compressCfg, lvl, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot BlobSidecars", stagingPath, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -368,6 +362,9 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		return fmt.Errorf("compress: %w", err)
 	}
 	if err := removeBlobIndexAndTorrents(snapDir, fromSlot, toSlot); err != nil {
+		return err
+	}
+	if err := os.Rename(stagingPath, f.Path); err != nil {
 		return err
 	}
 	// Generate .idx file, which is the slot => offset mapping.

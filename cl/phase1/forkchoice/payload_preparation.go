@@ -51,6 +51,15 @@ func (p *PayloadPreparationImports) BeginImport(slot uint64) func() {
 	return func() { p.active.Delete(key) }
 }
 
+func (p *PayloadPreparationImports) ImportInProgress(slot uint64) bool {
+	active := false
+	p.active.Range(func(_, value any) bool {
+		active = value.(uint64) == slot
+		return !active
+	})
+	return active
+}
+
 func (p *PayloadPreparationImports) BeginPendingEnvelope(blockRoot common.Hash) func() {
 	key := &blockRoot
 	p.pendingEnvelopes.Store(key, blockRoot)
@@ -101,6 +110,10 @@ func (p *PayloadPreparationImports) TryBegin(
 
 func (f *ForkChoiceStore) BeginPayloadImport(slot uint64) func() {
 	return f.payloadPreparation.BeginImport(slot)
+}
+
+func (f *ForkChoiceStore) PayloadImportInProgress(slot uint64) bool {
+	return f.payloadPreparation.ImportInProgress(slot)
 }
 
 func (f *ForkChoiceStore) BeginPendingPayloadEnvelope(blockRoot common.Hash) func() {

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 
+	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
@@ -1702,16 +1703,10 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 		if ws == nil {
 			return
 		}
-		if !eachWriteHeaderOf(ws.address, yield) ||
-			!eachWriteHeaderOf(ws.balance, yield) ||
-			!eachWriteHeaderOf(ws.nonce, yield) ||
-			!eachWriteHeaderOf(ws.incarnation, yield) ||
-			!eachWriteHeaderOf(ws.selfDestruct, yield) ||
-			!eachWriteHeaderOf(ws.createContract, yield) ||
-			!eachWriteHeaderOf(ws.code, yield) ||
-			!eachWriteHeaderOf(ws.codeHash, yield) ||
-			!eachWriteHeaderOf(ws.codeSize, yield) {
-			return
+		for h := range ws.accountHeaders() {
+			if !yield(h) {
+				return
+			}
 		}
 		for _, inner := range ws.storage {
 			for _, vw := range inner {
@@ -1720,6 +1715,24 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 				}
 			}
 		}
+	}
+}
+
+// accountHeaders is AllHeaders without the storage writes.
+func (ws *WriteSet) accountHeaders() iter.Seq[WriteHeader] {
+	return func(yield func(WriteHeader) bool) {
+		if ws == nil {
+			return
+		}
+		_ = eachWriteHeaderOf(ws.address, yield) &&
+			eachWriteHeaderOf(ws.balance, yield) &&
+			eachWriteHeaderOf(ws.nonce, yield) &&
+			eachWriteHeaderOf(ws.incarnation, yield) &&
+			eachWriteHeaderOf(ws.selfDestruct, yield) &&
+			eachWriteHeaderOf(ws.createContract, yield) &&
+			eachWriteHeaderOf(ws.code, yield) &&
+			eachWriteHeaderOf(ws.codeHash, yield) &&
+			eachWriteHeaderOf(ws.codeSize, yield)
 	}
 }
 
@@ -2888,8 +2901,8 @@ type accountState struct {
 	balance             fieldTracker[uint256.Int]
 	nonce               fieldTracker[uint64]
 	code                fieldTracker[accounts.Code]
-	balanceValue        *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
+	balanceValue        g.Option[uint256.Int]               // tracks latest seen balance
+	initialBalanceValue g.Option[uint256.Int]               // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
@@ -2918,7 +2931,7 @@ func (ft *fieldTracker[T]) recordWrite(idx uint32, value T) {
 	ft.changes.recordWrite(idx, value)
 }
 
-func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance g.Option[uint256.Int]) {
 	// Get the sorted indices to identify the first (lowest-index) entry.
 	// If the first entry equals the pre-block balance, it's a net-zero
 	// change from a reverted tx (e.g. CALL with value then revert) and
@@ -2928,7 +2941,7 @@ func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, ini
 	bt.changes.apply(func(idx uint32, value uint256.Int) {
 		if !firstFiltered {
 			firstFiltered = true
-			if initialBalance != nil && value.Eq(initialBalance) {
+			if initialBalance.Ok && value.Eq(&initialBalance.Value) {
 				return
 			}
 		}
@@ -2997,13 +3010,6 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
-func (account *accountState) setBalanceValue(v uint256.Int) {
-	if account.balanceValue == nil {
-		account.balanceValue = &uint256.Int{}
-	}
-	*account.balanceValue = v
-}
-
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{changes: types.AccountChanges{Address: addr.Value()}}
 }
@@ -3043,29 +3049,28 @@ func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint
 		// A first zero write is a no-op touch only when the pre-block balance is
 		// (or is implicitly) zero. A zero write over a non-zero pre-block balance
 		// is a genuine depletion and must be recorded.
-		if account.balanceValue == nil && val.IsZero() &&
-			(account.initialBalanceValue == nil || account.initialBalanceValue.IsZero()) {
-			if account.initialBalanceValue == nil {
-				v := val
-				account.initialBalanceValue = &v
+		if !account.balanceValue.Ok && val.IsZero() &&
+			(!account.initialBalanceValue.Ok || account.initialBalanceValue.Value.IsZero()) {
+			if !account.initialBalanceValue.Ok {
+				account.initialBalanceValue.Set(val)
 			}
-			account.setBalanceValue(val)
+			account.balanceValue.Set(val)
 			return
 		}
 		// Skip no-op writes.
-		if account.balanceValue != nil && val.Eq(account.balanceValue) {
-			account.setBalanceValue(val)
+		if account.balanceValue.Ok && val.Eq(&account.balanceValue.Value) {
+			account.balanceValue.Set(val)
 			return
 		}
 		// Skip balance writes that match the pre-block (initial) balance,
 		// but ONLY when no intermediate balance changes have been recorded.
 		// If intermediate changes exist, a write restoring the initial value
 		// MUST still be recorded so parallel executors see the correct value.
-		if account.initialBalanceValue != nil && val.Eq(account.initialBalanceValue) && len(account.balance.changes.entries) == 0 {
-			account.setBalanceValue(val)
+		if account.initialBalanceValue.Ok && val.Eq(&account.initialBalanceValue.Value) && len(account.balance.changes.entries) == 0 {
+			account.balanceValue.Set(val)
 			return
 		}
-		account.setBalanceValue(val)
+		account.balanceValue.Set(val)
 		account.balance.recordWrite(accessIndex, val)
 	}
 }
@@ -3095,14 +3100,13 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	// Record the pre-block balance for net-zero detection from the first read
 	// only, and only before any write: a read arriving after a write reflects
 	// post-write state, not the pre-block balance.
-	if account.initialBalanceValue == nil && account.balanceValue == nil {
-		v := val
-		account.initialBalanceValue = &v
+	if !account.initialBalanceValue.Ok && !account.balanceValue.Ok {
+		account.initialBalanceValue.Set(val)
 	}
 	// After a write, balanceValue tracks the written state; a stale DB read must
 	// not override it or the no-op check would skip a real write.
 	if len(account.balance.changes.entries) == 0 {
-		account.setBalanceValue(val)
+		account.balanceValue.Set(val)
 	}
 }
 
@@ -3247,15 +3251,56 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	if txFrom == nil {
 		return false
 	}
-	for h := range txFrom.AllHeaders() {
-		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
+	for addr, writes := range txFrom.storage {
+		if anyCommonKey(writes, txTo.storage[addr]) {
 			return true
 		}
-		if h.Path.AffectsAccountLifecycle() && txTo.hasAnyReadAt(h.Address) {
+	}
+	for h := range txFrom.accountHeaders() {
+		if txTo.DependsOn(h) {
 			return true
 		}
 	}
 	return false
+}
+
+// DependsOnAt is HasReadDep for the writes ws makes at addr.
+func (s ReadSet) DependsOnAt(ws *WriteSet, addr accounts.Address) bool {
+	if ws == nil {
+		return false
+	}
+	if anyCommonKey(ws.storage[addr], s.storage[addr]) {
+		return true
+	}
+	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodePath, CodeHashPath, CodeSizePath, CreateContractPath} {
+		h := WriteHeader{Address: addr, Path: p}
+		if ws.hasHeader(h) && s.DependsOn(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// anyCommonKey probes the smaller map's keys in the larger one.
+func anyCommonKey[K comparable, A, B any](a map[K]A, b map[K]B) bool {
+	if len(a) > len(b) {
+		return anyCommonKey(b, a)
+	}
+	for k := range a {
+		if _, ok := b[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// DependsOn reports whether a write of h can invalidate a read in s: a read of the same
+// cell, or any read of the address when h changes the account lifecycle.
+func (s ReadSet) DependsOn(h WriteHeader) bool {
+	if _, ok := s.getHeader(h.Address, h.Path, h.Key); ok {
+		return true
+	}
+	return h.Path.AffectsAccountLifecycle() && s.hasAnyReadAt(h.Address)
 }
 
 func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {

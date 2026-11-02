@@ -59,6 +59,22 @@ func pragueConfig() *chain.Config {
 	return config
 }
 
+func amsterdamConfig() *chain.Config {
+	config := chain.TestChainOsakaConfig.Copy()
+	config.AmsterdamTime = common.NewUint64(0)
+	return config
+}
+
+// importRepeats is how often a racy parallel import is repeated: once in short mode, where
+// TestValidatedFeeRecipientsStayEstimates covers the fix, and often enough to catch a regression
+// otherwise.
+func importRepeats() int {
+	if testing.Short() {
+		return 1
+	}
+	return 10
+}
+
 // baseFeePaid is the base fee paid by the tx at index i of the block.
 func baseFeePaid(chainPack *blockgen.ChainPack, i int) uint256.Int {
 	return *uint256.NewInt(chainPack.Receipts[0][i].GasUsed * chainPack.TopBlock.BaseFee().Uint64())
@@ -198,4 +214,136 @@ func TestZeroBaseFeeRemovesEmptyBurntRecipient(t *testing.T) {
 	}
 	importSerially(t, gspec, keys[0], chainPack, check)
 	importInParallel(t, gspec, keys[0], chainPack, check)
+}
+
+// Tx 0 touches an empty fee recipient, the burnt-fee recipient or the coinbase, with a zero-value
+// call, so EIP-161 removes it and its fee revives it with its storage. Every later tx stores the
+// recipient's balance, which must include the fees of all earlier txs.
+func TestFeeRevivingTouchedRecipientIsVisibleToLaterReads(t *testing.T) {
+	const txCount = 32
+	const gasPrice = 10_000_000_000
+	toucher := common.HexToAddress("0x7007")
+	observer := common.HexToAddress("0x0b5e")
+	for _, tc := range []struct {
+		name     string
+		config   *chain.Config
+		coinbase bool
+	}{
+		{"burnt/london", londonConfig(), false},
+		{"burnt/prague", pragueConfig(), false},
+		{"burnt/amsterdam", amsterdamConfig(), false},
+		{"coinbase/london", londonConfig(), true},
+		{"coinbase/prague", pragueConfig(), true},
+		{"coinbase/amsterdam", amsterdamConfig(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recipient, coinbase := burntRecipient, common.Address{1}
+			if tc.coinbase {
+				recipient = common.HexToAddress("0xc0c0")
+				coinbase = recipient
+			}
+			alloc := types.GenesisAlloc{
+				toucher:   {Code: callCode(recipient, 0)},
+				observer:  {Code: program.New().Push(recipient).Op(vm.BALANCE, vm.CALLER, vm.SSTORE).Bytes()},
+				recipient: {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{common.BytesToHash([]byte{1}): common.BytesToHash([]byte{1})}},
+			}
+			keys := revivalKeys(t, alloc, txCount)
+			calls := make([]revivalCall, txCount)
+			calls[0] = revivalCall{to: toucher}
+			for i := 1; i < txCount; i++ {
+				calls[i] = revivalCall{to: observer}
+			}
+			gspec := &types.Genesis{Config: burntFeeConfig(tc.config), GasLimit: txCount * 1_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, coinbase, gasPrice, calls)
+			feePaid := func(i int) uint256.Int {
+				if !tc.coinbase {
+					return baseFeePaid(chainPack, i)
+				}
+				tip := uint256.NewInt(gasPrice)
+				tip.Sub(tip, chainPack.TopBlock.BaseFee())
+				return *tip.Mul(tip, uint256.NewInt(chainPack.Receipts[0][i].GasUsed))
+			}
+			check := func(t *testing.T, st *state.IntraBlockState) {
+				var balance uint256.Int
+				for i, call := range calls {
+					if call.to == observer {
+						sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+						stored, err := st.GetState(accounts.InternAddress(observer), accounts.InternKey(common.BytesToHash(sender[:])))
+						require.NoError(t, err)
+						require.Equal(t, balance, stored, "the balance read by tx %d", i)
+					}
+					fee := feePaid(i)
+					balance.Add(&balance, &fee)
+				}
+				// Before the merge, the coinbase also gets the block reward.
+				if !tc.coinbase || tc.config.TerminalTotalDifficulty != nil {
+					final, err := st.GetBalance(accounts.InternAddress(recipient))
+					require.NoError(t, err)
+					require.Equal(t, balance, final)
+				}
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, recipient, 1))
+			}
+			importSerially(t, gspec, keys[0], chainPack, check)
+			for range importRepeats() {
+				importInParallel(t, gspec, keys[0], chainPack, check)
+			}
+		})
+	}
+}
+
+// Txs alternate between sending 1 wei to the burnt-fee recipient and storing its
+// balance, so every stored balance includes the base fees of all earlier txs.
+// A balance read can race with the crediting of an earlier tx's base fee, so the
+// parallel import is repeated.
+func TestBurntFeeIsVisibleToLaterBalanceReads(t *testing.T) {
+	const txCount = 64
+	const initialBalance = 1_000_000_000
+	observer := common.HexToAddress("0x0b5e")
+	for _, tc := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{"london", londonConfig()},
+		{"prague", pragueConfig()},
+		{"amsterdam", amsterdamConfig()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				observer:       {Code: program.New().Push(burntRecipient).Op(vm.BALANCE, vm.CALLER, vm.SSTORE).Bytes()},
+				burntRecipient: {Balance: big.NewInt(initialBalance)},
+			}
+			keys := revivalKeys(t, alloc, txCount)
+			calls := make([]revivalCall, txCount)
+			for i := range calls {
+				if i%2 == 0 {
+					calls[i] = revivalCall{to: burntRecipient, value: 1}
+				} else {
+					calls[i] = revivalCall{to: observer}
+				}
+			}
+			gspec := &types.Genesis{Config: burntFeeConfig(tc.config), GasLimit: txCount * 1_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, calls)
+			check := func(t *testing.T, st *state.IntraBlockState) {
+				balance := *uint256.NewInt(initialBalance)
+				for i, call := range calls {
+					if call.to == observer {
+						sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+						stored, err := st.GetState(accounts.InternAddress(observer), accounts.InternKey(common.BytesToHash(sender[:])))
+						require.NoError(t, err)
+						require.Equal(t, balance, stored, "the balance read by tx %d", i)
+					}
+					fee := baseFeePaid(chainPack, i)
+					balance.Add(&balance, &fee)
+					balance.AddUint64(&balance, call.value)
+				}
+				final, err := st.GetBalance(accounts.InternAddress(burntRecipient))
+				require.NoError(t, err)
+				require.Equal(t, balance, final)
+			}
+			importSerially(t, gspec, keys[0], chainPack, check)
+			for range importRepeats() {
+				importInParallel(t, gspec, keys[0], chainPack, check)
+			}
+		})
+	}
 }

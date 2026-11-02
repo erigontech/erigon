@@ -376,7 +376,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
 	if oldGasLimit != stateChanges.BlockGasLimit {
 		p.all.ascendAll(func(mt *metaTxn) bool {
-			if mt.TxnSlot.GetGas() < stateChanges.BlockGasLimit {
+			if mt.TxnSlot.GetGas() <= stateChanges.BlockGasLimit {
 				mt.subPool |= NotTooMuchGas
 			} else {
 				mt.subPool &^= NotTooMuchGas
@@ -404,6 +404,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
+	for i, txn := range unwindTxns.Txns {
+		unwindTxns.IsLocal[i] = p.isLocalLRU.Contains(string(txn.IDHash[:]))
+	}
 	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
 		return err
@@ -798,7 +801,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			continue
 		}
 
-		if mt.TxnSlot.GetGas() >= p.blockGasLimit.Load() {
+		if mt.TxnSlot.GetGas() > p.blockGasLimit.Load() {
 			// Skip transactions with very large gas limit
 			continue
 		}
@@ -1197,6 +1200,19 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+		}
+		return txpoolcfg.Spammer
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
+	}
+
 	if p.isOsaka() {
 		err := libkzg.VerifyCellProofBatch(blobs, commitments, proofs)
 		if err != nil {
@@ -1211,18 +1227,6 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
-		}
-		return txpoolcfg.Spammer
-	}
-	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
-		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
-		}
-		return txpoolcfg.BlobPoolOverflow
-	}
 	return txpoolcfg.Success
 }
 
@@ -1506,12 +1510,15 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 	return reasons, goodTxns, nil
 }
 
-// punishSpammer by drop half of it's transactions with high nonce
+// punishSpammer drops high-nonce transactions without breaking local nonce chains.
 func (p *TxPool) punishSpammer(spammer uint64) {
 	count := p.all.count(spammer) / 2
 	if count > 0 {
 		txnsToDelete := make([]*metaTxn, 0, count)
 		p.all.descend(spammer, func(mt *metaTxn) bool {
+			if mt.subPool&IsLocal != 0 {
+				return false
+			}
 			txnsToDelete = append(txnsToDelete, mt)
 			count--
 			return count > 0
@@ -1618,11 +1625,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	// An interesting note here is that if the block contained any transactions local to the node,
-	// by being first removed from the pool (from the "local" part of it), and then re-injected,
-	// they effective lose their priority over the "remote" transactions. In order to prevent that,
-	// somehow the fact that certain transactions were local, needs to be remembered for some
-	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
@@ -1683,11 +1685,6 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	// An interesting note here is that if the block contained any transactions local to the node,
-	// by being first removed from the pool (from the "local" part of it), and then re-injected,
-	// they effective lose their priority over the "remote" transactions. In order to prevent that,
-	// somehow the fact that certain transactions were local, needs to be remembered for some
-	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
@@ -2233,6 +2230,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
+	followsRemote := false
 	senderHasCode := !senderCodeHash.IsEmpty()
 	senderTxnKept := false
 	var toDel []*metaTxn                       // can't delete items while iterate them
@@ -2277,6 +2275,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			minTip = min(minTip, mt.TxnSlot.GetTipCap().Uint64())
 		}
 		mt.minTip = minTip
+		mt.followsRemote = followsRemote
+		followsRemote = followsRemote || mt.subPool&IsLocal == 0
 
 		mt.nonceDistance = 0
 		if mt.TxnSlot.Nonce > senderNonce { // no uint underflow
@@ -2312,7 +2312,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 
 		mt.subPool &^= NotTooMuchGas
-		if mt.TxnSlot.GetGas() < blockGasLimit {
+		if mt.TxnSlot.GetGas() <= blockGasLimit {
 			mt.subPool |= NotTooMuchGas
 		}
 
@@ -2787,50 +2787,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
-	txns := TxnSlots{}
-	parseCtx := NewTxnParseContext(p.chainID)
-	parseCtx.WithSender(false)
-
-	i := 0
-	it, err = tx.Range(kv.PoolTransaction, nil, nil, order.Asc, kv.Unlim)
-	if err != nil {
-		return err
-	}
-	for it.HasNext() {
-		k, v, err := it.Next()
-		if err != nil {
-			return err
-		}
-		addr, txnRlp := *(*[20]byte)(v[:20]), bytes.Clone(v[20:])
-		txn := &TxnSlot{}
-
-		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB
-		_, err = parseCtx.ParseTransaction(txnRlp, 0, txn, nil, false /* hasEnvelope */, true /*wrappedWithBlobs*/, nil)
-		if err != nil {
-			err = fmt.Errorf("err: %w, rlp: %x", err, txnRlp)
-			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
-			continue
-		}
-		txn.Rlp = nil // means that we don't need store it in db anymore
-
-		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
-		isLocalTx := p.isLocalLRU.Contains(string(k))
-
-		reason, err := p.validateTx(txn, isLocalTx, cacheView)
-		if err != nil {
-			return err
-		}
-		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
-			continue
-		}
-		p.recoverAuthorizations(txn)
-		txns.Resize(uint(i + 1))
-		txns.Txns[i] = txn
-		txns.IsLocal[i] = isLocalTx
-		copy(txns.Senders.At(i), addr[:])
-		i++
-	}
-
 	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
 
 	if p.feeCalculator != nil {
@@ -2865,11 +2821,61 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	}
 
 	if blockGasLimit == 0 {
-		if p.chainConfig.DefaultBlockGasLimit != nil {
-			blockGasLimit = *p.chainConfig.DefaultBlockGasLimit
-		} else {
-			blockGasLimit = ethconfig.DefaultBlockGasLimit
+		blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
+	}
+
+	// The validation and insertion below read these from p, so publish them first.
+	var pendingBaseFee256 uint256.Int
+	pendingBaseFee256.SetUint64(pendingBaseFee)
+	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
+	p.pendingBaseFee.Store(pendingBaseFee)
+	p.pendingBlobFee.Store(pendingBlobFee)
+	p.blockGasLimit.Store(blockGasLimit)
+
+	txns := TxnSlots{}
+	parseCtx := NewTxnParseContext(p.chainID)
+	parseCtx.WithSender(false)
+
+	i := 0
+	it, err = tx.Range(kv.PoolTransaction, nil, nil, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
 		}
+		addr, txnRlp := *(*[20]byte)(v[:20]), bytes.Clone(v[20:])
+		txn := &TxnSlot{}
+
+		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB
+		_, err = parseCtx.ParseTransaction(txnRlp, 0, txn, nil, false /* hasEnvelope */, true /*wrappedWithBlobs*/, nil)
+		if err != nil {
+			err = fmt.Errorf("err: %w, rlp: %x", err, txnRlp)
+			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
+			continue
+		}
+		txn.Rlp = nil // means that we don't need store it in db anymore
+
+		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
+		isLocalTx := p.isLocalLRU.Contains(string(k))
+
+		reason, err := p.validateTx(txn, isLocalTx, cacheView)
+		if err != nil {
+			return err
+		}
+		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
+			// The flush-time delete needs only the hash and the sender; dropping the body frees blobs now.
+			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
+			continue
+		}
+		p.recoverAuthorizations(txn)
+		txns.Resize(uint(i + 1))
+		txns.Txns[i] = txn
+		txns.IsLocal[i] = isLocalTx
+		copy(txns.Senders.At(i), addr[:])
+		i++
 	}
 
 	err = p.senders.registerNewSenders(&txns, p.logger)
@@ -2904,14 +2910,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return true
 	})
 
-	// Initialise cached pendingBaseFee values in all queues so that their
-	// comparators use the correct base fee even before the first OnNewBlock.
-	var pendingBaseFee256 uint256.Int
-	pendingBaseFee256.SetUint64(pendingBaseFee)
-	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
-	p.pendingBaseFee.Store(pendingBaseFee)
-	p.pendingBlobFee.Store(pendingBlobFee)
-	p.blockGasLimit.Store(blockGasLimit)
 	return nil
 }
 

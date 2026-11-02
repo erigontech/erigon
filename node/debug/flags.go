@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/felixge/fgprof"
 	"github.com/pelletier/go-toml/v2"
@@ -372,8 +373,9 @@ func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {
 		pprofMux.Handle("/debug/fgprof", fgprof.Handler())
 
 		pprofServer := &http.Server{
-			Addr:    address,
-			Handler: pprofMux,
+			Addr:              address,
+			Handler:           pprofMux,
+			ReadHeaderTimeout: 5 * time.Second,
 		}
 
 		go func() {

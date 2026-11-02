@@ -104,6 +104,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		t.mockSyncedData,
 		t.mockColumnSidecarStorage,
 		beaconevents.NewEventEmitter(),
+		nil,
 	)
 
 	t.mockFuncs = &mockFuncs{
@@ -531,6 +532,37 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 	t.NoError(err)
 }
 
+// A sidecar for the same (slot, proposer, index) claimed while this one is validated, for example by
+// columns built from EL blobs, makes this one a duplicate: it is ignored, not stored or forwarded.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenClaimedDuringValidation_ReturnsErrIgnore() {
+	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
+	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
+	verifyDataColumnSidecarKZGProofs = t.mockFuncs.VerifyDataColumnSidecarKZGProofs
+	blsVerify = t.mockFuncs.BlsVerify
+
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockEthClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofs", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
+	header := sidecar.SignedBlockHeader.Header
+	key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
+	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Add(key, struct{}{})
+		return nil
+	}).Times(1)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Times(0)
+
+	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
+
+	t.ErrorIs(err, ErrIgnore)
+}
+
 // TestProcessMessage_WhenStorageFails_ReturnsError tests storage failure handling
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_ReturnsError() {
 	// Setup mock functions
@@ -563,6 +595,10 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_Returns
 	t.Error(err)
 	t.ErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "failed to write data column sidecar")
+	// The sidecar was not stored, so a later valid copy must not be ignored as a duplicate.
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index})
+	t.False(seen)
 }
 
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyLookupFails_ReturnsErrIgnore() {
@@ -577,6 +613,52 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyLookupFails_R
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
 
 	t.ErrorIs(err, ErrIgnore)
+}
+
+// expectValidFuluSidecarOutsideCustody makes every gossip check pass for a node whose only custody column is 0.
+func (t *dataColumnSidecarTestSuite) expectValidFuluSidecarOutsideCustody(kzgProofsValid bool) {
+	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
+	stateReader := das_state_mock.NewMockPeerDasStateReader(t.gomockCtrl)
+	t.mockForkChoice.MockPeerDas = peerDas
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().StateReader().Return(stateReader).AnyTimes()
+	stateReader.EXPECT().GetMyCustodyColumns().Return(map[uint64]bool{0: true}, nil).AnyTimes()
+
+	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
+	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
+	verifyDataColumnSidecarKZGProofs = t.mockFuncs.VerifyDataColumnSidecarKZGProofs
+	blsVerify = t.mockFuncs.BlsVerify
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockEthClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofs", gomock.Any()).Return(kzgProofsValid).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
+	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).Return(nil).AnyTimes()
+}
+
+// A node subscribed to a column's subnet relays a valid sidecar for it even when it does not keep the column.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecarOutsideCustody_AcceptsWithoutStoring() {
+	t.expectValidFuluSidecarOutsideCustody(true)
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
+
+	t.NoError(err)
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: 1})
+	t.True(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidSidecarOutsideCustody_ReturnsError() {
+	t.expectValidFuluSidecarOutsideCustody(false)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion))
+
+	t.Error(err)
+	t.NotErrorIs(err, ErrIgnore)
 }
 
 // ============================================

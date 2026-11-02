@@ -43,17 +43,6 @@ func (r *staticAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 	return nil, nil
 }
 
-// anyAccountReader answers every address with the same account, so a benchmark
-// can touch an arbitrary number of distinct accounts.
-type anyAccountReader struct {
-	emptyReader
-	acc *accounts.Account
-}
-
-func (r *anyAccountReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
-	return r.acc, nil
-}
-
 func newNoMaterializeIBS(reader StateReader) (*IntraBlockState, *VersionMap) {
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)

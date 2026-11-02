@@ -45,7 +45,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	_, hasDelete := writes.GetSelfDestruct(addr)
 	require.False(t, hasDelete)
 
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
 	next.SetTxContext(1, 1)
@@ -163,7 +163,7 @@ func TestFinalizedWritesRemoveTouchedEmptyAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists)
 	require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, 0))
-	vm.FlushVersionedWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true, "")
+	vm.FlushVersionedWrites(finalizedWrites(t, toucher, &chain.Rules{IsSpuriousDragon: true}), true)
 
 	exists, err = newTx(2).Exist(addr)
 	require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), false, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
 
 	writes := finalizedWrites(t, ibs, &chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)

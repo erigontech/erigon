@@ -112,7 +112,7 @@ const (
 // Commit: syncs inside itself, like Durable, only if unsynced data is above SyncInCommitIfAboveUnsyncedBytes
 // or the last sync is older than SyncInCommitIfUnsyncedFor.
 var (
-	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
+	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 1*datasize.GB)
 	DefaultPollerSyncPeriod          = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred sync. Set it before any database

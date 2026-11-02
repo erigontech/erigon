@@ -289,11 +289,14 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 	}
-	sender, err := t.signer.Sender(t.Tx())
+	sender, err := t.Tx().Sender(*t.signer)
 	if err != nil {
-		return accounts.NilAddress, err
+		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
 	t.sender = sender
+	if RecoversSenders(t.Header) {
+		return t.sender, nil
+	}
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
 	return t.sender, nil
 }
@@ -304,19 +307,22 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
-	isPlainCall := txn != nil && txn.GetTo() != nil && len(txn.GetAuthorizations()) == 0 &&
+	isPlain := txn != nil && len(txn.GetAuthorizations()) == 0 &&
 		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.AccountAbstractionTxType
-	if !isPlainCall {
+	if !isPlain {
 		return false
 	}
 	sender, err := t.TxSender()
-	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
+	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && (txn.GetTo() == nil || sender.Value() != *txn.GetTo())
 	return senderOnlyPays
 }
 
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
+			if _, err := t.TxSender(); err != nil {
+				return nil, err
+			}
 			if t.signer == nil {
 				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 			}
