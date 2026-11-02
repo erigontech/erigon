@@ -638,6 +638,9 @@ func LoadRemotePreverified(ctx context.Context, chainName string, forceChainToml
 
 		var err error
 		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		if err == nil {
+			_, err = fromToml(hashes) // a CDN error page can come back with HTTP 200
+		}
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
