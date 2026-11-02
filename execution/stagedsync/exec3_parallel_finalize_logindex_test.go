@@ -118,19 +118,6 @@ func foldLogIndexTestResults(t *testing.T, pe *parallelExecutor, tx kv.TemporalT
 	return finalize
 }
 
-func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
-	db := newResumeTestDB(t)
-	seedLogEmittingContract(t, db, logIndexContract)
-
-	rwTx, domains := temporaltest.NewTestTxSD(t, db)
-	pe := newParallelLogIndexTestExec(db, domains, 1)
-	runParallelLogIndexTestBlock(t, pe, rwTx)
-	require.NoError(t, domains.Flush(t.Context(), rwTx))
-
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
-}
-
 // The final virtual transaction clears the latest receipt-cache value, while
 // history preserves the last regular receipt. Indexing block-end system-call
 // logs must leave that receipt readable at its original transaction number.
@@ -224,21 +211,25 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	seedLogEmittingContract(t, db, logIndexContract)
 
 	logger := log.New()
-	roTx, err := db.BeginTemporalRo(t.Context())
+	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
-	t.Cleanup(roTx.Rollback)
+	t.Cleanup(rwTx.Rollback)
 	indexes := &indexCountingMemBatch{
-		TemporalMemBatch: dbstate.NewTemporalMemBatch(roTx, db, kvmetrics.NewDomainMetrics()),
+		TemporalMemBatch: dbstate.NewTemporalMemBatch(rwTx, db, kvmetrics.NewDomainMetrics()),
 		adds:             make(map[indexAddition]int),
 	}
-	domains, err := execctx.NewSharedDomains(t.Context(), roTx, logger, execctx.WithMemBatch(indexes))
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, logger, execctx.WithMemBatch(indexes))
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
 	pe := newParallelLogIndexTestExec(db, domains, syscalls)
-	runParallelLogIndexTestBlock(t, pe, roTx)
+	runParallelLogIndexTestBlock(t, pe, rwTx)
 
 	require.Equal(t, map[indexAddition]int{
 		{table: kv.LogAddrIdx, txNum: logIndexFinalTxNum}:  syscalls,
 		{table: kv.LogTopicIdx, txNum: logIndexFinalTxNum}: syscalls,
 	}, indexes.adds)
+	require.NoError(t, domains.Flush(t.Context(), rwTx))
+
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
+	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }
