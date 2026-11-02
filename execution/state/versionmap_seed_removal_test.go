@@ -190,6 +190,59 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "reads before the deploy must not see the later CREATE2 code")
 }
 
+func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
+	t.Parallel()
+
+	a := accounts.InternAddress(common.HexToAddress("0xacc5"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(100)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{a: &baseAcc}}
+	written := accounts.NewAccount()
+	written.Nonce = 9
+	written.Balance = *uint256.NewInt(7)
+	marker := written
+
+	flushOverMarker := func(vm *VersionMap, complete bool) *VersionMap {
+		vm.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
+		ws := &WriteSet{}
+		ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &written})
+		vm.FlushVersionedWrites(ws, complete)
+		return vm
+	}
+	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
+	cases := map[string]func() *VersionMap{
+		"pooled marker cell": func() *VersionMap {
+			prev := NewVersionMap(nil)
+			prev.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
+			prev.Delete(a, AddressPath, accounts.NilKey, 0, false)
+			vm := NewVersionMap(nil)
+			vm.WriteAddress(a, Version{TxIndex: 0}, &written, true)
+			return vm
+		},
+		"marker at the same txIdx": func() *VersionMap {
+			vm := NewVersionMap(nil)
+			vm.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
+			vm.WriteAddress(a, Version{TxIndex: 0}, &written, true)
+			return vm
+		},
+		"equal-value flush over a marker": func() *VersionMap {
+			return flushOverMarker(NewVersionMap(nil), true)
+		},
+		"equal-value estimate flush over a marker on a BAL block": func() *VersionMap {
+			bal := types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}}
+			return flushOverMarker(NewVersionMap(bal), false)
+		},
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, ok := build().View(1, reader).GetAccount(a)
+			require.True(t, ok)
+			require.Equal(t, uint64(9), got.Nonce)
+			require.Equal(t, *uint256.NewInt(7), got.Balance)
+		})
+	}
+}
+
 func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	t.Parallel()
 

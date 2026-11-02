@@ -175,6 +175,7 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		ci.incarnation = incarnation
 		ci.Value = value
 		ci.valStatus = valStatus
+		ci.accSource = AccountFromBase
 		return cells
 	}
 	cell := getCell()
@@ -182,6 +183,7 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 	cell.incarnation = incarnation
 	cell.Value = value
 	cell.valStatus = valStatus
+	cell.accSource = AccountFromBase
 	cells.Set(txIdx, cell)
 	return cells
 }
@@ -1170,6 +1172,7 @@ func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr
 				ci.flag = flag
 			}
 			ci.valStatus = valStatus
+			ci.accSource = AccountFromBase
 			return cells
 		}
 	}
@@ -1185,7 +1188,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 		return false
 	}
 	ci, ok := cells.Get(txIdx)
-	if !ok || !eq(ci.Value, value) || ci.valStatus != valStatus {
+	if !ok || !eq(ci.Value, value) || ci.valStatus != valStatus || ci.accSource != AccountFromBase {
 		return false
 	}
 	return ci.flag == flag || (ci.flag == FlagDone && flag == FlagEstimate)
@@ -2004,11 +2007,11 @@ type WriteCell[T any] struct {
 	flag        statusFlag
 	valStatus   valueStatus
 	incarnation Incarnation
-	Value       T
 	// accSource marks where an AddressPath cell's record came from. AccountFromBAL is an
 	// existence-only record the BAL seed wrote — its Value is not authoritative, so value
 	// reads fall back to the committed base. Independent of valStatus.
 	accSource AccountSource
+	Value     T
 }
 
 // Per-T pools for *WriteCell[T], spanning VersionMap lifetimes: a cell freed by
