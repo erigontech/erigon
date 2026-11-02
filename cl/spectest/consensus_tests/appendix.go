@@ -28,6 +28,7 @@ import (
 var TestFormats = spectest.Appendix{}
 
 func init() {
+	// The UnimplementedHandler entries under fork_choice, sync and networking are tracked in https://github.com/erigontech/erigon/issues/25698.
 	TestFormats.Add("bls").
 		With("aggregate_verify", &BlsAggregateVerify{}).
 		With("aggregate", spectest.UnimplementedHandler).
