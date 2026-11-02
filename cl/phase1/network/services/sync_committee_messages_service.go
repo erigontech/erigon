@@ -75,7 +75,8 @@ type syncCommitteeMessagesService struct {
 	batchSignatureVerifier    *BatchSignatureVerifier
 	test                      bool
 
-	mu sync.Mutex
+	mu     sync.Mutex
+	poolMu sync.Mutex
 }
 
 type SyncCommitteeMessageForGossip struct {
@@ -146,38 +147,30 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 }
 
 // storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
-// if another message for them was verified at the same time and recorded first. Only the recording holds the service
-// lock, the cleanup and the pool add of the recorded message do not.
+// if another message for them was verified at the same time and recorded first.
 func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
-	stored, err := s.recordVerifiedMessage(subnet, msg)
-	if !stored {
-		return err
+	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
+	verified, loaded := s.seenSyncCommitteeMessages.LoadOrStore(key, verifiedSyncCommitteeMessage{
+		beaconBlockRoot: msg.BeaconBlockRoot,
+		signature:       msg.Signature,
+	})
+	if loaded {
+		if !verified.(verifiedSyncCommitteeMessage).matches(msg.BeaconBlockRoot, msg.Signature) {
+			return ErrIgnore
+		}
+		return nil
 	}
 	s.cleanupOldSyncCommitteeMessages()
+	// One addition at a time holds a head-state view: an addition waiting for the pool inside a view would keep a
+	// head-state write, and every reader queued behind it, waiting.
+	s.poolMu.Lock()
+	defer s.poolMu.Unlock()
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
 	}); err != nil {
 		log.Debug("failed to add sync committee message to pool", "err", err)
 	}
 	return nil
-}
-
-func (s *syncCommitteeMessagesService) recordVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
-	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok {
-		if !verified.(verifiedSyncCommitteeMessage).matches(msg.BeaconBlockRoot, msg.Signature) {
-			return false, ErrIgnore
-		}
-		return false, nil
-	}
-	s.seenSyncCommitteeMessages.Store(key, verifiedSyncCommitteeMessage{
-		beaconBlockRoot: msg.BeaconBlockRoot,
-		signature:       msg.Signature,
-	})
-	return true, nil
 }
 
 // checkMessage runs the gossip checks that need no signature and returns the signature to verify, or nil for a

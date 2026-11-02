@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
@@ -465,4 +467,64 @@ func TestSyncCommitteesPoolAddDoesNotBlockOtherMessages(t *testing.T) {
 	}
 	releasePoolAdd()
 	require.NoError(t, <-done)
+}
+
+// One pool addition at a time holds a head-state view: an addition queued for the pool inside a view would keep a
+// head-state write, and every reader behind it, waiting.
+func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	releasePoolAdds := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePoolAdds)
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			entered <- struct{}{}
+			<-release
+			return nil
+		}).Times(2)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+
+	done := make(chan error, 2)
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	<-entered
+	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), other) }()
+	select {
+	case <-entered:
+		t.Fatal("a second pool addition held a head-state view while the first was in the pool")
+	case <-time.After(200 * time.Millisecond):
+	}
+	releasePoolAdds()
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+}
+
+func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, subnet, except uint64) uint64 {
+	t.Helper()
+	for index := range uint64(s.ValidatorLength()) {
+		if index == except {
+			continue
+		}
+		validatorSubnets, err := subnets.ComputeSubnetsForSyncCommittee(s, slot, index)
+		require.NoError(t, err)
+		if slices.Contains(validatorSubnets, subnet) {
+			return index
+		}
+	}
+	t.Fatalf("no other validator on sync subnet %d", subnet)
+	return 0
 }
