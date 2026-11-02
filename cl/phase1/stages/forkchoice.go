@@ -482,13 +482,19 @@ func syncDirectory(path string) error {
 
 // saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a
 // later restart can resume from a locally-provable, reorg-immune anchor. It reuses the head-state
-// save cadence. Fetching the finalized state is best-effort: a miss or error is non-fatal.
-func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64) error {
+// save cadence and skips a finalized root that is already saved. Fetching the finalized state is
+// best-effort: a miss or error is non-fatal and leaves savedRoot unchanged, so the next save on the
+// cadence retries.
+func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64, savedRoot *common.Hash) error {
 	epochFrequency := uint64(5)
 	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
 		return nil
 	}
-	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root)
+	finalizedRoot := fc.FinalizedCheckpoint().Root
+	if finalizedRoot == *savedRoot {
+		return nil
+	}
+	st, err := fc.GetStateAtBlockRoot(finalizedRoot)
 	if err != nil {
 		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
 		return nil
@@ -496,7 +502,11 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 	if st == nil {
 		return nil
 	}
-	return writeFinalizedStateFile(dirs, st)
+	if err := writeFinalizedStateFile(dirs, st); err != nil {
+		return err
+	}
+	*savedRoot = finalizedRoot
+	return nil
 }
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
@@ -551,7 +561,7 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	}); err != nil {
 		return err
 	}
-	if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headSlot); err != nil {
+	if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headSlot, &cfg.savedFinalizedRoot); err != nil {
 		return fmt.Errorf("failed to save finalized state on disk: %w", err)
 	}
 	return nil
