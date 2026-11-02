@@ -581,11 +581,3 @@ func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, indices [sszCustody
 	}
 	return ssz.EncodeDynamicList(ssz.OffsetSSZ(4), entries)
 }
-
-func encodeGetInclusionListResponse(txs []hexutil.Bytes) ([]byte, error) {
-	raw := make([][]byte, len(txs))
-	for i, tx := range txs {
-		raw[i] = tx
-	}
-	return solid.NewTransactionsSSZFromTransactions(raw).EncodeSSZ(nil)
-}

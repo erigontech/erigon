@@ -19,7 +19,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -276,12 +275,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 }
 
 func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, payloadID string) {
-	id, err := parsePayloadIDPath(payloadID)
-	if err != nil {
-		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
-		return
-	}
-	decodedID, err := engine_types.DecodePayloadID(id)
+	decodedID, err := parsePayloadIDPath(payloadID)
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, problemInvalidRequest, err.Error())
 		return
@@ -301,16 +295,16 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 	writeSSZBytes(w, out)
 }
 
-func parsePayloadIDPath(s string) (hexutil.Bytes, error) {
+func parsePayloadIDPath(s string) (uint64, error) {
 	s = strings.TrimPrefix(s, "0x")
 	if len(s) != 16 {
-		return nil, errors.New("invalid payload ID length")
+		return 0, errors.New("invalid payload ID length")
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return hexutil.Bytes(b), nil
+	return engine_types.DecodePayloadID(b)
 }
 
 func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion) {
@@ -598,11 +592,6 @@ func (e *EngineServer) handleSSZGetInclusionList(w http.ResponseWriter, r *http.
 		writeEngineProblem(w, err)
 		return
 	}
-	out, err := encodeGetInclusionListResponse(resp)
-	if err != nil {
-		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
-		return
-	}
 	e.logger.Debug("[SSZ-REST] handled get inclusion list", "path", r.URL.Path)
-	writeSSZBytes(w, out)
+	writeSSZ(w, newTransactionsSSZ(resp))
 }

@@ -1260,7 +1260,7 @@ func TestSSZRESTGetPayloadRejectsMismatchedFork(t *testing.T) {
 func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
 	id, err := parsePayloadIDPath("0x0102030405060708")
 	require.NoError(t, err)
-	require.Equal(t, hexutil.Bytes{1, 2, 3, 4, 5, 6, 7, 8}, id)
+	require.Equal(t, uint64(0x0102030405060708), id)
 
 	_, err = parsePayloadIDPath("0x01")
 	require.Error(t, err)
