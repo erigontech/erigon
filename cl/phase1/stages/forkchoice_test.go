@@ -122,15 +122,13 @@ type blockingStateCopyForkGraph struct {
 	released                 atomic.Bool
 	hideCurrentView          bool
 	currentViewStateOverride *state.CachingBeaconState
+	ownedCopies              atomic.Int32
 	started                  chan struct{}
 	release                  chan struct{}
 }
 
 func (g *blockingStateCopyForkGraph) CurrentStateLocked(root common.Hash) *state.CachingBeaconState {
 	current := g.ForkGraph.CurrentStateLocked(root)
-	if !g.armed.Load() {
-		return current
-	}
 	pcs := make([]uintptr, 16)
 	frames := runtime.CallersFrames(pcs[:runtime.Callers(1, pcs)])
 	viewCurrent := false
@@ -142,6 +140,12 @@ func (g *blockingStateCopyForkGraph) CurrentStateLocked(root common.Hash) *state
 		if !more {
 			break
 		}
+	}
+	if getOwned && current != nil {
+		g.ownedCopies.Add(1)
+	}
+	if !g.armed.Load() {
+		return current
 	}
 	if viewCurrent {
 		if g.hideCurrentView {
@@ -1590,4 +1594,345 @@ func TestEmitHeadEventsPreGloasEmitsHeadV2AsFull(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("head_v2 event was not emitted")
 	}
+}
+
+type sameRootForkGraph struct {
+	*blockingStateCopyForkGraph
+	hasEnvelope  atomic.Bool
+	hideHeader   atomic.Bool
+	failDumpOnce atomic.Bool
+	dumpCalls    atomic.Int32
+}
+
+func (g *sameRootForkGraph) HasEnvelope(common.Hash) bool { return g.hasEnvelope.Load() }
+
+func (g *sameRootForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if g.hideHeader.Load() {
+		return nil, false
+	}
+	return g.ForkGraph.GetHeader(root)
+}
+
+func (g *sameRootForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
+	return solid.Checkpoint{}, true
+}
+
+func (g *sameRootForkGraph) DumpBeaconStateOnDisk(root common.Hash, bs *state.CachingBeaconState, forced bool) error {
+	g.dumpCalls.Add(1)
+	if g.failDumpOnce.CompareAndSwap(true, false) {
+		return errors.New("dump failed")
+	}
+	return g.ForkGraph.DumpBeaconStateOnDisk(root, bs, forced)
+}
+
+type failingHighestFinalizedTx struct {
+	kv.RwTx
+	err error
+}
+
+func (tx failingHighestFinalizedTx) Put(table string, k, v []byte) error {
+	if table == kv.HighestFinalized {
+		return tx.err
+	}
+	return tx.RwTx.Put(table, k, v)
+}
+
+// sameRootFixture is a real fork-choice store whose only block is the anchor, with a Gloas state at headSlot.
+// Nothing is published to the synced data yet, so the first pass takes the copy-and-publish path.
+type sameRootFixture struct {
+	cfg        *Cfg
+	graph      *sameRootForkGraph
+	syncedData *synced_data.SyncedDataManager
+	publish    *recordingHeadPublish
+	events     chan *beaconevents.EventStream
+	tx         kv.RwTx
+	headState  *state.CachingBeaconState
+	headRoot   common.Hash
+	headSlot   uint64
+	headResets byte
+}
+
+func newSameRootFixture(t *testing.T, gloasForkEpoch, headSlot uint64) *sameRootFixture {
+	t.Helper()
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.GloasForkEpoch = gloasForkEpoch
+	beaconCfg.InitializeForkSchedule()
+	genesisTime := uint64(time.Now().Unix()) - headSlot*beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &beaconCfg)
+	headState := state.New(&beaconCfg)
+	headState.SetGenesisTime(genesisTime)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(headSlot))
+	headState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: headSlot})
+
+	manager := synced_data.NewSyncedDataManager(&beaconCfg, true)
+	emitter := beaconevents.NewEventEmitter()
+	baseGraph, err := fork_graph.NewForkGraphDisk(headState, manager, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := &sameRootForkGraph{blockingStateCopyForkGraph: &blockingStateCopyForkGraph{
+		ForkGraph: baseGraph,
+		started:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}}
+	store, err := forkchoice.NewForkChoiceStore(
+		clock,
+		headState,
+		nil,
+		pool.NewOperationsPool(&beaconCfg),
+		graph,
+		emitter,
+		manager,
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	headRoot := baseGraph.AnchorRoot()
+	store.MarkPayloadStatus(headRoot, common.Hash{0xe1}, execution_client.PayloadStatusNotValidated)
+
+	events := make(chan *beaconevents.EventStream, 64)
+	subscription := emitter.State().Subscribe(events)
+	t.Cleanup(subscription.Unsubscribe)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	publish := &recordingHeadPublish{SyncedData: manager}
+	return &sameRootFixture{
+		cfg: &Cfg{
+			ethClock:                clock,
+			beaconCfg:               &beaconCfg,
+			forkChoice:              store,
+			syncedData:              publish,
+			emitter:                 emitter,
+			blobDownloader:          &network2.BlobHistoryDownloader{},
+			attestationDataProducer: noOpAttestationDataProducer{},
+			dirs:                    datadir.New(t.TempDir()),
+		},
+		graph:      graph,
+		syncedData: manager,
+		publish:    publish,
+		events:     events,
+		tx:         tx,
+		headState:  headState,
+		headRoot:   headRoot,
+		headSlot:   headSlot,
+	}
+}
+
+func (f *sameRootFixture) runPass() error {
+	return postForkchoiceOperations(f.tx, log.New(), f.cfg, f.headSlot, f.headRoot)
+}
+
+// setHeadStatus makes fork choice select the anchor with the given payload status. The unrelated payload
+// mark below only drops the cached head, so that the next read recomputes it.
+func (f *sameRootFixture) setHeadStatus(t *testing.T, status cltypes.PayloadStatus) {
+	t.Helper()
+	f.graph.hideHeader.Store(status == cltypes.PayloadStatusPending)
+	f.graph.hasEnvelope.Store(status == cltypes.PayloadStatusFull)
+	f.headResets++
+	unrelated := common.Hash{0xee, f.headResets}
+	f.cfg.forkChoice.MarkPayloadStatus(unrelated, unrelated, execution_client.PayloadStatusNotValidated)
+	head, slot, err := f.cfg.forkChoice.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, forkchoice.ForkChoiceNode{Root: f.headRoot, PayloadStatus: status}, head)
+	require.Equal(t, f.headSlot, slot)
+}
+
+func (f *sameRootFixture) requireCopiesAndPublishes(t *testing.T, want int) {
+	t.Helper()
+	require.EqualValues(t, want, f.graph.ownedCopies.Load(), "owned head-state copies")
+	require.Equal(t, want, f.publish.ownedCalls, "owned head-state publishes")
+}
+
+func (f *sameRootFixture) publishedHead(t *testing.T) *state.CachingBeaconState {
+	t.Helper()
+	var published *state.CachingBeaconState
+	require.NoError(t, f.syncedData.ViewHeadState(func(head *state.CachingBeaconState) error {
+		published = head
+		return nil
+	}))
+	return published
+}
+
+func (f *sameRootFixture) drainHeadEvents() (headV2Statuses []string, headEvents int) {
+	for {
+		select {
+		case event := <-f.events:
+			switch event.Event {
+			case beaconevents.StateHead:
+				headEvents++
+			case beaconevents.StateHeadV2:
+				headV2Statuses = append(headV2Statuses, event.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+			}
+		default:
+			return headV2Statuses, headEvents
+		}
+	}
+}
+
+func TestPostForkchoiceSameRootRerunKeepsPublishedState(t *testing.T) {
+	const (
+		empty   = cltypes.PayloadStatusEmpty
+		full    = cltypes.PayloadStatusFull
+		pending = cltypes.PayloadStatusPending
+	)
+	for _, test := range []struct {
+		name     string
+		from, to cltypes.PayloadStatus
+	}{
+		{name: "EMPTY to FULL", from: empty, to: full},
+		{name: "FULL to EMPTY", from: full, to: empty},
+		{name: "FULL to PENDING", from: full, to: pending},
+		{name: "same status twice", from: empty, to: empty},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newSameRootFixture(t, 0, 32)
+			f.setHeadStatus(t, test.from)
+			require.NoError(t, f.runPass())
+			f.requireCopiesAndPublishes(t, 1)
+			published := f.publishedHead(t)
+			f.drainHeadEvents()
+
+			f.setHeadStatus(t, test.to)
+			require.NoError(t, f.runPass())
+
+			f.requireCopiesAndPublishes(t, 1)
+			require.Same(t, published, f.publishedHead(t))
+			headV2Statuses, headEvents := f.drainHeadEvents()
+			require.Equal(t, []string{beaconevents.PayloadStatusName(test.to)}, headV2Statuses)
+			require.Equal(t, 1, headEvents)
+		})
+	}
+}
+
+func TestPostForkchoiceSameRootRerunFinishesFailedPass(t *testing.T) {
+	finalizedSaveSlot := 5 * clparams.MainnetBeaconConfig.SlotsPerEpoch
+	f := newSameRootFixture(t, 0, finalizedSaveSlot)
+	f.graph.failDumpOnce.Store(true)
+
+	require.ErrorContains(t, f.runPass(), "dump failed")
+	require.EqualValues(t, 1, f.graph.dumpCalls.Load())
+	f.requireCopiesAndPublishes(t, 1)
+	requireNoFinalizedStateFile(t, f.cfg.dirs)
+
+	require.NoError(t, f.runPass())
+
+	require.EqualValues(t, 2, f.graph.dumpCalls.Load())
+	f.requireCopiesAndPublishes(t, 1)
+	require.FileExists(t, finalizedStateFilePath(f.cfg.dirs))
+}
+
+func TestPostForkchoiceSameRootAfterOtherWriterRunsPerPassSteps(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	require.NoError(t, f.syncedData.OnHeadStateWithBlockRoot(f.headState, f.headRoot))
+	require.False(t, f.cfg.forkChoice.Synced())
+
+	require.NoError(t, f.runPass())
+
+	f.requireCopiesAndPublishes(t, 0)
+	require.True(t, f.cfg.forkChoice.Synced())
+	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
+	highestFinalized, err := beacon_indicies.ReadHighestFinalized(f.tx)
+	require.NoError(t, err)
+	require.Equal(t, f.cfg.forkChoice.FinalizedSlot(), highestFinalized)
+	headV2Statuses, headEvents := f.drainHeadEvents()
+	require.Equal(t, []string{"empty"}, headV2Statuses)
+	require.Equal(t, 1, headEvents)
+}
+
+func TestPostForkchoiceRepublishesNewRootOrSlot(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		otherRoot func(f *sameRootFixture) common.Hash
+		otherSlot func(f *sameRootFixture) uint64
+	}{
+		{
+			name:      "different root",
+			otherRoot: func(*sameRootFixture) common.Hash { return common.Hash{0xbb} },
+			otherSlot: func(f *sameRootFixture) uint64 { return f.headSlot },
+		},
+		{
+			name:      "different slot",
+			otherRoot: func(f *sameRootFixture) common.Hash { return f.headRoot },
+			otherSlot: func(f *sameRootFixture) uint64 { return f.headSlot + 1 },
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newSameRootFixture(t, 0, 32)
+			other, err := f.headState.Copy()
+			require.NoError(t, err)
+			require.NoError(t, other.SetSlot(test.otherSlot(f)))
+			require.NoError(t, f.syncedData.OnHeadStateWithBlockRoot(other, test.otherRoot(f)))
+
+			require.NoError(t, f.runPass())
+
+			f.requireCopiesAndPublishes(t, 1)
+			root, slot, ok := f.syncedData.StateHead()
+			require.True(t, ok)
+			require.Equal(t, f.headRoot, root)
+			require.Equal(t, f.headSlot, slot)
+		})
+	}
+}
+
+func TestPostForkchoiceSameRootFallsBackWhenEventNotEmitted(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	require.NoError(t, f.runPass())
+	f.requireCopiesAndPublishes(t, 1)
+	f.drainHeadEvents()
+
+	f.graph.hideCurrentView = true
+	f.graph.releaseCopy()
+	f.graph.armed.Store(true)
+	require.NoError(t, f.runPass())
+
+	f.requireCopiesAndPublishes(t, 2)
+	headV2Statuses, headEvents := f.drainHeadEvents()
+	require.Equal(t, []string{"empty"}, headV2Statuses)
+	require.Equal(t, 1, headEvents)
+}
+
+func TestPostForkchoiceGateFollowsHeadSlotFork(t *testing.T) {
+	const gloasForkEpoch = 1
+	gloasStart := gloasForkEpoch * clparams.MainnetBeaconConfig.SlotsPerEpoch
+	for _, test := range []struct {
+		name       string
+		headSlot   uint64
+		wantCopies int
+	}{
+		{name: "before Gloas", headSlot: gloasStart - 1, wantCopies: 2},
+		{name: "first Gloas slot", headSlot: gloasStart, wantCopies: 1},
+		{name: "after first Gloas slot", headSlot: gloasStart + 1, wantCopies: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newSameRootFixture(t, gloasForkEpoch, test.headSlot)
+			// A hidden header makes fork choice return the anchor, which avoids building a checkpoint state.
+			f.graph.hideHeader.Store(true)
+
+			require.NoError(t, f.runPass())
+			require.NoError(t, f.runPass())
+
+			f.requireCopiesAndPublishes(t, test.wantCopies)
+		})
+	}
+}
+
+func TestPostForkchoiceHighestFinalizedFailureDoesNotPublish(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	putErr := errors.New("put failed")
+	f.tx = failingHighestFinalizedTx{RwTx: f.tx, err: putErr}
+
+	require.ErrorIs(t, f.runPass(), putErr)
+
+	f.requireCopiesAndPublishes(t, 0)
+	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
 }
