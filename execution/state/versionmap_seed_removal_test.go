@@ -80,3 +80,25 @@ func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
 	vm.SeedEmptyRemovals(bal, true, false, reader)
 	require.Zero(t, reader.reads)
 }
+
+// A non-zero value cleared by a later change does not prove the account non-empty: seeding
+// reads the base and removes the account.
+func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	drained, renonced, uncoded := addr("0xc1"), addr("0xc2"), addr("0xc3")
+	bal := types.BlockAccessList{
+		{Address: drained.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}, {Index: 2, Value: uint256.Int{}}}},
+		{Address: renonced.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}, {Index: 2, Value: 0}}},
+		{Address: uncoded.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}},
+	}
+	reader := &countingAccountReader{}
+
+	vm := NewVersionMap(bal)
+	vm.SeedEmptyRemovals(bal, true, false, reader)
+	require.Equal(t, 3, reader.reads)
+	for _, a := range []accounts.Address{drained, renonced, uncoded} {
+		_, ok := vm.View(2, reader).GetAccount(a)
+		require.False(t, ok, a)
+	}
+}
