@@ -1510,12 +1510,15 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 	return reasons, goodTxns, nil
 }
 
-// punishSpammer by drop half of it's transactions with high nonce
+// punishSpammer drops high-nonce transactions without breaking local nonce chains.
 func (p *TxPool) punishSpammer(spammer uint64) {
 	count := p.all.count(spammer) / 2
 	if count > 0 {
 		txnsToDelete := make([]*metaTxn, 0, count)
 		p.all.descend(spammer, func(mt *metaTxn) bool {
+			if mt.subPool&IsLocal != 0 {
+				return false
+			}
 			txnsToDelete = append(txnsToDelete, mt)
 			count--
 			return count > 0
@@ -2863,6 +2866,8 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			return err
 		}
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
+			// The flush-time delete needs only the hash and the sender; dropping the body frees blobs now.
+			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
 			continue
 		}
 		p.recoverAuthorizations(txn)

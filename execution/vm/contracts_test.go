@@ -533,11 +533,14 @@ func TestCachedPrecompileOwnershipAndGas(t *testing.T) {
 	}
 }
 
-// A cheap call is still cached; only a call whose gas is below its normalized key length is not.
+// A cheap call is cached on its second miss, so an input seen once does not pay the insert; a call
+// whose gas is below its normalized key length is not cached.
 func TestCachedPrecompileAdmission(t *testing.T) {
-	runTwice := func(p *countingPrecompile, input []byte, normalize func([]byte) ([]byte, bool)) int {
-		c := newCachedPrecompile(p, normalize, [21]byte{209})
-		for range 2 {
+	run := func(n int, p *countingPrecompile, input []byte, normalize func([]byte) ([]byte, bool)) int {
+		domain := [21]byte{209}
+		binary.BigEndian.PutUint64(domain[1:], cacheTestID.Add(1))
+		c := newCachedPrecompile(p, normalize, domain)
+		for range n {
 			_, err := c.Run(input)
 			require.NoError(t, err)
 		}
@@ -548,12 +551,14 @@ func TestCachedPrecompileAdmission(t *testing.T) {
 		copy(in, fmt.Appendf(nil, "%s/%d", t.Name(), cacheTestID.Add(1)))
 		return in
 	}
-	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 200}, input(171), wholeInputKey), "cheap call not cached")
-	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 171}, input(171), wholeInputKey), "gas equal to key length not cached")
-	require.Equal(t, 2, runTwice(&countingPrecompile{output: []byte{1}, gas: 170}, input(171), wholeInputKey), "gas below key length cached")
-	require.Equal(t, 1, runTwice(&countingPrecompile{output: []byte{1}, gas: 200}, input(300), zeroPaddedKey(128)), "gas above the normalized key length not cached")
-	require.Equal(t, 1, runTwice(&countingPrecompile{output: make([]byte, 1024)}, input(64), wholeInputKey), "1024-byte output not cached")
-	require.Equal(t, 2, runTwice(&countingPrecompile{output: make([]byte, 1025)}, input(64), wholeInputKey), "1025-byte output cached")
+	require.Equal(t, 2, run(2, &countingPrecompile{output: []byte{1}, gas: 200}, input(171), wholeInputKey), "cheap call cached on its first miss")
+	require.Equal(t, 2, run(3, &countingPrecompile{output: []byte{1}, gas: 200}, input(171), wholeInputKey), "cheap call not cached")
+	require.Equal(t, 2, run(3, &countingPrecompile{output: []byte{1}, gas: 171}, input(171), wholeInputKey), "gas equal to key length not cached")
+	require.Equal(t, 3, run(3, &countingPrecompile{output: []byte{1}, gas: 170}, input(171), wholeInputKey), "gas below key length cached")
+	require.Equal(t, 2, run(3, &countingPrecompile{output: []byte{1}, gas: 200}, input(300), zeroPaddedKey(128)), "gas above the normalized key length not cached")
+	require.Equal(t, 1, run(2, &countingPrecompile{output: make([]byte, 1024)}, input(64), wholeInputKey), "1024-byte output not cached")
+	require.Equal(t, 2, run(2, &countingPrecompile{output: make([]byte, 1025)}, input(64), wholeInputKey), "1025-byte output cached")
+	require.Equal(t, 1, run(2, &countingPrecompile{output: []byte{1}, gas: 6000}, make([]byte, 96), zeroPaddedKey(96)), "all-zero input not cached")
 }
 
 func TestCachedPrecompileDomainAndErrors(t *testing.T) {
@@ -660,7 +665,23 @@ func TestBLSRepeatedPointScalars(t *testing.T) {
 	}
 }
 
+// A point addition computes in microseconds while a hit costs tens of nanoseconds.
+func TestPointAdditionsAreCached(t *testing.T) {
+	for _, p := range []PrecompiledContract{&bn254AddIstanbul{}, &bn254AddByzantium{}, &bls12381G1Add{}, &bls12381G2Add{}} {
+		require.NotNil(t, precompileCacheKey(p), p.Name())
+	}
+}
+
 func TestPrecompileCacheKeyNormalizes(t *testing.T) {
+	addKey := precompileCacheKey(&bn254AddIstanbul{})
+	point := common.FromHex("0x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002")
+	for _, in := range [][]byte{make([]byte, 128), slices.Concat(point, make([]byte, 64)), slices.Concat(make([]byte, 64), point)} {
+		_, ok := addKey(in)
+		require.False(t, ok, "an addition with a point at infinity is cheaper than a lookup")
+	}
+	_, ok := addKey(slices.Concat(point, point))
+	require.True(t, ok)
+
 	key, ok := zeroPaddedKey(128)(append([]byte{1, 2}, make([]byte, 300)...))
 	require.True(t, ok)
 	require.Equal(t, []byte{1, 2}, key, "trailing zeros and bytes past the read prefix must not split entries")
@@ -691,8 +712,8 @@ func TestCachedPrecompileMatchesNativeVectors(t *testing.T) {
 			// The padded input is the same call for precompiles that ignore a suffix and a rejected length for the rest.
 			for _, input := range [][]byte{in, slices.Concat(in, make([]byte, 64))} {
 				want, wantErr := p.Run(input)
-				for i := range 2 { // miss, then hit
-					if i == 1 && cachedPrecompileHit(c, input) {
+				for i := range 3 { // a cheap call is cached on its second miss
+					if i == 2 && cachedPrecompileHit(c, input) {
 						hits++
 					}
 					got, err := c.Run(input)
