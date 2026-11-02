@@ -53,7 +53,7 @@ func TestSeedEmptyRemovals(t *testing.T) {
 
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(baseTxNum)
-	require.NoError(t, vm.SeedEmptyRemovals(bal, true, false, reader))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
 	_, ok := vm.View(1, reader).GetAccount(emptied)
@@ -103,7 +103,7 @@ func TestSeedAddresses(t *testing.T) {
 		t.Fatal("precondition: a BAL-created account's address read should be absent before SeedAddresses")
 	}
 
-	vm.SeedAddresses(bal) // no base reader: existence comes from the BAL alone
+	vm.SeedAddresses() // no base reader: existence comes from the BAL alone
 
 	if _, _, ok := vm.ReadAddress(created, 5); !ok {
 		t.Fatal("SeedAddresses marks a BAL-created account present with no base lookup")
@@ -146,7 +146,7 @@ func TestSeedAddressesDoesNotLeakLaterCode(t *testing.T) {
 
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(baseTxNum)
-	vm.SeedAddresses(bal)
+	vm.SeedAddresses()
 
 	// Compose after funding (BAL index 2 → TxIndex 1) but before the code deploy (index 5
 	// → TxIndex 4): the funded, still-codeless account the CREATE2 collision check must see.
@@ -164,7 +164,7 @@ func TestSeedEmptyRemovals_BaseReadErrorFails(t *testing.T) {
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(0)
 	boom := errors.New("boom")
-	require.ErrorIs(t, vm.SeedEmptyRemovals(bal, true, false, &failingBaseReader{err: boom}), boom)
+	require.ErrorIs(t, vm.SeedEmptyRemovals(true, false, &failingBaseReader{err: boom}), boom)
 }
 
 // TestSeedEmptyRemovals_DrainThenRefund pins the removal at an interior index: an
@@ -185,7 +185,7 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(0)
-	require.NoError(t, vm.SeedEmptyRemovals(bal, true, false, reader))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	_, ok := vm.View(1, reader).GetAccount(addr)
 	require.False(t, ok, "drained to empty at index 1: absent before the re-fund")
@@ -214,7 +214,7 @@ func TestSeedEmptyRemovals_DrainThenRecreateWithoutBalance(t *testing.T) {
 
 	vm := NewVersionMap(bal)
 	vm.SetBaseTxNum(0)
-	require.NoError(t, vm.SeedEmptyRemovals(bal, true, false, reader))
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	_, ok := vm.View(1, reader).GetAccount(addr)
 	require.False(t, ok, "drained to empty at index 1")

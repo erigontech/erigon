@@ -192,13 +192,8 @@ func TestEmitTouched_BatchKeepsEarlierBlockDestruct(t *testing.T) {
 	vmB.SetBaseTxNum(0)
 	vmB.FlushVersionedWrites(wsB, true)
 
-	cc := &commitmentCalculator{}
-	cc.accumulateTouched(state.NewVersionMapWriteView(wsA, vmA, txIdx))
-	cc.accumulateTouched(state.NewVersionMapWriteView(wsB, vmB, txIdx))
-	u := newTestUpdates()
-	require.NoError(t, cc.emitTouched(vmB.View(T, newMapStateReader()), u))
-
-	got := collectUpdates(t, u)[string(av[:])]
+	got := emitTouchedUpdates(t, vmB, T, newMapStateReader(),
+		state.NewVersionMapWriteView(wsA, vmA, txIdx), state.NewVersionMapWriteView(wsB, vmB, txIdx))[string(av[:])]
 	require.Equal(t, *uint256.NewInt(7), got.Balance)
 	require.True(t, got.DeleteStorageSubtree, "a destruct in an earlier batch block must reset the storage subtree")
 }
@@ -219,12 +214,7 @@ func TestEmitTouched_ZeroCodeHashFoldsAsEmpty(t *testing.T) {
 	vm.SetBaseTxNum(0)
 	vm.FlushVersionedWrites(ws, true)
 
-	cc := &commitmentCalculator{}
-	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx))
-	u := newTestUpdates()
-	require.NoError(t, cc.emitTouched(vm.View(txIdx+1, newMapStateReader()), u))
-
-	got := collectUpdates(t, u)[string(av[:])]
+	got := emitTouchedUpdates(t, vm, txIdx+1, newMapStateReader(), state.NewVersionMapWriteView(ws, vm, txIdx))[string(av[:])]
 	require.Equal(t, *uint256.NewInt(5), got.Balance)
 	require.Equal(t, empty.CodeHash, got.CodeHash)
 }

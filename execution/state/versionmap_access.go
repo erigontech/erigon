@@ -114,12 +114,11 @@ func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
 	return state != LifecycleLive
 }
 
-func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled, isAura bool, base StateReader) error {
-	ws := &WriteSet{}
-	var interior []*WriteSet
+func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
+	var stamps []*WriteSet
 	var candidates []uint32
-	for i := range bal {
-		ac := &bal[i]
+	for i := range vm.bal {
+		ac := &vm.bal[i]
 		addr := accounts.InternAddress(ac.Address)
 		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
 			continue
@@ -144,25 +143,21 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 			if acc == nil || !acc.Balance.IsZero() || acc.Nonce != 0 || !acc.CodeHash.IsEmpty() {
 				continue
 			}
-			if idx == maxIdx {
-				ws.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
-				continue
-			}
 			rm := &WriteSet{}
 			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
-			interior = append(interior, rm)
+			stamps = append(stamps, rm)
+			if idx == maxIdx {
+				continue
+			}
 			next := balNextChangeIndex(ac, idx)
 			if !slices.ContainsFunc(ac.BalanceChanges, func(c *types.BalanceChange) bool { return c.Index == next }) {
 				live := &WriteSet{}
 				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
-				interior = append(interior, live)
+				stamps = append(stamps, live)
 			}
 		}
 	}
-	for _, rm := range interior {
-		vm.FlushVersionedWrites(rm, true)
-	}
-	if !ws.IsEmpty() {
+	for _, ws := range stamps {
 		vm.FlushVersionedWrites(ws, true)
 	}
 	return nil
@@ -175,40 +170,43 @@ func (vm *VersionMap) SeedEmptyRemovals(bal types.BlockAccessList, eip161Enabled
 // existence is taken straight from the BAL (the account's first change index), with no
 // base read: the AddressPath is stamped ValueUnknown, so field reads still fall back to
 // the committed base for a base-present account's untouched fields.
-func (vm *VersionMap) SeedAddresses(bal types.BlockAccessList) {
-	for i := range bal {
-		minIdx := balNextChangeIndex(&bal[i], 0)
+func (vm *VersionMap) SeedAddresses() {
+	for i := range vm.bal {
+		minIdx := balNextChangeIndex(&vm.bal[i], 0)
 		if minIdx == 0 {
 			continue
 		}
-		addr := accounts.InternAddress(bal[i].Address)
+		addr := accounts.InternAddress(vm.bal[i].Address)
 		if acc := NewVersionedAccountView(addr, int(minIdx), vm, nil).Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
 		}
 	}
 }
 
-func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
-	var m uint32
-	upd := func(idx uint32) {
-		if idx > after && (m == 0 || idx < m) {
-			m = idx
-		}
-	}
+func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	for _, c := range ac.BalanceChanges {
-		upd(c.Index)
+		fn(c.Index)
 	}
 	for _, c := range ac.NonceChanges {
-		upd(c.Index)
+		fn(c.Index)
 	}
 	for _, c := range ac.CodeChanges {
-		upd(c.Index)
+		fn(c.Index)
 	}
 	for _, sc := range ac.StorageChanges {
 		for _, c := range sc.Changes {
-			upd(c.Index)
+			fn(c.Index)
 		}
 	}
+}
+
+func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
+	var m uint32
+	balChangeIndexes(ac, func(idx uint32) {
+		if idx > after && (m == 0 || idx < m) {
+			m = idx
+		}
+	})
 	return m
 }
 
@@ -216,19 +214,6 @@ func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 // entries, i.e. the index of its last touch this block.
 func balMaxChangeIndex(ac *types.AccountChanges) uint32 {
 	var m uint32
-	for _, c := range ac.BalanceChanges {
-		m = max(m, c.Index)
-	}
-	for _, c := range ac.NonceChanges {
-		m = max(m, c.Index)
-	}
-	for _, c := range ac.CodeChanges {
-		m = max(m, c.Index)
-	}
-	for _, sc := range ac.StorageChanges {
-		for _, c := range sc.Changes {
-			m = max(m, c.Index)
-		}
-	}
+	balChangeIndexes(ac, func(idx uint32) { m = max(m, idx) })
 	return m
 }

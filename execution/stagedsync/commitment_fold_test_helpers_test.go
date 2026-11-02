@@ -39,27 +39,15 @@ func collectUpdates(t *testing.T, updates *commitment.Updates) map[string]commit
 	return out
 }
 
-func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {
-	t.Helper()
-	var found *commitment.Update
-	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
-		if string(k) == plainKey {
-			cp := *u
-			found = &cp
-		}
-		return nil
-	}))
-	require.NotNil(t, found, "no Update emitted for plainKey %x", plainKey)
-	return found
-}
-
 // emitTouchedUpdates folds writes into the version map's touched union and emits the
 // commitment updates the calculator would produce from it, keyed by plain key. base is
 // the committed-base reader for untouched fields (nil when the version map holds them).
-func emitTouchedUpdates(t *testing.T, vm *state.VersionMap, lastTxNum uint64, base state.StateReader, writes state.WriteSetView) map[string]commitment.Update {
+func emitTouchedUpdates(t *testing.T, vm *state.VersionMap, lastTxNum uint64, base state.StateReader, writes ...state.WriteSetView) map[string]commitment.Update {
 	t.Helper()
 	cc := &commitmentCalculator{}
-	cc.accumulateTouched(writes)
+	for _, w := range writes {
+		cc.accumulateTouched(w)
+	}
 	u := newTestUpdates()
 	require.NoError(t, cc.emitTouched(vm.View(lastTxNum, base), u))
 	return collectUpdates(t, u)

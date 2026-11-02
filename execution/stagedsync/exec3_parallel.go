@@ -1359,9 +1359,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 }
 
 func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
-	if be.execStarted.IsZero() && len(be.accessList) > 0 {
+	if be.execStarted.IsZero() && be.versionMap.HasBAL {
 		base := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx)), be.blockNum)
-		if err := be.versionMap.SeedEmptyRemovals(be.accessList,
+		if err := be.versionMap.SeedEmptyRemovals(
 			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
 			pe.cfg.chainConfig.Aura != nil,
 			base); err != nil {
@@ -2503,9 +2503,8 @@ type execRequest struct {
 
 type blockExecutor struct {
 	sync.Mutex
-	blockNum   uint64
-	blockHash  common.Hash
-	accessList types.BlockAccessList
+	blockNum  uint64
+	blockHash common.Hash
 
 	tasks   []*execTask
 	results []*execResult
@@ -2630,7 +2629,7 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	versionMap := state.NewVersionMap(accessList)
-	versionMap.SeedAddresses(accessList)
+	versionMap.SeedAddresses()
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2639,7 +2638,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
 		versionMap:          versionMap,
-		accessList:          accessList,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,

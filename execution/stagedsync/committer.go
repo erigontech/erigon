@@ -371,13 +371,12 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
-		writes := r.writes
 		if r.versionMap != nil {
 			cc.curVersionMap = r.versionMap
 		}
-		if writes != nil && !writes.IsEmpty() {
+		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
-			cc.accumulateTouched(writes)
+			cc.accumulateTouched(r.writes)
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -602,8 +601,8 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 func (cc *commitmentCalculator) balVersionMap(req *blockRequest) (*state.VersionMap, error) {
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
-	vm.SeedAddresses(req.bal)
-	err := vm.SeedEmptyRemovals(req.bal,
+	vm.SeedAddresses()
+	err := vm.SeedEmptyRemovals(
 		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
 		cc.chainConfig.Aura != nil,
 		cc.asOfReader.dr.StateReaderAt(req.firstTxNum))

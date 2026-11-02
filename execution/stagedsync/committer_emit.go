@@ -31,14 +31,6 @@ import (
 // the EIP-161 / self-destruct existence verdict, so this path has no EIP knowledge and
 // no re-derivation.
 
-func (cc *commitmentCalculator) ensureTouched() {
-	if cc.touchedAccounts == nil {
-		cc.touchedAccounts = map[accounts.Address]struct{}{}
-		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
-		cc.destructed = map[accounts.Address]struct{}{}
-	}
-}
-
 func (cc *commitmentCalculator) clearTouched() {
 	clear(cc.touchedAccounts)
 	clear(cc.touchedStorage)
@@ -52,10 +44,11 @@ func (cc *commitmentCalculator) clearTouched() {
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
-	if writes == nil || writes.IsEmpty() {
-		return
+	if cc.touchedAccounts == nil {
+		cc.touchedAccounts = map[accounts.Address]struct{}{}
+		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
+		cc.destructed = map[accounts.Address]struct{}{}
 	}
-	cc.ensureTouched()
 	addAccount := func(a accounts.Address) {
 		if _, seen := cc.touchedAccounts[a]; seen {
 			return

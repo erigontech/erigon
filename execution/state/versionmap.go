@@ -2125,13 +2125,6 @@ func (res *ReadResult) DepIdx() int {
 	return res.depIdx
 }
 
-// AccountSource reports where the floor cell's record came from. AccountFromBAL means
-// it records existence only — the account is present, but value reads must fall back to
-// the committed base.
-func (res *ReadResult) AccountSource() AccountSource {
-	return res.accSource
-}
-
 func (res *ReadResult) Incarnation() Incarnation {
 	return res.incarnation
 }

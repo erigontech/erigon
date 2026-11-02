@@ -2082,7 +2082,7 @@ func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) 
 		// An existence-only AddressPath marks that the account is present but its value
 		// lives in the field cells / committed base, not here. Report no account so the
 		// caller composes over the base instead of this cell.
-		if res.AccountSource() == AccountFromBAL {
+		if res.accSource == AccountFromBAL {
 			return nil, false
 		}
 		return val, true
