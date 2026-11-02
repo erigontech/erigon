@@ -63,6 +63,7 @@ type frameBlockUpdate struct {
 	blockHash  common.Hash
 	parked     []*metaTxn
 	unwound    TxnSlots
+	restoring  []common.Address
 }
 
 var errFrameStateChanged = errors.New("frame validation state changed")
@@ -98,6 +99,45 @@ func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 		}
 	}
 	return ordinary, frames
+}
+
+// The caller holds the pool lock. Counts keep overlapping restores from
+// releasing the same sender's nonce-chain guard too early.
+func (p *TxPool) beginFrameRestoration(txns TxnSlots) []common.Address {
+	var senders []common.Address
+	for _, txn := range txns.Txns {
+		frame, ok := txn.Txn.(*types.FrameTransaction)
+		if !ok || !frame.UsesLegacyNonce() {
+			continue
+		}
+		sender := frame.SenderAddress
+		p.frameRestorations[sender]++
+		p.frameAccountsToRefresh[sender] = struct{}{}
+		senders = append(senders, sender)
+	}
+	return senders
+}
+
+func (p *TxPool) finishFrameRestoration(ctx context.Context, senders []common.Address) error {
+	// Release guards even if cancellation prevents opening a fresh state view.
+	p.lock.Lock()
+	for _, sender := range senders {
+		p.frameRestorations[sender]--
+		if p.frameRestorations[sender] == 0 {
+			delete(p.frameRestorations, sender)
+			p.frameAccountsToRefresh[sender] = struct{}{}
+		}
+	}
+	p.lock.Unlock()
+	return p.withLockedState(ctx, nil, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		var announcements Announcements
+		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger); err != nil {
+			return err
+		}
+		p.pending.EnforceBestInvariants()
+		p.notifyPendingTxns(announcements)
+		return nil
+	})
 }
 
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {

@@ -169,6 +169,7 @@ type TxPool struct {
 	remoteFrames            remoteFrameQueue
 	frameReservations       map[common.Address]frameReservation
 	frameAccountsToRefresh  map[common.Address]struct{}
+	frameRestorations       map[common.Address]uint64      // In-flight restores per legacy-nonce sender
 	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
@@ -270,6 +271,7 @@ func New(
 		frameValidationGate:     make(chan struct{}, 1),
 		remoteFrames:            remoteFrames,
 		frameAccountsToRefresh:  make(map[common.Address]struct{}),
+		frameRestorations:       make(map[common.Address]uint64),
 		frameRejections:         frameRejections,
 		senderLastActivity:      make(map[uint64]uint64),
 	}
@@ -307,7 +309,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
@@ -355,6 +357,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	frames, err := p.applyBlockUpdate(stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView, poolTx)
+	if len(frames.restoring) > 0 {
+		defer func() {
+			err = errors.Join(err, p.finishFrameRestoration(ctx, frames.restoring))
+		}()
+	}
 	if err != nil {
 		return err
 	}
@@ -433,6 +440,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		}
 	}
 	unwindTxns, frames.unwound = p.splitRestoredTxns(unwindTxns)
+	frames.restoring = p.beginFrameRestoration(frames.unwound)
 	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
 		return frames, err
 	}
@@ -2282,6 +2290,9 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
 	sender := p.senders.senderID2Addr[senderID]
 	delete(p.frameAccountsToRefresh, sender)
+	// An unwound predecessor is absent during simulation. Keep its account-nonce
+	// chain queued and defer gap eviction until restoration finishes.
+	restoring := p.frameRestorations[sender] > 0
 	reserved := p.frameReservations[sender]
 	if senderBalance.Gt(&reserved.cost) {
 		senderBalance.Sub(&senderBalance, &reserved.cost)
@@ -2319,13 +2330,13 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		case senderHasCode && senderTxnKept:
 			deleteAndContinueReasonLog = "delegated sender transaction limit"
 			discardReason = txpoolcfg.DelegatedTxnLimit
-		case senderHasCode && mt.TxnSlot.Nonce != senderNonce:
+		case !restoring && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
-		case p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
+		case !restoring && p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
 			deleteAndContinueReasonLog = "nonce gap too large"
 			discardReason = txpoolcfg.NonceTooDistant
-		case mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
+		case !restoring && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
 		if deleteAndContinueReasonLog != "" {
@@ -2363,7 +2374,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		// through this transaction's nonce to be present.
 		mt.subPool &^= NoNonceGaps
 		if noGapsNonce == mt.TxnSlot.Nonce {
-			mt.subPool |= NoNonceGaps
+			if !restoring {
+				mt.subPool |= NoNonceGaps
+			}
 			noGapsNonce++
 		}
 

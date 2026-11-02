@@ -893,6 +893,114 @@ func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
 	}
 }
 
+func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
+	for _, outcome := range []string{"valid", "invalid", "unavailable", "delegated", "nonce gap limit"} {
+		t.Run(outcome, func(t *testing.T) {
+			codeHash := accounts.EmptyCodeHash
+			if outcome == "delegated" {
+				codeHash = testDelegationCodeHash()
+			}
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, codeHash)
+			pool.chainConfig = pool.chainConfig.Copy()
+			pool.chainConfig.BogotaTime = common.NewUint64(0)
+			backend := &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
+			pool.ethBackend = backend
+			blockChange := func(hash common.Hash, nonce uint64) *remoteproto.StateChangeBatch {
+				change := newBlockChangeForAccounts(hash, nonce, sender)
+				account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: codeHash}
+				change.ChangeBatch[0].Changes[0].Data = accounts.SerialiseV3(&account)
+				return change
+			}
+			frame := framePoolSlot(t, sender, 1, 2)
+			var frameTxns TxnSlots
+			frameTxns.Append(frame, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, frameTxns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			mined := blockChange(common.Hash{1}, 1)
+			mined.ChangeBatch[0].BlockHeight = 1
+			require.NoError(t, pool.OnNewBlock(ctx, mined, TxnSlots{}, TxnSlots{}, frameTxns))
+			require.Empty(t, pool.byHash)
+
+			var successors TxnSlots
+			if outcome == "delegated" || outcome == "nonce gap limit" {
+				count := uint64(1)
+				if outcome == "nonce gap limit" {
+					pool.cfg.MaxNonceGap = 1
+					count = 2
+				}
+				for nonce := uint64(1); nonce <= count; nonce++ {
+					txn := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+					txn.IDHash[0] = byte(nonce)
+					successors.Append(txn, sender[:], true)
+				}
+			} else {
+				wrapped, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
+				require.NoError(t, err)
+				wrapper := wrapped.(*types.BlobTxWrapper)
+				wrapper.Tx.Nonce = 1
+				var encoded bytes.Buffer
+				require.NoError(t, wrapper.MarshalBinaryWrapped(&encoded))
+				blob := &TxnSlot{}
+				parser := NewTxnParseContext(*uint256.NewInt(1))
+				parser.WithSender(false)
+				_, err = parser.ParseTransaction(encoded.Bytes(), 0, blob, nil, false, true, nil)
+				require.NoError(t, err)
+				successors.Append(blob, sender[:], true)
+			}
+			reasons, err = pool.AddLocalTxns(ctx, successors)
+			require.NoError(t, err)
+			for _, reason := range reasons {
+				require.Equal(t, txpoolcfg.Success, reason)
+			}
+			require.Equal(t, len(successors.Txns), pool.pending.Len())
+
+			backend.onValidate = func() {
+				for _, txn := range successors.Txns {
+					mt := pool.byHash[string(txn.IDHash[:])]
+					require.NotNil(t, mt, "pooled successor must survive while its predecessor is being restored")
+					require.Equal(t, QueuedSubPool, mt.currentSubPool)
+				}
+				var selected TxnsRlp
+				_, err := pool.PeekBest(ctx, 10, &selected, 0)
+				require.NoError(t, err)
+				require.Empty(t, selected.Txns)
+			}
+			switch outcome {
+			case "invalid":
+				backend.valid = false
+			case "unavailable":
+				backend.err = context.DeadlineExceeded
+			}
+			change := blockChange(common.Hash{2}, 0)
+			change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+			require.NoError(t, pool.OnNewBlock(ctx, change, frameTxns, TxnSlots{}, TxnSlots{}))
+			if outcome == "invalid" || outcome == "unavailable" {
+				require.Empty(t, pool.byHash, "failed restoration must recheck the remaining nonce gap")
+				return
+			}
+			restored := pool.byHash[string(frame.IDHash[:])]
+			require.NotNil(t, restored)
+			require.Equal(t, PendingSubPool, restored.currentSubPool)
+			if outcome == "delegated" {
+				require.Len(t, pool.byHash, 1)
+				reason, ok := pool.discardReasonsLRU.Get(string(successors.Txns[0].IDHash[:]))
+				require.True(t, ok)
+				require.Equal(t, txpoolcfg.DelegatedTxnLimit, reason)
+				return
+			}
+			for _, txn := range successors.Txns {
+				mt := pool.byHash[string(txn.IDHash[:])]
+				require.NotNil(t, mt)
+				require.Equal(t, PendingSubPool, mt.currentSubPool)
+				require.NotZero(t, mt.subPool&IsLocal)
+				require.Equal(t, txn.BlobBundles, mt.TxnSlot.BlobBundles)
+			}
+		})
+	}
+}
+
 func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.chainID.SetUint64(1)
