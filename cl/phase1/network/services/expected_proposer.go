@@ -27,7 +27,12 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// maxConcurrentSidecarProposerStateRebuilds bounds the parent states rebuilt at once for sidecar proposer checks, as
+// maxConcurrentBlockValidationContexts does for blocks.
+const maxConcurrentSidecarProposerStateRebuilds = 4
+
 type parentStateViewer interface {
+	ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 }
 
@@ -39,10 +44,11 @@ type expectedProposerKey struct {
 // expectedProposers reads the expected proposer of a slot on the branch of a parent block. All sidecars of a block
 // share its parent and slot, so each pair is read from the parent state once.
 type expectedProposers struct {
-	cfg     *clparams.BeaconChainConfig
-	states  parentStateViewer
-	results *lru.Cache[expectedProposerKey, uint64]
-	reads   singleflight.Group
+	cfg      *clparams.BeaconChainConfig
+	states   parentStateViewer
+	results  *lru.Cache[expectedProposerKey, uint64]
+	reads    singleflight.Group
+	rebuilds chan struct{}
 }
 
 func newExpectedProposers(cfg *clparams.BeaconChainConfig, states parentStateViewer) *expectedProposers {
@@ -50,11 +56,17 @@ func newExpectedProposers(cfg *clparams.BeaconChainConfig, states parentStateVie
 	if err != nil {
 		panic(err)
 	}
-	return &expectedProposers{cfg: cfg, states: states, results: results}
+	return &expectedProposers{
+		cfg:      cfg,
+		states:   states,
+		results:  results,
+		rebuilds: make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds),
+	}
 }
 
 // get returns the expected proposer of slot on the branch of parentRoot. It ignores the sidecar when the parent state
-// does not give it without being advanced, as the spec allows while the proposers of the branch are not known yet.
+// does not give it without being advanced, or when it would rebuild that state while the rebuild budget is used up,
+// as the spec allows while the proposers of the branch are not known yet.
 func (e *expectedProposers) get(parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	key := expectedProposerKey{parentRoot: parentRoot, slot: slot}
 	if proposer, ok := e.results.Get(key); ok {
@@ -65,9 +77,13 @@ func (e *expectedProposers) get(parentRoot common.Hash, parentSlot, slot uint64)
 		return 0, fmt.Errorf("%w: expected proposer of slot %d is not in the parent state", ErrIgnore, slot)
 	}
 	proposer, err, _ := e.reads.Do(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (any, error) {
+		if proposer, ok := e.results.Get(key); ok {
+			return proposer, nil
+		}
 		var proposer uint64
-		found := false
-		if err := e.states.ViewStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
+		found, viewed := false, false
+		read := func(parentState *state.CachingBeaconState) error {
+			viewed = true
 			if state.Epoch(parentState) == epoch {
 				var err error
 				proposer, err = parentState.GetBeaconProposerIndexForSlot(slot)
@@ -78,7 +94,20 @@ func (e *expectedProposers) get(parentRoot common.Hash, parentSlot, slot uint64)
 				proposer, found = parentState.ProposerIndexFromLookahead(slot)
 			}
 			return nil
-		}); err != nil {
+		}
+		err := e.states.ViewCurrentStateAtBlockRoot(parentRoot, read)
+		if err == nil && !viewed {
+			select {
+			case e.rebuilds <- struct{}{}:
+			default:
+				return uint64(0), fmt.Errorf("%w: too many parent states rebuilt for sidecar proposer checks", ErrIgnore)
+			}
+			func() {
+				defer func() { <-e.rebuilds }()
+				err = e.states.ViewStateAtBlockRoot(parentRoot, read)
+			}()
+		}
+		if err != nil {
 			return uint64(0), fmt.Errorf("%w: view parent state for the expected proposer: %w", ErrIgnore, err)
 		}
 		if !found {
