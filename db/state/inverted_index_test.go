@@ -146,6 +146,15 @@ func TestLastTxNumInDBPerSnapshot(t *testing.T) {
 	require.Equal(t, uint64(100), last(cur))
 	require.Equal(t, uint64(10), last(old))
 	require.Equal(t, uint64(100), last(cur))
+
+	// A second reader of the same snapshot is served from the cached answer.
+	same, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer same.Rollback()
+	require.Equal(t, cur.ViewID(), same.ViewID())
+	n, found := ii.lastTxNumInDB(same)
+	require.Equal(t, uint64(100), n)
+	require.True(t, found)
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
