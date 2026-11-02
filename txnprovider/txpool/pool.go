@@ -144,6 +144,7 @@ type discardRecord struct {
 type nonceGapState struct {
 	sender            common.Address
 	firstMissingNonce uint64
+	minRetryNonce     uint64
 	checkedGeneration uint64
 	progressRevision  uint64
 }
@@ -774,7 +775,7 @@ func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, vi
 		gap.firstMissingNonce = frontier
 		gap.progressRevision = p.nonceRetryRevision.Add(1)
 	}
-	return gap.progressRevision > seenRevision, false, nil
+	return frontier >= gap.minRetryNonce && gap.progressRevision > seenRevision, false, nil
 }
 
 func (p *TxPool) recordPrecheck(hash [32]byte, reason txpoolcfg.DiscardReason) {
@@ -2596,9 +2597,13 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	for i, mt := range toDel {
 		record := discardRecord{reason: toDelReasons[i]}
 		if record.reason == txpoolcfg.NonceTooDistant {
+			minRetryNonce := mt.TxnSlot.Nonce
+			if mt.TxnSlot.TxType() != BlobTxnType {
+				minRetryNonce -= p.cfg.MaxNonceGap
+			}
 			record.nonceGap = &nonceGapState{
 				sender: p.senders.senderID2Addr[senderID], firstMissingNonce: noGapsNonce,
-				checkedGeneration: p.stateGeneration,
+				minRetryNonce: minRetryNonce, checkedGeneration: p.stateGeneration,
 			}
 		}
 		p.discardLocked(mt, record)

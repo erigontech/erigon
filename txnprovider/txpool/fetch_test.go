@@ -1722,6 +1722,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
 						require.Equal(t, int64(2), parses())
 						updateP2PRetryNonce(t, pool, otherSender, 1, 4)
+						require.True(t, pool.discardReasonsLRU.Remove(string(otherHash[:])))
 						return reply
 					},
 					func() *sentryproto.InboundMessage {
@@ -1736,6 +1737,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
 						require.Equal(t, int64(4), parses())
 						updateP2PRetryNonce(t, pool, otherSender, 2, 5)
+						require.True(t, pool.discardReasonsLRU.Remove(string(otherHash[:])))
 						return reply
 					},
 					func() *sentryproto.InboundMessage {
@@ -1745,6 +1747,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 						updateP2PRetryNonce(t, pool, otherSender, 3, 6)
+						require.True(t, pool.discardReasonsLRU.Remove(string(otherHash[:])))
 						handoff = true
 						return reply
 					},
@@ -2174,7 +2177,7 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 						handoff = false
 						nonce := uint64(0)
 						if mode == "parse_progress" {
-							nonce = 1
+							nonce = 65
 						}
 						change := &remoteproto.StateChangeBatch{
 							PendingBlockBaseFee: 1, BlockGasLimit: 30_000_000,
@@ -2205,6 +2208,7 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 					reasons, err := pool.AddLocalTxns(ctx, local)
 					require.NoError(t, err)
 					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+					require.True(t, pool.discardReasonsLRU.Remove(string(otherHash[:])))
 				}
 				if mode == "fee_precheck" {
 					pool.pendingBlobFee.Store(300_000)
@@ -2239,8 +2243,9 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 							require.True(t, pool.precheckLRU.Remove(string(otherHash[:])))
 							updateP2PRetryNonce(t, pool, sender, 0, 4)
 						case "used_progress":
-							updateP2PRetryNonce(t, pool, sender, 1, 4)
+							updateP2PRetryNonce(t, pool, sender, 65, 4)
 							pool.pendingBlobFee.Store(300_000)
+							require.True(t, pool.discardReasonsLRU.Remove(string(otherHash[:])))
 							return reply
 						default:
 							advanceOther(0)
@@ -2287,6 +2292,9 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 						if mode == "fee_precheck" {
 							return nil
 						}
+						if mode == "used_progress" || mode == "parse_progress" {
+							require.True(t, pool.discardReasonsLRU.Remove(string(hash[:])))
+						}
 						updateP2PRetryNonce(t, pool, sender, 65, 6)
 						pool.pendingBlobFee.Store(100_000)
 						return reply
@@ -2294,7 +2302,7 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 				)
 				if mode != "fee_precheck" {
 					steps = append(steps, func() *sentryproto.InboundMessage {
-						require.NotEmpty(t, pool.unprocessedRemoteTxns.Txns, "real owner progress must still retry")
+						require.NotEmpty(t, pool.unprocessedRemoteTxns.Txns, "an eligible owner must remain retryable")
 						require.Equal(t, [32]byte(hash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
 						require.NoError(t, pool.processRemoteTxns(ctx))
 						require.Contains(t, pool.byHash, string(hash[:]))
@@ -2306,6 +2314,85 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 				require.Empty(t, penalties)
 			})
 		}
+	}
+}
+
+func TestFetchWaitsForNonceRetryEligibility(t *testing.T) {
+	for _, profile := range []string{"ordinary", "Cancun", "Osaka"} {
+		t.Run(profile, func(t *testing.T) {
+			const targetNonce = uint64(1000)
+			var pool *TxPool
+			var signed types.Transaction
+			var sender common.Address
+			var wire []byte
+			eligibleNonce := targetNonce - 64
+			if profile == "ordinary" {
+				var change *remoteproto.StateChangeBatch
+				pool, _, signed, change = newFetchTestTransaction(t, targetNonce)
+				sender = gointerfaces.ConvertH160toAddress(change.ChangeBatch[0].Changes[0].Address)
+				wire = encodeFetchTestTransactions(t, signed)[0]
+			} else {
+				var blob *types.BlobTxWrapper
+				var key *ecdsa.PrivateKey
+				pool, blob, _, wire, key = newFetchBlobRetryFixture(t, targetNonce)
+				pool.chainConfig = testforks.Forks[profile]
+				pool.pragueTime = pool.chainConfig.PragueTime
+				pool.osakaTime = pool.chainConfig.OsakaTime
+				if profile == "Osaka" {
+					var err error
+					wire, err = blob.ConvertToV1()
+					require.NoError(t, err)
+				}
+				signed, sender = blob, crypto.PubkeyToAddress(key.PublicKey)
+				eligibleNonce = targetNonce
+				updateP2PRetryNonce(t, pool, sender, 0, 2)
+			}
+			pool.cfg.MaxNonceGap = 64
+			hash := signed.Hash()
+			client, sent, penalties := newFetchTestClient(t)
+			var wg sync.WaitGroup
+			fetch := NewFetch(t.Context(), nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+			parses := countFetchTestParses(fetch)
+			reply := &sentryproto.InboundMessage{
+				Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, PeerId: peerID,
+				Data: EncodePooledTransactions66([][]byte{wire}, 1, nil),
+			}
+			steps := []func() *sentryproto.InboundMessage{
+				func() *sentryproto.InboundMessage { return reply },
+				func() *sentryproto.InboundMessage {
+					require.NoError(t, pool.processRemoteTxns(t.Context()))
+					record, found := pool.discardReasonsLRU.Peek(string(hash[:]))
+					require.True(t, found)
+					require.Equal(t, txpoolcfg.NonceTooDistant, record.reason)
+					return reply
+				},
+			}
+			for i, nonce := range []uint64{1, 2, 3, eligibleNonce - 1, eligibleNonce} {
+				steps = append(steps, func() *sentryproto.InboundMessage {
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns, "an ineligible cached transaction must not be enqueued again")
+					require.Equal(t, int64(1), parses(), "partial nonce progress must not parse the cached body again")
+					updateP2PRetryNonce(t, pool, sender, nonce, uint64(i+3))
+					return reply
+				})
+			}
+			steps = append(steps,
+				func() *sentryproto.InboundMessage {
+					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "reaching the inclusive eligibility boundary must retry")
+					require.Equal(t, int64(2), parses())
+					require.NoError(t, pool.processRemoteTxns(t.Context()))
+					require.Contains(t, pool.byHash, string(hash[:]))
+					return reply
+				},
+				func() *sentryproto.InboundMessage {
+					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+					require.Equal(t, int64(2), parses(), "accepted transactions must remain deduplicated")
+					return nil
+				},
+			)
+			receiveFetchTestMessages(t, fetch, client, steps...)
+			require.Empty(t, sent)
+			require.Empty(t, penalties)
+		})
 	}
 }
 

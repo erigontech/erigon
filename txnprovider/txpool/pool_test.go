@@ -3701,9 +3701,12 @@ func TestP2PRetryNonceFrontierAdvancesWithoutNewBlock(t *testing.T) {
 	target.IDHash[0] = 1
 	var txns TxnSlots
 	txns.Append(target, sender[:], true)
+	farther := newTestTxnSlot(67, 0, 1, 2, 21_000)
+	farther.IDHash[0] = 4
+	txns.Append(farther, sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant, txpoolcfg.NonceTooDistant}, reasons)
 	_, retry := p2pRetryForTest(t, pool, target.IDHash[:], seen)
 	require.False(t, retry)
 	for _, nonce := range []uint64{1, 0} {
@@ -3726,6 +3729,17 @@ func TestP2PRetryNonceFrontierAdvancesWithoutNewBlock(t *testing.T) {
 	require.False(t, retry, "one packet cannot reuse the same frontier advance")
 	_, retry = p2pRetryForTest(t, pool, target.IDHash[:], seen)
 	require.True(t, retry, "another cached packet has its own retry opportunity")
+	_, retry = p2pRetryForTest(t, pool, farther.IDHash[:], seen)
+	require.False(t, retry, "pooled progress must reach the transaction's allowed nonce gap")
+	bridge := newTestTxnSlot(2, 0, 1, 2, 21_000)
+	bridge.IDHash[0] = 5
+	var lower TxnSlots
+	lower.Append(bridge, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, lower)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	_, retry = p2pRetryForTest(t, pool, farther.IDHash[:], seen)
+	require.True(t, retry, "contiguous pooled transactions must also unlock eligible retries")
 	_, verdict, err := pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, verdict)
@@ -3837,7 +3851,7 @@ func TestCachedPacketRetriesNonceGapSkippedByAnotherPacket(t *testing.T) {
 	reasons, err = pool.AddLocalTxns(ctx, completedTxns)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
-	updateP2PRetryNonce(t, pool, completedSender, 1, 3)
+	updateP2PRetryNonce(t, pool, completedSender, 2, 3)
 	revision, retry = p2pRetryForTest(t, pool, completed.IDHash[:], revision)
 	require.True(t, retry)
 	bad := makeBlobSlot(2, true)
