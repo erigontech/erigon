@@ -777,17 +777,18 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 }
 
 // ImportHeldGloasTip processes the held Gloas block with the envelope that arrives within envelopeTimeout and reports
-// its root and whether processing reached it. After a failed import, the tip is tried again in the next slot.
-func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration) (common.Hash, bool) {
+// whether processing reached the block and accepted(root) holds. A tip that processing rejects is dropped; any other
+// tip that is not imported is tried again in the next slot.
+func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, accepted func(common.Hash) bool) bool {
 	f.mu.Lock()
 	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
 	f.mu.Unlock()
 	if tip == nil {
-		return common.Hash{}, false
+		return false
 	}
 	root, err := tip.Block.HashSSZ()
 	if err != nil || f.currentSlot != nil && f.currentSlot() < retrySlot {
-		return root, false
+		return false
 	}
 
 	blocks := []*cltypes.SignedBeaconBlock{tip}
@@ -804,7 +805,7 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	highestSlotProcessed, err := f.process(f.highestSlotProcessed, blocks, envelopes)
-	if err != nil || highestSlotProcessed < tip.Block.Slot {
+	if err != nil || highestSlotProcessed < tip.Block.Slot || !accepted(root) {
 		if f.currentSlot != nil {
 			f.gloasTipRetrySlot = saturatingIncrement(f.currentSlot())
 		}
@@ -817,12 +818,12 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 			}
 			f.clearGloasScan()
 		}
-		return root, false
+		return false
 	}
 	f.highestSlotProcessed = highestSlotProcessed
 	f.highestSlotUpdateTime = time.Now()
 	f.clearGloasScan()
-	return root, true
+	return true
 }
 
 func (f *ForwardBeaconDownloader) advanceGloasScanPast(lastSlot uint64) {

@@ -183,17 +183,23 @@ func TestForwardSyncAsksForSuccessorAfterAnswerWithTip(t *testing.T) {
 	require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
 }
 
+// Processing skips a tip that is not on the finalized chain without an error, even when the tip is in the chain tip
+// slot that ends ForwardSync.
 func TestForwardSyncKeepsSyncingWhenForkChoiceRejectsGloasTip(t *testing.T) {
-	f := newForwardSyncTipFixture(t, 2, false)
-	orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
-	orphan.Block.Slot = f.tip.Block.Slot
-	orphan.Block.ParentRoot = common.HexToHash("0x01")
-	f.sentinel.firstBlocks = f.encode(t, orphan)
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
+	for _, slotsAfterTip := range []uint64{0, 2} {
+		t.Run(fmt.Sprint(slotsAfterTip), func(t *testing.T) {
+			f := newForwardSyncTipFixture(t, slotsAfterTip, false)
+			orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
+			orphan.Block.Slot = f.tip.Block.Slot
+			orphan.Block.ParentRoot = common.HexToHash("0x01")
+			f.sentinel.firstBlocks = f.encode(t, orphan)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
 
-	require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
-	require.Zero(t, f.cfg.forwardSyncTipRoot)
+			require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+			require.Zero(t, f.cfg.forwardSyncTipRoot)
+		})
+	}
 }
 
 func TestForwardSyncKeepsSyncingWhenTipEnvelopeIsRejected(t *testing.T) {
