@@ -194,7 +194,8 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil
 	}
-	return v.compose()
+	acc := v.compose()
+	return &acc
 }
 
 // compose overlays the version-map field cells on the base record, reading raw
@@ -202,7 +203,7 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 // destroyed-but-preserved account (EIP-8246 no-burn) keeps its surviving fields.
 // For a non-destroyed account this equals the lifecycle getters. A field with no
 // cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
-func (v *VersionedAccountView) compose() *accounts.Account {
+func (v *VersionedAccountView) compose() accounts.Account {
 	v.ensureBase()
 	acc := accounts.NewAccount()
 	if v.baseAcc != nil {
@@ -222,7 +223,7 @@ func (v *VersionedAccountView) compose() *accounts.Account {
 			acc.CodeHash = ch
 		}
 	}
-	return &acc
+	return acc
 }
 
 var _ accounts.AccountView = (*VersionedAccountView)(nil)

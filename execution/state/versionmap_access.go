@@ -73,7 +73,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if _, balRes, balOk := view.vm.ReadBalance(addr, txIdx); balOk && balRes.ValStatus() == ValueDeleted {
 		return accounts.Account{}, false
 	}
-	av := NewVersionedAccountView(addr, txIdx, view.vm, view.base)
+	av := VersionedAccountView{addr: addr, txIdx: txIdx, vm: view.vm, base: view.base}
 	exists := av.recordExists()
 	if err := av.Err(); err != nil {
 		view.err = cmp.Or(view.err, err)
@@ -82,7 +82,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if !exists {
 		return accounts.Account{}, false
 	}
-	return *av.compose(), true
+	return av.compose(), true
 }
 
 // GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok
@@ -136,7 +136,16 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		}
 		candidates = append(candidates, maxIdx)
 		for _, idx := range candidates {
-			av := NewVersionedAccountView(addr, int(idx), vm, base)
+			if b, ok := versionedUpdateBalance(vm, addr, int(idx)); ok && !b.IsZero() {
+				continue
+			}
+			if n, ok := versionedUpdateNonce(vm, addr, int(idx)); ok && n != 0 {
+				continue
+			}
+			if ch, ok := versionedUpdateCodeHash(vm, addr, int(idx)); ok && !ch.IsEmpty() {
+				continue
+			}
+			av := VersionedAccountView{addr: addr, txIdx: int(idx), vm: vm, base: base}
 			acc := av.Account()
 			if err := av.Err(); err != nil {
 				return err
@@ -178,7 +187,8 @@ func (vm *VersionMap) SeedAddresses() {
 			continue
 		}
 		addr := accounts.InternAddress(vm.bal[i].Address)
-		if acc := NewVersionedAccountView(addr, int(minIdx), vm, nil).Account(); acc != nil {
+		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
+		if acc := av.Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
 		}
 	}

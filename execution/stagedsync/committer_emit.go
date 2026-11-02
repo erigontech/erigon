@@ -49,18 +49,8 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey]struct{}{}
 		cc.destructed = map[accounts.Address]struct{}{}
 	}
-	addAccount := func(a accounts.Address) {
-		if _, seen := cc.touchedAccounts[a]; seen {
-			return
-		}
-		cc.touchedAccounts[a] = struct{}{}
-		if cc.prefetchFn != nil {
-			address := a.Value()
-			cc.prefetchFn(address[:])
-		}
-	}
 	for a := range writes.AccountChanges() {
-		addAccount(a)
+		cc.addTouchedAccount(a)
 	}
 	for a, vw := range writes.SelfDestructs() {
 		if vw.Val {
@@ -68,7 +58,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 		}
 	}
 	for a, slots := range writes.StorageChanges() {
-		addAccount(a)
+		cc.addTouchedAccount(a)
 		m := cc.touchedStorage[a]
 		if m == nil {
 			m = map[accounts.StorageKey]struct{}{}
@@ -84,6 +74,17 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView) {
 				cc.prefetchFn(append(address[:], slot[:]...))
 			}
 		}
+	}
+}
+
+func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address) {
+	if _, seen := cc.touchedAccounts[a]; seen {
+		return
+	}
+	cc.touchedAccounts[a] = struct{}{}
+	if cc.prefetchFn != nil {
+		address := a.Value()
+		cc.prefetchFn(address[:])
 	}
 }
 
