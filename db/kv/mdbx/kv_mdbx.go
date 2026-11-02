@@ -323,8 +323,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	if err := env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	if err := env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { // default: 262144
+	if err := env.SetOption(mdbx.OptRpAugmentLimit, uint64(dbg.EnvInt("MDBX_RP_AUGMENT", 1_000_000_000))); err != nil { // default: 262144
 		return nil, err
+	}
+	if v := dbg.EnvInt("MDBX_PREFAULT_WRITE", -1); v >= 0 {
+		if err := env.SetOption(mdbx.OptPrefaultWriteEnable, uint64(v)); err != nil {
+			return nil, err
+		}
 	}
 
 	exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
