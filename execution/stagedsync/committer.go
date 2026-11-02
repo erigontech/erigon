@@ -371,7 +371,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// with seekInFiles(txNum=0) on datadirs whose history window starts past
 		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
 		// it only affects the lazy-load path, never the trie fold.
-		if r.writes != nil && !r.writes.IsEmpty() {
+		if r.writes != nil && !r.writes.IsEmpty() && !(probeAheadAtTip && cc.computedAhead[r.blockNum]) {
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.state.origins = r.origins
