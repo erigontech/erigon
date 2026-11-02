@@ -621,10 +621,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 	b.WriteString("[")
 	first := true
 	var err error
-	validators.Range(func(i int, v solid.Validator, l int) bool {
-		if len(filterIndicies) > 0 && !slices.Contains(filterIndicies, uint64(i)) {
-			return true
-		}
+	appendValidator := func(i int, v solid.Validator) bool {
 		// "{\"index\":\"%d\",\"status\":\"%s\",\"balance\":\"%d\",\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":\"%d\",\"slashed\":%t,\"activation_eligibility_epoch\":\"%d\",\"activation_epoch\":\"%d\",\"exit_epoch\":\"%d\",\"withdrawable_epoch\":\"%d\"}}"
 		status := validatorStatusFromValidator(v, stateEpoch, balances.Get(i))
 		if shouldStatusBeFiltered(status, filterStatuses) {
@@ -654,7 +651,18 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		}
 
 		return true
-	})
+	}
+	if len(filterIndicies) == 0 {
+		validators.Range(func(i int, v solid.Validator, _ int) bool {
+			return appendValidator(i, v)
+		})
+	} else {
+		for _, idx := range sortedIndicesBelow(filterIndicies, validators.Length()) {
+			if !appendValidator(int(idx), validators.Get(int(idx))) {
+				break
+			}
+		}
+	}
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 		return
@@ -696,20 +704,37 @@ func responseValidatorsBalances(filterIndicies []uint64, balances solid.Uint64Li
 	}
 
 	balancesResponse := make([]BalanceResponse, 0)
-	balances.Range(func(i int, v uint64, l int) bool {
-		if len(filterIndicies) > 0 && !slices.Contains(filterIndicies, uint64(i)) {
-			return true
-		}
+	appendBalance := func(i int, v uint64) {
 		balancesResponse = append(balancesResponse, BalanceResponse{
 			Index:   strconv.FormatUint(uint64(i), 10),
 			Balance: strconv.FormatUint(v, 10),
 		})
-		return true
-	})
+	}
+	if len(filterIndicies) == 0 {
+		balances.Range(func(i int, v uint64, _ int) bool {
+			appendBalance(i, v)
+			return true
+		})
+	} else {
+		for _, idx := range sortedIndicesBelow(filterIndicies, balances.Length()) {
+			appendBalance(int(idx), balances.Get(int(idx)))
+		}
+	}
 
 	return newBeaconResponse(balancesResponse).
 		WithFinalized(finalized).
 		WithOptimistic(optimistic)
+}
+
+// sortedIndicesBelow returns the distinct indices smaller than length in
+// ascending order, so filtered responses keep registry order without
+// scanning the whole registry.
+func sortedIndicesBelow(indicies []uint64, length int) []uint64 {
+	sorted := slices.Clone(indicies)
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	end, _ := slices.BinarySearch(sorted, uint64(length))
+	return sorted[:end]
 }
 
 func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) bool {
