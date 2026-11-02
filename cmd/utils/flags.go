@@ -2425,13 +2425,9 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 	return g.None[bool]()
 }
 
-// setOverrideGenesis applies --override.genesis. It must run after the --chain
-// defaults are applied, as it replaces the ones that belong to the default
-// --chain network rather than to the given genesis.
+// setOverrideGenesis must run after the chain defaults are applied.
 func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
-	// Check whether the flag was given, not whether its value is empty: an empty
-	// path, e.g. from an unset variable in a wrapper script, must fail rather
-	// than silently start the default --chain network.
+	// An explicitly empty path must fail instead of selecting the default chain.
 	if !ctx.IsSet(OverrideGenesisFlag.Name) {
 		return nil
 	}

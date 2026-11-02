@@ -66,42 +66,44 @@ func TestReadGenesisFile(t *testing.T) {
 	})
 }
 
+func runOverrideGenesis(args []string) (*ethconfig.Config, error) {
+	// CLI flags retain parse state, so each run needs fresh instances.
+	overrideGenesisFlag, chainFlag, networkIDFlag := OverrideGenesisFlag, ChainFlag, NetworkIdFlag
+	dnsDiscoveryFlag, noDiscoverFlag := DNSDiscoveryFlag, NoDiscoverFlag
+	cfg := &ethconfig.Config{EthDiscoveryURLs: []string{"enrtree://mainnet"}}
+	app := &cli.Command{
+		Flags: []cli.Flag{&overrideGenesisFlag, &chainFlag, &networkIDFlag, &dnsDiscoveryFlag, &noDiscoverFlag},
+		Action: func(_ context.Context, ctx *cli.Command) error {
+			cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
+			return setOverrideGenesis(ctx, cfg)
+		},
+	}
+	err := app.Run(context.Background(), append([]string{"test"}, args...))
+	return cfg, err
+}
+
 func TestSetOverrideGenesis(t *testing.T) {
 	path := writeGenesis(t, `{"config":{"chainId":1337},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`)
 	mainnetDNS := []string{"enrtree://mainnet"}
 	tests := []struct {
 		name          string
 		args          []string
-		networkID     uint64 // as set by SetEthConfig before setOverrideGenesis
 		wantNetworkID uint64
 		wantDNS       []string
 	}{
-		{"no --networkid → genesis chain id", nil, 1, 1337, nil},
-		{"explicit --networkid wins", []string{"--networkid=7"}, 7, 7, nil},
-		{"--nodiscover keeps discovery config", []string{"--nodiscover"}, 1, 1337, mainnetDNS},
+		{"no --networkid → genesis chain id", nil, 1337, nil},
+		{"explicit --networkid wins", []string{"--networkid=7"}, 7, nil},
+		{"--nodiscover keeps discovery config", []string{"--nodiscover"}, 1337, mainnetDNS},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// urfave/cli v3 flags carry parse state (hasBeenSet), so use fresh
-			// instances per run instead of the shared package-global flags.
-			overrideGenesisFlag := OverrideGenesisFlag
-			chainFlag := ChainFlag
-			networkIdFlag := NetworkIdFlag
-			dnsDiscoveryFlag := DNSDiscoveryFlag
-			noDiscoverFlag := NoDiscoverFlag
-			app := &cli.Command{}
-			app.Flags = []cli.Flag{&overrideGenesisFlag, &chainFlag, &networkIdFlag, &dnsDiscoveryFlag, &noDiscoverFlag}
-			app.Action = func(_ context.Context, ctx *cli.Command) error {
-				cfg := &ethconfig.Config{NetworkID: tt.networkID, EthDiscoveryURLs: mainnetDNS}
-				require.NoError(t, setOverrideGenesis(ctx, cfg))
-				require.True(t, cfg.GenesisFromFile)
-				require.Equal(t, uint64(1337), cfg.Genesis.Config.ChainID.Uint64())
-				require.Equal(t, tt.wantNetworkID, cfg.NetworkID)
-				require.Equal(t, tt.wantDNS, cfg.EthDiscoveryURLs)
-				return nil
-			}
-			args := append([]string{"test", "--override.genesis=" + path}, tt.args...)
-			require.NoError(t, app.Run(context.Background(), args))
+			args := append([]string{"--override.genesis=" + path}, tt.args...)
+			cfg, err := runOverrideGenesis(args)
+			require.NoError(t, err)
+			require.True(t, cfg.GenesisFromFile)
+			require.Equal(t, uint64(1337), cfg.Genesis.Config.ChainID.Uint64())
+			require.Equal(t, tt.wantNetworkID, cfg.NetworkID)
+			require.Equal(t, tt.wantDNS, cfg.EthDiscoveryURLs)
 		})
 	}
 }
@@ -111,40 +113,29 @@ func TestSetOverrideGenesisErrors(t *testing.T) {
 	zeroChainID := writeGenesis(t, `{"config":{"chainId":0},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`)
 	largeChainID := writeGenesis(t, `{"config":{"chainId":18446744073709551616},"gasLimit":"0x1c9c380","difficulty":"0x0","alloc":{}}`)
 	tests := []struct {
-		name    string
-		args    []string
-		wantErr string // empty: no error
+		name          string
+		args          []string
+		wantErr       string
+		wantNetworkID uint64
 	}{
-		{"empty path", []string{"--override.genesis="}, "failed to read genesis file"},
-		{"with --chain", []string{"--override.genesis=" + path, "--chain=sepolia"}, "mutually exclusive"},
-		{"chain id 0", []string{"--override.genesis=" + zeroChainID}, "must be set to a nonzero network id"},
-		{"chain id 0 with --networkid", []string{"--override.genesis=" + zeroChainID, "--networkid=7"}, ""},
-		{"chain id 2^64", []string{"--override.genesis=" + largeChainID}, "must be set to a nonzero network id"},
-		{"chain id 2^64 with --networkid", []string{"--override.genesis=" + largeChainID, "--networkid=7"}, ""},
-		{"flag not given", nil, ""},
+		{"empty path", []string{"--override.genesis="}, "failed to read genesis file", 0},
+		{"with --chain", []string{"--override.genesis=" + path, "--chain=sepolia"}, "mutually exclusive", 0},
+		{"chain id 0", []string{"--override.genesis=" + zeroChainID}, "must be set to a nonzero network id", 0},
+		{"chain id 0 with --networkid", []string{"--override.genesis=" + zeroChainID, "--networkid=7"}, "", 7},
+		{"chain id 2^64", []string{"--override.genesis=" + largeChainID}, "must be set to a nonzero network id", 0},
+		{"chain id 2^64 with --networkid", []string{"--override.genesis=" + largeChainID, "--networkid=7"}, "", 7},
+		{"flag not given", nil, "", ethconfig.Defaults.NetworkID},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			overrideGenesisFlag := OverrideGenesisFlag
-			chainFlag := ChainFlag
-			networkIdFlag := NetworkIdFlag
-			app := &cli.Command{}
-			app.Flags = []cli.Flag{&overrideGenesisFlag, &chainFlag, &networkIdFlag}
-			app.Action = func(_ context.Context, ctx *cli.Command) error {
-				cfg := &ethconfig.Config{NetworkID: ctx.Uint64(NetworkIdFlag.Name)}
-				err := setOverrideGenesis(ctx, cfg)
-				if tt.wantErr == "" {
-					require.NoError(t, err)
-					if ctx.IsSet(NetworkIdFlag.Name) {
-						require.Equal(t, ctx.Uint64(NetworkIdFlag.Name), cfg.NetworkID)
-					}
-				} else {
-					require.ErrorContains(t, err, tt.wantErr)
-					require.Nil(t, cfg.Genesis)
-				}
-				return nil
+			cfg, err := runOverrideGenesis(tt.args)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				require.Equal(t, tt.wantNetworkID, cfg.NetworkID)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+				require.Nil(t, cfg.Genesis)
 			}
-			require.NoError(t, app.Run(context.Background(), append([]string{"test"}, tt.args...)))
 		})
 	}
 }

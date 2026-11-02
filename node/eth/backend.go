@@ -1168,11 +1168,7 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 	return chainConfig, genesis, nil
 }
 
-// selectGenesis returns the genesis to pass to WriteGenesisBlock for this start. A
-// genesis stored in the DB replaces config.Genesis, and an initialised DB needs no
-// spec, unless the genesis came from --override.genesis: that one is passed on, so
-// that WriteGenesisBlock rejects it if it differs from the stored one, as `erigon
-// init` does, instead of running the stored chain under the file's network id.
+// Explicit genesis files must reach the writer for validation on restart.
 func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
 	if config.GenesisFromFile {
 		return config.Genesis, nil
