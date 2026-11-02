@@ -414,7 +414,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if frame, ok := txn.(*types.FrameTransaction); ok {
 		if ctx.poolRules {
 			if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
-				return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
+				// Gossip skips policy rejections; RPC still reports an invalid transaction.
+				return p, fmt.Errorf("%w: %w: %w", ErrRejected, ErrParseTxn, err)
 			}
 		}
 		if err := frame.Validate(); err != nil {
