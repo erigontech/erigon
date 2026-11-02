@@ -65,11 +65,13 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // every blockResult. It owns its own commitment.Updates buffer and reads
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
-	doms        *execctx.SharedDomains
-	db          kv.TemporalRoDB
-	chainConfig *chain.Config
-	logPrefix   string
-	logger      log.Logger
+	applyWritesDur time.Duration
+	applyWritesN   int
+	doms           *execctx.SharedDomains
+	db             kv.TemporalRoDB
+	chainConfig    *chain.Config
+	logPrefix      string
+	logger         log.Logger
 
 	// logCommit emits the periodic commit log/gauges for the executor; nil disables
 	// it. Called on this calculator's goroutine, serialized against the exec
@@ -368,9 +370,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// genesis. computeAndPublish resets this to lastTxNum+1 before compute, so
 		// it only affects the lazy-load path, never the trie fold.
 		if r.writes != nil && !r.writes.IsEmpty() {
+			t0 := time.Now()
 			cc.asOfReader.txNum = r.txNum
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.state.ApplyWrites(r.writes)
+			cc.applyWritesDur += time.Since(t0)
+			cc.applyWritesN++
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -448,6 +453,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				gap = -d
 			}
 			residual := stageWall - execActive - commitActive + overlap - gap
+			cc.logger.Info("[np-phase] applywrites", "blk", r.BlockNum, "n", cc.applyWritesN, "dur", cc.applyWritesDur, "computedAhead", cc.computedAhead[r.BlockNum])
+			cc.applyWritesDur, cc.applyWritesN = 0, 0
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
