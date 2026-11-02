@@ -43,20 +43,10 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 	a := func(b byte) accounts.Address { return accounts.InternAddress([20]byte{b}) }
 	k := func(b byte) accounts.StorageKey { return accounts.InternKey([32]byte{b}) }
 	codeHash := accounts.NewCode([]byte{0x60, 0x00}).Hash
-	storKey := func(addr accounts.Address, slot accounts.StorageKey) string {
-		av, sv := addr.Value(), slot.Value()
-		return string(av[:]) + string(sv[:])
-	}
 	full := func(bal uint64, nonce uint64, ch accounts.CodeHash) commitment.Update {
 		return commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Balance: *uint256.NewInt(bal), Nonce: nonce, CodeHash: ch.Value()}
 	}
 	del := commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
-	storVal := func(v uint64) commitment.Update {
-		b := uint256.NewInt(v).Bytes()
-		u := commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(b))}
-		copy(u.Storage[:], b)
-		return u
-	}
 	storDel := commitment.Update{Flags: commitment.DeleteUpdate}
 
 	wiped := full(3, 1, accounts.EmptyCodeHash)
@@ -76,12 +66,12 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 			"storage plus account",
 			newWS().bal(a(3), ver, *uint256.NewInt(5)).nonce(a(3), ver, 1).
 				stor(a(3), k(1), ver, *uint256.NewInt(1)).stor(a(3), k(2), ver, *uint256.NewInt(2)).build(),
-			map[string]commitment.Update{acctPlainKey(a(3)): full(5, 1, accounts.EmptyCodeHash), storKey(a(3), k(1)): storVal(1), storKey(a(3), k(2)): storVal(2)},
+			map[string]commitment.Update{acctPlainKey(a(3)): full(5, 1, accounts.EmptyCodeHash), storPlainKey(a(3), k(1)): storVal(1), storPlainKey(a(3), k(2)): storVal(2)},
 		},
 		{
 			"storage cleared to zero",
 			newWS().bal(a(9), ver, *uint256.NewInt(5)).nonce(a(9), ver, 1).stor(a(9), k(3), ver, uint256.Int{}).build(),
-			map[string]commitment.Update{acctPlainKey(a(9)): full(5, 1, accounts.EmptyCodeHash), storKey(a(9), k(3)): storDel},
+			map[string]commitment.Update{acctPlainKey(a(9)): full(5, 1, accounts.EmptyCodeHash), storPlainKey(a(9), k(3)): storDel},
 		},
 		{
 			"balance-deleted verdict removes leaf and subtree",
@@ -130,9 +120,8 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 	ver := state.Version{TxIndex: txIdx}
 	addr := accounts.InternAddress([20]byte{0xcb})
 	slot := accounts.InternKey([32]byte{0x7})
-	av, sv := addr.Value(), slot.Value()
-	storKey := string(av[:]) + string(sv[:])
-	acctKey := string(av[:])
+	storKey := storPlainKey(addr, slot)
+	acctKey := acctPlainKey(addr)
 
 	// The access list records the account and the slot (so both are touched), but only the
 	// account is flushed — the slot has no cell this block, exactly the cross-block shape.
@@ -150,10 +139,7 @@ func TestEmitTouched_CrossBlockStorageResolvesFromBase(t *testing.T) {
 		base.accounts[addr] = &acc
 		base.storage[addr] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(42)}
 		got := emitTouchedUpdates(t, vm, T, base, state.NewVersionMapWriteView(recorded, vm, txIdx))
-		b := uint256.NewInt(42).Bytes()
-		want := commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(b))}
-		copy(want.Storage[:], b)
-		require.Equal(t, want, got[storKey], "cross-block slot must take its value from the base")
+		require.Equal(t, storVal(42), got[storKey], "cross-block slot must take its value from the base")
 	})
 
 	t.Run("absent base value deletes the slot", func(t *testing.T) {
@@ -213,17 +199,20 @@ func TestEmitTouched_ZeroCodeHashFoldsAsEmpty(t *testing.T) {
 	require.Equal(t, empty.CodeHash, got.CodeHash)
 }
 
-type errStorageBase struct {
-	*mapStateReader
-	accErr, storErr error
+func storVal(v uint64) commitment.Update {
+	b := uint256.NewInt(v).Bytes()
+	u := commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(b))}
+	copy(u.Storage[:], b)
+	return u
 }
 
-func (b *errStorageBase) ReadAccountData(accounts.Address) (*accounts.Account, error) {
-	return nil, b.accErr
+type errStorageBase struct {
+	*mapStateReader
+	err error
 }
 
 func (b *errStorageBase) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
-	return uint256.Int{}, false, b.storErr
+	return uint256.Int{}, false, b.err
 }
 
 // TestEmitTouched_BaseReadErrorFailsTheFold pins that a failed base read fails the fold
@@ -241,7 +230,7 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 		vm := state.NewVersionMap(nil)
 		cc := &commitmentCalculator{}
 		cc.accumulateTouched(newWS().nonce(addr, ver, 1).build())
-		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{accErr: boom}), newTestUpdates())
+		err := cc.emitTouched(vm.View(txIdx+1, &failingAccountReader{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
 		require.ErrorIs(t, err, boom)
 	})
 
@@ -251,7 +240,7 @@ func TestEmitTouched_BaseReadErrorFailsTheFold(t *testing.T) {
 		vm.FlushVersionedWrites(newWS().bal(addr, ver, *uint256.NewInt(1)).build(), true)
 		cc := &commitmentCalculator{}
 		cc.accumulateTouched(ws)
-		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{storErr: boom}), newTestUpdates())
+		err := cc.emitTouched(vm.View(txIdx+1, &errStorageBase{mapStateReader: newMapStateReader(), err: boom}), newTestUpdates())
 		require.ErrorIs(t, err, boom)
 	})
 }

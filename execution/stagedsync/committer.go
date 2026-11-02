@@ -556,8 +556,13 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
-	vm, err := cc.balVersionMap(req)
-	if err != nil {
+	vm := state.NewVersionMap(req.bal)
+	vm.SetBaseTxNum(req.firstTxNum)
+	vm.SeedAddresses()
+	if err := vm.SeedEmptyRemovals(
+		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
+		cc.chainConfig.Aura != nil,
+		cc.asOfReader.dr.StateReaderAt(req.firstTxNum)); err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
@@ -596,17 +601,6 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	if !dbg.BALShadowCompute {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}
-}
-
-func (cc *commitmentCalculator) balVersionMap(req *blockRequest) (*state.VersionMap, error) {
-	vm := state.NewVersionMap(req.bal)
-	vm.SetBaseTxNum(req.firstTxNum)
-	vm.SeedAddresses()
-	err := vm.SeedEmptyRemovals(
-		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
-		cc.chainConfig.Aura != nil,
-		cc.asOfReader.dr.StateReaderAt(req.firstTxNum))
-	return vm, err
 }
 
 // checkpointStepsFromBAL emits a commitment checkpoint at each unfrozen step

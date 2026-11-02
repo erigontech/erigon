@@ -123,7 +123,8 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
 			continue
 		}
-		maxIdx := balMaxChangeIndex(ac)
+		var maxIdx uint32
+		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
@@ -207,13 +208,5 @@ func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 			m = idx
 		}
 	})
-	return m
-}
-
-// balMaxChangeIndex is the highest 1-based change index across an account's BAL
-// entries, i.e. the index of its last touch this block.
-func balMaxChangeIndex(ac *types.AccountChanges) uint32 {
-	var m uint32
-	balChangeIndexes(ac, func(idx uint32) { m = max(m, idx) })
 	return m
 }

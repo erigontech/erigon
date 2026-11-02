@@ -46,6 +46,11 @@ func balFoldUpdates(t *testing.T, blockBAL types.BlockAccessList, eip161Enabled,
 
 func acctPlainKey(addr accounts.Address) string { v := addr.Value(); return string(v[:]) }
 
+func storPlainKey(addr accounts.Address, slot accounts.StorageKey) string {
+	av, sv := addr.Value(), slot.Value()
+	return string(av[:]) + string(sv[:])
+}
+
 // TestBALFold_EmptyAccountBecomesDelete pins the EIP-161 reconstruction on the BAL path:
 // the BAL carries no deletion marker, so a touched account whose block-end state is empty
 // must fold to a leaf-removing DeleteUpdate (not a zero-valued leaf), while a funded one
