@@ -22,9 +22,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"maps"
 	"slices"
 	"sync"
+	"time"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -765,11 +768,16 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 			return err
 		}
 	}
+	t0 := time.Now()
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
+	tDiff := time.Since(t0)
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
+	}
+	if flushSplitTrace {
+		log.Info("[flush] split", "diffset", tDiff, "writers", time.Since(t0)-tDiff)
 	}
 	// PlainStateVersion advances here with the domain writes; metadata overlays
 	// must not advance it independently.
@@ -835,8 +843,12 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if w == nil {
 			continue
 		}
+		t0 := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
+		}
+		if flushSplitTrace {
+			log.Info("[flush] domain", "domain", kv.Domain(di), "took", time.Since(t0))
 		}
 		aggTx.d[di].closeValsCursor() // TODO: why?
 		w.Close()
@@ -847,12 +859,16 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		}
 		writer.close()
 	}
-	for _, w := range sd.iiWriters {
+	for ii, w := range sd.iiWriters {
 		if w == nil {
 			continue
 		}
+		t0 := time.Now()
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
+		}
+		if flushSplitTrace {
+			log.Info("[flush] ii", "idx", ii, "took", time.Since(t0))
 		}
 		w.close()
 	}
@@ -877,3 +893,5 @@ func AggTx(tx kv.Tx) *AggregatorRoTx {
 
 	return nil
 }
+
+var flushSplitTrace = dbg.EnvBool("FLUSH_SPLIT_TRACE", false)
