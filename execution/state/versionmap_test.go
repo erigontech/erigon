@@ -2124,3 +2124,30 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, 1, res.DepIdx())
 	require.Equal(t, *uint256.NewInt(42), val)
 }
+
+func TestSpeculativeCodeFlushKeepsBALSeed(t *testing.T) {
+	t.Parallel()
+
+	addr := common.Address{0xc0}
+	bytecode := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+	mvh := NewVersionMap(types.BlockAccessList{{
+		Address:     addr,
+		CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: bytecode}}, // written by tx 1
+	}})
+	a := accounts.InternAddress(addr)
+	code := accounts.NewCode(bytecode)
+	v := Version{TxIndex: 1, Incarnation: 1}
+
+	ws := &WriteSet{}
+	ws.SetCode(a, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: a, Path: CodePath, Version: v}, Val: code})
+	ws.SetCodeHash(a, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: a, Path: CodeHashPath, Version: v}, Val: code.Hash})
+	ws.SetCodeSize(a, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: a, Path: CodeSizePath, Version: v}, Val: code.Len()})
+	mvh.FlushVersionedWrites(ws, false)
+
+	_, res, _ := mvh.ReadCode(a, 2)
+	require.Equal(t, MVReadResultDone, res.Status(), "an equal speculative write must not turn the BAL code into an estimate")
+	_, res, _ = mvh.ReadCodeSize(a, 2)
+	require.Equal(t, MVReadResultDone, res.Status())
+	_, res, _ = mvh.ReadCodeHash(a, 2)
+	require.Equal(t, MVReadResultDone, res.Status())
+}
