@@ -62,6 +62,46 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	require.Equal(t, uint64(5), acc.Nonce)
 }
 
+// An account whose last BAL change sets a non-zero balance, nonce or code cannot be empty,
+// so seeding needs no committed-base read for it.
+func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	funded, nonced, coded := addr("0xf1"), addr("0xf2"), addr("0xf3")
+	bal := types.BlockAccessList{
+		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}, {Index: 1, Value: *uint256.NewInt(3)}}},
+		{Address: nonced.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}},
+		{Address: coded.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}}},
+	}
+	reader := &countingAccountReader{}
+
+	vm := NewVersionMap(bal)
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	require.Zero(t, reader.reads)
+}
+
+// A non-zero value cleared by a later change does not prove the account non-empty: seeding
+// reads the base and removes the account.
+func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	drained, renonced, uncoded := addr("0xc1"), addr("0xc2"), addr("0xc3")
+	bal := types.BlockAccessList{
+		{Address: drained.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}, {Index: 2, Value: uint256.Int{}}}},
+		{Address: renonced.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}, {Index: 2, Value: 0}}},
+		{Address: uncoded.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}, {Index: 2}}},
+	}
+	reader := &countingAccountReader{}
+
+	vm := NewVersionMap(bal)
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	require.Equal(t, 3, reader.reads)
+	for _, a := range []accounts.Address{drained, renonced, uncoded} {
+		_, ok := vm.View(2, reader).GetAccount(a)
+		require.False(t, ok, a)
+	}
+}
+
 // TestSeedAddresses pins the DB-free existence seed. The BAL carries no address record, so
 // a block-created account (absent in the committed base) has only field cells; the address
 // existence read consults the AddressPath (not the field cells), so unseeded it reads absent
