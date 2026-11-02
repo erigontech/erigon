@@ -373,3 +373,47 @@ func TestIndexJoinStopsScanningOnCancel(t *testing.T) {
 	_, err := s.IndexJoin(ctx, req)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+// reusedBufKV yields n pairs from one reused buffer, like an MDBX cursor, then fails with err if set.
+type reusedBufKV struct {
+	buf    []byte
+	n      int
+	err    error
+	closed bool
+}
+
+func (it *reusedBufKV) HasNext() bool { return it.n > 0 || it.err != nil }
+func (it *reusedBufKV) Close()        { it.closed = true }
+func (it *reusedBufKV) Next() ([]byte, []byte, error) {
+	if it.n == 0 {
+		return nil, nil, it.err
+	}
+	it.n--
+	it.buf[0] = byte(it.n)
+	return it.buf, it.buf, nil
+}
+
+type rangeTx struct {
+	kv.TemporalTx
+	it *reusedBufKV
+}
+
+func (tx *rangeTx) Range(string, []byte, []byte, order.By, int) (stream.KV, error) { return tx.it, nil }
+
+func TestRangeCopiesPairsAndClosesIterator(t *testing.T) {
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	it := &reusedBufKV{buf: make([]byte, 1), n: 3}
+	s.txs[1] = &threadSafeTx{TemporalTx: &rangeTx{it: it}}
+	reply, err := s.Range(t.Context(), &remoteproto.RangeReq{TxId: 1, Limit: -1})
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{2}, {1}, {0}}, reply.Keys)
+	require.Equal(t, [][]byte{{2}, {1}, {0}}, reply.Values)
+	require.True(t, it.closed)
+
+	errNext := errors.New("next failed")
+	it = &reusedBufKV{buf: make([]byte, 1), n: 1, err: errNext}
+	s.txs[1] = &threadSafeTx{TemporalTx: &rangeTx{it: it}}
+	_, err = s.Range(t.Context(), &remoteproto.RangeReq{TxId: 1, Limit: -1})
+	require.ErrorIs(t, err, errNext)
+	require.True(t, it.closed)
+}
