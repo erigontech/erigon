@@ -64,16 +64,10 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		return nil, err
 	}
 
-	archive := d.IsArchivedMode()
-	var custody map[cltypes.CustodyIndex]bool
-	if !archive {
-		if custody, err = d.state.GetMyCustodyColumns(); err != nil {
-			return nil, err
-		}
-	}
+	store := ColumnsToStore(d)
 	stored := make([]*cltypes.DataColumnSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
-		if !archive && len(custody) > 0 && !custody[sidecar.Index] {
+		if !store(sidecar.Index) {
 			continue
 		}
 		if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
@@ -84,10 +78,10 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 	if err := d.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
 		log.Warn("[peerdas] failed to schedule blob recovery after EL import", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
 	}
-	if d.caplinConfig.SubscribeAllTopics || archive {
+	if d.caplinConfig.SubscribeAllTopics || d.IsArchivedMode() {
 		return sidecars, nil
 	}
-	if len(custody) == 0 {
+	if custody, err := d.state.GetMyCustodyColumns(); err != nil || len(custody) == 0 {
 		return nil, nil
 	}
 	return stored, nil

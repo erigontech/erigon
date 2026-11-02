@@ -148,6 +148,23 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	}
 }
 
+// Without a custody set the node subscribes to no column subnet: it keeps every column and publishes none.
+func TestImportColumnsFromBlobsStoresAllColumnsOnCustodyLookupError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
+	require.Empty(t, toPublish)
+}
+
 // An archive node subscribes to every column subnet whatever its custody set.
 func TestImportColumnsFromBlobsPublishesAllColumnsInArchiveModeOnCustodyLookupError(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
@@ -164,24 +181,6 @@ func TestImportColumnsFromBlobsPublishesAllColumnsInArchiveModeOnCustodyLookupEr
 	require.NoError(t, err)
 
 	require.Len(t, toPublish, int(cfg.NumberOfColumns))
-}
-
-func TestImportColumnsFromBlobsStoresAndPublishesNothingOnCustodyLookupError(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	initTestBeaconConfig(&cfg)
-	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
-	_, err := d.state.GetMyCustodyColumns()
-	require.Error(t, err)
-	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
-
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
-	require.Error(t, err)
-	require.Empty(t, toPublish)
-
-	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
-	require.NoError(t, err)
-	require.Empty(t, saved)
 }
 
 func TestImportColumnsFromBlobsStoresAllColumnsWithoutLocalNode(t *testing.T) {
