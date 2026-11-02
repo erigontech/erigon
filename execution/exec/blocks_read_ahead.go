@@ -392,11 +392,11 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 }
 
 func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
-	address := accounts.InternAddress(account.Address)
+	address := account.Address
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
 		var err error
-		accountData, err = stateReader.ReadAccountData(address)
+		accountData, err = stateReader.ReadAccountByPlainAddr(address)
 		if err != nil {
 			return err
 		}
@@ -408,7 +408,7 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 		}
 		var err error
 		if slotIndex < storageChanges {
-			_, _, err = stateReader.ReadAccountStorage(address, account.StorageChanges[slotIndex].Slot)
+			_, _, err = stateReader.ReadAccountStorageValue(address, account.StorageChanges[slotIndex].Slot.Value())
 		} else {
 			_, _, err = stateReader.ReadAccountStorageValue(address, account.StorageReads[slotIndex-storageChanges])
 		}
@@ -419,17 +419,19 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 	if task.slotFrom != 0 || codeMode == balCodeWarmupNone {
 		return nil
 	}
-	warmCode := false
+	warmCode := accountData != nil && !accountData.CodeHash.IsEmpty()
 	if codeMode == balCodeWarmupAll {
-		warmCode = len(account.CodeChanges) > 0 || (accountData != nil && !accountData.CodeHash.IsEmpty())
-	} else if _, ok := txCodeDestinations[address]; ok {
-		warmCode = accountData != nil && !accountData.CodeHash.IsEmpty()
+		warmCode = warmCode || len(account.CodeChanges) > 0
 	}
-	if warmCode {
-		_, err := stateReader.ReadAccountCode(address)
-		return err
+	if !warmCode {
+		return nil
 	}
-	return nil
+	interned := accounts.InternAddress(address)
+	if _, ok := txCodeDestinations[interned]; !ok && codeMode != balCodeWarmupAll {
+		return nil
+	}
+	_, err := stateReader.ReadAccountCode(interned)
+	return err
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.
@@ -584,7 +586,7 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 						if err := workerCtx.Err(); err != nil {
 							return err
 						}
-						if _, _, err := stateReader.ReadAccountStorageValue(addr, slot); err != nil {
+						if _, _, err := stateReader.ReadAccountStorageValue(addr.Value(), slot); err != nil {
 							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}
 					}
@@ -739,7 +741,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						_, _, _ = stateReader.ReadAccountStorageValue(accounts.InternAddress(list.Address), slot)
+						_, _, _ = stateReader.ReadAccountStorageValue(list.Address, slot)
 					}
 				}
 			}

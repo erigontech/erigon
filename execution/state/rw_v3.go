@@ -918,13 +918,12 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	return r.ReadAccountStorageValue(address, key.Value())
+	return r.ReadAccountStorageValue(address.Value(), key.Value())
 }
 
-// ReadAccountStorageValue is ReadAccountStorage for a slot that is not interned.
-func (r *ReaderV3) ReadAccountStorageValue(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
-	addressValue := address.Value()
-	copy(r.composite[:length.Addr], addressValue[:])
+// ReadAccountStorageValue is ReadAccountStorage for an address and slot that are not interned.
+func (r *ReaderV3) ReadAccountStorageValue(address common.Address, keyValue common.Hash) (uint256.Int, bool, error) {
+	copy(r.composite[:length.Addr], address[:])
 	copy(r.composite[length.Addr:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
 	if err != nil {
@@ -948,7 +947,7 @@ func (r *ReaderV3) ReadAccountStorageValue(address accounts.Address, keyValue co
 // needs for %x formatting does not force res to the heap on every read.
 //
 //go:noinline
-func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.Hash, enc []byte, res uint256.Int) {
+func (r *ReaderV3) traceReadAccountStorage(address common.Address, key common.Hash, enc []byte, res uint256.Int) {
 	if enc == nil {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 	} else {
