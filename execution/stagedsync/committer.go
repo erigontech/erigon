@@ -53,6 +53,8 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+var probeAheadAtTip = dbg.EnvBool("PROBE_AHEAD_AT_TIP", false)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -533,7 +535,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
 		return
 	}
-	if cc.ownsChangeset(n) {
+	if cc.ownsChangeset(n) && !probeAheadAtTip {
 		return
 	}
 	if !cc.computeAheadGateOpen(n) {
