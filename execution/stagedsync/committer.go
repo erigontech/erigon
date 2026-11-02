@@ -68,6 +68,7 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
 	probeApply time.Duration
+	probeSeen  map[uint64]bool
 	probeTxs   int
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
@@ -365,6 +366,13 @@ func (cc *commitmentCalculator) ownsChangeset(n uint64) bool {
 func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
 	switch r := msg.(type) {
 	case *txResult:
+		if probeAheadAtTip && !cc.probeSeen[r.blockNum] {
+			if cc.probeSeen == nil {
+				cc.probeSeen = map[uint64]bool{}
+			}
+			cc.probeSeen[r.blockNum] = true
+			cc.maybeComputeAhead(ctx, r.blockNum)
+		}
 		// Pin asOfReader at this tx's txNum before ApplyWrites so a first-touch
 		// lazy-load reads the canonical pre-tx state via GetAsOf(r.txNum).
 		// Otherwise the initial txNum=0 leaks into the first lazy-load and crashes
@@ -535,7 +543,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
 		return
 	}
-	if cc.ownsChangeset(n) && !probeAheadAtTip {
+	if cc.ownsChangeset(n) && !(probeAheadAtTip && cc.probeSeen[n]) {
 		return
 	}
 	if !cc.computeAheadGateOpen(n) {
