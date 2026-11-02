@@ -1369,7 +1369,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
 	if be.execStarted.IsZero() && be.versionMap.HasBAL {
-		base := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx)), be.blockNum)
+		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
+		if first := be.tasks[0]; first.IsHistoric() {
+			reader = state.NewHistoryReaderV3WithSharedDomains(pe.applyTx, pe.domainsRead(), first.Version().TxNum)
+		}
+		base := pe.prevBlockBase(reader, be.blockNum)
 		if err := be.versionMap.SeedEmptyRemovals(
 			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
 			pe.cfg.chainConfig.Aura != nil,

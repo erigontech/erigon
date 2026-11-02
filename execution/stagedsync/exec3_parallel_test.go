@@ -1942,3 +1942,30 @@ func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
 	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
 	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
 }
+
+func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a5"))
+	av := addr.Value()
+	atBlock := accounts.NewAccount()
+	atBlock.Balance = *uint256.NewInt(5)
+	latest := atBlock
+	latest.Nonce = 1
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		if err := putter.DomainPut(kv.AccountsDomain, av[:], accounts.SerialiseV3(&atBlock), 0, nil); err != nil {
+			return err
+		}
+		return putter.DomainPut(kv.AccountsDomain, av[:], accounts.SerialiseV3(&latest), 100, nil)
+	})
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	task := &exec.TxTask{Header: header, Config: config, TxNum: 1, HistoryExecution: true}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	lc, _, _, _ := pe.blockExecutors[1].versionMap.AccountLifecycleAt(addr, 1)
+	require.NotEqual(t, state.LifecycleLive, lc)
+}
