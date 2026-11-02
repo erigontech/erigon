@@ -289,6 +289,10 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 	if !inCustody {
+		// Storage sends the data_column_sidecar event for a stored column, so a column that is not stored gets it here.
+		msg.BlockRoot = blockRoot
+		msg.Slot = blockHeader.Slot
+		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
 		return nil
 	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {

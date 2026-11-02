@@ -65,6 +65,7 @@ type dataColumnSidecarTestSuite struct {
 	mockPeerDasStateReader   *das_state_mock.MockPeerDasStateReader
 	dataColumnSidecarService DataColumnSidecarService
 	beaconConfig             *clparams.BeaconChainConfig
+	emitters                 *beaconevents.EventEmitter
 	mockFuncs                *mockFuncs
 }
 
@@ -97,6 +98,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		MaxBlobsPerBlockElectra: 9,
 	}
 
+	t.emitters = beaconevents.NewEventEmitter()
 	t.dataColumnSidecarService = NewDataColumnSidecarService(
 		canceledPendingQueueContext(t.T()),
 		t.beaconConfig,
@@ -104,7 +106,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 		t.mockForkChoice,
 		t.mockSyncedData,
 		t.mockColumnSidecarStorage,
-		beaconevents.NewEventEmitter(),
+		t.emitters,
 		nil,
 	)
 	// createMockDataColumnSidecar proposes every block with validator 1.
@@ -534,11 +536,16 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	// Execute
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
 	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
 	t.NoError(err)
+	// Storage sends the event for a stored column, the service does not send another.
+	t.Empty(events)
 }
 
 // A sidecar for the same (slot, proposer, index) claimed while this one is validated, for example by
@@ -624,8 +631,9 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyLookupFails_R
 	t.ErrorIs(err, ErrIgnore)
 }
 
-// expectValidFuluSidecarOutsideCustody makes every gossip check pass for a node whose only custody column is 0.
-func (t *dataColumnSidecarTestSuite) expectValidFuluSidecarOutsideCustody(kzgProofsValid bool) {
+// expectFuluSidecarOutsideCustody makes every gossip check before the KZG check pass for a node whose only custody
+// column is 0, and the KZG check return kzgProofsValid.
+func (t *dataColumnSidecarTestSuite) expectFuluSidecarOutsideCustody(kzgProofsValid bool) {
 	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
 	stateReader := das_state_mock.NewMockPeerDasStateReader(t.gomockCtrl)
 	t.mockForkChoice.MockPeerDas = peerDas
@@ -650,7 +658,7 @@ func (t *dataColumnSidecarTestSuite) expectValidFuluSidecarOutsideCustody(kzgPro
 
 // A node subscribed to a column's subnet relays a valid sidecar for it even when it does not keep the column.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecarOutsideCustody_AcceptsWithoutStoring() {
-	t.expectValidFuluSidecarOutsideCustody(true)
+	t.expectFuluSidecarOutsideCustody(true)
 	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
@@ -661,13 +669,43 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecarOutsideC
 	t.True(seen)
 }
 
+// A sidecar outside custody passes gossip validation without being stored, so the data_column_sidecar event, which
+// storage sends for stored columns, is sent by the service.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecarOutsideCustody_EmitsEvent() {
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	t.expectFuluSidecarOutsideCustody(true)
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
+
+	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
+
+	t.Require().Len(events, 1)
+	event := <-events
+	t.Equal(beaconevents.OpDataColumnSidecar, event.Event)
+	data, ok := event.Data.(*beaconevents.DataColumnSidecarData)
+	t.Require().True(ok)
+	blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	t.Require().NoError(err)
+	t.Equal(common.Hash(blockRoot), data.BlockRoot)
+	t.Equal(testSlot, data.Slot)
+	t.Equal(uint64(1), data.Index)
+}
+
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidSidecarOutsideCustody_ReturnsError() {
-	t.expectValidFuluSidecarOutsideCustody(false)
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	t.expectFuluSidecarOutsideCustody(false)
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
 
-	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion))
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
 
-	t.Error(err)
-	t.NotErrorIs(err, ErrIgnore)
+	t.ErrorContains(err, "invalid kzg proofs")
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: 1})
+	t.False(seen)
+	t.Empty(events)
 }
 
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenNotFromExpectedProposer_ReturnsError() {
