@@ -469,20 +469,33 @@ func TestSyncCommitteesPoolAddDoesNotBlockOtherMessages(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-// One pool addition at a time holds a head-state view: an addition queued for the pool inside a view would keep a
-// head-state write, and every reader behind it, waiting.
+// One pool addition at a time holds a head-state view: an addition waiting for the pool must not hold a view, or a
+// pending head-state publication, and every reader behind it, would wait for that addition too.
 func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
-	entered, release := make(chan struct{}, 2), make(chan struct{})
-	releasePoolAdds := sync.OnceFunc(func() { close(release) })
-	t.Cleanup(releasePoolAdds)
+	verified := make(chan struct{}, 2)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		verified <- struct{}{}
+		return true, nil
+	}
+	entered := make(chan struct{}, 2)
+	firstRelease, secondRelease := make(chan struct{}), make(chan struct{})
+	releaseFirst := sync.OnceFunc(func() { close(firstRelease) })
+	releaseSecond := sync.OnceFunc(func() { close(secondRelease) })
+	t.Cleanup(releaseFirst)
+	t.Cleanup(releaseSecond)
+	var adds atomic.Int32
 	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			first := adds.Add(1) == 1
 			entered <- struct{}{}
-			<-release
+			if first {
+				<-firstRelease
+			} else {
+				<-secondRelease
+			}
 			return nil
 		}).Times(2)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -498,17 +511,50 @@ func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
 		},
 		ImmediateVerification: true,
 	}
+	await := func(ch <-chan struct{}, done <-chan error, what string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case err := <-done:
+			t.Fatalf("%s: message processing ended early: %v", what, err)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: timed out", what)
+		}
+	}
 
 	done := make(chan error, 2)
 	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
-	<-entered
+	await(verified, done, "first message verified")
+	await(entered, done, "first addition in the pool")
 	go func() { done <- s.ProcessMessage(t.Context(), new(uint64), other) }()
+	await(verified, done, "second message verified")
+	// From its verdict to the pool lock the second addition does not block, so this lets it reach that lock.
+	time.Sleep(50 * time.Millisecond)
+
+	published := make(chan error, 1)
+	go func() { published <- synced.OnHeadState(headState) }()
+	// While the first addition holds its view, a new view blocks only once the publication waits for the lock.
+	require.Eventually(t, func() bool {
+		viewed := make(chan struct{})
+		go func() {
+			_ = synced.ViewHeadState(func(*state.CachingBeaconState) error { return nil })
+			close(viewed)
+		}()
+		select {
+		case <-viewed:
+			return false
+		case <-time.After(20 * time.Millisecond):
+			return true
+		}
+	}, 5*time.Second, time.Millisecond, "head-state publication did not start waiting")
+	releaseFirst()
 	select {
-	case <-entered:
-		t.Fatal("a second pool addition held a head-state view while the first was in the pool")
-	case <-time.After(200 * time.Millisecond):
+	case err := <-published:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("head-state publication waited for a pool addition that was still waiting for the pool")
 	}
-	releasePoolAdds()
+	releaseSecond()
 	require.NoError(t, <-done)
 	require.NoError(t, <-done)
 }
