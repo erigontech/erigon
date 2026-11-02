@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -608,6 +609,79 @@ func TestNoBump_ValuePathKeepsVersionUnlessSelfDestructed(t *testing.T) {
 		require.Equal(t, Incarnation(1), balCellInc(vm, addr),
 			"a self-destruct this tx disqualifies the no-bump, so the balance cell re-versions")
 	})
+}
+
+// CreateAccount writes a SelfDestruct=false marker. For a fresh address that marker
+// is not a removal, so an equal-value re-exec keeps the balance version. After a
+// destruct in an earlier tx it is a reincarnation, so the balance re-versions.
+func TestNoBump_CreateAccountMarker(t *testing.T) {
+	t.Parallel()
+	createWrites := func(vm *VersionMap, addr accounts.Address, inc Incarnation) *WriteSet {
+		ibs := NewWithVersionMap(newAccountStateReader(), vm)
+		ibs.SetTxContext(1, 5)
+		ibs.SetVersion(inc)
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
+		writes, err := ibs.FinalizedWrites(&chain.Rules{})
+		require.NoError(t, err)
+		sd, ok := writes.selfDestruct[addr]
+		require.True(t, ok && !sd.Val, "CreateAccount writes a SelfDestruct=false marker")
+		return writes
+	}
+	balCellInc := func(vm *VersionMap, addr accounts.Address) Incarnation {
+		c, ok := vm.load(addr).Balance.Get(5)
+		require.True(t, ok)
+		return c.incarnation
+	}
+
+	t.Run("fresh address keeps the balance version", func(t *testing.T) {
+		t.Parallel()
+		addr := getAddress(82)
+		vm := NewVersionMap(nil)
+		vm.FlushVersionedWrites(createWrites(vm, addr, 0), false)
+		vm.FlushVersionedWrites(createWrites(vm, addr, 1), false)
+		require.Equal(t, Incarnation(0), balCellInc(vm, addr))
+	})
+
+	t.Run("revival after an earlier destruct re-versions the balance", func(t *testing.T) {
+		t.Parallel()
+		addr := getAddress(83)
+		vm := NewVersionMap(nil)
+		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 3}, true, true)
+		vm.FlushVersionedWrites(createWrites(vm, addr, 0), false)
+		vm.FlushVersionedWrites(createWrites(vm, addr, 1), false)
+		require.Equal(t, Incarnation(1), balCellInc(vm, addr))
+	})
+}
+
+// The finalize flush (complete) of an equal value must keep the incarnation that the
+// Estimate re-flush kept, or the readers bound to it re-execute at commit.
+func TestNoBump_CompleteFlushKeepsEqualValueVersion(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(84)
+	flush := func(vm *VersionMap, inc Incarnation, val uint64, complete bool) {
+		ws := &WriteSet{}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5, Incarnation: inc}}, Val: *uint256.NewInt(val)})
+		vm.FlushVersionedWrites(ws, complete)
+	}
+	cell := func(vm *VersionMap) *WriteCell[uint256.Int] {
+		c, ok := vm.load(addr).Balance.Get(5)
+		require.True(t, ok)
+		return c
+	}
+
+	vm := NewVersionMap(nil)
+	flush(vm, 0, 100, false)
+	flush(vm, 1, 100, false)
+	flush(vm, 1, 100, true)
+	require.Equal(t, Incarnation(0), cell(vm).incarnation, "an equal value at commit keeps the version")
+	require.Equal(t, FlagDone, cell(vm).flag)
+
+	vm = NewVersionMap(nil)
+	flush(vm, 0, 100, false)
+	flush(vm, 1, 100, false)
+	flush(vm, 1, 101, true)
+	require.Equal(t, Incarnation(1), cell(vm).incarnation, "a changed value at commit re-versions")
 }
 
 // TestOriginStorageIsWriteOnce pins the other half of the structural guarantee: the
@@ -1694,7 +1768,7 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 
 	// The entry is published, as a creator does, but the latch is not yet set.
-	m.s.LoadOrStore(addr, &AddressEntry{})
+	lazyMap(&m.s).LoadOrStore(addr, &AddressEntry{})
 	require.Nil(t, m.load(addr), "the latch is what load keys on")
 
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)

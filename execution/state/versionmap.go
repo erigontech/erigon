@@ -229,8 +229,8 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 }
 
 type VersionMap struct {
-	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
-	s sync.Map // accounts.Address -> *AddressEntry
+	// Account lookup is lock-free. Each entry's RWMutex guards only its own cells.
+	s atomic.Pointer[xsync.Map[accounts.Address, *AddressEntry]]
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
@@ -238,10 +238,10 @@ type VersionMap struct {
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
-	// write-once, so it lives in lock-free sync.Maps separate from the per-account e.mu-guarded cells
+	// write-once, so it lives in lock-free maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
-	originAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = committed-absent)
+	originAccounts atomic.Pointer[xsync.Map[accounts.Address, *accounts.Account]] // nil ptr = committed-absent
 	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
@@ -256,6 +256,18 @@ type VersionMap struct {
 	absentAccountHook func()
 }
 
+// lazyMap returns the map behind p, creating it on first use: a VersionMap is built per RPC call and most stay small.
+func lazyMap[K comparable, V any](p *atomic.Pointer[xsync.Map[K, V]]) *xsync.Map[K, V] {
+	if m := p.Load(); m != nil {
+		return m
+	}
+	m := xsync.NewMap[K, V]()
+	if !p.CompareAndSwap(nil, m) {
+		return p.Load()
+	}
+	return m
+}
+
 type originStorageKey struct {
 	addr accounts.Address
 	key  accounts.StorageKey
@@ -263,28 +275,21 @@ type originStorageKey struct {
 
 // StoreOriginAccount records the committed base account write-once (idempotent across txs).
 func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Account) {
-	vm.originAccounts.LoadOrStore(addr, acc)
+	lazyMap(&vm.originAccounts).LoadOrStore(addr, acc)
 }
 
 // LoadOriginAccount returns the committed base account and whether it was seeded.
 func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Account, bool) {
-	if v, ok := vm.originAccounts.Load(addr); ok {
-		acc, _ := v.(*accounts.Account)
-		return acc, true
+	m := vm.originAccounts.Load()
+	if m == nil {
+		return nil, false
 	}
-	return nil, false
+	return m.Load(addr)
 }
 
 // StoreOriginStorage records the committed base slot value write-once.
 func (vm *VersionMap) StoreOriginStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	m := vm.originStorage.Load()
-	if m == nil {
-		m = xsync.NewMap[originStorageKey, uint256.Int]()
-		if !vm.originStorage.CompareAndSwap(nil, m) {
-			m = vm.originStorage.Load()
-		}
-	}
-	m.LoadOrStore(originStorageKey{addr, key}, val)
+	lazyMap(&vm.originStorage).LoadOrStore(originStorageKey{addr, key}, val)
 }
 
 // LoadOriginStorage returns the committed base slot value and whether it was seeded.
@@ -352,10 +357,12 @@ func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 	if !vm.nonEmpty.Load() {
 		return nil
 	}
-	if e, ok := vm.s.Load(addr); ok {
-		return e.(*AddressEntry)
+	m := vm.s.Load()
+	if m == nil {
+		return nil
 	}
-	return nil
+	e, _ := m.Load(addr)
+	return e
 }
 
 // StorageKeys returns every storage slot key recorded for addr.
@@ -530,11 +537,12 @@ func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
 	if !vm.nonEmpty.Load() {
 		vm.nonEmpty.Store(true)
 	}
-	if e, ok := vm.s.Load(addr); ok {
-		return e.(*AddressEntry)
+	m := lazyMap(&vm.s)
+	if e, ok := m.Load(addr); ok {
+		return e
 	}
-	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
-	return e.(*AddressEntry)
+	e, _ := m.LoadOrStore(addr, &AddressEntry{})
+	return e
 }
 
 func flagFor(complete bool) statusFlag {
@@ -1117,21 +1125,11 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 	return true
 }
 
-// flushCell routes a value-path Estimate flush through the no-bump rule: a re-execution
-// that recomputed the same value must not re-version the cell — a fresh incarnation would
-// spuriously invalidate readers that bound to the prior one, cascading into wasted
-// re-execution. When the cell already holds an equal value at this txIndex, the account was
-// not self-destructed this tx, and this is an Estimate flush (Done commits always record),
-// keep the existing incarnation and only promote the flag. All other cases fall through to
-// putCell unchanged. Structural paths (SelfDestruct/CreateContract/Incarnation/Code/CodeSize)
-// never route here — for them an equal value does not imply an unchanged state. A self-destruct
-// this tx disqualifies the value no-bump too: a reincarnation (SELFDESTRUCT then CREATE2) can
-// leave a field coincidentally equal across the removal, and keeping the prior version would
-// hold a reader valid against the wrong incarnation. A fresh create or incarnation-set alone is
-// a deterministic re-execution, so its equal value keeps its version; identity-sensitive readers
-// re-validate via the always-bumped IncarnationPath.
-func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, getCell func() *WriteCell[T], eq func(a, b T) bool, complete, destructed bool) *btree.Map[int, *WriteCell[T]] {
-	if !complete && !destructed && cells != nil {
+// flushCell keeps the cell's incarnation when a re-execution flushes an equal value at
+// the same txIndex, so readers bound to it stay valid. A reincarnated account always
+// re-versions: across a removal an equal value does not mean an unchanged state.
+func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, version Version, flag statusFlag, value T, valStatus valueStatus, getCell func() *WriteCell[T], eq func(a, b T) bool, destructed bool) *btree.Map[int, *WriteCell[T]] {
+	if !destructed && cells != nil {
 		if ci, ok := cells.Get(version.TxIndex); ok && eq(ci.Value, value) {
 			if !(ci.flag == FlagDone && flag == FlagEstimate) { // never downgrade Done->Estimate
 				ci.flag = flag
@@ -1255,21 +1253,26 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
-		// A self-destruct on this account this tx disqualifies the no-bump skip for its value
-		// writes: across a reincarnation an equal value does not mean an unchanged state. A fresh
-		// create or incarnation-set alone is a deterministic re-execution and keeps the no-bump.
-		_, destructed := writes.selfDestruct[addr]
+		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
+		destructed := false
+		if sd, ok := writes.selfDestruct[addr]; ok {
+			destructed = sd.Val
+			if !destructed {
+				state, _, _, _ := accountLifecycleLocked(e, sd.Version.TxIndex, false)
+				destructed = state != LifecycleLive
+			}
+		}
 		if vw, ok := writes.address[addr]; ok {
-			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, complete, destructed)
+			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
 			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, complete, destructed)
+			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, destructed)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
-			e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, complete, destructed)
+			e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, destructed)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
 			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
@@ -1278,7 +1281,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
-			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, complete, destructed)
+			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, destructed)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
 			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
@@ -1313,7 +1316,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 					}
 					continue
 				}
-				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, destructed)
+				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
 			}
 		}
 		e.mu.Unlock()
@@ -2061,9 +2064,6 @@ type ReadResult struct {
 	// validated: the floor cell was Validated (pre-seal, revertible); the reader
 	// continues on it like Done but the dep is not yet final.
 	validated bool
-	// valStatus carries the floor cell's write transition so validation can treat a
-	// no-op (ValueUnchanged) write as not invalidating a reader without re-reading
-	// and comparing the live value.
 	valStatus valueStatus
 }
 
