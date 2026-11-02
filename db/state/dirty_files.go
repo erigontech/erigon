@@ -388,9 +388,10 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 		if out == nil {
 			panic("must not happen: " + filenameBase)
 		}
-		if _, ok := dirtyFiles.Delete(out); !ok { // already retired from another (older) view
+		if cur, ok := dirtyFiles.Get(out); !ok || cur != out { // retired from another (older) view, maybe replaced
 			continue
 		}
+		dirtyFiles.Delete(out)
 		out.canDelete.Store(canDelete)
 		detached = append(detached, out)
 		if filenameBase == traceFileLife && out.decompressor != nil {

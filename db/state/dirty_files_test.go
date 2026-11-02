@@ -272,4 +272,10 @@ func TestRetireSkipsAlreadyDetachedItems(t *testing.T) {
 	require.Equal(t, []*FilesItem{item}, retire(mvcc.RetireReasonWasDeletedFromDisk, dirty, []*FilesItem{item}, "test", log.New()))
 	require.Empty(t, retire(mvcc.RetireReasonAged, dirty, []*FilesItem{item}, "test", log.New()))
 	require.False(t, item.canDelete.Load())
+
+	reopened := &FilesItem{startTxNum: 0, endTxNum: 16}
+	dirty.Set(reopened)
+	require.Empty(t, retire(mvcc.RetireReasonAged, dirty, []*FilesItem{item}, "test", log.New()))
+	_, ok := dirty.Get(reopened)
+	require.True(t, ok, "a stale item must not detach the reopened file of the same range")
 }
