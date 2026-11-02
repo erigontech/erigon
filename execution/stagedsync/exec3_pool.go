@@ -173,7 +173,7 @@ func (pt *poolTask) waitThen(t, next int) bool {
 	return !pt.be.requeueAt(pt.tv.index, t, pt)
 }
 
-const poolNamedReruns = 3
+var poolNamedReruns = dbg.EnvInt("POOL_NAMED_RERUNS", 3)
 
 func (pt *poolTask) rerunAfter(named int) bool {
 	t := pt.tv.index - 1
