@@ -521,9 +521,12 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		if !affected {
 			continue
 		}
-		// Keep the reservation and nonce index, but prevent selection or promotion
-		// until validation against the new state completes.
+		// Keep the reservation and nonce index while validation is pending. Legacy-nonce
+		// successors must also stop being selectable until their predecessor is usable.
 		p.removeFromSubPool(mt, "frame validation pending")
+		if !keyedNonce {
+			p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+		}
 		parked = append(parked, mt)
 	}
 	return parked
@@ -560,6 +563,10 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 			mt.TxnSlot.frameValidation = validation
 			p.reserveFrame(validation)
 			p.queued.Add(mt, "frame revalidated", p.logger)
+			frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+			if frame.UsesLegacyNonce() {
+				p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+			}
 		} else {
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 		}

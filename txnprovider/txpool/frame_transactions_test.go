@@ -419,7 +419,7 @@ func TestFramePoolDiscardRefreshesSenderNonceChain(t *testing.T) {
 			case "expired":
 				change.ChangeBatch[0].BlockTime = 101
 			case "parked pool overflow":
-				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 2, 0, 0
+				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 0, 1
 				backend.err = context.DeadlineExceeded
 			}
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
@@ -436,14 +436,10 @@ func TestFramePoolDiscardRefreshesSenderNonceChain(t *testing.T) {
 				wantSelected = 1
 			}
 			require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
-			if action == "parked pool overflow" {
-				require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]), "the queued pool has zero capacity")
-			} else {
-				mt := pool.byHash[string(ordinary.IDHash[:])]
-				require.NotNil(t, mt)
-				require.Equal(t, QueuedSubPool, mt.currentSubPool, "nonce 1 cannot execute without nonce 0")
-				require.Zero(t, mt.subPool&NoNonceGaps)
-			}
+			mt := pool.byHash[string(ordinary.IDHash[:])]
+			require.NotNil(t, mt)
+			require.Equal(t, QueuedSubPool, mt.currentSubPool, "nonce 1 cannot execute without nonce 0")
+			require.Zero(t, mt.subPool&NoNonceGaps)
 			var selected TxnsRlp
 			_, count, err := pool.best(ctx, 10, &selected, 1, nil,
 				mdgas.FullMdGas{MdGas: mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}}, nil, 1_000_000)
@@ -1231,10 +1227,66 @@ func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
 	}))
 }
 
+func TestFramePoolRevalidationQueuesNonceSuccessor(t *testing.T) {
+	for _, funding := range []string{"sender", "sponsor"} {
+		t.Run(funding, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			frameTx := &types.FrameTransaction{
+				ChainID: *uint256.NewInt(1), NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
+				Fees:   types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2)},
+			}
+			if funding == "sponsor" {
+				backend.payer = common.Address{2}
+				frameTx.Frames[0].Flags = types.FrameApproveExecution
+				frameTx.Frames = append(frameTx.Frames, types.Frame{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &backend.payer, Limits: mdgas.MdGas{Execution: 100}})
+			}
+			frame := &TxnSlot{Txn: frameTx}
+			ordinary := newTestTxnSlot(1, 0, 1, 2, 21_000)
+			var txns TxnSlots
+			for _, txn := range []*TxnSlot{frame, ordinary} {
+				var encoded bytes.Buffer
+				require.NoError(t, txn.Txn.MarshalBinary(&encoded))
+				txn.IDHash, txn.Rlp, txn.Size = txn.Txn.Hash(), encoded.Bytes(), uint32(encoded.Len())
+				txns.Append(txn, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Equal(t, 2, pool.pending.Len())
+
+			checkParked := func() {
+				require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+				var selected TxnsRlp
+				_, err := pool.PeekBest(ctx, 10, &selected, 1)
+				require.NoError(t, err)
+				require.Empty(t, selected.Txns, "a parked frame cannot supply its successor's account nonce")
+				require.Equal(t, QueuedSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+			}
+			backend.onValidate = checkParked
+			backend.err = context.DeadlineExceeded
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, backend.payer)
+			change.ChangeBatch[0].BlockHeight = 1
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			checkParked()
+
+			backend.err = nil
+			change = newBlockChangeForAccounts(common.Hash{2}, 0)
+			change.ChangeBatch[0].BlockHeight = 2
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Len(t, backend.calls, 3)
+			for _, txn := range txns.Txns {
+				require.Equal(t, PendingSubPool, pool.byHash[string(txn.IDHash[:])].currentSubPool)
+			}
+		})
+	}
+}
+
 func TestFramePoolRevalidationUnavailableRetriesOnNextBlock(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
-	frame := framePoolSlot(t, common.Address{2}, 1, 2, uint256.Int{1})
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 	ordinary := newTestTxnSlot(1, 0, 1, 2, 21_000)
 	ordinary.IDHash[0] = 3
 	var txns TxnSlots

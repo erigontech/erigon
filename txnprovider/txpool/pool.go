@@ -2290,9 +2290,12 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
 	sender := p.senders.senderID2Addr[senderID]
 	delete(p.frameAccountsToRefresh, sender)
-	// An unwound predecessor is absent during simulation. Keep its account-nonce
-	// chain queued and defer gap eviction until restoration finishes.
-	restoring := p.frameRestorations[sender] > 0
+	// A legacy frame awaiting restoration or revalidation cannot advance the account
+	// nonce. Keep its chain queued and defer gap eviction until it is usable or removed.
+	nonceChainBlocked := p.frameRestorations[sender] > 0
+	if pooledFrame := p.all.senderIDFrameTxn[senderID]; pooledFrame != nil && !pooledFrame.keyedNonce && pooledFrame.currentSubPool == 0 {
+		nonceChainBlocked = true
+	}
 	reserved := p.frameReservations[sender]
 	if senderBalance.Gt(&reserved.cost) {
 		senderBalance.Sub(&senderBalance, &reserved.cost)
@@ -2330,13 +2333,13 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		case senderHasCode && senderTxnKept:
 			deleteAndContinueReasonLog = "delegated sender transaction limit"
 			discardReason = txpoolcfg.DelegatedTxnLimit
-		case !restoring && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
+		case !nonceChainBlocked && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
-		case !restoring && p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
+		case !nonceChainBlocked && p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
 			deleteAndContinueReasonLog = "nonce gap too large"
 			discardReason = txpoolcfg.NonceTooDistant
-		case !restoring && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
+		case !nonceChainBlocked && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
 		if deleteAndContinueReasonLog != "" {
@@ -2374,7 +2377,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		// through this transaction's nonce to be present.
 		mt.subPool &^= NoNonceGaps
 		if noGapsNonce == mt.TxnSlot.Nonce {
-			if !restoring {
+			if !nonceChainBlocked {
 				mt.subPool |= NoNonceGaps
 			}
 			noGapsNonce++
