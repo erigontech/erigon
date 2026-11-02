@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	commonssz "github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func allForksConfig() *chain.Config {
@@ -412,17 +414,18 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 	requests := []hexutil.Bytes{{0x00, 0xaa}, {0x01, 0xbb}}
 
 	for _, tc := range []struct {
-		version      clparams.StateVersion
-		wantSOB      bool
-		wantBundle   bool
-		wantRequests bool
+		version           clparams.StateVersion
+		wantSOB           bool
+		wantBundle        bool
+		wantRequests      bool
+		wantPayloadOffset uint32
 	}{
-		{clparams.BellatrixVersion, false, false, false},
-		{clparams.CapellaVersion, false, false, false},
-		{clparams.DenebVersion, true, true, false},
-		{clparams.ElectraVersion, true, true, true},
-		{clparams.FuluVersion, true, true, true},
-		{clparams.GloasVersion, true, true, true},
+		{clparams.BellatrixVersion, false, false, false, 36},
+		{clparams.CapellaVersion, false, false, false, 36},
+		{clparams.DenebVersion, true, true, false, 41},
+		{clparams.ElectraVersion, true, true, true, 45},
+		{clparams.FuluVersion, true, true, true, 45},
+		{clparams.GloasVersion, true, true, true, 45},
 	} {
 		t.Run(tc.version.String(), func(t *testing.T) {
 			payload := engine_types.NewExecutionPayloadSSZ(tc.version)
@@ -445,6 +448,10 @@ func TestSSZRESTBuiltPayloadRoundTrip(t *testing.T) {
 			}
 			enc, err := encodeBuiltPayload(resp, tc.version)
 			require.NoError(t, err)
+			require.Equal(t, tc.wantPayloadOffset, binary.LittleEndian.Uint32(enc[:4]))
+			if tc.wantSOB {
+				require.Equal(t, byte(1), enc[tc.wantPayloadOffset-1], "should_override_builder must end the fixed section")
+			}
 			out, err := decodeBuiltPayload(enc, tc.version)
 			require.NoError(t, err)
 			require.Equal(t, blockValue, (*uint256.Int)(out.BlockValue))
@@ -1016,13 +1023,18 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 		{"method mismatch on capabilities", http.MethodPost, "/engine/v1/capabilities", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
 		{"wrong content type", http.MethodPost, "/engine/v1/payloads", "cancun", "application/json", http.StatusUnsupportedMediaType, problemUnsupportedMediaType},
 		{"bad ssz body", http.MethodPost, "/engine/v1/payloads", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
+		{"bad forkchoice body", http.MethodPost, "/engine/v1/forkchoice", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 		{"bad payload id", http.MethodGet, "/engine/v1/payloads/not-an-id", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
 		{"bodies range missing params", http.MethodGet, "/engine/v1/bodies", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
 		{"bodies range zero count", http.MethodGet, "/engine/v1/bodies?from=1&count=0", "cancun", "", http.StatusUnprocessableEntity, problemInvalidBody},
 		{"bodies range too large", http.MethodGet, "/engine/v1/bodies?from=1&count=33", "cancun", "", http.StatusRequestEntityTooLarge, problemRequestTooLarge},
 		{"bodies hash too many", http.MethodPost, "/engine/v1/bodies/hash", "cancun", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"bad bodies hash body", http.MethodPost, "/engine/v1/bodies/hash", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 		{"blobs unknown revision", http.MethodPost, "/engine/v1/blobs/v9", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
 		{"blobs too many hashes", http.MethodPost, "/engine/v1/blobs/v1", "", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
+		{"bad blobs v1 body", http.MethodPost, "/engine/v1/blobs/v1", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
+		{"bad blobs v2 body", http.MethodPost, "/engine/v1/blobs/v2", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
+		{"bad blobs v3 body", http.MethodPost, "/engine/v1/blobs/v3", "", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var body []byte
@@ -1186,6 +1198,59 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 	}
 }
 
+func TestSSZRESTForkchoiceStartsPayloadBuild(t *testing.T) {
+	const payloadID = uint64(0x0102030405060708)
+	cfg := allForksConfig()
+	cfg.TerminalTotalDifficulty = uint256.NewInt(0)
+	state := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x01},
+		SafeBlockHash:      common.Hash{0x02},
+		FinalizedBlockHash: common.Hash{0x03},
+	}
+	attrs := goldenSampleAttrs(clparams.GloasVersion)
+	attrs.Timestamp = 500
+	module := &stubExecutionModule{
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			return execmodule.ForkChoiceState{
+				HeadHash: state.HeadHash, SafeHash: state.SafeBlockHash, FinalizedHash: state.FinalizedBlockHash,
+			}, nil
+		},
+		getHeaderFunc: func(_ context.Context, hash *common.Hash, _ *uint64) (*types.Header, error) {
+			require.Equal(t, &state.HeadHash, hash)
+			return &types.Header{Time: 499}, nil
+		},
+		assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			require.Equal(t, &builder.Parameters{
+				ParentHash:            state.HeadHash,
+				Timestamp:             uint64(attrs.Timestamp),
+				PrevRandao:            attrs.PrevRandao,
+				SuggestedFeeRecipient: attrs.SuggestedFeeRecipient,
+				Withdrawals:           attrs.Withdrawals,
+				ParentBeaconBlockRoot: attrs.ParentBeaconBlockRoot,
+				SlotNumber:            (*uint64)(attrs.SlotNumber),
+				TargetGasLimit:        (*uint64)(attrs.TargetGasLimit),
+			}, params)
+			return execmodule.AssembleBlockResult{PayloadID: payloadID}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, module)
+	body, err := encodeForkchoiceUpdate(clparams.GloasVersion, state, attrs, nil)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "amsterdam", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	response, err := decodeForkchoiceResponse(rec.Body.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, response.PayloadStatus.Status)
+	require.Equal(t, &state.HeadHash, response.PayloadStatus.LatestValidHash)
+	require.Nil(t, response.PayloadStatus.ValidationError)
+	require.NotNil(t, response.PayloadId)
+	require.Equal(t, hexutil.Bytes{1, 2, 3, 4, 5, 6, 7, 8}, *response.PayloadId)
+}
+
 // A forkchoice with payload attributes whose timestamp belongs to a different
 // fork than the Eth-Execution-Version header must be rejected with 400 unsupported-fork.
 func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
@@ -1204,6 +1269,64 @@ func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
 	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "cancun", body))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+}
+
+func TestSSZRESTBlobsV2V3Availability(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 7)
+	getter := blobGetterMap{hash: bundle}
+	for _, revision := range []string{"v2", "v3"} {
+		t.Run(revision, func(t *testing.T) {
+			for _, tc := range []struct {
+				name   string
+				getter txpool.BlobGetter
+				hashes []common.Hash
+				v2Code int
+				v3Code int
+			}{
+				{"available", getter, []common.Hash{hash}, http.StatusOK, http.StatusOK},
+				{"one missing", getter, []common.Hash{hash, {}, hash}, http.StatusNoContent, http.StatusOK},
+				{"empty request", getter, nil, http.StatusOK, http.StatusOK},
+				{"disabled pool", nil, []common.Hash{hash}, http.StatusNoContent, http.StatusNoContent},
+				{"unavailable pool", blobGetterFunc(func([]common.Hash) []txpool.PoolBlobBundle { return nil }), []common.Hash{hash}, http.StatusNoContent, http.StatusNoContent},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					srv := newTestEngineServer(allForksConfig(), true)
+					srv.blobGetter = tc.getter
+					body, err := encodeHashListRequest(tc.hashes, sszMaxGetBlobHashes)
+					require.NoError(t, err)
+					rec := httptest.NewRecorder()
+					srv.SSZRESTHandler().ServeHTTP(rec,
+						newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/blobs/"+revision, "", body))
+
+					wantCode := tc.v2Code
+					if revision == "v3" {
+						wantCode = tc.v3Code
+					}
+					require.Equal(t, wantCode, rec.Code)
+					if wantCode == http.StatusNoContent {
+						require.Empty(t, rec.Body.Bytes())
+						return
+					}
+					require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+					blobs, err := decodeBlobsV2Response(rec.Body.Bytes())
+					require.NoError(t, err)
+					require.Len(t, blobs, len(tc.hashes))
+					for i, blob := range blobs {
+						if tc.hashes[i] != hash {
+							require.Nil(t, blob)
+							continue
+						}
+						require.NotNil(t, blob)
+						require.Equal(t, hexutil.Bytes(bundle.Blob), blob.Blob)
+						require.Len(t, blob.CellProofs, len(bundle.Proofs))
+						for j, proof := range bundle.Proofs {
+							require.Equal(t, hexutil.Bytes(proof[:]), blob.CellProofs[j])
+						}
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestSSZRESTBlobsPoolDisabled(t *testing.T) {
