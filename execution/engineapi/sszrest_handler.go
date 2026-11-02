@@ -162,6 +162,11 @@ func writeEngineProblem(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
+	// The Caplin guard uses an unsupported-fork RPC code for a server configuration error.
+	if errors.Is(err, errCaplinEnabled) {
+		writeProblem(w, http.StatusInternalServerError, problemInternal, err.Error())
+		return
+	}
 	if rpcErr, ok := errors.AsType[rpc.Error](err); ok {
 		switch rpcErr.ErrorCode() {
 		case engine_helpers.UnknownPayloadErr.Code:

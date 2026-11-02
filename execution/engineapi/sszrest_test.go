@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -1353,6 +1354,8 @@ func TestSSZRESTErrorMapping(t *testing.T) {
 		{&rpc.UnsupportedForkError{Message: "no"}, http.StatusBadRequest, problemUnsupportedFork},
 		{&rpc.InvalidParamsError{Message: "no"}, http.StatusUnprocessableEntity, problemInvalidBody},
 		{errors.New("boom"), http.StatusInternalServerError, problemInternal},
+		{errCaplinEnabled, http.StatusInternalServerError, problemInternal},
+		{fmt.Errorf("engine: %w", errCaplinEnabled), http.StatusInternalServerError, problemInternal},
 	} {
 		rec := httptest.NewRecorder()
 		writeEngineProblem(rec, tc.err)
