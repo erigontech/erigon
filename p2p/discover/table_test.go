@@ -388,6 +388,7 @@ func checkBucketContent(t *testing.T, tab *Table, nodes []*enode.Node) {
 
 	b := tab.bucket(nodes[0].ID())
 	if reflect.DeepEqual(unwrapNodes(b.entries), nodes) {
+		checkIPLimitInvariant(t, tab)
 		return
 	}
 	t.Log("wrong bucket content. have nodes:")
@@ -399,9 +400,6 @@ func checkBucketContent(t *testing.T, tab *Table, nodes []*enode.Node) {
 		t.Logf("  %v (seq=%v, ip=%v)", n.ID(), n.Seq(), n.IPAddr())
 	}
 	t.FailNow()
-
-	// Also check IP limits.
-	checkIPLimitInvariant(t, tab)
 }
 
 // This test checks that ENR updates happen during revalidation. If a node in the table
