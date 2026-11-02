@@ -92,10 +92,11 @@ type forwardSyncTipFixture struct {
 	currentSlot uint64
 	sentinel    *forwardSyncTipSentinel
 	digest      common.Bytes4
+	clock       *steppedClock
 }
 
 // newForwardSyncTipFixture returns a node whose peers serve a FULL Gloas tip and no block in the slotsAfterTip slots
-// after it.
+// after it. Its clock stays at the current slot until a test moves it.
 func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoice bool) *forwardSyncTipFixture {
 	t.Helper()
 
@@ -124,7 +125,9 @@ func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoic
 		anchorEnvelopeResponse: f.encode(t, &anchorEnvelope),
 		envelopeResponse:       f.encode(t, envelope),
 	}
-	cfg.ethClock = clock
+	f.clock = &steppedClock{EthereumClock: clock, slotsPerEpoch: cfg.beaconCfg.SlotsPerEpoch}
+	f.clock.slot.Store(currentSlot)
+	cfg.ethClock = f.clock
 	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), f.sentinel, cfg.beaconCfg, clock)
 	cfg.syncedData = synced_data.NewSyncedDataManager(cfg.beaconCfg, true)
 	cfg.hasDownloaded = true
@@ -213,11 +216,9 @@ func TestForwardSyncTipMarkerExpires(t *testing.T) {
 	defer cancel()
 	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
 
-	clock := &steppedClock{EthereumClock: f.cfg.ethClock, slotsPerEpoch: f.cfg.beaconCfg.SlotsPerEpoch}
-	f.cfg.ethClock = clock
 	expirySlot := f.currentSlot + f.cfg.beaconCfg.SlotsPerEpoch
 	argsAt := func(slot uint64) Args {
-		clock.slot.Store(slot)
+		f.clock.slot.Store(slot)
 		return ConsensusClStages().ArgsFunc(ctx, f.cfg)
 	}
 	require.True(t, argsAt(expirySlot-1).atForwardSyncTip)
@@ -267,11 +268,8 @@ func (c *flushHookCollector) Flush(ctx context.Context) error {
 func TestForwardSyncDatesTipMarkerAfterFlush(t *testing.T) {
 	f := newForwardSyncTipFixture(t, 2, true)
 	f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
-	clock := &steppedClock{EthereumClock: f.cfg.ethClock, slotsPerEpoch: f.cfg.beaconCfg.SlotsPerEpoch}
-	clock.slot.Store(f.currentSlot)
-	f.cfg.ethClock = clock
 	afterFlush := f.currentSlot + f.cfg.beaconCfg.SlotsPerEpoch
-	f.cfg.blockCollector = &flushHookCollector{onFlush: func() { clock.slot.Store(afterFlush) }}
+	f.cfg.blockCollector = &flushHookCollector{onFlush: func() { f.clock.slot.Store(afterFlush) }}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
