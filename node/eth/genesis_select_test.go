@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -66,10 +68,19 @@ func TestOverrideGenesisRestart(t *testing.T) {
 
 	t.Run("different genesis", func(t *testing.T) {
 		for _, keepStoredChainConfig := range []bool{false, true} {
-			_, _, err := startGenesis(t, db, &ethconfig.Config{Genesis: b, GenesisFromFile: true, KeepStoredChainConfig: keepStoredChainConfig})
+			tracerInitialized := false
+			tracer := &tracers.Tracer{Hooks: &tracing.Hooks{
+				OnBlockchainInit: func(*chain.Config) { tracerInitialized = true },
+			}}
+			_, _, err := setupGenesis(db, &ethconfig.Config{
+				Genesis:               b,
+				GenesisFromFile:       true,
+				KeepStoredChainConfig: keepStoredChainConfig,
+			}, datadir.New(t.TempDir()), log.New(), tracer)
 			var mismatch *genesiswrite.GenesisMismatchError
 			require.ErrorAs(t, err, &mismatch)
 			require.Equal(t, first.Hash(), mismatch.Stored)
+			require.False(t, tracerInitialized, "rejected genesis must not initialize the tracer")
 		}
 	})
 
@@ -106,14 +117,19 @@ func TestOverrideGenesisKeepsStoredChainConfig(t *testing.T) {
 	changed := *genesis
 	changed.Config = genesis.Config.Copy()
 	changed.Config.OsakaTime = common.NewUint64(200)
-	cfg, block, err := startGenesis(t, db, &ethconfig.Config{
+	var tracedConfig *chain.Config
+	tracer := &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnBlockchainInit: func(cfg *chain.Config) { tracedConfig = cfg.Copy() },
+	}}
+	cfg, block, err := setupGenesis(db, &ethconfig.Config{
 		Genesis:               &changed,
 		GenesisFromFile:       true,
 		KeepStoredChainConfig: true,
-	})
+	}, datadir.New(t.TempDir()), log.New(), tracer)
 	require.NoError(t, err)
 	require.Equal(t, first.Hash(), block.Hash())
 	require.Equal(t, storedCfg, cfg)
+	require.Equal(t, cfg, tracedConfig, "tracer must receive the selected configuration")
 	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
 		persisted, err := rawdb.ReadChainConfig(tx, first.Hash())
 		require.NoError(t, err)
@@ -171,16 +187,26 @@ func TestOverrideGenesisRestartWithForkOverride(t *testing.T) {
 		Genesis:               genesis,
 		GenesisFromFile:       true,
 		OverrideAmsterdamTime: common.NewUint64(0),
+		AllowAA:               true,
 	}
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	var tracedConfig *chain.Config
+	tracer := &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnBlockchainInit: func(cfg *chain.Config) { tracedConfig = cfg.Copy() },
+	}}
 
-	_, first, err := startGenesis(t, db, config)
+	cfg, first, err := setupGenesis(db, config, datadir.New(t.TempDir()), log.New(), tracer)
 	require.NoError(t, err)
 	require.NotNil(t, first.Header().SlotNumber)
 	require.Nil(t, genesis.Config.AmsterdamTime)
+	require.Equal(t, cfg, tracedConfig, "tracer must receive the overridden configuration")
+	require.True(t, tracedConfig.AllowAA)
 
-	_, block, err := startGenesis(t, db, config)
+	tracedConfig = nil
+	cfg, block, err := setupGenesis(db, config, datadir.New(t.TempDir()), log.New(), tracer)
 	require.NoError(t, err)
 	require.Equal(t, first.Hash(), block.Hash())
 	require.Nil(t, genesis.Config.AmsterdamTime)
+	require.Equal(t, cfg, tracedConfig, "tracer must receive the overridden configuration on restart")
+	require.True(t, tracedConfig.AllowAA)
 }

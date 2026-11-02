@@ -378,7 +378,6 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
@@ -1153,10 +1152,6 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 			return err
 		}
 
-		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
-		}
-
 		chainConfig, genesisBlock, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		return err
 	}); err != nil {
@@ -1164,6 +1159,10 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 			return nil, nil, fmt.Errorf("incompatible chain config: %w", err)
 		}
 		return nil, nil, err
+	}
+	chainConfig.AllowAA = config.AllowAA
+	if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+		tracer.Hooks.OnBlockchainInit(chainConfig)
 	}
 	return chainConfig, genesisBlock, nil
 }
