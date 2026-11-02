@@ -19,6 +19,7 @@ package engineapitester
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -39,7 +40,10 @@ import (
 // is delivered through the engine API.
 type EngineTest struct {
 	testutil.BlockTest
-	payloads []EngineXTestNewPayload
+	// SyncingTimeout is how long a call may keep answering SYNCING before the
+	// fixture fails.
+	SyncingTimeout time.Duration
+	payloads       []EngineXTestNewPayload
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
@@ -82,7 +86,7 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 		ethconfig.Defaults.MaxReorgDepth,
 	)
 	if len(et.payloads) > 0 {
-		if err := forkchoiceUpdated(m.Ctx, srv, m.Genesis.Hash(), et.payloads[0].FcuVersion); err != nil {
+		if err := forkchoiceUpdated(m.Ctx, srv, m.Genesis.Hash(), et.payloads[0].FcuVersion, et.SyncingTimeout); err != nil {
 			return fmt.Errorf("forkchoice update to genesis: %w", err)
 		}
 	}
@@ -91,7 +95,7 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 		reject := func(hash *common.Hash, err string) {
 			et.Rejections = append(et.Rejections, testutil.Rejection{Index: i, Hash: hash, Error: err})
 		}
-		if err := sendPayload(m.Ctx, srv, chain, payload, reject); err != nil {
+		if err := sendPayload(m.Ctx, srv, chain, payload, et.SyncingTimeout, reject); err != nil {
 			return fmt.Errorf("payload %d: %w", i, err)
 		}
 	}
@@ -101,7 +105,7 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 
 // sendPayload calls engine_newPayloadV<n> and, for a valid payload,
 // engine_forkchoiceUpdatedV<n>.
-func sendPayload(ctx context.Context, srv *engineapi.EngineServer, chain chainreader.ChainReaderWriterEth1, p EngineXTestNewPayload, reject func(hash *common.Hash, err string)) error {
+func sendPayload(ctx context.Context, srv *engineapi.EngineServer, chain chainreader.ChainReaderWriterEth1, p EngineXTestNewPayload, timeout time.Duration, reject func(hash *common.Hash, err string)) error {
 	var (
 		payload           enginetypes.ExecutionPayload
 		blobHashes        []common.Hash
@@ -120,7 +124,7 @@ func sendPayload(ctx context.Context, srv *engineapi.EngineServer, chain chainre
 	}
 
 	parentUnknown := func() bool { return chain.GetHeaderByHash(ctx, payload.ParentHash) == nil }
-	status, err := retrySyncing(ctx, parentUnknown, func() (*enginetypes.PayloadStatus, error) {
+	status, err := retrySyncing(ctx, timeout, parentUnknown, func() (*enginetypes.PayloadStatus, error) {
 		switch p.NewPayloadVersion {
 		case "1":
 			return srv.NewPayloadV1(ctx, &payload)
@@ -136,6 +140,9 @@ func sendPayload(ctx context.Context, srv *engineapi.EngineServer, chain chainre
 			return nil, fmt.Errorf("unsupported newPayload version %q", p.NewPayloadVersion)
 		}
 	})
+	if errors.Is(err, errStillSyncing) {
+		return err
+	}
 	switch {
 	case err != nil:
 		reject(&payload.BlockHash, rpcErrorString(err))
@@ -155,12 +162,12 @@ func sendPayload(ctx context.Context, srv *engineapi.EngineServer, chain chainre
 	case expectInvalid:
 		return fmt.Errorf("payload is valid, expected %s%s", p.ValidationError, p.ErrorCode)
 	}
-	return forkchoiceUpdated(ctx, srv, payload.BlockHash, p.FcuVersion)
+	return forkchoiceUpdated(ctx, srv, payload.BlockHash, p.FcuVersion, timeout)
 }
 
-func forkchoiceUpdated(ctx context.Context, srv *engineapi.EngineServer, head common.Hash, version string) error {
+func forkchoiceUpdated(ctx context.Context, srv *engineapi.EngineServer, head common.Hash, version string, timeout time.Duration) error {
 	state := &enginetypes.ForkChoiceState{HeadHash: head}
-	status, err := retrySyncing(ctx, nil, func() (*enginetypes.PayloadStatus, error) {
+	status, err := retrySyncing(ctx, timeout, nil, func() (*enginetypes.PayloadStatus, error) {
 		var (
 			r   *enginetypes.ForkChoiceUpdatedResponse
 			err error
@@ -227,9 +234,13 @@ func statusError(call string, status *enginetypes.PayloadStatus) error {
 	return fmt.Errorf("%s status %s: %w", call, status.Status, status.ValidationError.Error())
 }
 
+var errStillSyncing = errors.New("still SYNCING")
+
 // retrySyncing repeats call while the server answers SYNCING because it is
-// still busy with the previous request, or until stuck reports true.
-func retrySyncing(ctx context.Context, stuck func() bool, call func() (*enginetypes.PayloadStatus, error)) (*enginetypes.PayloadStatus, error) {
+// still busy with the previous request, or until stuck reports true. A server
+// still answering SYNCING after timeout fails with errStillSyncing.
+func retrySyncing(ctx context.Context, timeout time.Duration, stuck func() bool, call func() (*enginetypes.PayloadStatus, error)) (*enginetypes.PayloadStatus, error) {
+	deadline := time.After(timeout)
 	for {
 		status, err := call()
 		if err != nil || status.Status != enginetypes.SyncingStatus {
@@ -241,6 +252,8 @@ func retrySyncing(ctx context.Context, stuck func() bool, call func() (*enginety
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-deadline:
+			return nil, fmt.Errorf("%w after %s", errStillSyncing, timeout)
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

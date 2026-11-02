@@ -24,6 +24,7 @@ import (
 	"context"
 	"math/big"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -160,6 +161,11 @@ var (
 	BALWithholdFlag = cli.BoolFlag{
 		Name:  "bal-withhold",
 		Usage: "Execute every block without its access list, as IGNORE_BAL does",
+	}
+	SyncingTimeoutFlag = cli.DurationFlag{
+		Name:  "syncing-timeout",
+		Value: time.Minute,
+		Usage: "Fail an engine test whose newPayload or forkchoiceUpdated still answers SYNCING after this long",
 	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",

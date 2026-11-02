@@ -17,12 +17,15 @@
 package engineapitester
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -46,4 +49,36 @@ func TestRPCErrorString(t *testing.T) {
 	} {
 		require.Equal(t, tc.want, rpcErrorString(tc.err))
 	}
+}
+
+// answers returns a call that answers SYNCING syncing times, then VALID. A
+// negative syncing answers SYNCING forever.
+func answers(syncing int) func() (*enginetypes.PayloadStatus, error) {
+	return func() (*enginetypes.PayloadStatus, error) {
+		if syncing != 0 {
+			syncing--
+			return &enginetypes.PayloadStatus{Status: enginetypes.SyncingStatus}, nil
+		}
+		return &enginetypes.PayloadStatus{Status: enginetypes.ValidStatus}, nil
+	}
+}
+
+func TestRetrySyncingWaitsForAnAnswer(t *testing.T) {
+	status, err := retrySyncing(context.Background(), time.Minute, nil, answers(3))
+	require.NoError(t, err)
+	require.Equal(t, enginetypes.ValidStatus, status.Status)
+}
+
+func TestRetrySyncingFailsAfterTimeout(t *testing.T) {
+	const timeout = 200 * time.Millisecond
+	start := time.Now()
+	_, err := retrySyncing(context.Background(), timeout, nil, answers(-1))
+	require.ErrorIs(t, err, errStillSyncing)
+	require.GreaterOrEqual(t, time.Since(start), timeout)
+}
+
+func TestRetrySyncingReturnsSyncingWhenStuck(t *testing.T) {
+	status, err := retrySyncing(context.Background(), time.Minute, func() bool { return true }, answers(-1))
+	require.NoError(t, err)
+	require.Equal(t, enginetypes.SyncingStatus, status.Status)
 }

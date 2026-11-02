@@ -41,6 +41,7 @@ var engineTestCommand = cli.Command{
 		&JSONOutputFlag,
 		&RunFlag,
 		&ExcludeFlag,
+		&SyncingTimeoutFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
 	},
@@ -59,6 +60,9 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 	workers := ctx.Uint64(WorkersFlag.Name)
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
+	if ctx.Duration(SyncingTimeoutFlag.Name) <= 0 {
+		return fmt.Errorf("--%s must be positive", SyncingTimeoutFlag.Name)
 	}
 	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
 	if err != nil {
@@ -110,6 +114,7 @@ func runEngineTest(ctx *cli.Command, fname string, filter testFilter, reportPath
 			test.ExecWorkers = 1
 		}
 		test.ExecutionPathReporter = reportPath
+		test.SyncingTimeout = ctx.Duration(SyncingTimeoutFlag.Name)
 		result := testResult{Name: name, Pass: true}
 		if err := test.RunCLI(); err != nil {
 			result.Pass = false
