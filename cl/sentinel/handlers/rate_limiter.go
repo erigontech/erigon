@@ -65,6 +65,12 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 	return false
 }
 
+func (tb *tokenBucket) refund(n int) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.tokens = min(tb.tokens+float64(n), tb.maxTokens)
+}
+
 func (tb *tokenBucket) refill(now time.Time) {
 	elapsed := now.Sub(tb.lastRefill).Seconds()
 	if elapsed > 0 {
@@ -267,6 +273,16 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 		return false
 	}
 	return true
+}
+
+func (rl *peerRateLimiter) refundTokens(peerID string, protocol string, n int) {
+	key := peerProtocolKey{peerID: peerID, protocol: protocol}
+	if _, punished := rl.punished.Load(key); punished || n <= 0 {
+		return
+	}
+	if bucket, ok := rl.buckets.Load(key); ok {
+		bucket.(*tokenBucket).refund(n)
+	}
 }
 
 // acquireConcurrency tries to increment the in-flight count for a peer.

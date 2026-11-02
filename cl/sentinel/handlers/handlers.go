@@ -231,6 +231,12 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 	}
 }
 
+// refundRateLimit returns the tokens charged by consumeRateLimit for items a
+// response did not serve, keeping at least the admission token charged.
+func (c *ConsensusHandlers) refundRateLimit(s network.Stream, cost, served int) {
+	c.rateLimiter.refundTokens(s.Conn().RemotePeer().String(), string(s.Protocol()), min(cost, cost+1-served))
+}
+
 // consumeRateLimit consumes additional rate-limit tokens for a batch request.
 // Batch handlers call this after decoding the request to charge for the actual
 // number of response items (beyond the 1 token already consumed by the wrapper).

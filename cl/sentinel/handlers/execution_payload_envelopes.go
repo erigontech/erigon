@@ -69,7 +69,8 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	if cost := int(min(req.Count, maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
+	cost := int(min(req.Count, maxPayloads)) - 1
+	if !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -232,7 +233,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		}
 	}
 
-	wroteResponse := false
+	served := 0
 	peerID := s.Conn().RemotePeer().String()
 	for _, candidate := range responseCandidates {
 		var envelope *cltypes.SignedExecutionPayloadEnvelope
@@ -249,8 +250,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 				envelope, err = c.tryRebuildEnvelope(requestCtx, peerID, prepared)
 			}
 		}
+		if errors.Is(err, errNoRebuildCredit) {
+			c.refundRateLimit(s, cost, served)
+		}
 		if err != nil || envelope == nil {
-			if wroteResponse {
+			if served > 0 {
 				break
 			}
 			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
@@ -271,7 +275,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		if err := ssz_snappy.EncodeAndWrite(s, envelope); err != nil {
 			return err
 		}
-		wroteResponse = true
+		served++
 	}
 
 	return nil
@@ -305,7 +309,8 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
 	}
 
-	if cost := min(req.Length(), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
+	cost := min(req.Length(), int(maxPayloads)) - 1
+	if !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -411,6 +416,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			continue
 		}
 		envelope, err := c.tryRebuildEnvelope(requestCtx, peerID, prepared)
+		if errors.Is(err, errNoRebuildCredit) {
+			c.refundRateLimit(s, cost, count)
+		}
 		if err != nil {
 			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
 			break

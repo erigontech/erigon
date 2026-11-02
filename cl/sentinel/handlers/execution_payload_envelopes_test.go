@@ -1501,3 +1501,67 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 	_, err = stream.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "should get EOF for pre-GLOAS request")
 }
+
+func TestExecutionPayloadEnvelopesByRangeRetryAfterRebuildLimit(t *testing.T) {
+	c, cfg, _, _, rebuilder, stream := newRangeHistoryHandler(t, 129, 128)
+	testRetryAfterRebuildLimit(t, c, cfg, rebuilder, string(stream.protocol), func(skip, count int) []byte {
+		retry := &rangeHandlerTestStream{
+			envelopeHandlerStream: &envelopeHandlerStream{conn: stream.conn, protocol: stream.protocol},
+			startSlot:             stream.startSlot + uint64(skip),
+			count:                 uint64(count),
+		}
+		return retry.run(t, c)
+	})
+}
+
+func TestExecutionPayloadEnvelopesByRootRetryAfterRebuildLimit(t *testing.T) {
+	ctx := t.Context()
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+	ethClock, cfg := getGloasEthClockAndConfig(t)
+	requestCount := int(cfg.MaxRequestPayloads)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, cfg, ethClock.GetCurrentSlot()-uint64(requestCount)-1, requestCount, -1)
+	require.NoError(t, tx.Commit())
+	rebuilder := &testEnvelopeRebuilder{envelopes: envelopes}
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+	testRetryAfterRebuildLimit(t, c, cfg, rebuilder, communication.ExecutionPayloadEnvelopesByRootProtocolV1, func(skip, count int) []byte {
+		requestRoots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+		for _, root := range roots[skip : skip+count] {
+			requestRoots.Append(root)
+		}
+		return newRootHandlerTestStream(requestRoots, peer.ID("history-peer")).run(t, c)
+	})
+}
+
+// testRetryAfterRebuildLimit fills the item quota with one full request that
+// the rebuild credit cuts short, and expects a retry for the unserved items to
+// be served once the rebuild credit has recovered.
+func testRetryAfterRebuildLimit(t *testing.T, c *ConsensusHandlers, cfg *clparams.BeaconChainConfig, rebuilder *testEnvelopeRebuilder, protocolName string, run func(skip, count int) []byte) {
+	t.Helper()
+	now := time.Now()
+	c.rateLimiter.now = func() time.Time { return now }
+	rebuilder.onRebuild = func() { now = now.Add(250 * time.Millisecond) }
+	peerID := peer.ID("history-peer").String()
+	request := func(skip, count int) []byte {
+		if !c.rateLimiter.allowRequest(peerID, protocolName, 1) {
+			return []byte{InvalidRequestPrefix}
+		}
+		return run(skip, count)
+	}
+
+	requestCount := int(cfg.MaxRequestPayloads)
+	require.Equal(t, []uint64{0, 1, 2, 3, 4}, readEnvelopeBuilderIndices(t, request(0, requestCount), cfg))
+
+	now = now.Add(time.Second)
+	data := request(5, requestCount-5)
+	_, punished := c.rateLimiter.punished.Load(peerProtocolKey{peerID: peerID, protocol: protocolName})
+	require.False(t, punished, "retry for the unserved envelopes punished the peer")
+	require.NotEmpty(t, data)
+	require.Equal(t, byte(SuccessfulResponsePrefix), data[0])
+	require.Equal(t, []uint64{5, 6, 7, 8}, readEnvelopeBuilderIndices(t, data, cfg))
+}
