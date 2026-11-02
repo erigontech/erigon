@@ -19,6 +19,7 @@ package existence
 import (
 	"bufio"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,6 +74,13 @@ func (b *Filter) ContainsHash(hashedKey uint64) bool {
 		return b.fuseReader.ContainsHash(hashedKey)
 	}
 	return b.filter.ContainsHash(hashedKey)
+}
+
+func (b *Filter) Contains(v hash.Hash64) bool {
+	if b.empty || b.filter == nil {
+		return true
+	}
+	return b.filter.Contains(v)
 }
 
 func (b *Filter) Build() error {
