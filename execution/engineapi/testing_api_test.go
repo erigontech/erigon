@@ -66,8 +66,7 @@ type stubExecutionModule struct {
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 
-	getPayloadBodiesByHashFunc  func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
-	getPayloadBodiesByRangeFunc func(ctx context.Context, start, count uint64) ([]*execmodule.PayloadBody, error)
+	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -159,10 +158,7 @@ func (s *stubExecutionModule) GetPayloadBodiesByHash(ctx context.Context, hashes
 	return nil, nil
 }
 
-func (s *stubExecutionModule) GetPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*execmodule.PayloadBody, error) {
-	if s.getPayloadBodiesByRangeFunc != nil {
-		return s.getPayloadBodiesByRangeFunc(ctx, start, count)
-	}
+func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	return nil, nil
 }
 

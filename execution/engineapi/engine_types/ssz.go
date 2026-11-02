@@ -523,25 +523,6 @@ func blobBytes(list *solid.ListSSZ[*cltypes.Blob]) []hexutil.Bytes {
 	return out
 }
 
-func (*BlobAndProofV1) Static() bool         { return true }
-func (*BlobAndProofV1) EncodingSizeSSZ() int { return sszBlobBytes + sszKZGBytes }
-func (b *BlobAndProofV1) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), newKZGProof(b.Proof))
-}
-
-func (b *BlobAndProofV1) DecodeSSZ(buf []byte, version int) error {
-	blob := &cltypes.Blob{}
-	proof := &cltypes.KZGProof{}
-	if err := ssz2.UnmarshalSSZ(buf, version, blob, proof); err != nil {
-		return err
-	}
-	b.Blob = bytes.Clone(blob[:])
-	b.Proof = bytes.Clone(proof[:])
-	return nil
-}
-func (b *BlobAndProofV1) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
-func (*BlobAndProofV1) Clone() clonable.Clonable     { return &BlobAndProofV1{} }
-
 func (*BlobAndProofV2) Static() bool { return false }
 func (b *BlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
 	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](sszCellsPerExtBlob, sszKZGBytes)

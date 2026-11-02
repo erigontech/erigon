@@ -743,11 +743,6 @@ func TestSSZRESTBodiesByRangeReorg(t *testing.T) {
 					canonical = cancun
 					return header, nil
 				},
-				getPayloadBodiesByRangeFunc: func(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
-					body := bodies[canonical.Hash()]
-					canonical = cancun
-					return []*execmodule.PayloadBody{body}, nil
-				},
 				getPayloadBodiesByHashFunc: func(_ context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
 					result := make([]*execmodule.PayloadBody, len(hashes))
 					for i, hash := range hashes {
