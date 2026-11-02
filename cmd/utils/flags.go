@@ -2440,6 +2440,9 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
 		return err
 	}
 	if !ctx.IsSet(NetworkIdFlag.Name) {
+		if !genesis.Config.ChainID.IsUint64() {
+			return fmt.Errorf("--%s: genesis chain id %v exceeds 64 bits, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
 		networkID := genesis.Config.ChainID.Uint64()
 		// Sentry treats local status with network ID 0 as incomplete,
 		// so it cannot proceed with peer handshakes.
@@ -2450,7 +2453,7 @@ func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
 	}
 	cfg.Genesis = genesis
 	cfg.GenesisFromFile = true
-	if !ctx.IsSet(DNSDiscoveryFlag.Name) && !ctx.Bool(NoDiscoverFlag.Name) {
+	if !ctx.IsSet(DNSDiscoveryFlag.Name) {
 		cfg.EthDiscoveryURLs = nil
 	}
 	return nil
