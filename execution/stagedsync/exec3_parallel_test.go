@@ -1991,5 +1991,8 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	acc, ok := view.GetAccount(addr)
 	require.NoError(t, view.Err())
 	require.True(t, ok)
-	require.Equal(t, uint64(100), acc.Balance.Uint64(), "view at the step edge must not include the write at txNum 17")
+	require.Equal(t, uint64(100), acc.Balance.Uint64(), "view at the step edge must not include the write at txNum 16")
+	acc, ok = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
 }
