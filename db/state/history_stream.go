@@ -74,8 +74,8 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 			n := item.src.decompressor.Count() / 2
 			var ok bool
 			offset, ok = g.BinarySearch(hi.from, n, idx.OrdinalLookup)
-			if !ok {
-				offset = 0
+			if !ok { // every key in this file is below `from`
+				continue
 			}
 		}
 		g.Reset(offset)
@@ -465,7 +465,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if !ok {
 			continue
 		}
-		if int(txNum) >= hi.endTxNum {
+		if hi.endTxNum >= 0 && int(txNum) >= hi.endTxNum {
 			continue
 		}
 
