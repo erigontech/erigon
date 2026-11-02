@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestApplyLogIndexesPreservesReceiptCache(t *testing.T) {
+func TestApplyTxIndexesSkipsReceiptCache(t *testing.T) {
 	savedRCache := statecfg.Schema.RCacheDomain
 	statecfg.EnableHistoricalRCache()
 	t.Cleanup(func() { statecfg.Schema.RCacheDomain = savedRCache })
@@ -46,7 +46,7 @@ func TestApplyLogIndexesPreservesReceiptCache(t *testing.T) {
 	require.NotEmpty(t, cachedReceipt)
 
 	logs := []*types.Log{{Address: common.Address{19: 1}, Topics: []common.Hash{{31: 2}}}}
-	require.NoError(t, rs.ApplyLogIndexes(101, logs))
+	require.NoError(t, rs.ApplyTxIndexes(tx, 101, nil, 0, logs, nil, nil, true))
 	require.NoError(t, domains.Flush(t.Context(), tx))
 
 	got, _, err := tx.GetLatest(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, kv.GetLatestOptions{})
