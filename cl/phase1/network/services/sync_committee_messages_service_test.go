@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -36,14 +38,18 @@ import (
 
 func newSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller, ethClock eth_clock.EthereumClock) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager) {
 	t.Helper()
+	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	syncContributionPool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	return newSyncCommitteesServiceWithPool(t, ethClock, syncContributionPool)
+}
+
+func newSyncCommitteesServiceWithPool(t *testing.T, ethClock eth_clock.EthereumClock, syncContributionPool sync_contribution_pool.SyncContributionPool) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager) {
+	t.Helper()
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
-	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	batchSignatureVerifier := NewBatchSignatureVerifier(t.Context(), nil)
 	go batchSignatureVerifier.Start()
-	s := NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, true)
-	syncContributionPool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-	return s, syncedDataManager
+	return NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, true), syncedDataManager
 }
 
 func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
@@ -331,6 +337,8 @@ func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
 	entered, release := make(chan struct{}), make(chan struct{})
+	releaseVerification := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseVerification)
 	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
 		close(entered)
 		<-release
@@ -353,47 +361,68 @@ func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("head-state publication waited for a sync committee signature verification")
 	}
-	close(release)
+	releaseVerification()
 	require.NoError(t, <-done)
 }
 
-// Of two different valid messages for one validator and slot verified at the same time, only the first is accepted.
+// Of two different valid messages for one validator and slot verified at the same time, only the first is accepted
+// and added to the pool, whether both come through the API or one of them comes from gossip.
 func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidator(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	saveSignatureGlobals(t)
-	var entered sync.WaitGroup
-	entered.Add(2)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
-		entered.Done()
-		entered.Wait()
-		return true, nil
-	}
-	state, msg := getObjectsForSyncCommitteesServiceTest()
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
-	require.NoError(t, synced.OnHeadState(state))
-	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	other := &SyncCommitteeMessageForGossip{
-		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
-			Slot:            msg.SyncCommitteeMessage.Slot,
-			BeaconBlockRoot: common.Hash{0xff},
-			ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
-		},
-		ImmediateVerification: true,
-	}
+	for _, tc := range []struct {
+		name   string
+		gossip bool
+	}{
+		{name: "api", gossip: false},
+		{name: "gossip and api", gossip: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			saveSignatureGlobals(t)
+			var entered sync.WaitGroup
+			entered.Add(2)
+			blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+				entered.Done()
+				entered.Wait()
+				return true, nil
+			}
+			var poolAdds atomic.Int32
+			pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+			pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+				func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+					poolAdds.Add(1)
+					return nil
+				}).AnyTimes()
+			ethClock := eth_clock.NewMockEthereumClock(ctrl)
+			s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+			state, msg := getObjectsForSyncCommitteesServiceTest()
+			msg.ImmediateVerification = !tc.gossip
+			require.NoError(t, synced.OnHeadState(state))
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			other := &SyncCommitteeMessageForGossip{
+				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+					Slot:            msg.SyncCommitteeMessage.Slot,
+					BeaconBlockRoot: common.Hash{0xff},
+					ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
+				},
+				ImmediateVerification: true,
+			}
 
-	results := make(chan error, 2)
-	for _, m := range []*SyncCommitteeMessageForGossip{msg, other} {
-		go func() { results <- s.ProcessMessage(t.Context(), new(uint64), m) }()
+			results := make(chan error, 2)
+			for _, m := range []*SyncCommitteeMessageForGossip{msg, other} {
+				go func() { results <- s.ProcessMessage(t.Context(), new(uint64), m) }()
+			}
+			var accepted, ignored int
+			for range 2 {
+				if err := <-results; err == nil {
+					accepted++
+				} else {
+					require.ErrorIs(t, err, ErrIgnore)
+					ignored++
+				}
+			}
+			require.Equal(t, 1, accepted)
+			require.Equal(t, 1, ignored)
+			require.Equal(t, int32(1), poolAdds.Load())
+		})
 	}
-	var accepted, ignored int
-	for range 2 {
-		if err := <-results; err == nil {
-			accepted++
-		} else {
-			require.ErrorIs(t, err, ErrIgnore)
-			ignored++
-		}
-	}
-	require.Equal(t, 1, accepted)
-	require.Equal(t, 1, ignored)
 }
