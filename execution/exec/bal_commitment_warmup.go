@@ -416,8 +416,30 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 			return err
 		}
 	}
-	active := hashedKeys
-	for depth := 0; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
+	var storageKeys [][]byte
+	for _, k := range hashedKeys {
+		if len(k) > storageTrieDepth {
+			storageKeys = append(storageKeys, k)
+		}
+	}
+	// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
+	for _, w := range []struct {
+		keys  [][]byte
+		start int
+	}{{hashedKeys, 0}, {storageKeys, storageTrieDepth}} {
+		if err := walkTriePrefixes(ctx, db, ttx, p, w.keys, w.start, stats); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const storageTrieDepth = 64
+
+func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, p latestPrefetcher, keys [][]byte, start int, stats *prefetchStats) error {
+	compact := make([]byte, 0, 128)
+	active := keys
+	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		seen := map[string]struct{}{}
 		prefixes := make([][]byte, 0, len(active))
 		for _, k := range active {
