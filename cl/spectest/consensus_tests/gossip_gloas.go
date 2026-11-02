@@ -104,6 +104,9 @@ type gossipFixtureStore struct {
 	finalized *solid.Checkpoint
 	config    *clparams.BeaconChainConfig
 	timeMs    uint64
+	// minTimeMs keeps fork-choice time at or after the slot of the newest imported block, which
+	// Caplin requires even though fixture message times may be earlier.
+	minTimeMs uint64
 }
 
 func (s *gossipFixtureStore) FinalizedCheckpoint() solid.Checkpoint {
@@ -175,6 +178,7 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	if err := store.importBlocks(ctx, meta.Blocks); err != nil {
 		return err
 	}
+	store.minTimeMs = store.timeMs
 
 	headRoot, _, err := store.GetHead(nil)
 	if err != nil {
@@ -276,10 +280,12 @@ func (s *gossipFixtureStore) importBlocks(ctx context.Context, blocks []gloasGos
 }
 
 func (s *gossipFixtureStore) tick(timeMs uint64) {
-	if timeMs <= s.timeMs {
-		return
+	timeMs = max(timeMs, s.minTimeMs)
+	if timeMs < s.timeMs {
+		s.SetTimeForSpecTest(timeMs)
+	} else {
+		s.OnTick(timeMs)
 	}
-	s.OnTick(timeMs)
 	s.timeMs = timeMs
 }
 
