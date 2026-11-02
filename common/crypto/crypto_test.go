@@ -30,7 +30,6 @@ import (
 	"reflect"
 	"sync"
 	"testing"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -38,7 +37,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -450,10 +448,12 @@ func TestKeccak256HashMatchesReference(t *testing.T) {
 	wg.Wait()
 }
 
-func TestKeccakCachePrefault(t *testing.T) {
-	prefaultKeccakCache()
-	buckets := unsafe.Slice((*byte)(unsafe.Pointer(keccakCacheBuckets)), unsafe.Sizeof(*keccakCacheBuckets))
-	resident, err := mmap.Resident(buckets)
-	require.NoError(t, err)
-	require.True(t, resident, "keccak cache pages must be resident after prefault")
+func TestPrefaultKeepsBucketsInUse(t *testing.T) {
+	buckets := new([1 << 17]keccakBucket)
+	buckets[0].seq.Store(5)
+	buckets[0].tag.Store(7)
+	prefault(buckets)
+	require.Equal(t, uint64(5), buckets[0].seq.Load())
+	require.Equal(t, uint64(7), buckets[0].tag.Load())
+	require.Zero(t, buckets[len(buckets)-1].seq.Load())
 }

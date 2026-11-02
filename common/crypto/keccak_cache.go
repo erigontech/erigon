@@ -49,15 +49,15 @@ var (
 	keccakCacheBuckets = new([1 << 17]keccakBucket)
 )
 
-func init() { go prefaultKeccakCache() }
-
-// prefaultKeccakCache writes every page of the cache once, so the first blocks after a start do not
+// PrefaultKeccakCache writes every page of the cache once, so the first blocks after a start do not
 // pay a copy-on-write page fault per cold page. CompareAndSwap(0, 0) faults a page in without
 // changing a bucket that is already in use.
-func prefaultKeccakCache() {
+func PrefaultKeccakCache() { prefault(keccakCacheBuckets) }
+
+func prefault(buckets *[1 << 17]keccakBucket) {
 	perPage := max(1, os.Getpagesize()/int(unsafe.Sizeof(keccakBucket{})))
-	for i := 0; i < len(keccakCacheBuckets); i += perPage {
-		keccakCacheBuckets[i].seq.CompareAndSwap(0, 0)
+	for i := 0; i < len(buckets); i += perPage {
+		buckets[i].seq.CompareAndSwap(0, 0)
 	}
 }
 
