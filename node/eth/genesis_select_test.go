@@ -7,6 +7,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -36,7 +37,7 @@ func startGenesis(t *testing.T, db kv.RwDB, config *ethconfig.Config) (*chain.Co
 		if err != nil {
 			return err
 		}
-		cfg, block, err = genesiswrite.WriteGenesisBlock(tx, spec, "", nil, nil, false, datadir.New(t.TempDir()), log.New())
+		cfg, block, err = genesiswrite.WriteGenesisBlock(tx, spec, "", config.OverrideOsakaTime, config.OverrideAmsterdamTime, false, datadir.New(t.TempDir()), log.New())
 		return err
 	})
 	return cfg, block, err
@@ -77,4 +78,28 @@ func TestOverrideGenesisRestart(t *testing.T) {
 		require.Equal(t, uint64(1337), cfg.ChainID.Uint64())
 		require.Equal(t, a.GasLimit, config.Genesis.GasLimit)
 	})
+}
+
+func TestOverrideGenesisRestartWithForkOverride(t *testing.T) {
+	genesis := &types.Genesis{
+		Config:     chain.TestChainOsakaConfig.Copy(),
+		GasLimit:   30_000_000,
+		Difficulty: uint256.NewInt(0),
+	}
+	config := &ethconfig.Config{
+		Genesis:               genesis,
+		GenesisFromFile:       true,
+		OverrideAmsterdamTime: common.NewUint64(0),
+	}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+
+	_, first, err := startGenesis(t, db, config)
+	require.NoError(t, err)
+	require.NotNil(t, first.Header().SlotNumber)
+	require.Nil(t, genesis.Config.AmsterdamTime)
+
+	_, block, err := startGenesis(t, db, config)
+	require.NoError(t, err)
+	require.Equal(t, first.Hash(), block.Hash())
+	require.Nil(t, genesis.Config.AmsterdamTime)
 }

@@ -1192,6 +1192,7 @@ func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
 	}
 	return config.Genesis, nil
 }
+
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 

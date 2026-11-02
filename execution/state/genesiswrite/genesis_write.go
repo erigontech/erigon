@@ -156,19 +156,21 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 
-	if (storedHash == common.Hash{}) {
-		custom := true
-		if genesis == nil {
-			logger.Info("Writing main-net genesis block")
-			genesis = chainspec.MainnetGenesisBlock()
-			custom = false
-		}
+	custom := genesis != nil
+	if genesis == nil && (storedHash == common.Hash{}) {
+		logger.Info("Writing main-net genesis block")
+		genesis = chainspec.MainnetGenesisBlock()
+	}
+	if genesis != nil {
 		// Copy the struct, not just the config it points at: a named chain hands over the
 		// registered Genesis, and assigning the copied config back writes into it.
 		g := *genesis
 		g.Config = g.Config.Copy()
 		genesis = &g
 		applyOverrides(genesis.Config)
+	}
+
+	if (storedHash == common.Hash{}) {
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
