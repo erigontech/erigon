@@ -211,6 +211,9 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		panic(err)
 	}
 	return frozen, hasGap
