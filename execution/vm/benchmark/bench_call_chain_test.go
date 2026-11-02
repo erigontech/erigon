@@ -442,3 +442,21 @@ func BenchmarkCallReturnData(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkStaticCallToJumpingCallee measures a loop of STATICCALLs into a callee that
+// takes one JUMP, as every Solidity dispatcher does.
+func BenchmarkStaticCallToJumpingCallee(b *testing.B) {
+	b.ReportAllocs()
+	vmenv := benchConfig(b, 100_000_000)
+	statedb := vmenv.IntraBlockState()
+
+	deployContract(b, statedb, addrPair, []byte{byte(vm.PUSH1), 3, byte(vm.JUMP), byte(vm.JUMPDEST), byte(vm.STOP)})
+	p, lbl := program.New().Jumpdest()
+	code := p.StaticCall(nil, rawPair, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
+	deployContract(b, statedb, addrContract, code)
+
+	callOOG(b, vmenv, addrContract)
+	for b.Loop() {
+		callOOG(b, vmenv, addrContract)
+	}
+}
