@@ -95,7 +95,8 @@ func foldLogIndexTestResults(t *testing.T, pe *parallelExecutor, tx kv.TemporalT
 
 // The final virtual transaction clears the latest receipt-cache value, while
 // history preserves the last regular receipt. Indexing block-end system-call
-// logs must leave that receipt readable at its original transaction number.
+// logs must leave that receipt readable in the historical state after the
+// regular transaction.
 func TestParallelBlockEndLogsPreserveReceiptHistory(t *testing.T) {
 	savedRCache := statecfg.Schema.RCacheDomain
 	statecfg.EnableHistoricalRCache()
@@ -176,9 +177,9 @@ func (m *indexCountingMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum
 }
 
 // Finalize system calls share an IntraBlockState and txIndex, so GetRawLogs
-// returns all logs collected so far. Reading it after each call would process
-// earlier logs again. Count index additions before storage deduplicates equal
-// (key, txNum) pairs, which would hide that duplication in index queries.
+// returns all logs collected so far. Indexing that list after each call would
+// index earlier logs again. Count index additions before storage deduplicates
+// equal (key, txNum) pairs, which would hide that duplication in index queries.
 func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	const syscalls = 3
 
