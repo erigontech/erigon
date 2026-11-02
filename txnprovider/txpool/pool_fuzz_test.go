@@ -549,7 +549,9 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(TxnSlots{}, txns3, "fork2 mined")
 
 		// add some remote txns from p2p
-		pool.AddRemoteTxns(ctx, p2pReceived, nil, nil, nil)
+		if _, _, admissionErr := pool.AddRemoteTxns(ctx, p2pReceived, nil, nil, nil); admissionErr != nil {
+			t.Fatal(admissionErr)
+		}
 		err = pool.processRemoteTxns(ctx)
 		require.NoError(err)
 		check(p2pReceived, TxnSlots{}, "p2pmsg1")

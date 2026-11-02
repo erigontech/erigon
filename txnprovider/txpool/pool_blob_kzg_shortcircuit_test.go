@@ -188,7 +188,9 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 	slots.Append(&bad, a0[:], false)
 	slots.Append(&good, a1[:], false)
 
-	pool.AddRemoteTxns(ctx, slots, attackerPeerID, sentryClient, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, slots, attackerPeerID, sentryClient, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	// kickKZGOffenders fires PenalizePeer in a goroutine; wait for it.
@@ -230,15 +232,21 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
-	pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 
 	var fromHonest TxnSlots
 	fromHonest.Append(&good, a1[:], false)
-	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 
 	var trailingFromAttacker TxnSlots
 	trailingFromAttacker.Append(&trailing, a2[:], false)
-	pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
@@ -276,13 +284,17 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
 	fromAttacker.Append(skipped, a1[:], false)
-	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 
 	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	replacement.IDHash[0] = 0x63
 	var fromHonest TxnSlots
 	fromHonest.Append(replacement, a2[:], false)
-	pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 
 	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 	require.NoError(t, err)
@@ -311,7 +323,9 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 			a0 := [20]byte{1}
 			var slots TxnSlots
 			slots.Append(&bad, a0[:], false)
-			pool.AddRemoteTxns(ctx, slots, nil, nil, nil)
+			if _, _, admissionErr := pool.AddRemoteTxns(ctx, slots, nil, nil, nil); admissionErr != nil {
+				t.Fatal(admissionErr)
+			}
 
 			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 			require.NoError(t, err)
@@ -343,7 +357,9 @@ func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
 	overflow.Txn.(*types.BlobTx).GasLimit = 100_000
 	var remote TxnSlots
 	remote.Append(&overflow, sender[:], false)
-	pool.AddRemoteTxns(ctx, remote, nil, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, remote, nil, nil, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 	require.NoError(t, err)
 	require.Len(t, pool.byHash, 2)

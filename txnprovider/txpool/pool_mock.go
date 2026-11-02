@@ -121,18 +121,19 @@ func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNew
 }
 
 // AddRemoteTxns mocks base method.
-func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, previous *RemoteTxnsResult) (Hashes, *RemoteTxnsResult) {
+func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, retry *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns, peerID, sentry, previous)
+	ret := m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns, peerID, sentry, retry)
 	ret0, _ := ret[0].(Hashes)
 	ret1, _ := ret[1].(*RemoteTxnsResult)
-	return ret0, ret1
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // AddRemoteTxns indicates an expected call of AddRemoteTxns.
-func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns, peerID, sentry, previous any) *MockPoolAddRemoteTxnsCall {
+func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns, peerID, sentry, retry any) *MockPoolAddRemoteTxnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns, peerID, sentry, previous)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns, peerID, sentry, retry)
 	return &MockPoolAddRemoteTxnsCall{Call: call}
 }
 
@@ -142,19 +143,19 @@ type MockPoolAddRemoteTxnsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPoolAddRemoteTxnsCall) Return(arg0 Hashes, arg1 *RemoteTxnsResult) *MockPoolAddRemoteTxnsCall {
-	c.Call = c.Call.Return(arg0, arg1)
+func (c *MockPoolAddRemoteTxnsCall) Return(arg0 Hashes, arg1 *RemoteTxnsResult, arg2 error) *MockPoolAddRemoteTxnsCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient, *RemoteTxnsResult) (Hashes, *RemoteTxnsResult)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient, *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient, *RemoteTxnsResult) (Hashes, *RemoteTxnsResult)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient, *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

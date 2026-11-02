@@ -978,7 +978,9 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 				if local {
 					reasons, err = pool.AddLocalTxns(ctx, txns)
 				} else {
-					pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
+					if _, _, admissionErr := pool.AddRemoteTxns(ctx, txns, nil, nil, nil); admissionErr != nil {
+						t.Fatal(admissionErr)
+					}
 					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 				}
 				require.NoError(t, err)
@@ -1534,7 +1536,9 @@ func TestTxnPoke(t *testing.T) {
 		txnSlot := newTestTxnSlot(2, 0, 300000, 3000000, 100000)
 		txnSlot.IDHash[0] = 1
 		txnSlots.Append(txnSlot, addr[:], true)
-		pool.AddRemoteTxns(ctx, txnSlots, nil, nil, nil)
+		if _, _, admissionErr := pool.AddRemoteTxns(ctx, txnSlots, nil, nil, nil); admissionErr != nil {
+			t.Fatal(admissionErr)
+		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -1551,7 +1555,9 @@ func TestTxnPoke(t *testing.T) {
 		txnSlot := newTestTxnSlot(2, 0, 3000000, 3000000, 100000)
 		txnSlot.IDHash[0] = 2
 		txnSlots.Append(txnSlot, addr[:], true)
-		pool.AddRemoteTxns(ctx, txnSlots, nil, nil, nil)
+		if _, _, admissionErr := pool.AddRemoteTxns(ctx, txnSlots, nil, nil, nil); admissionErr != nil {
+			t.Fatal(admissionErr)
+		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -2210,7 +2216,9 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 		txnSlot.IDHash[0] = 1
 		txnSlots.Append(txnSlot, addr[:], true)
 
-		txnPool.AddRemoteTxns(ctx, txnSlots, nil, nil, nil)
+		if _, _, admissionErr := txnPool.AddRemoteTxns(ctx, txnSlots, nil, nil, nil); admissionErr != nil {
+			t.Fatal(admissionErr)
+		}
 	}
 
 	// empty because AddRemoteTxns logic is intentionally empty
@@ -3575,7 +3583,9 @@ func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
 
 	var remote TxnSlots
 	remote.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
-	pool.AddRemoteTxns(ctx, remote, nil, nil, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, remote, nil, nil, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	var local TxnSlots
@@ -3628,7 +3638,8 @@ func TestPrecheckRejectionsPreserveDiscardHistory(t *testing.T) {
 				cheap.IDHash[0] = id
 				var remote TxnSlots
 				remote.Append(cheap, sender[:], false)
-				submitted, _ := pool.AddRemoteTxns(ctx, remote, nil, nil, nil)
+				submitted, _, err := pool.AddRemoteTxns(ctx, remote, nil, nil, nil)
+				require.NoError(t, err)
 				require.Equal(t, Hashes(cheap.IDHash[:]), submitted)
 				reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 				require.NoError(t, err)
@@ -3715,9 +3726,11 @@ func TestP2PRetryNonceFrontierAdvancesWithoutNewBlock(t *testing.T) {
 	require.False(t, retry, "one packet cannot reuse the same frontier advance")
 	_, retry = p2pRetryForTest(t, pool, target.IDHash[:], seen)
 	require.True(t, retry, "another cached packet has its own retry opportunity")
-	_, verdict := pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
+	_, verdict, err := pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
+	require.NoError(t, err)
 	require.NotNil(t, verdict)
-	_, verdict = pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
+	_, verdict, err = pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
+	require.NoError(t, err)
 	require.Nil(t, verdict, "a duplicate does not own the queued packet verdict")
 	_, retry = p2pRetryForTest(t, pool, target.IDHash[:], seen)
 	require.False(t, retry, "queued transactions already have an admission attempt")
@@ -3783,7 +3796,9 @@ func TestP2PRetrySuppressesIgnoredRemoteTransactions(t *testing.T) {
 	txn.IDHash[0] = 1
 	var txns TxnSlots
 	txns.Append(txn, sender[:], false)
-	pool.AddRemoteTxns(ctx, txns, peerID, nil, nil)
+	if _, _, admissionErr := pool.AddRemoteTxns(ctx, txns, peerID, nil, nil); admissionErr != nil {
+		t.Fatal(admissionErr)
+	}
 	require.Empty(t, pool.unprocessedRemoteTxns.Txns)
 	_, retry := p2pRetryForTest(t, pool, txn.IDHash[:], seen)
 	require.False(t, retry, "ignored remote packets should remain deduplicated")
@@ -3813,27 +3828,53 @@ func TestCachedPacketRetriesNonceGapSkippedByAnotherPacket(t *testing.T) {
 	revision, retry := p2pRetryForTest(t, pool, good.IDHash[:], 0)
 	require.True(t, retry)
 	require.Greater(t, revision, uint64(0))
+	completedSender := common.Address{3}
+	updateP2PRetryNonce(t, pool, completedSender, 0, 2)
+	completed := newTestTxnSlot(66, 0, 300_000, 300_000, 100_000)
+	completed.IDHash[0] = 3
+	var completedTxns TxnSlots
+	completedTxns.Append(completed, completedSender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, completedTxns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+	updateP2PRetryNonce(t, pool, completedSender, 1, 3)
+	revision, retry = p2pRetryForTest(t, pool, completed.IDHash[:], revision)
+	require.True(t, retry)
 	bad := makeBlobSlot(2, true)
 	bad.Txn.(*types.BlobTx).GasLimit = 100_000
 	badSender := common.Address{2}
 	var badTxns TxnSlots
 	badTxns.Append(&bad, badSender[:], false)
-	_, badFlag := pool.AddRemoteTxns(ctx, badTxns, peerID, nil, nil)
-	submitted, goodFlag := pool.AddRemoteTxns(ctx, goodTxns, peerID, nil, nil)
+	_, badFlag, err := pool.AddRemoteTxns(ctx, badTxns, peerID, nil, nil)
+	require.NoError(t, err)
+	submitted, goodFlag, err := pool.AddRemoteTxns(ctx, goodTxns, peerID, nil, nil)
+	require.NoError(t, err)
 	require.Equal(t, Hashes(good.IDHash[:]), submitted)
-	entry := bodyCacheEntry{hashes: good.IDHash[:], revision: revision, result: goodFlag}
+	entry := bodyCacheEntry{hashes: append(bytes.Clone(completed.IDHash[:]), good.IDHash[:]...), revision: revision, result: goodFlag}
 	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NonceTooDistant}, reasons)
 	require.True(t, badFlag.invalidSidecar.Load())
 	require.False(t, goodFlag.invalidSidecar.Load())
-	require.True(t, goodFlag.incomplete.Load())
+	require.Equal(t, Hashes(good.IDHash[:]), goodFlag.incompleteHashes())
 	require.Empty(t, pool.byHash)
 	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 		_, retry, err = entry.retry(ctx, tx, pool)
 		return err
 	}))
 	require.True(t, retry, "a packet skipped before validation has not used its nonce-progress opportunity")
+	handled, _, err := pool.AddRemoteTxns(ctx, goodTxns, peerID, nil, &RemoteTxnsRetry{
+		revision: entry.revision, result: entry.result, unsubmitted: entry.unsubmitted,
+	})
+	require.NoError(t, err)
+	require.Equal(t, Hashes(good.IDHash[:]), handled)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Contains(t, pool.byHash, string(good.IDHash[:]))
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		_, retry, err = entry.retry(ctx, tx, pool)
+		return err
+	}))
+	require.False(t, retry, "an incomplete hash must not reset completed hashes to revision zero")
 }
 
 func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
@@ -3866,7 +3907,9 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 					require.NoError(t, err)
 					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 				} else {
-					pool.AddRemoteTxns(ctx, slots, nil, nil, nil)
+					if _, _, admissionErr := pool.AddRemoteTxns(ctx, slots, nil, nil, nil); admissionErr != nil {
+						t.Fatal(admissionErr)
+					}
 					require.NoError(t, pool.processRemoteTxns(ctx))
 				}
 			}
@@ -3889,7 +3932,9 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 				return nil
 			}))
 
-			pool.AddRemoteTxns(ctx, slots, nil, nil, nil)
+			if _, _, admissionErr := pool.AddRemoteTxns(ctx, slots, nil, nil, nil); admissionErr != nil {
+				t.Fatal(admissionErr)
+			}
 			require.NoError(t, pool.processRemoteTxns(ctx))
 			require.NotContains(t, pool.byHash, string(replay.IDHash[:]))
 			var nonces []uint64
@@ -3904,4 +3949,24 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 			require.Zero(t, queued)
 		})
 	}
+}
+
+func TestP2PRetryRefreshesNonceGapWithUnknownHash(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	require.NoError(t, pool.start(ctx))
+	target := newTestTxnSlot(66, 0, 1, 2, 21_000)
+	target.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(target, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+	updateP2PRetryNonce(t, pool, sender, 1, 2)
+	unknown := common.Hash{2}
+	hashes := append(bytes.Clone(target.IDHash[:]), unknown[:]...)
+	_, retry := p2pRetryForTest(t, pool, hashes, 0)
+	require.True(t, retry)
+	record, found := pool.discardReasonsLRU.Peek(string(target.IDHash[:]))
+	require.True(t, found)
+	require.Equal(t, uint64(1), record.nonceGap.firstMissingNonce, "another retryable hash must not skip the sender state refresh")
 }

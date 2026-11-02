@@ -2121,3 +2121,206 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 		require.NoError(t, <-done)
 	})
 }
+
+func TestFetchMixedBlobRetryEligibility(t *testing.T) {
+	for _, fork := range []string{"Cancun", "Osaka"} {
+		for _, mode := range []string{"evicted_precheck", "unrelated_block", "fee_precheck", "used_progress", "parse_progress", "no_submission_result"} {
+			t.Run(fork+"/"+mode, func(t *testing.T) {
+				ctx := t.Context()
+				pool, good, _, wire, key := newFetchBlobRetryFixture(t, 65)
+				pool.cfg.MaxNonceGap = 64
+				pool.cfg.AccountSlots = 65
+				pool.cfg.MinFeeCap = 2
+				pool.chainConfig = testforks.Forks[fork]
+				pool.pragueTime = pool.chainConfig.PragueTime
+				pool.osakaTime = pool.chainConfig.OsakaTime
+				if fork == "Osaka" {
+					var err error
+					wire, err = good.ConvertToV1()
+					require.NoError(t, err)
+				}
+				sender := crypto.PubkeyToAddress(key.PublicKey)
+				hash := good.Hash()
+				otherKey, err := crypto.GenerateKey()
+				require.NoError(t, err)
+				otherSender := crypto.PubkeyToAddress(otherKey.PublicKey)
+				updateP2PRetryNonce(t, pool, otherSender, 0, 2)
+				txn := newTestTxnSlot(1000, 0, 300_000, 300_000, 100_000).Txn.(*types.DynamicFeeTransaction)
+				if mode == "evicted_precheck" {
+					txn.TipCap.SetUint64(1)
+					txn.FeeCap.SetUint64(1)
+				}
+				txn.ChainID = pool.chainID
+				other, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), otherKey)
+				require.NoError(t, err)
+				otherHash := other.Hash()
+				rlps := [][]byte{wire, encodeFetchTestTransactions(t, other)[0]}
+				reply := &sentryproto.InboundMessage{
+					Id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+					Data: EncodePooledTransactions66(rlps, 1, nil), PeerId: peerID,
+				}
+				client, sent, penalties := newFetchTestClient(t)
+				var wg sync.WaitGroup
+				fetch := NewFetch(ctx, nil, pool, nil, pool.poolDB, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+				parses := countFetchTestParses(fetch)
+				var handoff bool
+				var handoffErr error
+				validateRLP := fetch.pooledTxnsParseCtx.validateRlp
+				fetch.pooledTxnsParseCtx.ValidateRLP(func(rlp []byte) error {
+					if err := validateRLP(rlp); err != nil {
+						return err
+					}
+					if handoff {
+						handoff = false
+						nonce := uint64(0)
+						if mode == "parse_progress" {
+							nonce = 1
+						}
+						change := &remoteproto.StateChangeBatch{
+							PendingBlockBaseFee: 1, BlockGasLimit: 30_000_000,
+							ChangeBatch: []*remoteproto.StateChange{{
+								BlockHeight: 4, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+								Changes: []*remoteproto.AccountChange{{
+									Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(sender),
+									Data: accounts.SerialiseV3(&accounts.Account{
+										Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash,
+									}),
+								}},
+							}},
+						}
+						handoffErr = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+						if mode == "parse_progress" {
+							pool.pendingBlobFee.Store(300_000)
+						}
+					}
+					return nil
+				})
+				advanceOther := func(nonce uint64) {
+					t.Helper()
+					slot := newTestTxnSlot(nonce, 0, 300_000, 300_000, 100_000)
+					slot.Txn.(*types.DynamicFeeTransaction).ChainID = pool.chainID
+					slot.IDHash[0], slot.IDHash[31] = byte(nonce+1), 0xee
+					var local TxnSlots
+					local.Append(slot, otherSender[:], true)
+					reasons, err := pool.AddLocalTxns(ctx, local)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				}
+				if mode == "fee_precheck" {
+					pool.pendingBlobFee.Store(300_000)
+				}
+				var steps []func() *sentryproto.InboundMessage
+				if mode == "no_submission_result" {
+					steps = append(steps, func() *sentryproto.InboundMessage {
+						return &sentryproto.InboundMessage{
+							Id: reply.Id, Data: EncodePooledTransactions66(rlps, 2, nil), PeerId: peerID,
+						}
+					})
+				}
+				steps = append(steps,
+					func() *sentryproto.InboundMessage { return reply },
+					func() *sentryproto.InboundMessage {
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						want := []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.NonceTooDistant}
+						if mode == "fee_precheck" {
+							want[0] = txpoolcfg.FeeTooLow
+						}
+						if mode == "evicted_precheck" {
+							want[1] = txpoolcfg.UnderPriced
+						}
+						require.Equal(t, want, reasons)
+						if mode != "fee_precheck" {
+							updateP2PRetryNonce(t, pool, sender, 0, 3)
+						}
+						switch mode {
+						case "evicted_precheck":
+							require.True(t, pool.precheckLRU.Remove(string(otherHash[:])))
+							updateP2PRetryNonce(t, pool, sender, 0, 4)
+						case "used_progress":
+							updateP2PRetryNonce(t, pool, sender, 1, 4)
+							pool.pendingBlobFee.Store(300_000)
+							return reply
+						default:
+							advanceOther(0)
+						}
+						handoff = mode == "unrelated_block" || mode == "parse_progress"
+						return reply
+					},
+				)
+				if mode == "used_progress" || mode == "parse_progress" {
+					steps = append(steps, func() *sentryproto.InboundMessage {
+						require.NoError(t, handoffErr)
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow, txpoolcfg.NonceTooDistant}, reasons)
+						if mode == "parse_progress" {
+							advanceOther(1)
+						} else {
+							advanceOther(0)
+						}
+						return reply
+					})
+				}
+				var beforeDuplicate int64
+				steps = append(steps,
+					func() *sentryproto.InboundMessage {
+						require.NoError(t, handoffErr)
+						require.False(t, handoff)
+						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "only the other sender may retry")
+						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
+						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						require.NoError(t, err)
+						want := txpoolcfg.NonceTooDistant
+						if mode == "evicted_precheck" {
+							want = txpoolcfg.UnderPriced
+						}
+						require.Equal(t, []txpoolcfg.DiscardReason{want}, reasons)
+						beforeDuplicate = parses()
+						return reply
+					},
+					func() *sentryproto.InboundMessage {
+						require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+						require.Equal(t, beforeDuplicate, parses(), "an unchanged duplicate must remain suppressed")
+						if mode == "fee_precheck" {
+							return nil
+						}
+						updateP2PRetryNonce(t, pool, sender, 65, 6)
+						pool.pendingBlobFee.Store(100_000)
+						return reply
+					},
+				)
+				if mode != "fee_precheck" {
+					steps = append(steps, func() *sentryproto.InboundMessage {
+						require.NotEmpty(t, pool.unprocessedRemoteTxns.Txns, "real owner progress must still retry")
+						require.Equal(t, [32]byte(hash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
+						require.NoError(t, pool.processRemoteTxns(ctx))
+						require.Contains(t, pool.byHash, string(hash[:]))
+						return nil
+					})
+				}
+				receiveFetchTestMessages(t, fetch, client, steps...)
+				require.Empty(t, sent)
+				require.Empty(t, penalties)
+			})
+		}
+	}
+}
+
+func TestBodyCacheReservesIncompleteHashBudget(t *testing.T) {
+	cache := newBodyCache()
+	for _, id := range []uint64{1, 2} {
+		entry := bodyCacheEntry{hashes: make(Hashes, maxBodyCacheHashBytes/2), result: new(RemoteTxnsResult)}
+		cache.add(bodyCacheKey{hash: id}, entry)
+		incomplete := Hashes(bytes.Clone(entry.hashes))
+		entry.result.incomplete.Store(&incomplete)
+	}
+	var retained int
+	for _, key := range cache.entries.Keys() {
+		entry, _ := cache.entries.Peek(key)
+		retained += len(entry.hashes) + len(entry.unsubmitted) + len(entry.result.incompleteHashes())
+	}
+	require.LessOrEqual(t, retained, maxBodyCacheHashBytes, "late validation results must fit the retained hash budget")
+}

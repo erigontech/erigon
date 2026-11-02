@@ -354,8 +354,8 @@ func (entry bodyCacheEntry) retry(ctx context.Context, tx kv.Tx, pool Pool) (rev
 	// Unvalidated hashes have not used this packet's nonce-progress opportunity.
 	if err == nil && !retry {
 		unvalidated := entry.unsubmitted
-		if entry.result != nil && entry.result.incomplete.Load() {
-			unvalidated = entry.hashes
+		if incomplete := entry.result.incompleteHashes(); len(incomplete) > 0 {
+			unvalidated = append(bytes.Clone(unvalidated), incomplete...)
 		}
 		if len(unvalidated) > 0 {
 			revision, retry, err = pool.P2PRetry(ctx, tx, unvalidated, 0)
@@ -378,7 +378,7 @@ const maxBodyCacheHashBytes = 2 * 1024 * 1024
 func newBodyCache() *bodyCache {
 	cache := &bodyCache{}
 	cache.entries, _ = simplelru.NewLRU[bodyCacheKey, bodyCacheEntry](1024, func(_ bodyCacheKey, entry bodyCacheEntry) {
-		cache.hashBytes -= len(entry.hashes) + len(entry.unsubmitted)
+		cache.hashBytes -= 2*len(entry.hashes) + len(entry.unsubmitted)
 	})
 	return cache
 }
@@ -393,7 +393,8 @@ func (c *bodyCache) add(key bodyCacheKey, entry bodyCacheEntry) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.entries.Remove(key)
-	weight := len(entry.hashes) + len(entry.unsubmitted)
+	// Reserve room for a late incomplete-validation result.
+	weight := 2*len(entry.hashes) + len(entry.unsubmitted)
 	if weight > maxBodyCacheHashBytes {
 		return
 	}
@@ -480,24 +481,24 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 					defer f.wg.Done()
 				}
 				var revision uint64
-				var previous *RemoteTxnsResult
+				var previous *RemoteTxnsRetry
 				cacheable := isBody(req)
 				key := bodyCacheKey{}
 				if cacheable {
 					key = bodyCacheKey{hash: maphash.Hash(req.Data), id: req.Id}
 					entry, found := seenBodies.get(key)
 					var retry bool
-					var err error
+					var retryErr error
 					if found {
-						previous = entry.result
-						revision, retry, err = entry.retry(streamCtx, tx, f.pool)
-						if err == nil && !retry {
+						revision, retry, retryErr = entry.retry(streamCtx, tx, f.pool)
+						if retryErr == nil && !retry {
 							return
 						}
+						previous = &RemoteTxnsRetry{revision: entry.revision, result: entry.result, unsubmitted: entry.unsubmitted}
 					} else {
-						revision, _, err = f.pool.P2PRetry(streamCtx, tx, nil, 0)
+						revision, _, retryErr = f.pool.P2PRetry(streamCtx, tx, nil, 0)
 					}
-					cacheable = err == nil
+					cacheable = retryErr == nil
 				}
 				entry, handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient, previous)
 				if handleErr != nil {
@@ -509,6 +510,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				// Peer-specific announcement failures must not suppress an honest reply.
 				if cacheable && entry.hashes != nil {
 					entry.revision = revision
+					if entry.result != nil {
+						entry.revision = max(entry.revision, entry.result.revision)
+					}
 					seenBodies.add(key, entry)
 				}
 			}()
@@ -562,7 +566,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 }
 
 // Non-nil hashes permit caching, including immutable rejections and empty packets.
-func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, previous *RemoteTxnsResult) (entry bodyCacheEntry, err error) {
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, previous *RemoteTxnsRetry) (entry bodyCacheEntry, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -707,7 +711,9 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
 		entry.hashes = Hashes{}
-		entry.result = previous
+		if previous != nil {
+			entry.result = previous.result
+		}
 		txns := TxnSlots{}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
@@ -780,29 +786,33 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				return bodyCacheEntry{hashes: Hashes{}}, nil
 			}
 		}
-		var submitted Hashes
+		var handled Hashes
 		if len(txns.Txns) > 0 {
 			var result *RemoteTxnsResult
-			submitted, result = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient, previous)
+			var admissionErr error
+			handled, result, admissionErr = f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient, previous)
+			if admissionErr != nil {
+				return bodyCacheEntry{}, admissionErr
+			}
 			if result != nil {
 				entry.result = result
 			}
 		}
-		var submittedIDs map[common.Hash]struct{}
+		var handledIDs map[common.Hash]struct{}
 		for i, next := 0, 0; i < len(entry.hashes); i += 32 {
 			hash := entry.hashes[i : i+32]
-			if next < len(submitted) && bytes.Equal(hash, submitted[next:next+32]) {
+			if next < len(handled) && bytes.Equal(hash, handled[next:next+32]) {
 				next += 32
 				continue
 			}
-			// Repeated hashes share the first occurrence's admission attempt.
-			if submittedIDs == nil && len(submitted) > 0 {
-				submittedIDs = make(map[common.Hash]struct{}, len(submitted)/32)
-				for j := 0; j < len(submitted); j += 32 {
-					submittedIDs[common.Hash(submitted[j:j+32])] = struct{}{}
+			// Repeated hashes share the first occurrence's admission decision.
+			if handledIDs == nil && len(handled) > 0 {
+				handledIDs = make(map[common.Hash]struct{}, len(handled)/32)
+				for j := 0; j < len(handled); j += 32 {
+					handledIDs[common.Hash(handled[j:j+32])] = struct{}{}
 				}
 			}
-			if _, ok := submittedIDs[common.Hash(hash)]; !ok {
+			if _, ok := handledIDs[common.Hash(hash)]; !ok {
 				entry.unsubmitted = append(entry.unsubmitted, hash...)
 			}
 		}

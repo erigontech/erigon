@@ -78,7 +78,7 @@ const txMaxBroadcastSize = 4 * 1024
 //go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
 type Pool interface {
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
-	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, previous *RemoteTxnsResult) (Hashes, *RemoteTxnsResult)
+	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, retry *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
@@ -106,7 +106,34 @@ type remoteSource struct {
 
 type RemoteTxnsResult struct {
 	invalidSidecar *atomic.Bool
-	incomplete     atomic.Bool
+	incomplete     atomic.Pointer[Hashes]
+	revision       uint64
+}
+
+type RemoteTxnsRetry struct {
+	revision    uint64
+	result      *RemoteTxnsResult
+	unsubmitted Hashes
+}
+
+func (result *RemoteTxnsResult) incompleteHashes() Hashes {
+	if result != nil {
+		if hashes := result.incomplete.Load(); hashes != nil {
+			return *hashes
+		}
+	}
+	return nil
+}
+
+func (retry *RemoteTxnsRetry) seenRevision(hash []byte) uint64 {
+	for _, hashes := range []Hashes{retry.unsubmitted, retry.result.incompleteHashes()} {
+		for i := 0; i < len(hashes); i += 32 {
+			if bytes.Equal(hash, hashes[i:i+32]) {
+				return 0
+			}
+		}
+	}
+	return retry.revision
 }
 
 type discardRecord struct {
@@ -670,7 +697,7 @@ func (p *TxPool) P2PRetry(ctx context.Context, tx kv.Tx, hashes Hashes, seenRevi
 	retry, needsView, err := p.p2pRetryLocked(tx, hashes, seenRevision, nil)
 	revision = p.nonceRetryRevision.Load()
 	p.lock.Unlock()
-	if err != nil || retry || !needsView {
+	if err != nil || !needsView {
 		return revision, retry, err
 	}
 	err = p.withLockedState(ctx, nil, func(_ kv.TemporalTx, view kvcache.CacheView) error {
@@ -705,44 +732,49 @@ func (p *TxPool) p2pRetryLocked(tx kv.Tx, hashes Hashes, seenRevision uint64, vi
 		if record.reason != txpoolcfg.NonceTooDistant {
 			continue
 		}
-		gap := record.nonceGap
-		frontier := gap.firstMissingNonce
-		if gap.checkedGeneration != p.stateGeneration {
-			if view == nil {
-				needsView = true
-				continue
-			}
-			encoded, err := view.Get(gap.sender[:])
-			if err != nil {
-				return false, false, err
-			}
-			var account accounts.Account
-			if len(encoded) > 0 {
-				if err := accounts.DeserialiseV3(&account, encoded); err != nil {
-					return false, false, err
-				}
-			}
-			frontier = max(frontier, account.Nonce)
-			gap.checkedGeneration = p.stateGeneration
+		hashRetry, hashNeedsView, err := p.nonceGapRetryLocked(record.nonceGap, seenRevision, view)
+		if err != nil {
+			return false, false, err
 		}
-		if id, ok := p.senders.getID(gap.sender); ok {
-			for frontier < math.MaxUint64 {
-				txn := p.all.get(id, frontier)
-				if txn == nil || txn.subPool&NoNonceGaps == 0 {
-					break
-				}
-				frontier++
-			}
-		}
-		if frontier > gap.firstMissingNonce {
-			gap.firstMissingNonce = frontier
-			gap.progressRevision = p.nonceRetryRevision.Add(1)
-		}
-		if gap.progressRevision > seenRevision {
-			retry = true
-		}
+		retry = retry || hashRetry
+		needsView = needsView || hashNeedsView
 	}
 	return retry, needsView, nil
+}
+
+func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, view kvcache.CacheView) (bool, bool, error) {
+	frontier := gap.firstMissingNonce
+	if gap.checkedGeneration != p.stateGeneration {
+		if view == nil {
+			return false, true, nil
+		}
+		encoded, err := view.Get(gap.sender[:])
+		if err != nil {
+			return false, false, err
+		}
+		var account accounts.Account
+		if len(encoded) > 0 {
+			if err := accounts.DeserialiseV3(&account, encoded); err != nil {
+				return false, false, err
+			}
+		}
+		frontier = max(frontier, account.Nonce)
+		gap.checkedGeneration = p.stateGeneration
+	}
+	if id, ok := p.senders.getID(gap.sender); ok {
+		for frontier < math.MaxUint64 {
+			txn := p.all.get(id, frontier)
+			if txn == nil || txn.subPool&NoNonceGaps == 0 {
+				break
+			}
+			frontier++
+		}
+	}
+	if frontier > gap.firstMissingNonce {
+		gap.firstMissingNonce = frontier
+		gap.progressRevision = p.nonceRetryRevision.Add(1)
+	}
+	return gap.progressRevision > seenRevision, false, nil
 }
 
 func (p *TxPool) recordPrecheck(hash [32]byte, reason txpoolcfg.DiscardReason) {
@@ -1085,21 +1117,77 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, previous *RemoteTxnsResult) (submitted Hashes, result *RemoteTxnsResult) {
+func (p *TxPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, retry *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error) {
 	if p.cfg.NoGossip {
-		// if no gossip, then
-		// disable adding remote transactions
-		// consume remote txn from fetch
-		return nil, nil
+		return nil, nil, nil
 	}
-
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
-	defer p.lock.Unlock()
-	if previous != nil && previous.invalidSidecar.Load() {
-		return nil, nil
+	needsView := false
+	if retry != nil {
+		for _, txn := range newTxns.Txns {
+			if txn.TxType() != BlobTxnType {
+				continue
+			}
+			record, found := p.discardReasonsLRU.Peek(string(txn.IDHash[:]))
+			if found && record.reason == txpoolcfg.NonceTooDistant && record.nonceGap.checkedGeneration != p.stateGeneration {
+				needsView = true
+				break
+			}
+		}
 	}
-	result = new(RemoteTxnsResult)
+	if !needsView {
+		defer p.lock.Unlock()
+		return p.addRemoteTxnsLocked(newTxns, peerID, sentry, retry, nil)
+	}
+	p.lock.Unlock()
+	var handled Hashes
+	var result *RemoteTxnsResult
+	err := p.withLockedState(ctx, nil, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+		var checkErr error
+		handled, result, checkErr = p.addRemoteTxnsLocked(newTxns, peerID, sentry, retry, view)
+		return checkErr
+	})
+	return handled, result, err
+}
+
+func (p *TxPool) addRemoteTxnsLocked(newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, retry *RemoteTxnsRetry, view kvcache.CacheView) (handled Hashes, result *RemoteTxnsResult, err error) {
+	var previous *RemoteTxnsResult
+	var filtered []bool
+	if retry != nil {
+		previous = retry.result
+		if previous != nil && previous.invalidSidecar.Load() {
+			return nil, nil, nil
+		}
+		for i, txn := range newTxns.Txns {
+			if txn.TxType() != BlobTxnType {
+				continue
+			}
+			hash := string(txn.IDHash[:])
+			if p.unprocessedRemoteByHash[hash] != nil {
+				continue
+			}
+			eligible := true
+			if record, found := p.discardReasonsLRU.Peek(hash); found {
+				eligible = false
+				if record.reason == txpoolcfg.NonceTooDistant {
+					eligible, _, err = p.nonceGapRetryLocked(record.nonceGap, retry.seenRevision(txn.IDHash[:]), view)
+					if err != nil {
+						return nil, nil, err
+					}
+				}
+			} else if p.precheckLRU.Contains(hash) {
+				eligible = false
+			}
+			if !eligible {
+				if filtered == nil {
+					filtered = make([]bool, len(newTxns.Txns))
+				}
+				filtered[i] = true
+			}
+		}
+	}
+	result = &RemoteTxnsResult{revision: p.nonceRetryRevision.Load()}
 	if previous != nil {
 		result.invalidSidecar = previous.invalidSidecar
 	} else {
@@ -1107,36 +1195,24 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	}
 	src := remoteSource{peerID: peerID, sentry: sentry, result: result}
 	for i, txn := range newTxns.Txns {
-		hashS := string(txn.IDHash[:])
-		_, ok := p.unprocessedRemoteByHash[hashS]
-		if ok {
+		hash := string(txn.IDHash[:])
+		if p.unprocessedRemoteByHash[hash] != nil {
 			continue
 		}
-		if previous != nil && txn.TxType() == BlobTxnType {
-			if record, found := p.discardReasonsLRU.Peek(hashS); found && record.reason == txpoolcfg.NonceTooDistant {
-				gap := record.nonceGap
-				if gap.checkedGeneration == p.stateGeneration && gap.progressRevision == 0 {
-					id, known := p.senders.getID(gap.sender)
-					var bridge *metaTxn
-					if known {
-						bridge = p.all.get(id, gap.firstMissingNonce)
-					}
-					if bridge == nil || bridge.subPool&NoNonceGaps == 0 {
-						continue
-					}
-				}
-			}
+		// Filtered hashes used this packet's retry decision, but did not enter the queue.
+		handled = append(handled, txn.IDHash[:]...)
+		if i < len(filtered) && filtered[i] {
+			continue
 		}
-		p.unprocessedRemoteByHash[hashS] = txn
+		p.unprocessedRemoteByHash[hash] = txn
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
-		submitted = append(submitted, txn.IDHash[:]...)
 	}
 	p.hasUnprocessedRemoteTxns.Store(len(p.unprocessedRemoteTxns.Txns) > 0)
-	if len(submitted) == 0 {
-		return nil, nil
+	if len(handled) == 0 {
+		return nil, nil, nil
 	}
-	return submitted, result
+	return handled, result, nil
 }
 
 func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
@@ -1630,9 +1706,24 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		}
 		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
 	}
+	for _, source := range sources {
+		if source.result != nil {
+			source.result.incomplete.Store(nil)
+		}
+	}
+	var incomplete map[*RemoteTxnsResult]Hashes
+	defer func() {
+		for result, hashes := range incomplete {
+			result.incomplete.Store(&hashes)
+		}
+	}()
 	markIncomplete := func(i int) {
 		if !txns.IsLocal[i] && i < len(sources) && sources[i].result != nil {
-			sources[i].result.incomplete.Store(true)
+			if incomplete == nil {
+				incomplete = make(map[*RemoteTxnsResult]Hashes)
+			}
+			result := sources[i].result
+			incomplete[result] = append(incomplete[result], txns.Txns[i].IDHash[:]...)
 		}
 	}
 

@@ -99,7 +99,9 @@ func TestPoolReopensStateAfterNewBlock(t *testing.T) {
 						txpoolcfg.NonceTooLow, txpoolcfg.Success, txpoolcfg.DelegatedNonceGap,
 					}, reasons)
 				case "remote":
-					pool.AddRemoteTxns(ctx, txns, nil, nil, nil)
+					if _, _, admissionErr := pool.AddRemoteTxns(ctx, txns, nil, nil, nil); admissionErr != nil {
+						t.Fatal(admissionErr)
+					}
 					require.NoError(t, pool.processRemoteTxns(ctx))
 				case "reload":
 					require.NoError(t, pool.start(ctx))
