@@ -1059,19 +1059,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
 
-		static          = &AggV3StaticFiles{}
-		closeCollations = true
-		collListMu      = sync.Mutex{}
-		collations      = make([]Collation, 0)
+		static = &AggV3StaticFiles{}
 	)
-	defer func() {
-		if !closeCollations {
-			return
-		}
-		for _, c := range collations {
-			c.Close()
-		}
-	}()
 
 	g, workerCtx := errgroup.WithContext(ctx)
 	g.SetLimit(a.workers.getCollateAndBuild())
@@ -1096,10 +1085,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
 			}
-			collListMu.Lock()
-			collations = append(collations, collation)
-			collListMu.Unlock()
-
 			sf, err := d.buildFiles(workerCtx, step, collation, a.backgroundProgress)
 			collation.Close()
 			if err != nil {
@@ -1115,8 +1100,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 			return nil
 		})
 	}
-	closeCollations = false
-
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
 		if !ii.Enabled {
