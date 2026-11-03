@@ -279,7 +279,6 @@ func (ef *EliasFano) getProbe(i uint64, pr *mmap.Probe) (val uint64, window uint
 	if ef.l != 0 {
 		lowerPos := i * ef.l
 		idx64, shift := lowerPos/64, lowerPos%64
-		mmap.Populate(unsafe.Pointer(&ef.lowerBits[idx64]))
 		pr.Touch(unsafe.Pointer(&ef.lowerBits[idx64]))
 		lower = ef.lowerBits[idx64] >> shift
 		if shift > 0 {
@@ -291,14 +290,11 @@ func (ef *EliasFano) getProbe(i uint64, pr *mmap.Probe) (val uint64, window uint
 	jumpInsideSuperQ := (i % superQ) / q
 	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
-	mmap.Populate(unsafe.Pointer(&ef.jump[jumpSuperQ]))
 	pr.Touch(unsafe.Pointer(&ef.jump[jumpSuperQ]))
-	mmap.Populate(unsafe.Pointer(&ef.jump[idx64]))
 	pr.Touch(unsafe.Pointer(&ef.jump[idx64]))
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
 	currWord = jump / 64
-	mmap.Populate(unsafe.Pointer(&ef.upperBits[currWord]))
 	pr.Touch(unsafe.Pointer(&ef.upperBits[currWord]))
 	window = ef.upperBits[currWord] & (uint64(0xffffffffffffffff) << (jump % 64))
 	d := int(i & qMask)

@@ -503,7 +503,6 @@ func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (u
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
-	mmap.Populate(unsafe.Pointer(&idx.data[pos]))
 	pr.Touch(unsafe.Pointer(&idx.data[pos]))
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask

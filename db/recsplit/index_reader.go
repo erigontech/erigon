@@ -71,16 +71,6 @@ func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {
 	return r.OrdinalLookup(id), true
 }
 
-func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
-	if r.index.Empty() {
-		return 0, false
-	}
-	id, ok := r.index.Lookup(hi, lo)
-	if !ok {
-		return 0, false
-	}
-	return r.index.OrdinalLookup(id), true
-}
 func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
 
 // TwoLayerLookupByHashProbe is TwoLayerLookupByHash with pr touching the pages it reads.
@@ -100,11 +90,7 @@ func (r *IndexReader) TwoLayerLookupByHashProbe(hi, lo uint64, pr *mmap.Probe) (
 
 // TwoLayerLookupByHash high-level methods. allow to turn-off `enum` in future
 func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
-	enums := r.index.Enums()
-	if enums {
-		return r.twoLayerLookupByHash(hi, lo)
-	}
-	return r.index.Lookup(hi, lo)
+	return r.TwoLayerLookupByHashProbe(hi, lo, nil)
 }
 
 // TwoLayerLookup high-level methods. allow to turn-off `enum` in future

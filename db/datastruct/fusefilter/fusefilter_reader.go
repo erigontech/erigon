@@ -353,11 +353,7 @@ func (r *ReaderSharded) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
 }
 
 func (r *ReaderSharded) ContainsHash(v uint64) bool {
-	s := &r.shards[v>>56]
-	if s.inner == nil {
-		return false
-	}
-	return s.ContainsHash(v)
+	return r.ContainsHashProbe(v, nil)
 }
 
 // ForceInMem clones each shard's fingerprints into anonymous heap memory.

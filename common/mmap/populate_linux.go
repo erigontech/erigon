@@ -12,16 +12,8 @@ import (
 	"github.com/erigontech/erigon/common/iouring"
 )
 
-// MMAP_POPULATE=true faults mapped pages in via madvise, =iouring reads them via io_uring; either way the disk
-// wait happens in a syscall that releases the goroutine's P.
-var (
-	populateMode    = os.Getenv("MMAP_POPULATE")
-	PopulateEnabled = populateMode == "true" || populateMode == "iouring"
-	populateIouring = populateMode == "iouring"
-	// BatchPrefetch enables probed reads (Probe) and io_uring page batches (ReadPages).
-	BatchPrefetch    = os.Getenv("BAL_BATCH_PREFETCH") == "true"
-	registerMappings = populateIouring || BatchPrefetch
-)
+// BatchPrefetch enables probed reads (Probe) and io_uring page batches (ReadPages).
+var BatchPrefetch = os.Getenv("BAL_BATCH_PREFETCH") == "true"
 
 type mapping struct {
 	start, end uintptr
@@ -34,7 +26,7 @@ var (
 )
 
 func registerMapping(m []byte, f *os.File) {
-	if !registerMappings || len(m) == 0 {
+	if !BatchPrefetch || len(m) == 0 {
 		return
 	}
 	mappingsMu.Lock()
@@ -51,7 +43,7 @@ func registerMapping(m []byte, f *os.File) {
 }
 
 func unregisterMapping(m []byte) {
-	if !registerMappings || len(m) == 0 {
+	if !BatchPrefetch || len(m) == 0 {
 		return
 	}
 	mappingsMu.Lock()
@@ -85,21 +77,6 @@ func mappingOf(page uintptr) (mapping, bool) {
 	return (*ms)[i], true
 }
 
-// Populate makes the page holding p resident; a no-op unless PopulateEnabled.
-func Populate(p unsafe.Pointer) {
-	if !PopulateEnabled {
-		return
-	}
-	page := uintptr(p) &^ (osPageSize - 1)
-	if populateIouring {
-		if m, ok := mappingOf(page); ok {
-			iouring.BlockingRead(m.fd, int64(page-m.start), int(osPageSize))
-			return
-		}
-	}
-	_, _, _ = unix.Syscall(unix.SYS_MADVISE, page, osPageSize, unix.MADV_POPULATE_READ)
-}
-
 // ColdPage is the panic value a probed read raises at its first page that is not resident.
 type ColdPage uintptr
 
@@ -107,7 +84,6 @@ type ColdPage uintptr
 // probes nothing. A Probe belongs to one goroutine.
 type Probe struct {
 	resident map[uintptr]struct{}
-	coldData bool
 }
 
 // NewProbe returns nil when ReadPages cannot read pages, so callers fall back to ordinary reads.
@@ -120,23 +96,6 @@ func NewProbe() *Probe {
 		return nil
 	}
 	return &Probe{resident: map[uintptr]struct{}{}}
-}
-
-// TouchData is Touch for the first page of a value, so the caller can read the whole value once it is cold.
-func (pr *Probe) TouchData(p unsafe.Pointer) {
-	if pr == nil {
-		return
-	}
-	pr.coldData = true
-	pr.Touch(p)
-	pr.coldData = false
-}
-
-// ColdData reports whether the last ColdPage came from TouchData, and clears it.
-func (pr *Probe) ColdData() bool {
-	d := pr.coldData
-	pr.coldData = false
-	return d
 }
 
 func (pr *Probe) Touch(p unsafe.Pointer) {

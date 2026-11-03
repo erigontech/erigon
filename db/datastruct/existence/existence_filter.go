@@ -80,16 +80,7 @@ func (b *Filter) ContainsHashProbe(hashedKey uint64, pr *mmap.Probe) bool {
 }
 
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
-	if b.empty {
-		return true
-	}
-	if b.fuseReaderSharded != nil {
-		return b.fuseReaderSharded.ContainsHash(hashedKey)
-	}
-	if b.fuseReader != nil {
-		return b.fuseReader.ContainsHash(hashedKey)
-	}
-	return b.filter.ContainsHash(hashedKey)
+	return b.ContainsHashProbe(hashedKey, nil)
 }
 
 func (b *Filter) Contains(v hash.Hash64) bool {

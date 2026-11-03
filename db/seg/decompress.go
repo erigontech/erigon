@@ -960,9 +960,8 @@ func (g *Getter) Probe() *mmap.Probe { return g.probe }
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
-	if (mmap.PopulateEnabled || g.probe != nil) && offset < uint64(len(g.data)) {
-		mmap.Populate(unsafe.Pointer(&g.data[offset]))
-		g.probe.TouchData(unsafe.Pointer(&g.data[offset]))
+	if g.probe != nil && offset < uint64(len(g.data)) {
+		g.probe.Touch(unsafe.Pointer(&g.data[offset]))
 	}
 	if g.residencyGate {
 		g.ensureResident(offset)

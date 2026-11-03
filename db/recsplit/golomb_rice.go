@@ -125,8 +125,6 @@ func (g *GolombRiceReader) ReadReset(bitPos, unaryOffset int) {
 	g.currFixedOffset = bitPos
 	unaryPos := bitPos + unaryOffset
 	g.currPtrUnary = unaryPos / 64
-	mmap.Populate(unsafe.Pointer(&g.data[bitPos/64]))
-	mmap.Populate(unsafe.Pointer(&g.data[g.currPtrUnary]))
 	g.probe.Touch(unsafe.Pointer(&g.data[bitPos/64]))
 	g.probe.Touch(unsafe.Pointer(&g.data[g.currPtrUnary]))
 	g.currWindowUnary = g.data[g.currPtrUnary] >> (unaryPos & 63)
