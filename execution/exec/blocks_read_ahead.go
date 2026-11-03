@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -463,9 +464,17 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
-	group.Go(func() error {
-		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
-	})
+	if mmap.BatchPrefetch {
+		group.Go(func() error {
+			prefetchBAL(ctx, db, bal)
+			return nil
+		})
+	}
+	if !balWarmupStateOff {
+		group.Go(func() error {
+			return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+		})
+	}
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
@@ -751,3 +760,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 
 	return nil
 }
+
+// dbg: BAL_WARMUP_STATE_OFF skips the per-key BAL state warmup (TRIE_BAL_WARMUPERS=0 skips the per-key trie warmup).
+var balWarmupStateOff = dbg.EnvBool("BAL_WARMUP_STATE_OFF", false)

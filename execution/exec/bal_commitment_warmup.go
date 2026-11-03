@@ -19,14 +19,22 @@ package exec
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -214,4 +222,320 @@ func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitme
 	})
 	prefetch.Start()
 	return prefetch
+}
+
+type latestPrefetcher interface {
+	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
+}
+
+type prefetchStats struct {
+	waves, pages        int
+	plan, io, branchChk time.Duration
+}
+
+func (s *prefetchStats) add(waves, pages int, plan, io time.Duration) {
+	s.waves, s.pages, s.plan, s.io = s.waves+waves, s.pages+pages, s.plan+plan, s.io+io
+}
+
+var (
+	prefetchFlatDepth = dbg.EnvInt("BAL_PREFETCH_FLAT_DEPTH", 8)
+	prefetchPar       = dbg.EnvInt("BAL_PREFETCH_PAR", 4)
+)
+
+// keysWithChild keeps the keys whose branch at depth has their next nibble, checked by prefetchPar goroutines.
+// A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
+func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) ([][]byte, error) {
+	keep := make([]bool, len(keys))
+	check := func(tx kv.TemporalTx, from, to int) {
+		compact := make([]byte, 0, 128)
+		// Keys are sorted, so keys sharing a branch are adjacent: read it once.
+		var lastPrefix []byte
+		var bits uint16
+		for i := from; i < to && ctx.Err() == nil; i++ {
+			k := keys[i]
+			if depth >= len(k) {
+				continue
+			}
+			if lastPrefix == nil || !bytes.Equal(lastPrefix, k[:depth]) {
+				branch, _, err := tx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
+				bits = 0
+				if err == nil && len(branch) >= 4 {
+					bits = binary.BigEndian.Uint16(branch[2:4])
+				}
+				lastPrefix = k[:depth]
+			}
+			keep[i] = bits&(uint16(1)<<k[depth]) != 0
+		}
+	}
+	par := max(1, min(prefetchPar, len(keys)/256))
+	chunk := (len(keys) + par - 1) / par
+	var g errgroup.Group
+	for from := chunk; from < len(keys); from += chunk {
+		g.Go(func() error {
+			// Best effort: without a free read-tx permit the chunk is skipped, since the parent holds one.
+			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
+			if err != nil {
+				return nil
+			}
+			defer tx.Rollback()
+			if ttx, ok := tx.(kv.TemporalTx); ok {
+				check(ttx, from, min(from+chunk, len(keys)))
+			}
+			return nil
+		})
+	}
+	check(ttx, 0, min(chunk, len(keys)))
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	next := keys[:0:0]
+	for i, k := range keys {
+		if keep[i] {
+			next = append(next, k)
+		}
+	}
+	return next, nil
+}
+
+// prefetchKeys splits keys over prefetchPar planners, each with its own tx; stats keep the slowest planner's times.
+func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
+	if prefetchPar <= 1 || len(keys) < 2*prefetchPar {
+		stats.add(p.PrefetchLatest(ctx, domain, keys))
+		return nil
+	}
+	var mu sync.Mutex
+	var part prefetchStats
+	var g errgroup.Group
+	chunk := (len(keys) + prefetchPar - 1) / prefetchPar
+	for i := 0; i < len(keys); i += chunk {
+		keys := keys[i:min(i+chunk, len(keys))]
+		first := i == 0
+		g.Go(func() error {
+			pp := p
+			if !first {
+				tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
+				if err != nil {
+					return nil
+				}
+				defer tx.Rollback()
+				ttx, ok := tx.(kv.TemporalTx)
+				if !ok {
+					return nil
+				}
+				if pp, ok = ttx.AggTx().(latestPrefetcher); !ok {
+					return nil
+				}
+			}
+			waves, pages, plan, io := pp.PrefetchLatest(ctx, domain, keys)
+			mu.Lock()
+			defer mu.Unlock()
+			part.waves, part.pages = max(part.waves, waves), part.pages+pages
+			part.plan, part.io = max(part.plan, plan), max(part.io, io)
+			return nil
+		})
+	}
+	err := g.Wait()
+	stats.add(part.waves, part.pages, part.plan, part.io)
+	return err
+}
+
+// prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
+// storage, and the commitment trie level by level, since a branch decides whether the next level exists.
+// dbg: BAL_TRIE_GATE_PERMILLE skips the trie prefetch when a sample of its flat prefixes has fewer cold pages
+// per prefix than that (in 1/1000, default 50); 0 disables the gate.
+var trieGatePermille = dbg.EnvInt("BAL_TRIE_GATE_PERMILLE", 50)
+
+const trieGateSample = 256
+
+// sampleTrieColdPages probes the flat-depth prefixes of evenly spaced keys and returns the cold pages it read.
+func sampleTrieColdPages(ctx context.Context, p latestPrefetcher, hashedKeys [][]byte) (cold, probed int) {
+	step := max(1, len(hashedKeys)/trieGateSample)
+	compact := make([]byte, 0, 128)
+	seen := map[string]struct{}{}
+	var prefixes [][]byte
+	for i := 0; i < len(hashedKeys); i += step {
+		k := hashedKeys[i]
+		for depth := 0; depth <= min(max(prefetchFlatDepth, 0), len(k)); depth++ {
+			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+			if _, ok := seen[pfx]; !ok {
+				seen[pfx] = struct{}{}
+				prefixes = append(prefixes, []byte(pfx))
+			}
+		}
+	}
+	_, pages, _, _ := p.PrefetchLatest(ctx, kv.CommitmentDomain, prefixes)
+	return pages, len(prefixes)
+}
+
+// dbg split arms: BAL_PREFETCH_NO_TRIE prefetches accounts and storage only, BAL_PREFETCH_TRIE_ONLY the trie only.
+var (
+	prefetchNoTrie   = dbg.EnvBool("BAL_PREFETCH_NO_TRIE", false)
+	prefetchTrieOnly = dbg.EnvBool("BAL_PREFETCH_TRIE_ONLY", false)
+)
+
+// dbg: commitment prefix bytes held at once (flat set, then the largest trie wave).
+var probePrefixBytes, probeWaveBytes atomic.Int64
+
+func prefixesBytes(ps [][]byte) (n int64) {
+	for _, p := range ps {
+		n += int64(cap(p)) + 24 + 48 // slice + seen-map entry
+	}
+	return n
+}
+
+func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
+	started := time.Now()
+	mmap.ProbeEntries.Store(0)
+	mmap.PagesMax.Store(0)
+	probePrefixBytes.Store(0)
+	probeWaveBytes.Store(0)
+	accs := make([][]byte, 0, len(bal))
+	var slots [][]byte
+	for i := range bal {
+		addr := bal[i].Address
+		accs = append(accs, bytes.Clone(addr[:]))
+		for _, sc := range bal[i].StorageChanges {
+			slot := sc.Slot.Value()
+			slots = append(slots, append(bytes.Clone(addr[:]), slot[:]...))
+		}
+		for _, sr := range bal[i].StorageReads {
+			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
+		}
+	}
+	var stats [3]prefetchStats
+	var g errgroup.Group
+	if !prefetchTrieOnly {
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	}
+	hashed := balCommitmentWarmupKeys(bal)
+	if !prefetchNoTrie {
+		g.Go(func() error { return prefetchCommitment(ctx, db, hashed, &stats[2]) })
+	}
+	err := g.Wait()
+	keyBytes := int64(len(accs))*(20+24) + int64(len(slots))*(52+24) + int64(len(hashed))*(128+24)
+	probeBytes := mmap.ProbeEntries.Load() * 48
+	pagesBytes := mmap.PagesMax.Load() * (8 + 8 + 48)
+	set := keyBytes + probePrefixBytes.Load() + probeWaveBytes.Load() + probeBytes + pagesBytes
+	log.Info("[warmBAL] prefetch set", "keys", len(accs)+len(slots), "hashed", len(hashed), "keyMB", keyBytes>>20,
+		"prefixMB", probePrefixBytes.Load()>>20, "waveMB", probeWaveBytes.Load()>>20, "probeEntries", mmap.ProbeEntries.Load(),
+		"probeMB", probeBytes>>20, "pagesMax", mmap.PagesMax.Load(), "pagesMB", pagesBytes>>20, "setMB", set>>20)
+	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
+		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
+		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
+		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
+		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
+}
+
+func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return nil
+	}
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok {
+		return nil
+	}
+	return prefetchKeys(ctx, db, p, domain, keys, stats)
+}
+
+func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *prefetchStats) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return nil
+	}
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok {
+		return nil
+	}
+	compact := make([]byte, 0, 128)
+	if trieGatePermille > 0 && len(hashedKeys) > 0 {
+		cold, probed := sampleTrieColdPages(ctx, p, hashedKeys)
+		skip := probed > 0 && cold*1000 < probed*trieGatePermille
+		log.Info("[warmBAL] trie gate", "keys", len(hashedKeys), "probed", probed, "cold", cold, "permille", trieGatePermille, "skip", skip)
+		if skip {
+			return nil
+		}
+	}
+	if prefetchFlatDepth >= 0 {
+		seen := map[string]struct{}{}
+		var prefixes [][]byte
+		for _, k := range hashedKeys {
+			for depth := 0; depth <= min(prefetchFlatDepth, len(k)); depth++ {
+				pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+				if _, ok := seen[pfx]; !ok {
+					seen[pfx] = struct{}{}
+					prefixes = append(prefixes, []byte(pfx))
+				}
+			}
+		}
+		probePrefixBytes.Store(prefixesBytes(prefixes))
+		if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
+			return err
+		}
+	}
+	var storageKeys [][]byte
+	for _, k := range hashedKeys {
+		if len(k) > storageTrieDepth {
+			storageKeys = append(storageKeys, k)
+		}
+	}
+	// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
+	for _, w := range []struct {
+		keys  [][]byte
+		start int
+	}{{hashedKeys, 0}, {storageKeys, storageTrieDepth}} {
+		if err := walkTriePrefixes(ctx, db, ttx, p, w.keys, w.start, stats); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const storageTrieDepth = 64
+
+func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, p latestPrefetcher, keys [][]byte, start int, stats *prefetchStats) error {
+	compact := make([]byte, 0, 128)
+	active := keys
+	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
+		seen := map[string]struct{}{}
+		prefixes := make([][]byte, 0, len(active))
+		for _, k := range active {
+			if depth > len(k) {
+				continue
+			}
+			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+			if _, ok := seen[pfx]; !ok {
+				seen[pfx] = struct{}{}
+				prefixes = append(prefixes, []byte(pfx))
+			}
+		}
+		mmap.NoteMax(&probeWaveBytes, prefixesBytes(prefixes))
+		if depth > prefetchFlatDepth {
+			if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
+				return err
+			}
+		}
+		t0 := time.Now()
+		next := active
+		if depth >= prefetchFlatDepth {
+			var err error
+			if next, err = keysWithChild(ctx, db, ttx, active, depth); err != nil {
+				return err
+			}
+		}
+		stats.branchChk += time.Since(t0)
+		active = next
+	}
+	return nil
 }
