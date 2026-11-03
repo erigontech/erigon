@@ -341,6 +341,12 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
+// dbg split arms: BAL_PREFETCH_NO_TRIE prefetches accounts and storage only, BAL_PREFETCH_TRIE_ONLY the trie only.
+var (
+	prefetchNoTrie   = dbg.EnvBool("BAL_PREFETCH_NO_TRIE", false)
+	prefetchTrieOnly = dbg.EnvBool("BAL_PREFETCH_TRIE_ONLY", false)
+)
+
 // dbg: commitment prefix bytes held at once (flat set, then the largest trie wave).
 var probePrefixBytes, probeWaveBytes atomic.Int64
 
@@ -372,10 +378,14 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	}
 	var stats [3]prefetchStats
 	var g errgroup.Group
-	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
-	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	if !prefetchTrieOnly {
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	}
 	hashed := balCommitmentWarmupKeys(bal)
-	g.Go(func() error { return prefetchCommitment(ctx, db, hashed, &stats[2]) })
+	if !prefetchNoTrie {
+		g.Go(func() error { return prefetchCommitment(ctx, db, hashed, &stats[2]) })
+	}
 	err := g.Wait()
 	keyBytes := int64(len(accs))*(20+24) + int64(len(slots))*(52+24) + int64(len(hashed))*(128+24)
 	probeBytes := mmap.ProbeEntries.Load() * 48
