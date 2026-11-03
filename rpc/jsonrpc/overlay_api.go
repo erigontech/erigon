@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -460,12 +459,13 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
-	// Signed frame budgets must remain unchanged. Reject before receipt
-	// generation, which can also execute transactions.
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+	// Without overrides, changing gas limits can change the replayed state.
+	// Frame budgets are signed and must stay unchanged even with overrides.
 	for _, txn := range replayTransactions {
-		if api.GasCap != 0 && txn.Type() == types.FrameTxType {
+		if api.GasCap != 0 && (!hasStateOverrides || txn.Type() == types.FrameTxType) {
 			if gasLimit := txn.GetGasLimit(); gasLimit > api.GasCap {
-				return nil, fmt.Errorf("frame transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+				return nil, fmt.Errorf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
 			}
 		}
 	}
@@ -487,9 +487,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	// State overrides can flip an originally failed txn to success, so failed
-	// txns must be re-executed instead of trusting the original receipt.
-	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
 	if hasStateOverrides {
 		if err := stateOverride.Override(statedb, nil, rules); err != nil {
 			return nil, err
@@ -501,10 +498,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
 	storeEVM(evm)
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, err
-	}
 
 	// On the versioned state the overrides took tx index 0; the block's txs follow them.
 	firstTxIndex := statedb.TxnIndex()
@@ -517,40 +510,17 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Error(err.Error())
 			return nil, err
 		}
-		msg.ChangeGas(api.GasCap, api.GasCap)
-
-		receipt := receipts[uint64(idx)]
-		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
-		if receipt.Status == types.ReceiptStatusFailed && !hasStateOverrides {
-			if !txn.IsContractDeploy() && txn.Type() != types.FrameTxType {
-				log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
-				// bump the nonce of the sender
-				sender := vm.AccountRef(msg.From())
-				statedb.SetTxContext(blockNum, firstTxIndex+idx)
-				nonce, err := statedb.GetNonce(sender.Address())
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-				if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
-					return nil, err
-				}
-				continue
-			}
+		if hasStateOverrides {
+			msg.ChangeGas(api.GasCap, api.GasCap)
 		}
 
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		// Canonical frame replay must preserve the fee debit observed by later frames.
-		gasBailout := txn.Type() != types.FrameTxType || hasStateOverrides
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
+		// Without overrides, later transactions must observe canonical fee effects,
+		// even when an earlier transaction failed.
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, hasStateOverrides /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
