@@ -1431,7 +1431,7 @@ func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNu
 		if err != nil {
 			return err
 		}
-		if !swept {
+		if !swept && len(enc) > 0 { // enc is still the base value: a slot created after the base is absent there
 			p.touched[address] = append(p.touched[address], accounts.InternKey(common.BytesToHash(k[length.Addr:])))
 		}
 		if memEnc, _, ok := p.view.sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok {
