@@ -1148,44 +1148,46 @@ func TestFetchSuppressesIdenticalRejectedTransactions(t *testing.T) {
 }
 
 func TestFetchRetriesAfterSameBlockNonceGapCloses(t *testing.T) {
-	ctx := t.Context()
-	pool, db, signed, _ := newFetchTestTransactions(t, 65, 0)
-	hash := signed[0].Hash()
-	body := EncodePooledTransactions66(encodeFetchTestTransactions(t, signed[0]), 1, nil)
-	client, sent, penalties := newFetchTestClient(t)
-	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
-	parses := countFetchTestParses(fetch)
-	block := pool.lastSeenBlock.Load()
-	reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
-	receiveFetchTestMessages(t, fetch, client,
-		func() *sentryproto.InboundMessage { return reply },
-		func() *sentryproto.InboundMessage {
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
-			addFetchTestLocalTransactions(t, pool, signed[1])
-			require.Equal(t, block, pool.lastSeenBlock.Load())
-			return reply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-			require.NoError(t, pool.processRemoteTxns(ctx))
-			require.Contains(t, pool.byHash, string(hash[:]))
-			pending, baseFee, queued := pool.CountContent()
-			require.Equal(t, 1, pending)
-			require.Zero(t, baseFee)
-			require.Equal(t, 1, queued)
-			return reply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Empty(t, pool.unprocessedRemoteTxns.Txns)
-			return nil
-		},
-	)
-	require.Equal(t, int64(2), parses())
-	require.Empty(t, sent)
-	require.Empty(t, penalties)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		pool, db, signed, _ := newFetchTestTransactions(t, 65, 0)
+		hash := signed[0].Hash()
+		body := EncodePooledTransactions66(encodeFetchTestTransactions(t, signed[0]), 1, nil)
+		client, sent, penalties := newFetchTestClient(t)
+		var wg sync.WaitGroup
+		fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+		parses := countFetchTestParses(fetch)
+		block := pool.lastSeenBlock.Load()
+		reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
+		receiveFetchTestMessages(t, fetch, client,
+			func() *sentryproto.InboundMessage { return reply },
+			func() *sentryproto.InboundMessage {
+				reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+				addFetchTestLocalTransactions(t, pool, signed[1])
+				require.Equal(t, block, pool.lastSeenBlock.Load())
+				return reply
+			},
+			func() *sentryproto.InboundMessage {
+				require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+				require.NoError(t, pool.processRemoteTxns(ctx))
+				require.Contains(t, pool.byHash, string(hash[:]))
+				pending, baseFee, queued := pool.CountContent()
+				require.Equal(t, 1, pending)
+				require.Zero(t, baseFee)
+				require.Equal(t, 1, queued)
+				return reply
+			},
+			func() *sentryproto.InboundMessage {
+				require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+				return nil
+			},
+		)
+		require.Equal(t, int64(2), parses())
+		require.Empty(t, sent)
+		require.Empty(t, penalties)
+	})
 }
 
 func TestFetchHonestPeerAfterBadAnnouncementInSameBatch(t *testing.T) {
