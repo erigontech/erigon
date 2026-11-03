@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -59,6 +60,37 @@ func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 	cc.clearTouched()
 	cc.accumulateTouched(writes(3), nil)
 	require.ElementsMatch(t, want, got, "the next block prefetches the key again")
+}
+
+// The BAL compute-ahead of a batch's first block skips the branch prefetch, as the
+// BAL blocks folded from tx results do.
+func TestComputeAhead_FirstBlockSkipsBranchPrefetch(t *testing.T) {
+	defer func(balDriven, ignoreBAL, readAhead bool, workers int) {
+		dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers = balDriven, ignoreBAL, readAhead, workers
+	}(dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers)
+	dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers = true, false, true, 2
+
+	ctx := context.Background()
+	db, _, doms := setupStepTest(t)
+	out := make(chan commitmentResult, 4)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, make(chan applyResult, 4), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	prefetch := cc.prefetchFn
+	require.NotNil(t, prefetch)
+	called, started := false, false
+	cc.prefetchFn = func(plainKey []byte) {
+		prefetch(plainKey)
+		called = true
+		started = started || cc.prefetch != nil
+	}
+	bal := types.BlockAccessList{{Address: [20]byte{19: 1}, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: 11, lastTxNum: 12, stateRoot: common.Hash{0xde, 0xad}, bal: bal})
+	require.True(t, called, "precondition: the compute-ahead fold reaches the prefetch hook")
+	require.False(t, started)
 }
 
 func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {

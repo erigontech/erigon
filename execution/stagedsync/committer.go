@@ -658,6 +658,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	cc.clearTouched()
+	cc.balBlock = true
 	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex), nil)
 	err := cc.emitTouched(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
 	cc.clearTouched()
