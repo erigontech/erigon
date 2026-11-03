@@ -278,6 +278,28 @@ func (r *countingAccountReader) ReadAccountData(addr accounts.Address) (*account
 	return r.mapStateReader.ReadAccountData(addr)
 }
 
+// A failed first-touch base read fails the fold, even when the fold's own base reads cleanly.
+func TestEmitTouched_FirstTouchBaseReadErrorFailsTheFold(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	ver := state.Version{TxIndex: txIdx}
+	addr := accounts.InternAddress([20]byte{0xf2})
+	ws := newWS().bal(addr, ver, *uint256.NewInt(5)).build()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true)
+	boom := errors.New("first-touch read failed")
+	failing := &failingAccountReader{mapStateReader: newMapStateReader(), err: boom}
+
+	cc := &commitmentCalculator{updates: newTestUpdates()}
+	cc.setBlockBase(vm, failing)
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), failing)
+
+	require.ErrorIs(t, cc.emitTouched(cc.foldView(vm, txIdx+1, newMapStateReader()), newTestUpdates()), boom)
+	cc.clearTouched()
+	require.NoError(t, cc.emitTouched(cc.foldView(vm, txIdx+1, newMapStateReader()), newTestUpdates()))
+}
+
 // TestEmitTouched_FoldReusesFirstTouchBaseRead pins that the fold composes from the base
 // account read when the account was first touched, instead of reading the base again at
 // block end, and that a fold over another block's version map reads its own base.

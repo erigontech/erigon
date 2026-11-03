@@ -37,6 +37,7 @@ func (cc *commitmentCalculator) clearTouched() {
 	clear(cc.touchedAccounts)
 	clear(cc.touchedStorage)
 	clear(cc.destructed)
+	cc.baseErr = nil
 }
 
 // accumulateTouched folds one write-set view's changed-key set into the touched union.
@@ -89,6 +90,8 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	if base != nil {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
+		} else if cc.baseErr == nil {
+			cc.baseErr = err
 		}
 	}
 	if cc.prefetchFn != nil {
@@ -102,6 +105,9 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 // (and subtree), a present one writes its full account; a storage slot cleared to zero
 // removes its leaf, a non-zero one writes it.
 func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates *commitment.Updates) error {
+	if cc.baseErr != nil {
+		return cc.baseErr
+	}
 	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update
