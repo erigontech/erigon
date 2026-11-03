@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -65,7 +66,7 @@ type frameValidationBackend struct {
 	calls          []common.Hash
 	deadlines      []time.Time
 	onValidate     func()
-	dependencies   [][]byte
+	dependencies   []*typesproto.H160
 	creationNonces []*remoteproto.FrameCreationNonce
 }
 
@@ -84,18 +85,22 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 		return nil, b.err
 	}
 	var expiry uint64
-	dependencies := append([][]byte(nil), b.dependencies...)
+	dependencies := append([]*typesproto.H160(nil), b.dependencies...)
 	if frame, ok := tx.(*types.FrameTransaction); ok {
 		if !frame.UsesLegacyNonce() {
-			dependencies = append(dependencies, types.FrameNonceManager[:])
+			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameNonceManager))
 		}
 		if first := &frame.Frames[0]; first.IsExpiryVerifier() {
 			expiry = binary.BigEndian.Uint64(first.Data)
-			dependencies = append(dependencies, types.FrameExpiryVerifier[:])
+			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier))
 		}
 	}
 	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetFeeCap())
-	return &remoteproto.FrameValidationReply{Valid: b.valid, Payer: b.payer[:], PayerBalance: uint256.NewInt(b.balance).Bytes(), MaxCost: cost.Bytes(), Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces}, nil
+	return &remoteproto.FrameValidationReply{
+		Valid: b.valid, Payer: gointerfaces.ConvertAddressToH160(b.payer),
+		PayerBalance: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(b.balance)), MaxCost: gointerfaces.ConvertUint256IntToH256(cost),
+		Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces,
+	}, nil
 }
 
 func framePoolSlot(t *testing.T, sender common.Address, tip, fee uint64, keys ...uint256.Int) *TxnSlot {
@@ -1089,9 +1094,9 @@ func TestFramePoolUnwindPooledBlobPreservesReservation(t *testing.T) {
 		if validationErr != nil {
 			return nil, validationErr
 		}
-		cost := new(uint256.Int).SetBytes(reply.MaxCost)
+		cost := gointerfaces.ConvertH256ToUint256Int(reply.MaxCost)
 		cost.AddUint64(cost, frame.Txn.GetBlobGas()*pool.pendingBlobFee.Load())
-		reply.MaxCost = cost.Bytes()
+		reply.MaxCost = gointerfaces.ConvertUint256IntToH256(cost)
 		return reply, nil
 	}}
 	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -2218,8 +2223,8 @@ func TestFramePoolCreationNonceChanges(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			factory := common.Address{2}
 			backend := pool.ethBackend.(*frameValidationBackend)
-			backend.dependencies = [][]byte{factory[:]}
-			backend.creationNonces = []*remoteproto.FrameCreationNonce{{Address: factory[:], MinNonce: tc.minNonce, MaxNonce: tc.maxNonce}}
+			backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(factory)}
+			backend.creationNonces = []*remoteproto.FrameCreationNonce{{Address: gointerfaces.ConvertAddressToH160(factory), MinNonce: tc.minNonce, MaxNonce: tc.maxNonce}}
 			tx := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 				Frames: []types.Frame{

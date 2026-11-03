@@ -167,7 +167,7 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 					}
 					require.Equal(t, valid, result.Valid)
 					if tt.tx.SenderAddress == withdrawn && atHead {
-						require.Equal(t, uint256.NewInt(1_000_000_000_000_000_000).Bytes(), result.PayerBalance)
+						require.Equal(t, uint256.NewInt(1_000_000_000_000_000_000), gointerfaces.ConvertH256ToUint256Int(result.PayerBalance))
 					}
 				})
 			}
@@ -221,7 +221,7 @@ func TestFrameValidationCreationNonces(t *testing.T) {
 			initcode := program.New().ReturnData(program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes()).Bytes()
 			sender := types.CreateAddress(factory, 1)
 			code := program.New().Mstore(initcode, 0)
-			want := &remoteproto.FrameCreationNonce{Address: factory[:], MinNonce: 1, MaxNonce: 1}
+			want := &remoteproto.FrameCreationNonce{Address: gointerfaces.ConvertAddressToH160(factory), MinNonce: 1, MaxNonce: 1}
 			if creation == vm.CREATE2 {
 				sender = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
 				code.Push0()

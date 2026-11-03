@@ -309,25 +309,28 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		p.lock.Unlock()
 		return nil, nil
 	}
-	if len(reply.Payer) != 20 || len(reply.MaxCost) > 32 || len(reply.PayerBalance) > 32 {
+	if reply.Payer.GetHi() == nil ||
+		reply.MaxCost.GetHi() == nil || reply.MaxCost.GetLo() == nil ||
+		reply.PayerBalance.GetHi() == nil || reply.PayerBalance.GetLo() == nil {
 		return nil, errors.New("invalid frame validation reply")
 	}
-	v := &protocol.FrameValidation{Payer: common.BytesToAddress(reply.Payer), Paymaster: reply.Paymaster, Deadline: reply.Deadline}
-	v.MaxCost.SetBytes(reply.MaxCost)
-	v.PayerBalance.SetBytes(reply.PayerBalance)
+	v := &protocol.FrameValidation{
+		Payer: gointerfaces.ConvertH160toAddress(reply.Payer), Paymaster: reply.Paymaster, Deadline: reply.Deadline,
+		MaxCost: *gointerfaces.ConvertH256ToUint256Int(reply.MaxCost), PayerBalance: *gointerfaces.ConvertH256ToUint256Int(reply.PayerBalance),
+	}
 	v.Dependencies = make([]common.Address, 0, len(reply.Dependencies)+2)
 	v.Dependencies = append(v.Dependencies, txn.Txn.(*types.FrameTransaction).SenderAddress, v.Payer)
 	for _, dependency := range reply.Dependencies {
-		if len(dependency) != 20 {
+		if dependency.GetHi() == nil {
 			return nil, errors.New("invalid frame validation dependency")
 		}
-		v.Dependencies = append(v.Dependencies, common.BytesToAddress(dependency))
+		v.Dependencies = append(v.Dependencies, gointerfaces.ConvertH160toAddress(dependency))
 	}
 	for _, dependency := range reply.CreationNonces {
-		if dependency == nil || len(dependency.Address) != 20 || dependency.MinNonce > dependency.MaxNonce {
+		if dependency == nil || dependency.Address.GetHi() == nil || dependency.MinNonce > dependency.MaxNonce {
 			return nil, errors.New("invalid frame creation nonce dependency")
 		}
-		address := common.BytesToAddress(dependency.Address)
+		address := gointerfaces.ConvertH160toAddress(dependency.Address)
 		v.Dependencies = append(v.Dependencies, address)
 		v.CreationNonces = append(v.CreationNonces, protocol.FrameCreationNonce{
 			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,

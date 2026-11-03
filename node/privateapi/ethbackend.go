@@ -609,18 +609,19 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 		}
 		return &remoteproto.FrameValidationReply{}, nil
 	}
-	dependencies := make([][]byte, len(result.Dependencies))
+	dependencies := make([]*typesproto.H160, len(result.Dependencies))
 	for i := range result.Dependencies {
-		dependencies[i] = result.Dependencies[i][:]
+		dependencies[i] = gointerfaces.ConvertAddressToH160(result.Dependencies[i])
 	}
 	creationNonces := make([]*remoteproto.FrameCreationNonce, len(result.CreationNonces))
 	for i, dependency := range result.CreationNonces {
 		creationNonces[i] = &remoteproto.FrameCreationNonce{
-			Address: dependency.Address[:], MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+			Address: gointerfaces.ConvertAddressToH160(dependency.Address), MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
 		}
 	}
 	return &remoteproto.FrameValidationReply{
-		Valid: true, Payer: result.Payer[:], MaxCost: result.MaxCost.Bytes(), PayerBalance: result.PayerBalance.Bytes(),
+		Valid: true, Payer: gointerfaces.ConvertAddressToH160(result.Payer),
+		MaxCost: gointerfaces.ConvertUint256IntToH256(&result.MaxCost), PayerBalance: gointerfaces.ConvertUint256IntToH256(&result.PayerBalance),
 		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies, CreationNonces: creationNonces,
 	}, nil
 }
