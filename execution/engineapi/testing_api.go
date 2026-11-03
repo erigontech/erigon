@@ -56,7 +56,7 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → build a block containing exactly these transactions (strict nonce check)
+	//               [...] → build a block containing exactly these transactions (strict account nonce check)
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
 
 	// CommitBlockV1 builds a block on top of the current canonical head, inserts it into the
@@ -84,7 +84,7 @@ func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB)
 
 // decodeTxnProvider decodes raw transactions into a TxnProvider.
 // Returns nil if transactions is nil (mempool path).
-// Opens a single temporal DB transaction for all nonce lookups to avoid per-sender overhead.
+// Opens a single temporal DB transaction for all account nonce lookups to avoid per-sender overhead.
 func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
 	if transactions == nil {
 		return nil, nil
@@ -118,6 +118,11 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
 		}
 		tx.SetSender(sender)
+		decoded = append(decoded, tx)
+		// Execution checks keyed sequences against nonce-manager storage, independently of account nonces.
+		if frame, ok := tx.(*types.FrameTransaction); ok && !frame.UsesLegacyNonce() {
+			continue
+		}
 		if _, seen := expectedNonce[sender]; !seen {
 			var stateNonce uint64
 			if reader != nil {
@@ -140,7 +145,6 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
 		}
 		expectedNonce[sender]++
-		decoded = append(decoded, tx)
 	}
 	return &staticTxnProvider{txns: decoded}, nil
 }

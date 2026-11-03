@@ -1079,6 +1079,60 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 	})
 }
 
+func TestDecodeTxnProviderFrameNonces(t *testing.T) {
+	t.Parallel()
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	frame := func(nonceKey, seq uint64) hexutil.Bytes {
+		tx := &types.FrameTransaction{
+			ChainID: *cfg.ChainID, SenderAddress: sender, Nonce: seq,
+			NonceKeys: []uint256.Int{*uint256.NewInt(nonceKey)},
+			Frames:    []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+			Fees:      types.FrameFees{FeeCap: *uint256.NewInt(1_000_000_000)},
+		}
+		var encoded bytes.Buffer
+		require.NoError(t, tx.MarshalBinary(&encoded))
+		return encoded.Bytes()
+	}
+	ordinary0 := makeSignedRawTx(t, key, cfg, 0, 101, 1001)
+	ordinary1 := makeSignedRawTx(t, key, cfg, 1, 101, 1001)
+	for _, tc := range []struct {
+		name    string
+		txs     []hexutil.Bytes
+		wantErr string
+	}{
+		{name: "keyed sequence above account nonce", txs: []hexutil.Bytes{frame(1, 7)}},
+		{name: "keyed sequence below account nonce", txs: []hexutil.Bytes{ordinary0, frame(1, 0), ordinary1}},
+		{name: "keyed frame preserves account nonce", txs: []hexutil.Bytes{frame(1, 0), ordinary0}},
+		{name: "independent keys", txs: []hexutil.Bytes{frame(1, 0), frame(2, 0), ordinary0}},
+		{name: "legacy frame consumes account nonce", txs: []hexutil.Bytes{frame(0, 0), ordinary1}},
+		{name: "legacy frame nonce too high", txs: []hexutil.Bytes{frame(0, 1)}, wantErr: "nonce too high"},
+		{name: "legacy frame nonce too low", txs: []hexutil.Bytes{ordinary0, frame(0, 0)}, wantErr: "nonce too low"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := newTestingAPI(cfg, &stubExecutionModule{}).(*testingImpl)
+			provider, err := api.decodeTxnProvider(t.Context(), &tc.txs, 101, 1001)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.Nil(t, provider)
+				return
+			}
+			require.NoError(t, err)
+			provided, err := provider.ProvideTxns(t.Context())
+			require.NoError(t, err)
+			require.Len(t, provided, len(tc.txs))
+			for i, tx := range provided {
+				var encoded bytes.Buffer
+				require.NoError(t, tx.MarshalBinary(&encoded))
+				require.Equal(t, []byte(tc.txs[i]), encoded.Bytes())
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Multi-sender nonce tracking test
 // ---------------------------------------------------------------------------
