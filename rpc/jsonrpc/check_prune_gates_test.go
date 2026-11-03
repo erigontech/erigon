@@ -819,24 +819,31 @@ func TestIndexedHistoryGateWithSnapshotMappings(t *testing.T) {
 	for _, number := range []uint64{historyBlock - 1, historyBlock} {
 		require.NoError(t, rwTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(number)))
 	}
-	require.NoError(t, rwTx.Commit())
 	block := c.Blocks[historyBlock-1]
+	rawdb.DeleteHeader(rwTx, block.Hash(), historyBlock)
+	require.NoError(t, rwTx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(historyBlock)))
+	require.NoError(t, rwTx.Commit())
 	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	remoteDB, _ := remoteHistoryDB(t, m.DB)
 	for _, reader := range []struct {
 		name string
 		read dbservices.FullBlockReader
+		db   kv.TemporalRoDB
 	}{
-		{"local", m.BlockReader},
-		{"remote", freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))},
+		{"local", m.BlockReader, m.DB},
+		{"remote", freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn)), remoteDB},
 	} {
 		t.Run(reader.name, func(t *testing.T) {
 			api := newDebugApiForTest(m)
+			api._blockReader = reader.read
 			api._txNumReader = reader.read.TxnumReader()
-			api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: minTxNum + 2}
+			api.db = historyFloorDB{TemporalRoDB: reader.db, startTxNum: minTxNum + 2}
 			account, err := api.AccountAt(ctx, block.Hash(), 1, testAddr)
 			require.NoError(t, err, "snapshot mappings must admit a retained position without MDBX mappings")
 			require.NotNil(t, account)
 			require.EqualValues(t, 1, account.Nonce)
+			_, err = api.StorageRangeAt(ctx, block.Hash(), 1, testAddr, nil, 10)
+			require.NoError(t, err)
 			_, err = api.AccountAt(ctx, block.Hash(), 0, testAddr)
 			require.ErrorIs(t, err, state.ErrPruned)
 		})
