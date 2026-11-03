@@ -318,6 +318,65 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 	}
 }
 
+func TestIndexedStateReadRequiresTransactionBounds(t *testing.T) {
+	t.Parallel()
+	for _, mapping := range []struct {
+		name   string
+		offset uint64
+	}{
+		{"current", 0},
+		{"preceding", 1},
+	} {
+		t.Run(mapping.name, func(t *testing.T) {
+			ctx := t.Context()
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+			api, ref := apis.debug, chainInfo.old
+			block := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
+			cases := []struct {
+				name string
+				call func() (any, error)
+			}{
+				{"debug_accountAt", func() (any, error) {
+					return api.AccountAt(ctx, ref.hash, 0, testAddr)
+				}},
+				{"debug_storageRangeAt", func() (any, error) {
+					return api.StorageRangeAt(ctx, ref.hash, 0, testAddr, nil, 1)
+				}},
+				{"debug_traceCall", func() (any, error) {
+					return streamedResult(func(stream *jsonstream.Stream) error {
+						return api.TraceCall(ctx, pruneGatingCallArgs(), &block, &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint)}, stream)
+					})
+				}},
+				{"debug_traceCallMany", func() (any, error) {
+					bundles, simulate := pruneGatingBundle(ref.num)
+					simulate.TransactionIndex = new(int)
+					return streamedResult(func(stream *jsonstream.Stream) error {
+						return api.TraceCallMany(ctx, bundles, simulate, nil, stream)
+					})
+				}},
+			}
+			for _, tc := range cases {
+				_, err := tc.call()
+				require.NoError(t, err, "%s must succeed with complete mappings", tc.name)
+			}
+
+			require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+				return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(ref.num-mapping.offset))
+			}))
+			require.NoError(t, apis.rwDB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				return api.checkPruneTransactionHistoryAtIndex(ctx, tx, ref.num, 0)
+			}), "the history gate must still admit this position without the bounds check")
+
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					_, err := tc.call()
+					require.ErrorIs(t, err, state.ErrPruned)
+				})
+			}
+		})
+	}
+}
+
 func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
