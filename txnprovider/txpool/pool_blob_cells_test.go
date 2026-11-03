@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -118,4 +119,91 @@ func TestValidationCachesNoCellsForRejectedTxn(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow}, reasons)
 	require.Zero(t, pool.blobs.cells.Len(), "cells cached for a txn the pool rejected")
+}
+
+func TestUnwoundBlobTxnDoesNotKeepValidationCells(t *testing.T) {
+	ctx, pool, slot, txns := newPoolWithBlobTxn(t, "Amsterdam")
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee:  1,
+		BlockGasLimit:        30_000_000,
+		PendingBlobFeePerGas: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, txns, TxnSlots{}))
+
+	pooled := pool.byHash[string(slot.IDHash[:])]
+	require.NotNil(t, pooled)
+	for i, bundle := range pooled.TxnSlot.BlobBundles {
+		require.Nil(t, bundle.Cells, "pooled txn keeps cells for blob %d", i)
+	}
+}
+
+func TestAmsterdamValidationDoesNotStageCells(t *testing.T) {
+	ctx, pool, template, _ := newPoolWithBlobTxn(t, "Amsterdam")
+	sender := common.Address{1}
+	var txns TxnSlots
+	for i := 0; i <= blobCellsCacheSize; i++ {
+		txn := *template
+		txn.IDHash[0] = byte(i)
+		txn.IDHash[1] = byte(i >> 8)
+		txn.BlobBundles = append([]PoolBlobBundle(nil), template.BlobBundles...)
+		txns.Append(&txn, sender[:], true)
+	}
+
+	coreDB, cache := pool.chainDB()
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer coreTx.Rollback()
+	cacheView, err := cache.View(ctx, coreTx)
+	require.NoError(t, err)
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	require.NoError(t, pool.senders.registerNewSenders(&txns, pool.logger))
+	_, goodTxns, _, err := pool.validateTxns(&txns, cacheView, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, goodTxns.Txns, blobCellsCacheSize+1)
+	for _, txn := range goodTxns.Txns {
+		for i, bundle := range txn.BlobBundles {
+			require.Nil(t, bundle.Cells, "validation staged cells for blob %d", i)
+		}
+	}
+}
+
+func TestFromDBAmsterdamBlobCellsStayBounded(t *testing.T) {
+	ctx, pool, template, _ := newPoolWithBlobTxn(t, "Amsterdam")
+	raw := makeWrappedBlobTxnRlpWithCellProofs(t, &pool.chainID, 2)
+	sender := common.Address{1}
+	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+		for i := 0; i <= blobCellsCacheSize; i++ {
+			key := make([]byte, 32)
+			key[0] = byte(i)
+			key[1] = byte(i >> 8)
+			if err := tx.Put(kv.PoolTransaction, key, append(sender[:], raw...)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		return pool.fromDB(ctx, tx)
+	}))
+
+	require.LessOrEqual(t, pool.blobs.cells.Len(), blobCellsCacheSize)
+	pool.all.ascendAll(func(mt *metaTxn) bool {
+		for i, bundle := range mt.TxnSlot.BlobBundles {
+			require.Nil(t, bundle.Cells, "restored txn keeps cells for blob %d", i)
+		}
+		return true
+	})
+	senderID, ok := pool.senders.getID(sender)
+	require.True(t, ok)
+	restored := pool.all.get(senderID, template.Nonce)
+	require.NotNil(t, restored)
 }

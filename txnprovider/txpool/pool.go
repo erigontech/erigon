@@ -102,6 +102,15 @@ type remoteSource struct {
 	sentry sentryproto.SentryClient
 }
 
+type blobCells map[common.Hash]*[goethkzg.CellsPerExtBlob]*goethkzg.Cell
+
+func (c blobCells) add(hash common.Hash, cells *[goethkzg.CellsPerExtBlob]*goethkzg.Cell) {
+	if _, ok := c[hash]; !ok && len(c) >= blobCellsCacheSize {
+		return
+	}
+	c[hash] = cells
+}
+
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
 //
@@ -407,7 +416,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	for i, txn := range unwindTxns.Txns {
 		unwindTxns.IsLocal[i] = p.isLocalLRU.Contains(string(txn.IDHash[:]))
 	}
-	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
+	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -434,7 +443,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	var announcements Announcements
-	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
+	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, cells, /* newTxns */
 		stateChanges.BlockGasLimit, p.logger)
 	if err != nil {
 		return err
@@ -993,6 +1002,10 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
+	return p.validateTxWithCells(txn, isLocal, stateCache, nil)
+}
+
+func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells) (txpoolcfg.DiscardReason, error) {
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1150,12 +1163,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 	}
 	if txn.TxType() == BlobTxnType {
-		return p.validateBlobTxn(txn, isLocal), nil
+		return p.validateBlobTxn(txn, isLocal, cells), nil
 	}
 	return txpoolcfg.Success, nil
 }
 
-func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
+func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCells) txpoolcfg.DiscardReason {
 	if !p.isCancun() {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -1218,9 +1231,9 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		if err != nil {
 			return txpoolcfg.UnmatchedBlobTxExt
 		}
-		if p.isAmsterdam() {
-			for i := range txn.BlobBundles {
-				txn.BlobBundles[i].Cells = cells[i]
+		if p.isAmsterdam() && cellsByHash != nil {
+			for i, h := range blobHashes {
+				cellsByHash.add(h, cells[i])
 			}
 		}
 	} else {
@@ -1438,7 +1451,7 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &setCode, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, err = p.validateTxns(&setCode, view, nil, nil)
+		precheckReasons, goodTxns, _, err = p.validateTxns(&setCode, view, nil, nil)
 		return err
 	})
 	if err != nil {
@@ -1459,15 +1472,16 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 // A remote KZG failure skips later txns from that peer; with nil sources,
 // it skips all later remote txns. Skipped txns keep NotSet and are not returned.
 // Non-nil sources must be index-aligned with txns.
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {
 		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
 	}
 
 	if err := txns.Valid(); err != nil {
-		return reasons, goodTxns, err
+		return reasons, goodTxns, cells, err
 	}
+	cells = make(blobCells)
 
 	skipAllRemote := false
 	var kzgOffenders [][64]byte
@@ -1485,14 +1499,14 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
 			continue
 		}
-		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
+		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
 				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
 				reasons[i] = reason
 				continue
 			}
-			return reasons, goodTxns, err
+			return reasons, goodTxns, cells, err
 		}
 		if reason == txpoolcfg.Success {
 			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
@@ -1512,7 +1526,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 			}
 		}
 	}
-	return reasons, goodTxns, nil
+	return reasons, goodTxns, cells, nil
 }
 
 // punishSpammer drops high-nonce transactions without breaking local nonce chains.
@@ -1565,7 +1579,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 		if fromRemoteQueue {
 			sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
 		}
-		validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
+		validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
 		if err != nil {
 			return err
 		}
@@ -1574,7 +1588,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 			p.kickKZGOffenders(ctx, reasons)
 		}
 
-		announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
+		announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns, cells,
 			p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 		if err != nil {
 			return err
@@ -1616,7 +1630,7 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 }
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
-	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1644,7 +1658,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
-		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
@@ -1677,7 +1691,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, blockGasLimit uint64, logger log.Logger,
+	senders *sendersBatch, newTxns TxnSlots, cells blobCells, blockGasLimit uint64, logger log.Logger,
 ) (Announcements, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1697,7 +1711,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
@@ -1809,7 +1823,7 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 	}
 }
 
-func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.DiscardReason {
+func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce)
 	if found != nil {
@@ -1921,8 +1935,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + uint64(len(blobHashes)))
 		for i, b := range blobHashes {
-			p.blobs.put(b, mt.TxnSlot.IDHash, mt.TxnSlot.BlobBundles[i])
-			mt.TxnSlot.BlobBundles[i].Cells = nil
+			bundle := mt.TxnSlot.BlobBundles[i]
+			bundle.Cells = cells[b]
+			p.blobs.put(b, mt.TxnSlot.IDHash, bundle)
 		}
 	}
 
@@ -2839,6 +2854,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	p.blockGasLimit.Store(blockGasLimit)
 
 	txns := TxnSlots{}
+	cells := make(blobCells)
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
 
@@ -2867,7 +2883,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
-		reason, err := p.validateTx(txn, isLocalTx, cacheView)
+		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells)
 		if err != nil {
 			return err
 		}
@@ -2886,7 +2902,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, txns,
+	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, txns, cells,
 		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}
