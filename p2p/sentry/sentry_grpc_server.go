@@ -481,9 +481,9 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
-			if !headerRequestsLimiter.Allow() {
+			if err := headerRequestsLimiter.Wait(ctx); err != nil {
 				msg.Discard()
-				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: GetBlockHeaders rate limit exceeded")
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, err, "sentry.runPeer: waiting for header request allowance")
 			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
