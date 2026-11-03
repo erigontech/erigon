@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -886,6 +887,104 @@ func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newGetBlockHeadersReadWriter(t *testing.T, requests int) *MockMsgReadWriter {
+	t.Helper()
+	rw := NewMockMsgReadWriter()
+	for requestID := range requests {
+		require.NoError(t, p2p.Send(rw, eth.GetBlockHeadersMsg, &eth.GetBlockHeadersPacket66{
+			RequestId: uint64(requestID),
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Origin:  eth.HashOrNumber{Number: 1024},
+				Amount:  eth.MaxHeadersServe,
+				Reverse: true,
+			},
+		}))
+	}
+	rw.WriteToReadBuffer(rw.ReadAllWritten())
+	return rw
+}
+
+func TestRunPeer_GetBlockHeadersFloodKicksPeer(t *testing.T) {
+	for _, version := range []uint{direct.ETH68, direct.ETH69, direct.ETH70, direct.ETH71} {
+		for _, subscribers := range []bool{true, false} {
+			t.Run(fmt.Sprintf("eth%d/subscribers=%t", version, subscribers), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					peerInfo, peerID := newTestPeerInfoWithEth(t)
+					rw := newGetBlockHeadersReadWriter(t, 40)
+					forwarded := 0
+					peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: version},
+						rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
+						func(sentryproto.MessageId) bool { return subscribers }, log.Root())
+					require.NotNil(t, peerErr)
+					require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+					require.Equal(t, p2p.DiscReason(p2p.DiscSubprotocolError), peerErr.Reason)
+					if subscribers {
+						require.Equal(t, 30, forwarded)
+					} else {
+						require.Zero(t, forwarded)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestRunPeer_GetBlockHeadersRateLimitRefills(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		peerInfo, peerID := newTestPeerInfoWithEth(t)
+		rw := newGetBlockHeadersReadWriter(t, 32)
+		forwarded := 0
+		send := func(sentryproto.MessageId, [64]byte, []byte) {
+			forwarded++
+			if forwarded == 30 {
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+		peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH69},
+			rw, peerInfo, send, func(sentryproto.MessageId) bool { return true }, log.Root())
+		require.NotNil(t, peerErr)
+		require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+		require.Equal(t, 31, forwarded)
+	})
+}
+
+func TestRunPeer_GetBlockHeadersFloodPreservesOtherPeerRequests(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ss := &GrpcServer{}
+		server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+		defer server.Close()
+		defer ss.addMessagesStream([]sentryproto.MessageId{sentryproto.MessageId_GET_BLOCK_HEADERS_66}, server)()
+
+		for i, requests := range []int{1, libsentry.MessagesQueueSize, 1} {
+			peerInfo, peerID := newTestPeerInfoWithEth(t)
+			peerID[0] = byte(i + 1)
+			rw := newGetBlockHeadersReadWriter(t, requests)
+			peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH69},
+				rw, peerInfo, ss.send, ss.hasSubscribers, log.Root())
+			require.NotNil(t, peerErr)
+			if i == 1 {
+				assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+			} else {
+				require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code)
+				require.ErrorIs(t, peerErr.Err, io.EOF)
+			}
+		}
+		server.Close()
+		var peers [][64]byte
+		for {
+			message, err := client.Recv()
+			if err != nil {
+				require.ErrorIs(t, err, io.EOF)
+				break
+			}
+			peers = append(peers, gointerfaces.ConvertH512ToHash(message.PeerId))
+		}
+		require.Equal(t, 32, len(peers))
+		require.Equal(t, [64]byte{1}, peers[0])
+		require.Equal(t, [64]byte{3}, peers[len(peers)-1])
+	})
 }
 
 func TestSentryServer_BoundsQueuedPayloadBytes(t *testing.T) {
