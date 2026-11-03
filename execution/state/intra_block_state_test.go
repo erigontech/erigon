@@ -602,6 +602,38 @@ func TestValStatus_RevertRestamps(t *testing.T) {
 	require.Equal(t, ValueCreated, vw.valStatus)
 }
 
+// TestValStatus_AccountPathsNeverUnchanged pins the structural reason storage-read
+// validation stands on version without a value compare: storageValueStatus stamps
+// ValueUnchanged on a net-zero storage write, but balance and nonce writes never carry it,
+// so there is no account-path exemption for validation to lean on — a version-equal account
+// read is value-equal by construction.
+func TestValStatus_AccountPathsNeverUnchanged(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
+	s.txIndex = 1
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+
+	// Balance 0→100→0 nets to the committed origin — the storage analog is ValueUnchanged.
+	require.NoError(t, s.SetBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified))
+	require.NoError(t, s.SetBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
+	bw, ok := s.VersionedWrites().GetBalance(addr)
+	require.True(t, ok)
+	require.NotEqual(t, ValueUnchanged, bw.valStatus, "a net-zero balance write is never ValueUnchanged")
+
+	// Nonce 0→1→0 likewise nets to the origin and is never ValueUnchanged.
+	require.NoError(t, s.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, s.SetNonce(addr, 0, tracing.NonceChangeUnspecified))
+	nw, ok := s.VersionedWrites().GetNonce(addr)
+	require.True(t, ok)
+	require.NotEqual(t, ValueUnchanged, nw.valStatus, "a net-zero nonce write is never ValueUnchanged")
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
@@ -1839,4 +1871,56 @@ func TestWriteFlushedToMatchesFinalizeTxPreservedBalance(t *testing.T) {
 	require.Equal(t, want.storage, got.storage)
 	require.NotNil(t, got.accounts[c], "the balance survives")
 	require.Equal(t, *uint256.NewInt(50), got.accounts[c].Balance)
+}
+
+// downRevClearingWriter clears an account's code and storage on an incarnation decrease, as Writer does.
+type downRevClearingWriter struct{ *finalStateWriter }
+
+func (w downRevClearingWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	if original.Incarnation > account.Incarnation {
+		delete(w.code, address)
+		delete(w.storage, address)
+	}
+	return w.finalStateWriter.UpdateAccountData(address, original, account)
+}
+
+// A recreate below the original incarnation keeps the new code and storage on both paths: the
+// account write that clears the old ones must land first.
+func TestWriteFlushedToMatchesFinalizeTxIncarnationDecrease(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.Address{3})
+	slot := accounts.InternKey(common.Hash{1})
+	emptied := acctBal(0)
+	emptied.Incarnation = 2
+	reader := &fakeBaseReader{accts: map[accounts.Address]*accounts.Account{c: emptied}}
+	rules := &chain.Rules{IsSpuriousDragon: true, IsByzantium: true}
+	run := func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.CreateAccount(c, true))
+		require.NoError(t, ibs.SetNonce(c, 1, tracing.NonceChangeContractCreator))
+		require.NoError(t, ibs.SetCode(c, []byte{0x60, 0x00}, tracing.CodeChangeContractCreation))
+		require.NoError(t, ibs.SetState(c, slot, *uint256.NewInt(5)))
+	}
+
+	materialized := New(reader)
+	defer materialized.Close()
+	materialized.SetTxContext(1, 0)
+	run(materialized)
+	want := downRevClearingWriter{newFinalStateWriter()}
+	require.NoError(t, materialized.FinalizeTx(rules, want))
+
+	versioned := NewWithVersionMap(reader, NewVersionMap(nil))
+	defer versioned.Close()
+	versioned.SetTxContext(1, 0)
+	run(versioned)
+	writes, err := versioned.FinalizedWrites(rules)
+	require.NoError(t, err)
+	versioned.FlushWritesToVersionMap(writes)
+	got := downRevClearingWriter{newFinalStateWriter()}
+	require.NoError(t, versioned.WriteFlushedTo(writes, got))
+
+	require.Less(t, got.accounts[c].Incarnation, emptied.Incarnation, "the scenario lowers the incarnation")
+	require.Equal(t, want.accounts, got.accounts)
+	require.Equal(t, want.code, got.code)
+	require.Equal(t, want.storage, got.storage)
+	require.Contains(t, got.code, c, "the new code survives the account write")
 }
