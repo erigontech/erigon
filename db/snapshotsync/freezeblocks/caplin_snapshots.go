@@ -87,6 +87,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.AnchorVisibleAtLowestDirty(snaptype.CaplinEnums.BeaconBlocks)
 	return c
 }
 
@@ -97,25 +98,7 @@ func (s *CaplinSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-func (s *CaplinSnapshots) SegmentsMax() uint64 {
-	var view *CaplinView
-	var lowest uint64
-	s.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
-		lowest, _ = sn.GetRange()
-		view = s.View()
-		return false
-	})
-	if view == nil {
-		return 0
-	}
-	defer view.Close()
-
-	visible := view.BeaconBlocks()
-	if len(visible) == 0 || visible[0].From() != lowest {
-		return 0
-	}
-	return visible[len(visible)-1].To() - 1
-}
+func (s *CaplinSnapshots) SegmentsMax() uint64 { return s.IndicesMax() }
 
 func (s *CaplinSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
