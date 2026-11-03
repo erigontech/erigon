@@ -285,7 +285,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// Make sure this transaction's nonce is correct.
-	if st.msg.CheckNonce() && !st.chargeSenderAtValidation {
+	if st.msg.CheckNonce() && !st.chargeSenderAtValidation && !st.nonceless {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
