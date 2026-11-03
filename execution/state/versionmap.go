@@ -958,7 +958,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		if !haveLatest {
 			latest, latestIdx, haveLatest, latestSettled = v, k, true, settled
 		}
-		if !settled && v.Value {
+		if resolvedRevivalsOnly && !settled && v.Value {
 			pendingDestructs = append(pendingDestructs, k)
 		}
 		// A validated (pre-seal) self-destruct is as authoritative as a Done one:
