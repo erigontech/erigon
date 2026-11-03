@@ -33,9 +33,14 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// maxConcurrentSidecarProposerStateRebuilds bounds the parent states rebuilt at once for sidecar proposer checks, as
-// maxConcurrentBlockValidationContexts does for blocks.
-const maxConcurrentSidecarProposerStateRebuilds = 4
+const (
+	// maxConcurrentSidecarProposerStateRebuilds bounds the parent states rebuilt at once for sidecar proposer checks,
+	// as maxConcurrentBlockValidationContexts does for blocks.
+	maxConcurrentSidecarProposerStateRebuilds = 4
+	// maxQueuedSidecarProposerStateRebuilds bounds the reads waiting for a rebuild. Every waiting read holds gossip
+	// validations, so a read beyond the queue is ignored at once instead of adding to them.
+	maxQueuedSidecarProposerStateRebuilds = 4
+)
 
 type expectedProposerKey struct {
 	parentRoot common.Hash
@@ -50,7 +55,10 @@ type expectedProposers struct {
 	forkChoice forkchoice.ForkChoiceStorage
 	results    *lru.Cache[expectedProposerKey, uint64]
 	reads      singleflight.Group
-	rebuilds   chan struct{}
+	// admitted holds a slot for every read that rebuilds a parent state or waits to, and rebuilds one for every read
+	// that is rebuilding.
+	admitted chan struct{}
+	rebuilds chan struct{}
 }
 
 func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, forkChoice forkchoice.ForkChoiceStorage) *expectedProposers {
@@ -63,14 +71,15 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 		cfg:        cfg,
 		forkChoice: forkChoice,
 		results:    results,
+		admitted:   make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds),
 		rebuilds:   make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds),
 	}
 }
 
 // get returns the expected proposer of slot on the branch of parentRoot, as the spec computes it: from the parent
 // state advanced to slot. The parent state fork choice holds is read in place when it already gives the proposer.
-// Any other parent state is rebuilt, a bounded number at a time; a read that waits longer than a slot for its turn,
-// or whose parent state is gone, ignores the sidecar.
+// Any other parent state is rebuilt, a bounded number at a time, and a bounded number of reads wait for their turn:
+// a read beyond that queue, one that waits longer than a slot, or one whose parent state is gone ignores the sidecar.
 //
 // The sidecars of a block share one read. It runs under the service context, not a caller's, so one canceled
 // validation does not fail the others; each caller waits for it under its own context. The read runs on its own
@@ -135,6 +144,12 @@ func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, pa
 		}
 	}
 
+	select {
+	case e.admitted <- struct{}{}:
+	default:
+		return 0, fmt.Errorf("%w: too many parent state rebuilds for expected proposers in flight", ErrIgnore)
+	}
+	defer func() { <-e.admitted }()
 	wait := time.NewTimer(time.Duration(e.cfg.SecondsPerSlot) * time.Second)
 	defer wait.Stop()
 	select {

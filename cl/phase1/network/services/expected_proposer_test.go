@@ -400,3 +400,59 @@ func TestExpectedProposerReadPanicIsIgnoredNotFatal(t *testing.T) {
 	_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
 	require.NoError(t, err, "the panicked read was cached")
 }
+
+// Reads waiting for a rebuild are bounded too: with the rebuild budget used up and the queue full, a read for another
+// parent is ignored at once instead of holding its gossip validation, and the queued reads still finish.
+func TestExpectedProposerReadsBeyondTheRebuildQueueAreIgnoredAtOnce(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	firstSlot := state.Epoch(parentState) * cfg.SlotsPerEpoch
+	started, release := make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds), make(chan struct{})
+	releaseRebuilds := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseRebuilds)
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		started <- struct{}{}
+		<-release
+		return fn(parentState)
+	}
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	get := func(root common.Hash) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := proposers.get(t.Context(), root, parentState.Slot(), firstSlot)
+			done <- err
+		}()
+		return done
+	}
+
+	admitted := make([]<-chan error, 0, maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds)
+	for i := range maxConcurrentSidecarProposerStateRebuilds {
+		admitted = append(admitted, get(common.Hash{byte(i + 1)}))
+		<-started
+	}
+	for i := range maxQueuedSidecarProposerStateRebuilds {
+		admitted = append(admitted, get(common.Hash{byte(0x80 + i)}))
+	}
+	require.Eventually(t, func() bool {
+		return len(proposers.admitted) == maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds
+	}, 5*time.Second, time.Millisecond, "the queued reads were not admitted")
+
+	select {
+	case err := <-get(common.Hash{0xff}):
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(time.Second):
+		t.Fatal("a read beyond the queue waited")
+	}
+	require.Len(t, started, 0, "a read beyond the queue started a rebuild")
+
+	releaseRebuilds()
+	for _, done := range admitted {
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a queued read did not finish")
+		}
+	}
+}
