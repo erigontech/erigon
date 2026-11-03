@@ -406,13 +406,13 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var err error
+		var slot common.Hash
 		if slotIndex < storageChanges {
-			_, _, err = stateReader.ReadAccountStorage(address, account.StorageChanges[slotIndex].Slot)
+			slot = account.StorageChanges[slotIndex].Slot.Value()
 		} else {
-			_, _, err = stateReader.ReadAccountStorageByPlainKey(address, account.StorageReads[slotIndex-storageChanges])
+			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if err != nil {
+		if _, _, err := stateReader.ReadAccountStorageByPlainKey(address, slot); err != nil {
 			return err
 		}
 	}
