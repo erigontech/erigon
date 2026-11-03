@@ -1155,10 +1155,6 @@ func (e *remoteRulesEngine) CalcDifficulty(_ rules.ChainHeaderReader, _ uint64, 
 	panic("remoteRulesEngine.CalcDifficulty not supported")
 }
 
-func (e *remoteRulesEngine) APIs(_ rules.ChainHeaderReader) []rpc.API {
-	panic("remoteRulesEngine.APIs not supported")
-}
-
 func (e *remoteRulesEngine) TxDependencies(header *types.Header) [][]int {
 	panic("remoteRulesEngine.TxDependencies not supported")
 }

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -426,12 +427,11 @@ func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint6
 func CreateTestGrpcConn(t testing.TB, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
-	apis := m.Engine.APIs(nil)
-	if len(apis) < 1 {
-		t.Fatal("couldn't instantiate Engine api")
+	engine := m.Engine
+	if mg, ok := engine.(*merge.Merge); ok {
+		engine = mg.InnerEngine()
 	}
-
-	ethashApi := apis[1].Service.(*ethash.API)
+	ethashApi := engine.(interface{ API() *ethash.API }).API() // *Ethash or *FakeEthash
 	server := grpc.NewServer()
 
 	remoteproto.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,

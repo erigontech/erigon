@@ -41,11 +41,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc"
 )
 
 const doNotStoreCachesOnDisk = ""
@@ -567,25 +565,8 @@ func (ethash *Ethash) Hashrate() float64 {
 	return ethash.hashrate.Rate() + float64(<-res)
 }
 
-// APIs implements rules.Engine, returning the user facing RPC APIs.
-func (ethash *Ethash) APIs(chain rules.ChainHeaderReader) []rpc.API {
-	// In order to ensure backward compatibility, we exposes ethash RPC APIs
-	// to both eth and ethash namespaces.
-	return []rpc.API{
-		{
-			Namespace: "eth",
-			Version:   "1.0",
-			Service:   &API{ethash},
-			Public:    true,
-		},
-		{
-			Namespace: "ethash",
-			Version:   "1.0",
-			Service:   &API{ethash},
-			Public:    true,
-		},
-	}
-}
+// API returns the remote-mining API (GetWork, SubmitWork) of this engine.
+func (ethash *Ethash) API() *API { return &API{ethash} }
 
 // SeedHash is the seed to use for generating a verification cache and the mining
 // dataset.

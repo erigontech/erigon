@@ -616,7 +616,7 @@ func New(
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+		ethashApi = casted.API()
 	}
 
 	backend.miningRPC = privateapi2.NewMiningServer(ctx, backend, ethashApi, logger)
