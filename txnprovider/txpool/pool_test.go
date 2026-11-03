@@ -3824,6 +3824,67 @@ func TestP2PRetrySuppressesIgnoredRemoteTransactions(t *testing.T) {
 	}))
 }
 
+func TestCachedBlobRetryRechecksNonceFrontier(t *testing.T) {
+	for _, change := range []string{"state nonce decrease", "pooled bridge removal"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := t.Context()
+			pool := seedBlobKZGTestPool(t, ctx)
+			require.NoError(t, pool.start(ctx))
+			sender := common.Address{1}
+			blob := makeBlobSlot(1, false)
+			blob.Nonce = 65
+			blob.Txn.(*types.BlobTx).Nonce = 65
+			blob.Txn.(*types.BlobTx).GasLimit = 100_000
+			var txns TxnSlots
+			txns.Append(&blob, sender[:], false)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+
+			if change == "state nonce decrease" {
+				updateP2PRetryNonce(t, pool, sender, 65, 1)
+			} else {
+				updateP2PRetryNonce(t, pool, sender, 64, 1)
+				bridge := newTestTxnSlot(64, 0, 300_000, 300_000, 21_000)
+				bridge.IDHash[0] = 2
+				var lower TxnSlots
+				lower.Append(bridge, sender[:], true)
+				reasons, err = pool.AddLocalTxns(ctx, lower)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			}
+			revision, retry := p2pRetryForTest(t, pool, blob.IDHash[:], 0)
+			require.True(t, retry)
+
+			if change == "state nonce decrease" {
+				updateP2PRetryNonce(t, pool, sender, 1, 2)
+			} else {
+				bridgeHash := common.Hash{2}
+				pool.lock.Lock()
+				bridge := pool.byHash[string(bridgeHash[:])]
+				pool.removeFromSubPool(bridge, "test")
+				pool.discardLocked(bridge, discardRecord{reason: txpoolcfg.Mined})
+				pool.lock.Unlock()
+			}
+			_, result, err := pool.AddRemoteTxns(ctx, txns, peerID, nil, &RemoteTxnsRetry{})
+			require.NoError(t, err)
+			require.Empty(t, pool.unprocessedRemoteTxns.Txns, "a blob that lost nonce eligibility must stay out of the queue")
+			require.Equal(t, revision, result.revision)
+			_, retry = p2pRetryForTest(t, pool, blob.IDHash[:], 0)
+			require.False(t, retry)
+
+			updateP2PRetryNonce(t, pool, sender, 65, 3)
+			_, retry = p2pRetryForTest(t, pool, blob.IDHash[:], revision)
+			require.True(t, retry, "restored nonce eligibility must allow a new retry")
+			handled, _, err := pool.AddRemoteTxns(ctx, txns, peerID, nil, &RemoteTxnsRetry{revision: result.revision})
+			require.NoError(t, err)
+			require.Equal(t, Hashes(blob.IDHash[:]), handled)
+			require.NoError(t, pool.processRemoteTxns(ctx))
+			require.Contains(t, pool.byHash, string(blob.IDHash[:]))
+		})
+	}
+}
+
 func TestCachedPacketRetriesNonceGapSkippedByAnotherPacket(t *testing.T) {
 	ctx := t.Context()
 	pool := seedBlobKZGTestPool(t, ctx)

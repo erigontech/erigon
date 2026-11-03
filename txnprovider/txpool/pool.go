@@ -143,6 +143,7 @@ type discardRecord struct {
 
 type nonceGapState struct {
 	sender            common.Address
+	stateNonce        uint64
 	firstMissingNonce uint64
 	minRetryNonce     uint64
 	checkedGeneration uint64
@@ -744,7 +745,6 @@ func (p *TxPool) p2pRetryLocked(tx kv.Tx, hashes Hashes, seenRevision uint64, vi
 }
 
 func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, view kvcache.CacheView) (bool, bool, error) {
-	frontier := gap.firstMissingNonce
 	if gap.checkedGeneration != p.stateGeneration {
 		if view == nil {
 			return false, true, nil
@@ -759,22 +759,26 @@ func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, vi
 				return false, false, err
 			}
 		}
-		frontier = max(frontier, account.Nonce)
+		gap.stateNonce = account.Nonce
 		gap.checkedGeneration = p.stateGeneration
 	}
+	frontier := gap.stateNonce
 	if id, ok := p.senders.getID(gap.sender); ok {
-		for frontier < math.MaxUint64 {
-			txn := p.all.get(id, frontier)
-			if txn == nil || txn.subPool&NoNonceGaps == 0 {
-				break
+		p.all.ascend(id, func(txn *metaTxn) bool {
+			if txn.TxnSlot.Nonce < frontier {
+				return true
+			}
+			if frontier == math.MaxUint64 || txn.TxnSlot.Nonce != frontier || txn.subPool&NoNonceGaps == 0 {
+				return false
 			}
 			frontier++
-		}
+			return true
+		})
 	}
 	if frontier > gap.firstMissingNonce {
-		gap.firstMissingNonce = frontier
 		gap.progressRevision = p.nonceRetryRevision.Add(1)
 	}
+	gap.firstMissingNonce = frontier
 	return frontier >= gap.minRetryNonce && gap.progressRevision > seenRevision, false, nil
 }
 
@@ -2602,8 +2606,11 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				minRetryNonce -= p.cfg.MaxNonceGap
 			}
 			record.nonceGap = &nonceGapState{
-				sender: p.senders.senderID2Addr[senderID], firstMissingNonce: noGapsNonce,
-				minRetryNonce: minRetryNonce, checkedGeneration: p.stateGeneration,
+				sender:            p.senders.senderID2Addr[senderID],
+				stateNonce:        senderNonce,
+				firstMissingNonce: noGapsNonce,
+				minRetryNonce:     minRetryNonce,
+				checkedGeneration: p.stateGeneration,
 			}
 		}
 		p.discardLocked(mt, record)
