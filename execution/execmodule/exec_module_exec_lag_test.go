@@ -172,4 +172,5 @@ func TestValidateChainRejectsBadHeaderWhileLagging(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
 	require.Equal(t, common.Hash{}, result.LatestValidHash)
+	require.NotContains(t, result.ValidationError, "invalid header", "exception mappers match the header error's own text")
 }
