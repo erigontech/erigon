@@ -277,4 +277,30 @@ func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 	evm.SetAbortOnDependency(true)
 	evm.cancelOnReadDependency()
 	require.True(t, evm.Cancelled())
+	evm.SetAbortOnDependency(false)
+	require.False(t, evm.Cancelled(), "a dependency abort must not leak into the worker's next task, e.g. a block-init system call")
+
+	evm.SetAbortOnDependency(true)
+	evm.Cancel()
+	evm.SetAbortOnDependency(false)
+	require.True(t, evm.Cancelled(), "an explicit Cancel survives the end of the opt-in")
+}
+
+func TestZeroValueCallToUnflushedDeployCancelsOptedInRun(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0df"))
+	vm := state.NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x00}}},
+	}})
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.SetAbortOnDependency(true)
+
+	_, _, _, err := evm.Call(accounts.ZeroAddress, addr, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.True(t, evm.Cancelled(), "the EIP-161 no-op return must not hide the dependency from the calling frame")
 }

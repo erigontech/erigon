@@ -105,6 +105,7 @@ type EVM struct {
 	// abortOnDependency cancels once the state recorded a read dependency: the run's
 	// result is discarded and re-executed, so finishing it is wasted work.
 	abortOnDependency bool
+	abortedOnDep      bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -193,12 +194,20 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 // SetAbortOnDependency makes each call frame cancel the run once the state recorded a
 // read dependency. Only for executors that discard and re-run such results.
-func (evm *EVM) SetAbortOnDependency(on bool) { evm.abortOnDependency = on }
+// Turning it off clears a cancellation the dependency caused, so it does not reach the next task.
+func (evm *EVM) SetAbortOnDependency(on bool) {
+	evm.abortOnDependency = on
+	if !on && evm.abortedOnDep {
+		evm.abortedOnDep = false
+		evm.abort.Store(false)
+	}
+}
 
 // cancelOnReadDependency runs once per frame, not per jump: a check in the jump path
 // costs every loop.
 func (evm *EVM) cancelOnReadDependency() {
-	if evm.abortOnDependency && evm.intraBlockState.HadInvalidRead() {
+	if evm.abortOnDependency && !evm.abort.Load() && evm.intraBlockState.HadInvalidRead() {
+		evm.abortedOnDep = true
 		evm.abort.Store(true)
 	}
 }
@@ -354,6 +363,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 		// beacon-root syscall's "no-op when not deployed" semantics at
 		// the fork-transition block, before the contract is deployed.
 		if !isPrecompile && evm.chainRules.IsEIP161Enabled() && value.IsZero() {
+			evm.cancelOnReadDependency()
 			return nil, gasRemaining, mdgas.MdGasUsage{}, nil
 		}
 		if err := evm.intraBlockState.CreateAccount(addr, false); err != nil {
