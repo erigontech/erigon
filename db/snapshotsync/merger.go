@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/background"
@@ -17,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -91,6 +89,16 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
+func removeMergedFiles(sn snaptype.FileInfo) {
+	_ = dir.RemoveFile(sn.Path)
+	_ = dir.RemoveFile(sn.Path + ".torrent")
+	for _, idx := range sn.Type.IdxFileNames(sn.From, sn.To) {
+		idxPath := filepath.Join(filepath.Dir(sn.Path), idx)
+		_ = dir.RemoveFile(idxPath)
+		_ = dir.RemoveFile(idxPath + ".torrent")
+	}
+}
+
 func (m *Merger) mergeSubSegment(
 	ctx context.Context,
 	sn snaptype.FileInfo,
@@ -107,18 +115,7 @@ func (m *Merger) mergeSubSegment(
 		}
 		if err != nil {
 			newDirtySegment.close()
-			f := sn.Path
-			_ = dir.RemoveFile(f)
-			_ = dir.RemoveFile(f + ".torrent")
-			ext := filepath.Ext(f)
-			withoutExt := f[:len(f)-len(ext)]
-			_ = dir.RemoveFile(withoutExt + ".idx")
-			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-			isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-			if isTxnType {
-				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-			}
+			removeMergedFiles(sn)
 		}
 	}()
 	if len(toMerge) == 0 {
@@ -232,10 +229,13 @@ func (m *Merger) Merge(
 			out[snapType] = append(out[snapType], t...)
 		}
 
+		built := make([]*DirtySegment, 0, len(snapTypes))
+		outputs := make([]snaptype.FileInfo, 0, len(snapTypes))
 		for _, t := range snapTypes {
+			output := t.FileInfo(snapDir, r.From(), r.To())
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
-				t.FileInfo(snapDir, r.From(), r.To()),
+				output,
 				toMerge[t.Enum()],
 				snapDir,
 				doIndex,
@@ -248,13 +248,24 @@ func (m *Merger) Merge(
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
 			}
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
+			built = append(built, newDirtySegment)
+			outputs = append(outputs, output)
 			mergedFileNames = append(mergedFileNames, newDirtySegment.FilePath())
 		}
 
 		snapshots.LogStat("merge")
 
 		if onMerge != nil {
-			if err := onMerge(mergedFileNames); err != nil {
+			if err := onMerge(slices.Clone(mergedFileNames)); err != nil {
+				for _, sn := range built {
+					sn.close()
+				}
+				if onDelete != nil {
+					_ = onDelete(ctx, slices.Clone(mergedFileNames))
+				}
+				for i := range outputs {
+					removeMergedFiles(outputs[i])
+				}
 				return err
 			}
 		}

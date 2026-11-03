@@ -310,6 +310,24 @@ func openFds(t *testing.T) int {
 	return len(names)
 }
 
+func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
+	dir := t.TempDir()
+	info := snaptype2.Transactions.FileInfo(dir, 0, 500_000)
+	files := []string{info.Path, info.Path + ".torrent"}
+	for _, idx := range info.Type.IdxFileNames(info.From, info.To) {
+		files = append(files, filepath.Join(dir, idx), filepath.Join(dir, idx)+".torrent")
+	}
+	for _, f := range files {
+		require.NoError(t, os.WriteFile(f, nil, 0o644))
+	}
+
+	removeMergedFiles(info)
+
+	for _, f := range files {
+		require.NoFileExists(t, f)
+	}
+}
+
 func TestMergeFailureClosesMergedSegments(t *testing.T) {
 	injected := errors.New("injected")
 

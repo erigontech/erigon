@@ -218,11 +218,27 @@ func TestMergeBlocksMergesOneTierPerCall(t *testing.T) {
 	}
 }
 
-func TestAntiquateDoesNotFailOnAMergeError(t *testing.T) {
-	a, d := antiquaryWithBlockSegments(t, 0, snaptype.Erigon2MergeLimit)
-	d.deleteErr = errors.New("injected")
+func TestMergeBlocksRollsBackAMergeItCouldNotSeed(t *testing.T) {
+	const tier = snaptype.Erigon2MergeLimit
+	a, d := antiquaryWithBlockSegments(t, 0, tier)
+	injected := errors.New("injected")
+	d.seedErr = injected
+	merged := snaptype.BeaconBlocks.FileInfo(a.dirs.Snap, 0, tier).Path
 
-	require.NoError(t, a.antiquate())
+	require.ErrorIs(t, a.mergeBlocks(), injected)
+	require.NoFileExists(t, merged)
+	require.NoFileExists(t, strings.TrimSuffix(merged, ".seg")+".idx")
+
+	require.NoError(t, a.sn.OpenFolder())
+	a.removeBlockOverlaps()
+	for _, f := range blockSegmentFiles(0, tier) {
+		require.FileExists(t, filepath.Join(a.dirs.Snap, f))
+	}
+
+	d.seedErr = nil
+	require.NoError(t, a.mergeBlocks())
+	require.FileExists(t, merged)
+	require.Contains(t, d.seededNames(), filepath.Base(merged))
 }
 
 func TestMergeBlocksNeedsSnapgen(t *testing.T) {
