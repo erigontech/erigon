@@ -57,6 +57,17 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if tx.Nonce == math.MaxUint64 {
 		return nil, ErrNonceMax
 	}
+	if !tx.UsesLegacyNonce() {
+		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
+		// create an empty account that finalization deletes, allowing replay.
+		exists, err := st.state.Exist(accounts.InternAddress(types.FrameNonceManager))
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, errors.New("nonce manager does not exist")
+		}
+	}
 	if st.msg.CheckNonce() && tx.UsesLegacyNonce() {
 		if nonce < tx.Nonce {
 			return nil, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}

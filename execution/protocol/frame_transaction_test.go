@@ -224,6 +224,52 @@ func TestFrameTransactionKeyedNonce(t *testing.T) {
 	require.False(t, warm)
 }
 
+func TestFrameTransactionMissingNonceManager(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		for _, mode := range []string{"execution", "call", "pool validation"} {
+			t.Run(fmt.Sprintf("versioned=%t/%s", versioned, mode), func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				if versioned {
+					ibs.SetVersionMap(state.NewVersionMap(nil))
+				}
+				cfg := chain.AllProtocolChanges.Copy()
+				cfg.BogotaTime = common.NewUint64(0)
+				evm := newTestEVM(ibs, cfg, 30_000_000)
+				sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+				balance := uint256.Int{10_000_000}
+				require.NoError(t, ibs.SetBalance(sender, balance, tracing.BalanceChangeUnspecified))
+				require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+				tx := &types.FrameTransaction{
+					ChainID: *cfg.ChainID, SenderAddress: sender.Value(), NonceKeys: []uint256.Int{{1}},
+					Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
+					Fees:   types.FrameFees{FeeCap: uint256.Int{1}, TipCap: uint256.Int{1}},
+				}
+				if mode == "pool validation" {
+					result, err := ValidateFrameTransaction(evm, tx)
+					require.ErrorContains(t, err, "nonce manager does not exist")
+					require.Nil(t, result)
+				} else {
+					msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
+					require.NoError(t, err)
+					msg.SetCheckNonce(mode == "execution")
+					gp := NewGasPool(30_000_000, 0)
+					result, err := ApplyMessage(evm, msg, gp, true, false, nil)
+					require.ErrorContains(t, err, "nonce manager does not exist")
+					require.Nil(t, result)
+					require.EqualValues(t, 30_000_000, gp.Gas())
+				}
+				gotBalance, err := ibs.GetBalance(sender)
+				require.NoError(t, err)
+				require.Equal(t, balance, gotBalance)
+				exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		}
+	}
+}
+
 func TestFrameTransactionKeyedNonceRefill(t *testing.T) {
 	for _, revert := range []bool{false, true} {
 		t.Run(fmt.Sprintf("revert=%t", revert), func(t *testing.T) {

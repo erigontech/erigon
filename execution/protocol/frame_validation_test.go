@@ -57,6 +57,9 @@ func TestFrameValidationStopsAfterPayment(t *testing.T) {
 func TestFrameValidationKeyedNonceDependency(t *testing.T) {
 	evm, tx := frameTestEnv(t)
 	ibs := evm.IntraBlockState()
+	manager := accounts.InternAddress(types.FrameNonceManager)
+	require.NoError(t, ibs.SetNonce(manager, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(manager, common.FromHex("60006000fd"), tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(3).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	tx.NonceKeys = []uint256.Int{{1}}
 	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: 97_920}}}
