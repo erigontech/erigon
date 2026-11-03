@@ -206,8 +206,6 @@ func TestCaplinStateRemoveOverlapsUnindexedSuperset(t *testing.T) {
 	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table))
 }
 
-// A corrupt .idx fails the strict open and leaves its segment unindexed; the rebuild must
-// replace it rather than skip it because a file with that name exists.
 func TestCaplinStateBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())

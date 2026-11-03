@@ -1635,6 +1635,9 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 	}
 
 	// wait for Downloader service to download all expected snapshots
+	if _, err := snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
+		return fmt.Errorf("can't build missed indices: %w", err)
+	}
 	if err := s.IndexMissed(ctx, logPrefix, dirs.Tmp, cc, logger); err != nil {
 		return err
 	}
@@ -1645,7 +1648,7 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 }
 
 func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, cc *chain.Config, logger log.Logger) error {
-	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, tmpDir, cc, estimate.IndexSnapshot.Workers(), logger)
+	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, tmpDir, cc, logger)
 	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
@@ -1793,18 +1796,11 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
-func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, tmpDir string, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
+func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, tmpDir string, chainConfig *chain.Config, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
 		return
 	}
 
-	if !slices.ContainsFunc(s.enums, snaptype.IsCaplinType) {
-		if _, err = snaptype.GetIndexSalt(s.dir, logger); err != nil {
-			return
-		}
-	}
-
-	dir := s.dir
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	ps := background.NewProgressSet()
@@ -1814,7 +1810,7 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	defer logEvery.Stop()
 
 	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
+	g.SetLimit(estimate.IndexSnapshot.Workers())
 	finish := make(chan struct{})
 
 	go func() {
@@ -1848,7 +1844,7 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 				if !s.TryAcquireRange(t, from, to) {
 					continue
 				}
-				info := segment.FileInfo(dir)
+				info := segment.FileInfo(s.dir)
 
 				newIdxBuilt = true
 
