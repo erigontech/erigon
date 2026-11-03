@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -119,6 +120,10 @@ func TestRPCTransportError(t *testing.T) {
 	require.NoError(t, err)
 	defer r.Close()
 	_, err = r.ChainID(t.Context())
-	require.EqualError(t, err, "eth_chainId: dial tcp "+addr+": connect: connection refused")
-	require.ErrorIs(t, err, syscall.ECONNREFUSED)
+	// The system error's text and errno are the platform's.
+	require.True(t, strings.HasPrefix(err.Error(), "eth_chainId: dial tcp "+addr+": "), err.Error())
+	require.NotContains(t, err.Error(), "http://")
+	var op *net.OpError
+	require.ErrorAs(t, err, &op)
+	require.Equal(t, "dial", op.Op)
 }
