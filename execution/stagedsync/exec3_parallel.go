@@ -2977,7 +2977,8 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 func (be *blockExecutor) signalCommitted(tx int) {
 	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
-	waiters := append(be.wakeAt[tx], be.wakeValidated[tx]...)
+	waiters := be.wakeAt[tx]
+	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
 	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()

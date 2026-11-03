@@ -330,7 +330,8 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
-	for _, acc := range changes {
+	for i := range changes {
+		acc := &changes[i]
 		for _, c := range acc.CodeChanges {
 			if len(c.Bytecode) > 0 && c.Index > 0 {
 				if vm.deployers == nil {
