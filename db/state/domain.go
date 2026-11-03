@@ -108,9 +108,8 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files  visibleFiles
-	name   kv.Domain
-	caches *sync.Pool
+	files visibleFiles
+	name  kv.Domain
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -762,8 +761,6 @@ type DomainRoTx struct {
 
 	valsC      kv.Cursor
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
-
-	getFromFileCache *DomainGetFromFileCache
 }
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
@@ -1658,23 +1655,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil
-
 	hi, lo := dt.ht.iit.hashKey(k)
-
-	getFromFileCache := dt.getFromFileCache
-
-	if useCache && getFromFileCache == nil {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
-	}
-	if getFromFileCache != nil && useCache {
-		if cv, ok := getFromFileCache.get(k, hi); ok {
-			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
-		}
-	}
 
 	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
 	// last write in an older .kv is still found (walkback bounded by maxTxNum).
@@ -1713,18 +1694,10 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		if traceGetLatest == dt.name {
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 		}
-
-		if dt.getFromFileCache != nil && useCache {
-			dt.getFromFileCache.add(k, hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
-		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
 	if traceGetLatest == dt.name {
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))
-	}
-
-	if dt.getFromFileCache != nil && useCache {
-		dt.getFromFileCache.add(k, hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }
@@ -1737,14 +1710,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 	hi, lo := dt.ht.iit.hashKey(k)
-
-	if useCache && dt.getFromFileCache != nil {
-		if cv, ok := dt.getFromFileCache.get(k, hi); ok {
-			return len(cv.v), true, nil
-		}
-	}
 	for i, f := range slices.Backward(dt.files) {
 		if maxTxNum != math.MaxUint64 && f.startTxNum > maxTxNum {
 			continue
@@ -1852,8 +1818,6 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.mapReaders = nil
 	dt.ht.Close()
-
-	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use
