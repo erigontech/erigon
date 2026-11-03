@@ -465,7 +465,10 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
 	if mmap.BatchPrefetch {
+		done := make(chan struct{})
+		probePrefetchDone.Store(&done)
 		group.Go(func() error {
+			defer close(done)
 			prefetchBAL(ctx, db, bal)
 			return nil
 		})
@@ -756,5 +759,15 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	}
 	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
 
+	return nil
+}
+
+var probePrefetchDone atomic.Pointer[chan struct{}]
+
+// ProbePrefetchDone (dbg) is closed when the latest block's BAL batch prefetch ends; nil before the first one.
+func ProbePrefetchDone() <-chan struct{} {
+	if p := probePrefetchDone.Load(); p != nil {
+		return *p
+	}
 	return nil
 }

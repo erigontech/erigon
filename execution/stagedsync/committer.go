@@ -53,6 +53,8 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+var probeCkptWaitPrefetch = dbg.EnvBool("PROBE_CKPT_WAIT_PREFETCH", false)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -71,6 +73,7 @@ type commitmentCalculator struct {
 	probeLast   time.Time
 	probeCkpt   time.Duration
 	probeCkptN  int
+	probeWait   time.Duration
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
@@ -396,6 +399,16 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			// Checkpoint commitment at a mid-block step edge without advancing
 			// lastComputedBlock; the next checkpoint folds only keys dirtied after it.
+			if probeCkptWaitPrefetch {
+				w0 := time.Now()
+				if ch := exec.ProbePrefetchDone(); ch != nil {
+					select {
+					case <-ch:
+					case <-time.After(10 * time.Second):
+					}
+				}
+				cc.probeWait += time.Since(w0)
+			}
 			t0 := time.Now()
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 			cc.probeCkpt += time.Since(t0)
@@ -468,8 +481,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
 				"firstTx", cc.probeFirst.Sub(r.execStartedAt), "lastTx", cc.probeLast.Sub(r.execStartedAt),
-				"ckpt", cc.probeCkpt, "ckptN", cc.probeCkptN)
-			cc.probeApply, cc.probeTxs, cc.probeFirst, cc.probeCkpt, cc.probeCkptN = 0, 0, time.Time{}, 0, 0
+				"ckpt", cc.probeCkpt, "ckptN", cc.probeCkptN, "ckptWait", cc.probeWait)
+			cc.probeApply, cc.probeTxs, cc.probeFirst, cc.probeCkpt, cc.probeCkptN, cc.probeWait = 0, 0, time.Time{}, 0, 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
