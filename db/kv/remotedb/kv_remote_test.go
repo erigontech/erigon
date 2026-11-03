@@ -182,9 +182,57 @@ func TestGetLatestForwardsBranchCache(t *testing.T) {
 	require.True(t, request.GetBranchCache())
 }
 
-func TestIndexJoinJoinsRemoteIndexRanges(t *testing.T) {
+var testIndexQuery = kv.IndexQuery{
+	Clauses: [][]kv.IndexKey{
+		{{Idx: kv.LogTopicIdx, Key: []byte("topic")}},
+		{{Idx: kv.LogAddrIdx, Key: []byte("a1")}, {Idx: kv.LogAddrIdx, Key: []byte("a2")}},
+	},
+	FromTs: 2, ToTs: 10, Asc: order.Asc,
+}
+
+func TestIndexJoinUsesServerSideJoin(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	client := remoteproto.NewMockKVClient(ctrl)
+	pages := map[string]*remoteproto.IndexRangeReply{
+		"":   {Timestamps: []uint64{3, 5}, NextPageToken: "p2"},
+		"p2": {Timestamps: []uint64{8}, NextPageToken: "p3"},
+		"p3": {Timestamps: []uint64{9}},
+	}
+	client.EXPECT().IndexJoin(gomock.Any(), gomock.Any()).Times(3).DoAndReturn(func(_ context.Context, req *remoteproto.IndexJoinReq, _ ...grpc.CallOption) (*remoteproto.IndexRangeReply, error) {
+		require.Equal(t, uint64(7), req.TxId)
+		require.Equal(t, int64(2), req.FromTs)
+		require.Equal(t, int64(10), req.ToTs)
+		require.True(t, req.OrderAscend)
+		require.Equal(t, []*remoteproto.IndexJoinClause{
+			{Keys: []*remoteproto.IndexJoinKey{{Table: kv.LogTopicIdx.String(), K: []byte("topic")}}},
+			{Keys: []*remoteproto.IndexJoinKey{{Table: kv.LogAddrIdx.String(), K: []byte("a1")}, {Table: kv.LogAddrIdx.String(), K: []byte("a2")}}},
+		}, req.Clauses)
+		return pages[req.PageToken], nil
+	})
+	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
+
+	it, err := tx.IndexJoin(testIndexQuery)
+	require.NoError(t, err)
+	txNums, err := stream.ToArrayU64(it)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{3, 5, 8, 9}, txNums)
+}
+
+func TestIndexJoinPropagatesServerError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	wantErr := status.Error(codes.Unavailable, "join unavailable")
+	client.EXPECT().IndexJoin(gomock.Any(), gomock.Any()).Return(nil, wantErr)
+	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
+
+	_, err := tx.IndexJoin(testIndexQuery)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestIndexJoinFallsBackToClientSideJoin(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().IndexJoin(gomock.Any(), gomock.Any()).Return(nil, status.Error(codes.Unimplemented, "method IndexJoin not implemented"))
 	ranges := map[string][]uint64{
 		kv.LogTopicIdx.String() + "/topic": {3, 5, 8, 9},
 		kv.LogAddrIdx.String() + "/a1":     {1, 5},
@@ -200,13 +248,7 @@ func TestIndexJoinJoinsRemoteIndexRanges(t *testing.T) {
 	})
 	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
 
-	it, err := tx.IndexJoin(kv.IndexQuery{
-		Clauses: [][]kv.IndexKey{
-			{{Idx: kv.LogTopicIdx, Key: []byte("topic")}},
-			{{Idx: kv.LogAddrIdx, Key: []byte("a1")}, {Idx: kv.LogAddrIdx, Key: []byte("a2")}},
-		},
-		FromTs: 2, ToTs: 10, Asc: order.Asc,
-	})
+	it, err := tx.IndexJoin(testIndexQuery)
 	require.NoError(t, err)
 	txNums, err := stream.ToArrayU64(it)
 	require.NoError(t, err)
