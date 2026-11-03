@@ -511,3 +511,50 @@ func TestExpectedProposerWaitersOfASharedReadAreBounded(t *testing.T) {
 		require.NoError(t, <-done)
 	}
 }
+
+// The waiter limit bounds callers waiting for rebuilds only: with it filled by followers of a slow rebuild, a sidecar
+// whose parent state fork choice holds still gets its proposer.
+func TestExpectedProposerHeldParentIsReadWhileWaitersAreFull(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	slot := (state.Epoch(parentState)+1)*cfg.SlotsPerEpoch - 1
+	want, err := parentState.GetBeaconProposerIndexForSlot(slot)
+	require.NoError(t, err)
+	started, release := make(chan struct{}), make(chan struct{})
+	releaseRead := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseRead)
+	held := common.Hash{0xfe}
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewCurrentStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+		if root == held {
+			return fn(parentState)
+		}
+		return nil
+	}
+	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		close(started)
+		<-release
+		return fn(parentState)
+	}
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	waiters := make([]<-chan error, 0, proposers.maxWaiting)
+	for range proposers.maxWaiting {
+		done := make(chan error, 1)
+		go func() {
+			_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+			done <- err
+		}()
+		waiters = append(waiters, done)
+	}
+	<-started
+	require.Eventually(t, func() bool { return proposers.waiting.Load() == proposers.maxWaiting }, 5*time.Second, time.Millisecond)
+
+	got, err := proposers.get(t.Context(), held, parentState.Slot(), slot)
+	require.NoError(t, err, "a sidecar with a held parent was ignored while the waiter limit was full")
+	require.Equal(t, want, got)
+
+	releaseRead()
+	for _, done := range waiters {
+		require.NoError(t, <-done)
+	}
+}

@@ -84,17 +84,25 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 }
 
 // get returns the expected proposer of slot on the branch of parentRoot, as the spec computes it: from the parent
-// state advanced to slot. The parent state fork choice holds is read in place when it already gives the proposer.
-// Any other parent state is rebuilt, a bounded number at a time, and a bounded number of reads wait for their turn:
-// a read beyond that queue, one that waits longer than a slot, or one whose parent state is gone ignores the sidecar.
+// state advanced to slot. Each caller first reads the parent state fork choice holds, in place, when it gives the
+// proposer; that read neither rebuilds nor waits. Any other parent state is rebuilt, a bounded number at a time, a
+// bounded number of reads wait for their turn, and a bounded number of callers wait for those reads: a caller beyond
+// either bound, a read that waits longer than a slot, or one whose parent state is gone ignores the sidecar.
 //
-// The sidecars of a block share one read. It runs under the service context, not a caller's, so one canceled
-// validation does not fail the others; each caller waits for it under its own context. The read runs on its own
+// The sidecars of a block share one rebuild. It runs under the service context, not a caller's, so one canceled
+// validation does not fail the others; each caller waits for it under its own context. The rebuild runs on its own
 // goroutine, outside the gossip validator's recovery, where singleflight makes a panic fatal, so it recovers one
 // itself and ignores the sidecar.
 func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	key := expectedProposerKey{parentRoot: parentRoot, slot: slot}
 	if proposer, ok := e.results.Get(key); ok {
+		return proposer, nil
+	}
+	// The parent state fork choice holds neither rebuilds nor waits, so each caller reads it before the waiter limit.
+	if proposer, found, err := e.readHeld(parentRoot, parentSlot, slot); err != nil {
+		return 0, err
+	} else if found {
+		e.results.Add(key, proposer)
 		return proposer, nil
 	}
 	if e.waiting.Add(1) > e.maxWaiting {
@@ -130,32 +138,42 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 	}
 }
 
+// readHeld reads the proposer of slot from the parent state fork choice holds, when that state gives it in place.
+func (e *expectedProposers) readHeld(parentRoot common.Hash, parentSlot, slot uint64) (uint64, bool, error) {
+	epoch := slot / e.cfg.SlotsPerEpoch
+	if !parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch) {
+		return 0, false, nil
+	}
+	var proposer uint64
+	found := false
+	if err := e.forkChoice.ViewCurrentStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
+		var err error
+		proposer, found, err = e.proposerInPlace(parentState, epoch, slot)
+		return err
+	}); err != nil {
+		return 0, false, fmt.Errorf("%w: view parent state for the expected proposer: %w", ErrIgnore, err)
+	}
+	return proposer, found, nil
+}
+
+// proposerInPlace reads the proposer of slot from parentState without advancing it: in the state's own epoch, or from
+// Fulu on in a later epoch of its lookahead.
+func (e *expectedProposers) proposerInPlace(parentState *state.CachingBeaconState, epoch, slot uint64) (uint64, bool, error) {
+	if state.Epoch(parentState) == epoch {
+		proposer, err := parentState.GetBeaconProposerIndexForSlot(slot)
+		return proposer, err == nil, err
+	}
+	if parentState.Version() == e.cfg.GetCurrentStateVersion(epoch) {
+		proposer, ok := parentState.ProposerIndexFromLookahead(slot)
+		return proposer, ok, nil
+	}
+	return 0, false, nil
+}
+
+// read rebuilds the parent state to find the proposer of slot, once the parent state fork choice holds did not give it.
 func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	epoch := slot / e.cfg.SlotsPerEpoch
 	inPlace := parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch)
-	var proposer uint64
-	found := false
-	readInPlace := func(parentState *state.CachingBeaconState) error {
-		if state.Epoch(parentState) == epoch {
-			var err error
-			proposer, err = parentState.GetBeaconProposerIndexForSlot(slot)
-			found = err == nil
-			return err
-		}
-		if parentState.Version() == e.cfg.GetCurrentStateVersion(epoch) {
-			proposer, found = parentState.ProposerIndexFromLookahead(slot)
-		}
-		return nil
-	}
-	if inPlace {
-		if err := e.forkChoice.ViewCurrentStateAtBlockRoot(parentRoot, readInPlace); err != nil {
-			return 0, fmt.Errorf("%w: view parent state for the expected proposer: %w", ErrIgnore, err)
-		}
-		if found {
-			return proposer, nil
-		}
-	}
-
 	select {
 	case e.admitted <- struct{}{}:
 	default:
@@ -174,7 +192,13 @@ func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, pa
 	defer func() { <-e.rebuilds }()
 
 	if inPlace {
-		if err := e.forkChoice.ViewStateAtBlockRoot(parentRoot, readInPlace); err != nil {
+		var proposer uint64
+		found := false
+		if err := e.forkChoice.ViewStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
+			var err error
+			proposer, found, err = e.proposerInPlace(parentState, epoch, slot)
+			return err
+		}); err != nil {
 			return 0, fmt.Errorf("%w: view parent state for the expected proposer: %w", ErrIgnore, err)
 		}
 		if found {
@@ -191,7 +215,7 @@ func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, pa
 	if err := transition.DefaultMachine.ProcessSlots(parentState, slot); err != nil {
 		return 0, fmt.Errorf("%w: advance parent state for the expected proposer: %w", ErrIgnore, err)
 	}
-	proposer, err = parentState.GetBeaconProposerIndexForSlot(slot)
+	proposer, err := parentState.GetBeaconProposerIndexForSlot(slot)
 	if err != nil {
 		return 0, fmt.Errorf("%w: expected proposer of slot %d: %w", ErrIgnore, slot, err)
 	}
