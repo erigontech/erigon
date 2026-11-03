@@ -110,6 +110,7 @@ type ForkChoiceStorageMock struct {
 	ValidateBlockForPublishingFn                       func(*cltypes.SignedBeaconBlock, bool) error
 	OnTickFn                                           func(uint64)
 	ValidateExecutionPayloadEnvelopeErr                error
+	ValidateExecutionPayloadEnvelopeFunc               func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error
 	ValidateExecutionPayloadEnvelopeForGossipErr       error
 	ValidateExecutionPayloadEnvelopeForGossipCalled    bool
 	ValidateExecutionPayloadEnvelopeForGossipFunc      func(*cltypes.SignedExecutionPayloadEnvelope) error
@@ -562,7 +563,10 @@ func (f *ForkChoiceStorageMock) OnExecutionPayloadAt(ctx context.Context, signed
 	return f.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, validatePayload)
 }
 
-func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(_ context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if f.ValidateExecutionPayloadEnvelopeFunc != nil {
+		return f.ValidateExecutionPayloadEnvelopeFunc(ctx, signedEnvelope)
+	}
 	return f.ValidateExecutionPayloadEnvelopeErr
 }
 
