@@ -1466,8 +1466,8 @@ func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *tes
 	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
 	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
 	cleared := common.HexToAddress("0x00000000000000000000000000000000000000cc")
-	// SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0)
-	clearCode := []byte{0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x00}
+	// SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0) unless slot 0 is zero, so a call on cleared storage writes nothing
+	clearCode := []byte{0x60, 0x00, 0x54, 0x15, 0x60, 0x16, 0x57, 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x5b}
 	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
 	const simulatedBlocks = 8
 	newChain := func(recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
