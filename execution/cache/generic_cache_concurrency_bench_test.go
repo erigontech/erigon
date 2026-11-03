@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/cachebudget"
 )
 
 // Steady-state throughput with many more goroutines than cores. Accesses are a
@@ -107,6 +109,9 @@ func BenchmarkGenericCacheFill(b *testing.B) {
 // cache already holds 2M entries, so the timed fill grows no table.
 func BenchmarkGenericCacheParallelFill(b *testing.B) {
 	const ballast, keys = 2 * 1024 * 1024, 1024 * 1024
+	prev := cachebudget.Global
+	b.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(1 << 40)
 	val := make([]byte, 40)
 	for b.Loop() {
 		b.StopTimer()
@@ -115,6 +120,9 @@ func BenchmarkGenericCacheParallelFill(b *testing.B) {
 		for i := range uint64(ballast) {
 			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
 			c.PutIfAbsent(k, val, 1)
+		}
+		if c.Len() != ballast {
+			b.Fatalf("prefill holds %d entries, want %d", c.Len(), ballast)
 		}
 		var next atomic.Uint64
 		next.Store(ballast)

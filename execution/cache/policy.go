@@ -18,9 +18,9 @@ package cache
 
 // Mode selects what GenericCache does when an insert would overflow capacity.
 //
-// ModeEvictLRU (default) drops the least-recently-used entry, matching the
-// other state caches in the tree. ModeNoOp keeps the historical "first writers
-// win" behaviour — once full, new keys are dropped (counted via a metric) —
+// ModeEvictLRU (default) stays within capacity through W-TinyLFU admission: an
+// overflowing insert either evicts a colder entry or is itself rejected. ModeNoOp
+// keeps the historical "first writers win" behaviour — once full, new keys are dropped (counted via a metric) —
 // and exists only as a diagnostic baseline for the regression bench.
 type Mode uint8
 
