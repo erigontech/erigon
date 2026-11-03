@@ -210,6 +210,8 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	cfg.BogotaTime = common.NewUint64(0)
 	sender := common.HexToAddress("0x1000")
 	successfulTarget, revertingTarget := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	balanceLog := program.New().Push(sender).Op(vm.BALANCE).Push0().Op(vm.MSTORE).
+		Push(32).Push0().Op(vm.LOG0).Bytes()
 	genesis := &types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
@@ -217,7 +219,7 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 				Balance: big.NewInt(1_000_000_000_000_000_000),
 				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
 			},
-			successfulTarget: {Code: program.New().Push0().Push0().Op(vm.LOG0).Bytes()},
+			successfulTarget: {Code: balanceLog},
 			revertingTarget:  {Code: program.New().Push0().Push0().Op(vm.LOG0).Push0().Push0().Op(vm.REVERT).Bytes()},
 		},
 	}
@@ -241,20 +243,29 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 
 	base := newBaseApiForTest(m)
 	blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
+	overrideBalance := (*hexutil.U256)(uint256.NewInt(1))
 	for _, tc := range []struct {
-		name    string
-		gasCap  uint64
-		wantErr bool
+		name      string
+		gasCap    uint64
+		overrides *ethapi.StateOverrides
+		wantData  []byte
+		wantErr   bool
 	}{
 		{name: "within cap", gasCap: 1_000_000},
 		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: true},
 		{name: "below declared budget", gasCap: frameTx.GetGasLimit() - 1, wantErr: true},
 		{name: "at declared budget", gasCap: frameTx.GetGasLimit()},
 		{name: "unlimited", gasCap: 0},
+		{name: "empty overrides", gasCap: frameTx.GetGasLimit(), overrides: &ethapi.StateOverrides{}},
+		{
+			name: "underfunded balance override", gasCap: frameTx.GetGasLimit(),
+			overrides: &ethapi.StateOverrides{accounts.InternAddress(sender): {Balance: &overrideBalance}},
+			wantData:  common.LeftPadBytes([]byte{1}, 32),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
-			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, nil, nil)
+			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, tc.overrides, nil)
 			if tc.wantErr {
 				require.ErrorContains(t, err, "exceeds the RPC gas cap")
 				require.Empty(t, logs)
@@ -263,6 +274,11 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, logs, 1)
 			require.Equal(t, successfulTarget, logs[0].Address)
+			wantData := tc.wantData
+			if wantData == nil {
+				wantData = receipt.Logs[0].Data
+			}
+			require.Equal(t, wantData, []byte(logs[0].Data))
 		})
 	}
 }

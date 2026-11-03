@@ -547,8 +547,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		// Execute the transaction message
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
+		// Canonical frame replay must preserve the fee debit observed by later frames.
+		gasBailout := txn.Type() != types.FrameTxType || hasStateOverrides
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
