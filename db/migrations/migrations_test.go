@@ -18,6 +18,7 @@ package migrations
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -295,6 +296,35 @@ func TestCommitCallRequired(t *testing.T) {
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Empty(applied)
+		return nil
+	}))
+}
+
+func TestFailureAfterCommitCallbackNotRecorded(t *testing.T) {
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	migrationsDB := newTestMigrationsDB(t)
+	errUp := errors.New("up failed")
+	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator.Migrations = []Migration{{
+		Name: "one",
+		Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			tx, err := db.BeginRw(t.Context())
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if err := BeforeCommit(tx, nil, true); err != nil {
+				return err
+			}
+			return errUp
+		},
+	}}
+	require.ErrorIs(migrator.Apply(db, migrationsDB, "", "", log.New()), errUp)
+
+	require.NoError(migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+		applied, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Empty(applied)
 		return nil

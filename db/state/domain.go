@@ -2239,11 +2239,6 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	}
 }
 
-func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	txTo = min(txTo, dt.files.EndTxNum())
-	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
-}
-
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	txTo = min(txTo, dt.files.EndTxNum())
 	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
