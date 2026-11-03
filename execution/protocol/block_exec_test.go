@@ -76,7 +76,22 @@ func TestExecuteBlockEphemerallyStatelessFailsOnExecPanic(t *testing.T) {
 	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
 
 	res, err := ExecuteBlockEphemerally(cfg, &vm.Config{StatelessExec: true}, nil, ethash.NewFaker(), block,
-		panicOnBalanceReader{state.NewNoopReader()}, state.NewNoopWriter(), nil, nil, log.New())
+		&panicOnceReader{NoopReader: state.NewNoopReader()}, state.NewNoopWriter(), nil, nil, log.New())
 	require.ErrorIs(t, err, ErrExecPanic)
 	require.Nil(t, res)
+}
+
+// panicOnceReader panics on the first account read only, so a run that wrongly
+// survives the panic reaches the assertions instead of panicking again in finalize.
+type panicOnceReader struct {
+	*state.NoopReader
+	panicked bool
+}
+
+func (r *panicOnceReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if !r.panicked {
+		r.panicked = true
+		panic("injected exec panic")
+	}
+	return r.NoopReader.ReadAccountData(addr)
 }

@@ -131,7 +131,7 @@ func ExecuteBlockEphemerally(
 		return nil, err
 	}
 	if err := endPhase(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("init of block %d: %w", blockNum, err)
 	}
 
 	var rejectedTxs []*RejectedTx
@@ -163,7 +163,7 @@ func ExecuteBlockEphemerally(
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
 			if err := endPhase(); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, blockNum, txn.Hash().Hex(), err)
 			}
 			includedTxs = append(includedTxs, txn)
 			if !vmConfig.NoReceipts {
@@ -211,7 +211,7 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 		if err := endPhase(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("finalize of block %d: %w", blockNum, err)
 		}
 	}
 	newRoot := newBlock.Root()
