@@ -104,7 +104,7 @@ const (
 // Commit: syncs inside itself, like Durable, only if unsynced data is above SyncInCommitIfAboveUnsyncedBytes
 // or the last sync is older than SyncInCommitIfUnsyncedFor.
 var (
-	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 256*datasize.MB)
+	SyncInCommitIfAboveUnsyncedBytes = dbg.EnvDataSize("MDBX_SYNC_BYTES", 1*datasize.GB)
 	DefaultPollerSyncPeriod          = dbg.EnvDuration("MDBX_SYNC_PERIOD", time.Second)
 
 	// DefaultSafeNoSync gives every database the deferred sync. Set it before any database
@@ -1569,13 +1569,17 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: tx.db.buckets[bucket].Flags&mdbx.DupSort != 0, id: tx.cursorID}
+	cfg, ok := tx.db.buckets[bucket]
+	if !ok {
+		return nil, fmt.Errorf("table %s not found", bucket)
+	}
+	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: cfg.Flags&mdbx.DupSort != 0, id: tx.cursorID}
 	tx.cursorID++
 
 	if tx.tx == nil {
 		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
 	}
-	if err := c.c.Open(tx.tx, mdbx.DBI(tx.db.buckets[c.bucketName].DBI)); err != nil {
+	if err := c.c.Open(tx.tx, mdbx.DBI(cfg.DBI)); err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
 

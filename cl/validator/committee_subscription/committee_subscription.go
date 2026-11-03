@@ -46,7 +46,7 @@ type CommitteeSubscribeMgmt struct {
 	beaconConfig    *clparams.BeaconChainConfig
 	netConfig       *clparams.NetworkConfig
 	syncedData      *synced_data.SyncedDataManager
-	gossipManager   *gossipMgr.GossipManager
+	gossipManager   gossipMgr.Gossip
 	aggregationPool aggregation.AggregationPool
 }
 
@@ -81,6 +81,10 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	}
 
 	log.Trace("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
+	// Only aggregators need to receive subnet attestations; non-aggregators publish through the joined topic.
+	if !p.IsAggregator {
+		return nil
+	}
 	commiteePerSlot := c.syncedData.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 

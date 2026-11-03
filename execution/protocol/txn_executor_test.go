@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -67,6 +68,36 @@ func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) 
 		false, // isFree
 		nil,   // maxFeePerBlobGas
 	)
+}
+
+// panicOnBalanceReader panics on the first account read, standing in for a genuine
+// infrastructure failure during versioned transition execution.
+type panicOnBalanceReader struct {
+	*state.NoopReader
+}
+
+func (panicOnBalanceReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	panic("injected exec panic")
+}
+
+// TestExecute_VersionedPanicWrapsErrExecPanic pins that a panic recovered inside
+// versioned transition execution surfaces as ErrExecPanic, so downstream (TxTask.Execute)
+// can route it operationally rather than condemning the block as invalid.
+func TestExecute_VersionedPanicWrapsErrExecPanic(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.NewWithVersionMap(panicOnBalanceReader{state.NewNoopReader()}, state.NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(0, 0)
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+
+	_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.ErrorIs(t, err, ErrExecPanic,
+		"a panic in versioned execution must surface as ErrExecPanic (operational, not a block verdict)")
 }
 
 type nilBlobFeeCapMessage struct {
@@ -1698,4 +1729,90 @@ func TestNoBALSkipsAccessRecording(t *testing.T) {
 			ibs.Close()
 		}
 	}
+}
+
+type serviceTxEngine struct {
+	rules.EngineReader
+	service bool
+}
+
+func (e *serviceTxEngine) IsServiceTransaction(accounts.Address, rules.SystemCall) bool {
+	return e.service
+}
+
+// A re-executed tx reuses its message, so the service-tx decision must be taken
+// again on every application rather than stay on the message.
+func TestApplyMessage_ServiceTxDecisionNotKeptOnReusedMessage(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	msg := newSimpleTransferMsg(sender, recipient, 21000, true)
+	engine := &serviceTxEngine{}
+
+	apply := func(service bool) error {
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		blockCtx := evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: blockGasLimit, BaseFee: *uint256.NewInt(1)}
+		evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{})
+		engine.service = service
+		_, err := ApplyMessage(evm, msg, new(GasPool).AddGas(blockGasLimit), true, false, engine)
+		return err
+	}
+
+	require.NoError(t, apply(true))
+	require.ErrorIs(t, apply(false), ErrFeeCapTooLow)
+}
+
+type accountsReader struct {
+	*state.NoopReader
+	accounts map[accounts.Address]*accounts.Account
+}
+
+func (r accountsReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return r.accounts[addr], nil
+}
+
+// A transfer to a code-less recipient that validation credits skips the frame, but a call tracer
+// still sees its top-level CALL.
+func TestRecipientCreditedAtValidationReportsCallToTracer(t *testing.T) {
+	const blockGasLimit = 1_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	existing := accounts.NewAccount()
+	ibs := state.New(accountsReader{accounts: map[accounts.Address]*accounts.Account{recipient: &existing}})
+	defer ibs.Close()
+
+	type frame struct {
+		depth    int
+		typ      byte
+		to       accounts.Address
+		value    uint256.Int
+		exitSeen bool
+	}
+	var frames []frame
+	hooks := &tracing.Hooks{
+		OnEnter: func(depth int, typ byte, _, to accounts.Address, _ bool, _ []byte, _ uint64, value uint256.Int, _ []byte) {
+			frames = append(frames, frame{depth: depth, typ: typ, to: to, value: value})
+		},
+		OnExit: func(depth int, _ []byte, _ uint64, err error, reverted bool) {
+			require.Equal(t, 0, depth)
+			require.NoError(t, err)
+			require.False(t, reverted)
+			frames[len(frames)-1].exitSeen = true
+		},
+	}
+	evm := vm.NewEVM(evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: blockGasLimit},
+		evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true, Tracer: hooks})
+	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(5), blockGasLimit,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
+
+	result, err := ApplyMessageChargeSenderAtValidation(evm, msg, NewGasPool(blockGasLimit, 0), nil)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	balance, err := ibs.GetBalance(recipient)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "the run credited the recipient; validation must do it")
+	require.Equal(t, []frame{{depth: 0, typ: byte(vm.CALL), to: recipient, value: *uint256.NewInt(5), exitSeen: true}}, frames)
 }

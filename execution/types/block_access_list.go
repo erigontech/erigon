@@ -212,7 +212,7 @@ func (budget *blockAccessListDecodeBudget) takeItem() error {
 type AccountChanges struct {
 	Address        common.Address
 	StorageChanges []SlotChanges
-	StorageReads   []accounts.StorageKey
+	StorageReads   []common.Hash
 	BalanceChanges []*BalanceChange
 	NonceChanges   []*NonceChange
 	CodeChanges    []*CodeChange
@@ -701,10 +701,8 @@ func sortByIndex[T interface{ GetIndex() uint32 }](changes []T) {
 	})
 }
 
-func sortHashes(hashes []accounts.StorageKey) {
-	slices.SortFunc(hashes, func(a, b accounts.StorageKey) int {
-		return a.Cmp(b)
-	})
+func sortHashes(hashes []common.Hash) {
+	slices.SortFunc(hashes, common.Hash.Cmp)
 }
 
 type blockAccessListRLPItem interface {
@@ -745,26 +743,26 @@ func encodeBlockAccessList[T blockAccessListRLPItem](items []T, w io.Writer, buf
 	return nil
 }
 
-func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error {
+func encodeHashList(hashes []common.Hash, w io.Writer, buf []byte) error {
 	total := 0
 	for i := range hashes {
-		total += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
+		total += rlp.Uint256Len(hashToUint256(hashes[i]))
 	}
 	if err := rlp.EncodeListPrefix(total, w, buf); err != nil {
 		return err
 	}
 	for i := range hashes {
-		if err := rlp.EncodeUint256(hashToUint256(hashes[i].Value()), w, buf); err != nil {
+		if err := rlp.EncodeUint256(hashToUint256(hashes[i]), w, buf); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func encodingSizeHashList(hashes []accounts.StorageKey) int {
+func encodingSizeHashList(hashes []common.Hash) int {
 	size := 0
 	for i := range hashes {
-		size += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
+		size += rlp.Uint256Len(hashToUint256(hashes[i]))
 	}
 	return rlp.ListPrefixLen(size) + size
 }
@@ -922,11 +920,11 @@ func decodeChangeList[T any, P interface {
 	return out, nil
 }
 
-func decodeStorageKeys(s *rlp.Stream, budget *blockAccessListDecodeBudget) ([]accounts.StorageKey, error) {
+func decodeStorageKeys(s *rlp.Stream, budget *blockAccessListDecodeBudget) ([]common.Hash, error) {
 	if _, err := s.List(); err != nil {
 		return nil, err
 	}
-	var hashes []accounts.StorageKey
+	var hashes []common.Hash
 	for s.MoreDataInList() {
 		if err := budget.takeItem(); err != nil {
 			return nil, err
@@ -935,10 +933,10 @@ func decodeStorageKeys(s *rlp.Stream, budget *blockAccessListDecodeBudget) ([]ac
 		if err != nil {
 			return nil, err
 		}
-		if budget != nil && len(hashes) > 0 && hashes[len(hashes)-1].Value().Cmp(h) >= 0 {
+		if budget != nil && len(hashes) > 0 && hashes[len(hashes)-1].Cmp(h) >= 0 {
 			return nil, fmt.Errorf("%w: storage reads must be strictly increasing", ErrInvalidBlockAccessList)
 		}
-		hashes = append(hashes, accounts.InternKey(h))
+		hashes = append(hashes, h)
 	}
 	if err := s.ListEnd(); err != nil {
 		return nil, err
@@ -1074,8 +1072,8 @@ func (ac *AccountChanges) validate() error {
 			changeSlots[sc.Slot.Value()] = struct{}{}
 		}
 		for _, key := range ac.StorageReads {
-			if _, exists := changeSlots[key.Value()]; exists {
-				return fmt.Errorf("storage key %s in both changes and reads", key.Value().Hex())
+			if _, exists := changeSlots[key]; exists {
+				return fmt.Errorf("storage key %s in both changes and reads", key.Hex())
 			}
 		}
 	}
@@ -1099,7 +1097,7 @@ func validateStorageChangeEntries(changes []*StorageChange) error {
 	return validateIndexedChanges(changes)
 }
 
-func validateStorageReads(reads []accounts.StorageKey) error {
+func validateStorageReads(reads []common.Hash) error {
 	for i := 1; i < len(reads); i++ {
 		if reads[i-1].Cmp(reads[i]) >= 0 {
 			return fmt.Errorf("storage reads must be strictly increasing (index %d)", i)
@@ -1182,7 +1180,7 @@ func (bal BlockAccessList) DebugPrint(w io.Writer) {
 				if j > 0 {
 					fmt.Fprint(w, " ")
 				}
-				fmt.Fprint(w, read.Value().Hex())
+				fmt.Fprint(w, read.Hex())
 			}
 			fmt.Fprint(w, "]")
 		}
@@ -1259,9 +1257,9 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 			}
 		}
 		if acc.StorageReads != nil {
-			bal[i].StorageReads = make([]accounts.StorageKey, len(acc.StorageReads))
+			bal[i].StorageReads = make([]common.Hash, len(acc.StorageReads))
 			for j, r := range acc.StorageReads {
-				bal[i].StorageReads[j] = accounts.InternKey(gointerfaces.ConvertH256ToHash(r))
+				bal[i].StorageReads[j] = gointerfaces.ConvertH256ToHash(r)
 			}
 		}
 		if acc.BalanceChanges != nil {
@@ -1327,7 +1325,7 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 			balAccount.StorageChanges = append(balAccount.StorageChanges, slotChanges)
 		}
 		for _, read := range account.StorageReads {
-			balAccount.StorageReads = append(balAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
+			balAccount.StorageReads = append(balAccount.StorageReads, gointerfaces.ConvertHashToH256(read))
 		}
 		for _, balanceChange := range account.BalanceChanges {
 			if balanceChange == nil {
@@ -1407,7 +1405,7 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 			rpcAccount.StorageChanges = append(rpcAccount.StorageChanges, slotChanges)
 		}
 		for _, read := range account.StorageReads {
-			rpcAccount.StorageReads = append(rpcAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
+			rpcAccount.StorageReads = append(rpcAccount.StorageReads, gointerfaces.ConvertHashToH256(read))
 		}
 		for _, balanceChange := range account.BalanceChanges {
 			if balanceChange == nil {
@@ -1487,7 +1485,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 			if read == nil {
 				return nil, fmt.Errorf("blockAccessList account %d storageReads[%d] is nil", accountIdx, readIdx)
 			}
-			accountChanges.StorageReads = append(accountChanges.StorageReads, accounts.InternKey(gointerfaces.ConvertH256ToHash(read)))
+			accountChanges.StorageReads = append(accountChanges.StorageReads, gointerfaces.ConvertH256ToHash(read))
 		}
 		for balanceIdx, balanceChange := range account.BalanceChanges {
 			if balanceChange == nil {

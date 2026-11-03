@@ -78,7 +78,7 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 	}
 	// Its own, not the template's: the template traverses the skeleton over the
 	// same keys the workers do, so aliasing them counts every key twice.
-	p.metrics = NewMetrics("")
+	p.metrics = &Metrics{}
 	return p
 }
 
@@ -196,12 +196,6 @@ func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
 	}
 }
 
-func (p *ParallelPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
-	if p.template != nil {
-		p.template.EnableCsvMetrics(filePathPrefix)
-	}
-}
-
 func (p *ParallelPatriciaHashed) Variant() TrieVariant {
 	return VariantParallelHexPatricia
 }
@@ -242,7 +236,8 @@ func (p *ParallelPatriciaHashed) Process(
 	// Per-round, matching HexPatriciaHashed.Process: the counters published for
 	// a round have to describe that round alone.
 	p.metrics.Reset()
-	p.metrics.AddRoundKeys(updates.Size())
+	n := updates.Size()
+	p.metrics.AddRoundKeys(n)
 	roundStart := time.Now()
 	defer func() { observeRound(p.metrics, roundStart) }()
 
@@ -273,6 +268,7 @@ func (p *ParallelPatriciaHashed) Process(
 		return nil, mErr
 	}
 
+	pu.foldTombstones()
 	if p.cfg.LeaveDeferredForCaller {
 		pu.deferredMu.Lock()
 		p.deferredForCaller = pu.deferredCombined
@@ -290,7 +286,6 @@ func (p *ParallelPatriciaHashed) Process(
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
-		n := updates.Size()
 		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
 	}
 	return out, nil

@@ -18,9 +18,14 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"reflect"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -34,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -83,6 +89,82 @@ type SimulatedBlock struct {
 	Calls          []ethapi.CallArgs      `json:"calls"`
 }
 
+// UnmarshalJSON rejects block and account override keys that are not defined.
+// encoding/json alone ignores unknown keys.
+func (b *SimulatedBlock) UnmarshalJSON(input []byte) error {
+	var dec struct {
+		BlockOverrides json.RawMessage                    `json:"blockOverrides"`
+		StateOverrides map[common.Address]json.RawMessage `json:"stateOverrides"`
+		Calls          []ethapi.CallArgs                  `json:"calls"`
+	}
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	var res SimulatedBlock
+	if dec.BlockOverrides != nil {
+		if err := checkOverrideKeys(dec.BlockOverrides, reflect.TypeFor[ethapi.BlockOverrides](), "block override"); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(dec.BlockOverrides, &res.BlockOverrides); err != nil {
+			return err
+		}
+	}
+	if dec.StateOverrides != nil {
+		overrides := make(ethapi.StateOverrides, len(dec.StateOverrides))
+		for addr, raw := range dec.StateOverrides {
+			if err := checkOverrideKeys(raw, reflect.TypeFor[ethapi.Account](), "state override for "+addr.Hex()); err != nil {
+				return err
+			}
+			var account ethapi.Account
+			if err := json.Unmarshal(raw, &account); err != nil {
+				return err
+			}
+			overrides[accounts.InternAddress(addr)] = account
+		}
+		res.StateOverrides = &overrides
+	}
+	res.Calls = dec.Calls
+	*b = res
+	return nil
+}
+
+// checkOverrideKeys returns an error for a key of the JSON object that does not
+// name a field of t, or that names a field another key already names. Names
+// match case-insensitively, as in encoding/json. Repeated identical keys cannot
+// be seen here; encoding/json keeps the last one.
+func checkOverrideKeys(input json.RawMessage, t reflect.Type, what string) error {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(input, &keys); err != nil || keys == nil {
+		return nil
+	}
+	seen := make(map[int]string)
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		field := -1
+		for i := range t.NumField() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if !f.IsExported() || name == "-" {
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+			if strings.EqualFold(key, name) {
+				field = i
+				break
+			}
+		}
+		if field < 0 {
+			return fmt.Errorf("unknown field %q in %s", key, what)
+		}
+		if prev, ok := seen[field]; ok {
+			return fmt.Errorf("keys %q and %q in %s name the same field", prev, key, what)
+		}
+		seen[field] = key
+	}
+	return nil
+}
+
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
 type SimulatedBlockResult = *ethapi.RPCBlock
 
@@ -125,7 +207,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+	if err := api.checkPruneState(ctx, tx, blockNumber); err != nil {
 		return nil, err
 	}
 
@@ -350,6 +432,9 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		if s.chainConfig.IsPostMerge(overrides.Number.Uint64(), uint64(*overrides.Time)) {
 			difficulty = uint256.Int{}
 		}
+		if overrides.Difficulty != nil && difficulty.IsZero() {
+			return nil, &rpc.CustomError{Message: fmt.Sprintf("block %d: difficulty override is not allowed after the merge", overrides.Number.Uint64()), Code: rpc.ErrCodeInvalidParams}
+		}
 		var slotNumber *uint64
 		if header.SlotNumber != nil {
 			slot := *header.SlotNumber + 1
@@ -434,7 +519,10 @@ func (s *simulator) sanitizeCall(
 			args.MaxPriorityFeePerGas = new(hexutil.U256)
 		}
 	}
-	if args.MaxFeePerBlobGas == nil && args.BlobVersionedHashes != nil {
+	if args.BlobVersionedHashes == nil {
+		// eth_simulateV1 reads a blob fee cap without blob hashes as absent; the call methods reject it.
+		args.MaxFeePerBlobGas = nil
+	} else if args.MaxFeePerBlobGas == nil {
 		args.MaxFeePerBlobGas = new(hexutil.U256)
 	}
 	return nil
@@ -515,17 +603,6 @@ func (w diffTrackingWriter) CreateContract(address accounts.Address) error {
 		w.touchedKeys[address] = storageKeys{}
 	}
 	return nil
-}
-
-func (w diffTrackingWriter) trackWrites(writes *state.WriteSet) {
-	for h := range writes.AllHeaders() {
-		if _, ok := w.touchedKeys[h.Address]; !ok {
-			w.touchedKeys[h.Address] = storageKeys{}
-		}
-		if h.Path == state.StoragePath {
-			w.touchedKeys[h.Address] = append(w.touchedKeys[h.Address], h.Key)
-		}
-	}
 }
 
 // simOverrideReader serves overridden accounts from a separate state that holds the
@@ -670,74 +747,46 @@ func (s *simulator) simulateBlock(
 	// Determine the active precompiled contracts for this block.
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum, s.touchedKeys)
+	putDel := sharedDomains.AsPutDel(tx)
+	if !latest {
+		putDel = &historicalPutDel{TemporalPutDel: putDel, view: newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), touched: s.touchedKeys}
+	}
+	stateWriter := newDiffTrackingWriter(putDel, minTxNum, s.touchedKeys)
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
 
 	// Override the state before block execution.
-	stateOverrides := bsc.StateOverrides
-	var overrideDirtyAccounts map[accounts.Address]struct{}
-	var intraBlockState *state.IntraBlockState
-	if balMode {
-		if stateOverrides != nil {
-			overrideReader, err := commitSimOverrides(stateOverrides, stateReader, activePrecompiles, rules, stateWriter)
-			if err != nil {
-				return nil, nil, err
-			}
-			defer overrideReader.Close()
-			stateReader = overrideReader
+	if bsc.StateOverrides != nil {
+		overrideReader, err := commitSimOverrides(bsc.StateOverrides, stateReader, activePrecompiles, rules, stateWriter)
+		if err != nil {
+			return nil, nil, err
 		}
-		intraBlockState = state.New(stateReader)
-		intraBlockState.SetVersionMap(state.NewVersionMap(nil))
-		intraBlockState.SetForkRules(rules)
-		intraBlockState.SetTxContext(blockNumber, -1)
-	} else {
-		intraBlockState = state.New(stateReader)
-		if stateOverrides != nil {
-			if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
-				intraBlockState.Close()
-				return nil, nil, err
-			}
-			// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
-			// override-only accounts (they were not "touched" by any transaction).
-			overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
-			for addr, account := range *stateOverrides {
-				// An empty storage replacement journals nothing, but must still clear the stored slots.
-				if account.State != nil {
-					overrideDirtyAccounts[addr] = struct{}{}
-				}
-			}
-		}
+		defer overrideReader.Close()
+		stateReader = overrideReader
 	}
+	intraBlockState := state.New(stateReader)
 	defer intraBlockState.Close()
+	intraBlockState.SetVersionMap(state.NewVersionMap(nil))
+	intraBlockState.SetTxContext(blockNumber, -1)
 
 	var balIO *state.VersionedIO
-	recordPhase := func() error { return nil }
 	if balMode {
 		balIO = &state.VersionedIO{}
-		committedStorageKeys := state.CommittedStorageKeysFn(sharedDomains, tx)
-		emptyRemoval := blockNumber != 0 && s.chainConfig.IsEIP161Enabled(blockNumber)
-		recordPhase = func() error {
-			writes := intraBlockState.FinalizedWrites(rules)
-			intraBlockState.MergeTxIOInto(balIO, writes)
-			intraBlockState.FlushWritesToVersionMap(writes)
-			normalized, err := writes.Normalize(intraBlockState.VersionMap(), intraBlockState.TxnIndex(), 0, stateReader, committedStorageKeys, emptyRemoval, s.chainConfig.Aura != nil, rules.IsAmsterdam)
-			if err != nil {
-				return fmt.Errorf("normalize simulated writes: %w", err)
-			}
-			// A touched empty account produces no write of its own, so the EIP-161 removal that
-			// Normalize derives must reach the version map before the next call reads it.
-			for addr, removal := range normalized.SelfDestructs() {
-				if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
-					intraBlockState.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
-				}
-			}
-			stateWriter.trackWrites(normalized)
-			if err := normalized.Apply(sharedDomains, tx, blockNumber, minTxNum, nil, rules, nil, false); err != nil {
-				return fmt.Errorf("apply simulated writes: %w", err)
-			}
-			intraBlockState.ResetVersionedIO()
-			return nil
+	}
+	recordPhase := func() error {
+		// The finalized writes carry the EIP-161 removals, so the next call reads them from the version map.
+		writes, err := intraBlockState.FinalizedWrites(rules)
+		if err != nil {
+			return err
 		}
+		if balMode {
+			intraBlockState.MergeTxIOInto(balIO, writes)
+		}
+		intraBlockState.FlushWritesToVersionMap(writes)
+		if err := intraBlockState.WriteFlushedTo(writes, stateWriter); err != nil {
+			return fmt.Errorf("apply simulated writes: %w", err)
+		}
+		intraBlockState.ResetVersionedIO()
+		return nil
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -768,10 +817,6 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	callWriter := state.StateWriter(stateWriter)
-	if balMode {
-		callWriter = state.NewNoopWriter()
-	}
 	callResults := make([]ethapi.CallResult, 0, len(bsc.Calls))
 	for callIndex := range bsc.Calls {
 		call := &bsc.Calls[callIndex]
@@ -783,7 +828,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(rules, callWriter)
+		err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -806,9 +851,9 @@ func (s *simulator) simulateBlock(
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
+	intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
+	intraBlockState.ResetVersionedIO()
 	if balMode {
-		intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
-		intraBlockState.ResetVersionedIO()
 		// Withdrawal recipients left absent still belong in the BAL as accessed.
 		intraBlockState.StartAccessRecording()
 	}
@@ -818,23 +863,13 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
+	if err := recordPhase(); err != nil {
+		return nil, nil, err
+	}
 	if balMode {
-		if err := recordPhase(); err != nil {
-			return nil, nil, err
-		}
 		// FinalizeAndAssemble copied the header, so the hash must go on the block's own header.
 		balHash := balIO.AsBlockAccessList().Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &balHash
-	} else {
-		if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
-			return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
-		}
-		// Write override-only accounts that CommitBlock skipped (EIP-161 disabled for these).
-		if len(overrideDirtyAccounts) > 0 {
-			if err := intraBlockState.CommitOverrideDirtyAccounts(rules, stateWriter, overrideDirtyAccounts); err != nil {
-				return nil, nil, fmt.Errorf("committing override accounts: %w", err)
-			}
-		}
 	}
 
 	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
@@ -881,12 +916,21 @@ func (s *simulator) newStateReaderForBlock(
 		return state.NewReaderV3(sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), minTxNum, firstMinTxNum, nil
 	}
 
-	if minTxNum < state.StateHistoryStartTxNum(tx) {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if minTxNum < minHistoryTxNum {
 		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.ErrPruned, minTxNum)
 	}
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+	if s.commitmentHistory {
+		commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if minTxNum < commitmentStartingTxNum {
+			return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+		}
 	}
 
 	if len(ancestors) > 0 {
@@ -946,7 +990,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
 	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum, firstMinTxNum)
 		if err != nil {
 			return err
 		}
@@ -985,6 +1029,17 @@ func (s *simulator) simulateCall(
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *gasUsed, globalGasCap)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	// EIP-2681 also limits the nonce when validation is off and the nonce checks are skipped.
+	if !s.validation {
+		from := call.FromOrEmpty()
+		nonce, err := intraBlockState.GetNonce(from)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if nonce == math.MaxUint64 {
+			return nil, nil, nil, txValidationError(fmt.Errorf("%w: address %v, nonce: %d", protocol.ErrNonceMax, from, nonce))
+		}
 	}
 
 	// Prepare the transaction message
@@ -1248,6 +1303,84 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 	}
 }
 
+// historicalPutDel writes a simulation on a historical block. SharedDomains resolves the previous
+// value of a write from the head state, so a write equal to head is dropped and a delete of a key
+// gone at head writes no tombstone: in both cases the next simulated block reads the base value.
+// It resolves the previous value from the simulation's own view instead.
+type historicalPutDel struct {
+	kv.TemporalPutDel
+	view    *simulationIntraBlockStateReader
+	touched keysByAccount
+}
+
+func (p *historicalPutDel) prev(domain kv.Domain, k, prevVal []byte) ([]byte, error) {
+	if prevVal != nil {
+		return prevVal, nil
+	}
+	enc, err := p.view.getEncoded(domain, k)
+	if enc == nil {
+		enc = []byte{} // absent: a nil prevVal would make SharedDomains read head state
+	}
+	return enc, err
+}
+
+func (p *historicalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	prevVal, err := p.prev(domain, k, prevVal)
+	if err != nil {
+		return err
+	}
+	return p.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
+}
+
+func (p *historicalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	if domain == kv.AccountsDomain {
+		if err := p.DomainDel(kv.CodeDomain, k, txNum, nil); err != nil {
+			return err
+		}
+		if err := p.DomainDelPrefix(kv.StorageDomain, k, txNum); err != nil {
+			return err
+		}
+	}
+	prevVal, err := p.prev(domain, k, prevVal)
+	if err != nil {
+		return err
+	}
+	return p.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
+}
+
+// DomainDelPrefix also deletes the base block's slots: SharedDomains walks head storage only.
+func (p *historicalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	if err := p.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum); err != nil {
+		return err
+	}
+	if domain != kv.StorageDomain {
+		return nil
+	}
+	address := accounts.InternAddress(common.BytesToAddress(prefix))
+	to, _ := kv.NextSubtree(prefix)
+	it, err := p.view.roTx.RangeAsOf(kv.StorageDomain, prefix, to, p.view.firstMinTxNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, enc, err := it.Next()
+		if err != nil {
+			return err
+		}
+		p.touched[address] = append(p.touched[address], accounts.InternKey(common.BytesToHash(k[length.Addr:])))
+		if memEnc, _, ok := p.view.sd.GetMemBatch().GetLatest(kv.StorageDomain, k); ok {
+			enc = memEnc
+		}
+		if len(enc) > 0 {
+			if err := p.TemporalPutDel.DomainDel(kv.StorageDomain, k, txNum, enc); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // getEncoded returns the encoded value for a domain key: checks mem batch first, then falls back to GetAsOf.
 func (r *simulationIntraBlockStateReader) getEncoded(domain kv.Domain, key []byte) ([]byte, error) {
 	enc, _, ok := r.sd.GetMemBatch().GetLatest(domain, key)
@@ -1324,16 +1457,16 @@ func (r *simulationIntraBlockStateReader) SetTrace(_ bool, _ string) {}
 func (r *simulationIntraBlockStateReader) Trace() bool               { return false }
 func (r *simulationIntraBlockStateReader) TracePrefix() string       { return "" }
 
-func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
+func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains, firstMinTxNum uint64) commitmentdb.StateReader {
+	// Commitment is read from the temporary SharedDomains, account/storage/code values from the simulation's view.
 	// We use CommitmentReplayStateReader (not a plain SplitStateReader) so that Clone() only propagates the new tx to
 	// the commitment (temp DB) reader, keeping the plain state (main DB) reader pointing at the original outer-DB tx.
 	// This is critical: accounts whose data didn't change during simulation are not written to sd.mem, so when the trie
-	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
+	// reads them it must fall back to the base block state (via the original tx), not to the empty temp DB (via ttx).
 	return &commitmentdb.CommitmentReplayStateReader{
 		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
 			commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
-			commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{}),
+			newHistoryCommitmentOnlyReader(tx, sd, firstMinTxNum+1, firstMinTxNum),
 			false,
 		),
 	}
@@ -1348,13 +1481,14 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	baseBlockNum uint64,
 	simBlockNum uint64,
 	simMaxTxNum uint64,
+	firstMinTxNum uint64,
 ) ([]byte, error) {
 	replay := rpchelper.NewCommitmentReplay(s.dirs, s.txNumReader, s.logger)
 	// For computing the simulated block commitment we need to:
 	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
 	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
+		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd, firstMinTxNum))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
 			addrValue := address.Value()

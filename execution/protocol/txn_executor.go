@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -60,40 +61,10 @@ TxnExecutor applies a single transaction to the current world state.
 
 var ErrTxnExecutionFailed = errors.New("txn execution failed")
 
-type ErrExecAbortError struct {
-	DependencyTxIndex int
-	OriginError       error
-}
-
-// ErrExecPanic is a recovered non-dependency panic during transaction execution.
-// It is an operational failure, not evidence that the block is invalid.
-type ErrExecPanic struct {
-	message string
-}
-
-func (e *ErrExecPanic) Error() string {
-	return e.message
-}
-
-func (e ErrExecAbortError) Error() string {
-	if e.DependencyTxIndex >= 0 {
-		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
-	} else {
-		if e.OriginError != nil {
-			return e.OriginError.Error()
-		}
-		return "execution aborted"
-	}
-}
-
-// IsError reports whether the abort carries an execution error rather than only
-// a speculative dependency. Dependency aborts raised by state.ErrDependency
-// carry no OriginError and are retried; DependencyTxIndex is scheduling
-// metadata, not the classifier. An OriginError must be validated against settled
-// input before it can be attributed to block data rather than stale state.
-func (e ErrExecAbortError) IsError() bool {
-	return e.OriginError != nil
-}
+// ErrExecPanic wraps a panic recovered during versioned transition execution. It is an
+// infrastructure failure, not a block-validity verdict, so callers route it operationally
+// (fail the stage retryably) rather than as ErrInvalidBlock.
+var ErrExecPanic = errors.New("transition exec panic")
 
 // nonceError formats lazily: under parallel execution a nonce mismatch is a
 // routine re-execution signal whose text is discarded.
@@ -121,6 +92,7 @@ type TxnExecutor struct {
 	gasPrice              *uint256.Int
 	feeCap                *uint256.Int
 	tipCap                *uint256.Int
+	isFree                bool
 	value                 uint256.Int
 	data                  []byte
 	state                 *state.IntraBlockState
@@ -130,6 +102,8 @@ type TxnExecutor struct {
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
 	// This is useful during parallel txn execution, where the common account read/write should be minimized.
 	noFeeBurnAndTip bool
+
+	chargeSenderAtValidation bool
 }
 
 // Message represents a message sent to a contract.
@@ -154,6 +128,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
+	Authorities(chainID *uint256.Int) *types.RecoveredAuthorities
 	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -169,6 +144,7 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		gasPrice: msg.GasPrice(),
 		feeCap:   msg.FeeCap(),
 		tipCap:   msg.TipCap(),
+		isFree:   msg.IsFree(),
 		value:    *msg.Value(),
 		data:     msg.Data(),
 		state:    evm.IntraBlockState(),
@@ -186,29 +162,35 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Parity behaviour
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, refunds, gasBailout, false, engine)
+	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
 }
 
-func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
+func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, chargeSenderAtValidation bool, engine rules.EngineReader) (
 	*evmtypes.ExecutionResult, error,
 ) {
+	st := NewTxnExecutor(evm, msg, gp)
 	// Only zero-gas transactions may be service ones
-	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
+	if msg.FeeCap().IsZero() && !st.isFree && engine != nil {
 		blockContext := evm.Context
 		blockContext.Coinbase = params.SystemAddress
 		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
 		}
-		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		st.isFree = engine.IsServiceTransaction(msg.From(), syscall)
 	}
-	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
+	st.chargeSenderAtValidation = chargeSenderAtValidation
 	return st.Execute(refunds, gasBailout)
 }
 
 func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
-	return applyMessage(evm, msg, gp, refunds, gasBailout, true, engine)
+	return applyMessage(evm, msg, gp, refunds, gasBailout, true, false, engine)
+}
+
+// ApplyMessageChargeSenderAtValidation is ApplyMessageNoFeeBurnOrTip without the sender charge (nonce, gas, value).
+func ApplyMessageChargeSenderAtValidation(evm *vm.EVM, msg Message, gp *GasPool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
+	return applyMessage(evm, msg, gp, true, false, true, true, engine)
 }
 
 func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
@@ -239,7 +221,7 @@ func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 		}
 	}
 
-	if !gasBailout {
+	if !gasBailout && !st.chargeSenderAtValidation {
 		if err := st.state.SubBalance(st.msg.From(), fees.gasVal, tracing.BalanceDecreaseGasBuy); err != nil {
 			return err
 		}
@@ -277,7 +259,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	}
 
 	// Make sure this transaction's nonce is correct.
-	if st.msg.CheckNonce() {
+	if st.msg.CheckNonce() && !st.chargeSenderAtValidation {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
 			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -326,7 +308,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
-			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.isFree); err != nil {
 				return upfrontTxnFees{}, err
 			}
 		}
@@ -399,7 +381,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if !gasBailout {
+	if !gasBailout && !st.chargeSenderAtValidation {
 		balanceCheck := fees.gasVal
 		if st.feeCap != nil {
 			balanceCheck, overflow = u256.MulOverflow(u256.U64(gas), *st.feeCap)
@@ -563,22 +545,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				panicErr, isError := r.(error)
-				if isError && errors.Is(panicErr, state.ErrDependency) {
-					err = ErrExecAbortError{DependencyTxIndex: st.evm.IntraBlockState().DepTxIndex()}
-					return
-				}
-				stack := dbg.Stack()
-				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", stack)
-				err = &ErrExecPanic{message: fmt.Sprintf("transition exec panic: %v at: %s", r, stack)}
+				// An in-flight dependency aborts via result.Dep, it does not panic,
+				// so any panic here is a genuine failure.
+				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
 			}
 		}()
 	}
 
 	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(st.msg.From())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	var senderInitBalance uint256.Int
+	if !st.chargeSenderAtValidation {
+		senderInitBalance, err = st.state.GetBalance(st.msg.From())
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
 	}
 
 	var coinbaseInitBalance uint256.Int
@@ -612,7 +592,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 
-	if !contractCreation {
+	if !contractCreation && !st.chargeSenderAtValidation {
 		// Increment the nonce for the next transaction
 		nonce, err := st.state.GetNonce(sender)
 		if err != nil {
@@ -630,7 +610,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
 	}
 
-	var bailout bool
+	// The value debit is part of the sender charge applied at validation.
+	bailout := st.chargeSenderAtValidation
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
 		canTransfer, err := st.evm.Context.CanTransfer(st.state, msg.From(), *msg.Value())
@@ -663,8 +644,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	st.gasRemaining, gasUsed.auth, vmerr = st.verifyAuthorities(auths, rules.ChainID, st.gasRemaining)
 	if vmerr == nil {
 		if contractCreation {
-			createNonce, vmerr = st.state.GetNonce(sender)
-			if vmerr != nil {
+			if st.chargeSenderAtValidation {
+				createNonce = st.msg.Nonce()
+			} else if createNonce, vmerr = st.state.GetNonce(sender); vmerr != nil {
 				vmerr = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, vmerr)
 			}
 			if vmerr == nil && createNonce+1 >= createNonce {
@@ -698,9 +680,16 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		gasUsed = runtimeGasAccounting{frame: frameGasUsed}
 	} else {
 		frameGas := st.gasRemaining
-		if contractCreation {
+		switch {
+		case contractCreation && st.chargeSenderAtValidation:
+			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.CreateWithNonce(sender, st.data, st.gasRemaining, st.value, st.msg.Nonce(), bailout)
+		case contractCreation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
-		} else {
+		case st.chargeSenderAtValidation && RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, vmConfig.Tracer, rules, st.state.StateReader()):
+			tracer := vmConfig.Tracer
+			tracer.EmitEnter(0, byte(vm.CALL), sender, st.to(), false, st.data, st.gasRemaining, st.value, nil)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
+		default:
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
 		gasUsed.finishFrame(frameGas, st.gasRemaining, vmerr)
@@ -755,8 +744,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if !rules.IsAmsterdam {
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
-		if err := st.refundGas(gasLeft); err != nil {
-			return nil, err
+		if !st.chargeSenderAtValidation {
+			if err := st.refundGas(gasLeft); err != nil {
+				return nil, err
+			}
 		}
 	} else if !rules.IsAmsterdam {
 		st.blockExecutionGasUsed = st.msg.Gas()
@@ -792,7 +783,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	var burnAmount uint256.Int
 	var burntContractAddress accounts.Address
 
-	if !msg.IsFree() && rules.IsLondon {
+	if !st.isFree && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if !burntContractAddress.IsNil() {
 			burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
@@ -876,6 +867,19 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 	return gasRemaining, gasUsed, err
 }
 
+// RecipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
+// recipient exists and has no code, so validation credits it after every lower tx. A recorded read
+// of the recipient would conflict with each lower credit, so the run peeks at block-start state and
+// validation re-checks the code. A tracer that follows balances or gas needs the frame.
+func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value uint256.Int, tracer *tracing.Hooks, rules *chain.Rules, blockStart state.StateReader) bool {
+	if value.IsZero() || to == coinbase || to == from || tracer.HasGasChangeHook() || tracer != nil && tracer.OnBalanceChange != nil ||
+		slices.Contains(vm.ActivePrecompiles(rules), to) {
+		return false
+	}
+	acc, err := blockStart.ReadAccountData(to)
+	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
+}
+
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;
 // callers must first validate the list with validateSetCodePrerequisites.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
@@ -890,6 +894,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
+	recovered := st.msg.Authorities(chainID)
 	for i := range auths {
 		auth := &auths[i]
 
@@ -900,12 +905,18 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		recovered, err := auth.RecoverSigner()
+		var signer common.Address
+		var err error
+		if recovered != nil {
+			signer, err = recovered.Signers[i], recovered.Errs[i]
+		} else {
+			signer, err = auth.RecoverSigner()
+		}
 		if err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
-		authority := accounts.InternAddress(recovered)
+		authority := accounts.InternAddress(signer)
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)

@@ -152,7 +152,7 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 		f.mu.RUnlock()
 		return nil
 	}
-	parentState, err := f.forkGraph.GetState(block.Block.ParentRoot, true)
+	parentState, err := f.copyStateAtBlockRootLocked(block.Block.ParentRoot)
 	f.mu.RUnlock()
 	if err != nil {
 		return err
@@ -213,6 +213,10 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
+	if block != nil && block.Block != nil {
+		finishImport := f.BeginPayloadImport(block.Block.Slot)
+		defer finishImport()
+	}
 	// Count before taking the store mutex so queued imports are visible as in progress.
 	f.blocksProcessing.Add(1)
 	defer f.blocksProcessing.Add(-1)
@@ -264,7 +268,10 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, f.getCheckpointStateLocked)
+		if err != nil {
+			return err
+		}
 		head, _, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 		if err != nil {
 			return err
@@ -576,17 +583,29 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 
+	var custodyRequirement uint64
+	updateValidatorsCustody := false
 	if f.peerDas != nil {
 		if connectedValidators := f.localValidators.GetValidators(); len(connectedValidators) > 0 {
 			// update the custody requirement whenever we see a new block
-			custodyRequirement := state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
-			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+			custodyRequirement = state.GetValidatorsCustodyRequirement(lastProcessedState, connectedValidators)
+			updateValidatorsCustody = true
 		}
 	}
+
+	block.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
+		if err := f.onAttestationLocked(attestation, true, lastProcessedState, blockRoot); err != nil {
+			log.Debug("[OnBlock] block attestation not applied", "slot", block.Block.Slot, "err", err)
+		}
+		return true
+	})
 
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
+	if updateValidatorsCustody {
+		f.peerDas.UpdateValidatorsCustody(custodyRequirement)
+	}
 
 	var appliedEnvelope *cltypes.SignedExecutionPayloadEnvelope
 	var appliedEnvelopeLocal, envelopeApplied bool
@@ -821,7 +840,9 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
-	for _, repair := range f.envelopeIndexRepairs.repairs() {
+	repairs := f.envelopeIndexRepairs.repairs()
+	for i := range repairs {
+		repair := repairs[i]
 		if limit <= 0 || ctx.Err() != nil {
 			return
 		}
@@ -844,7 +865,7 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 				limit--
 				continue
 			}
-			repair = f.envelopeIndexRepairs.setValues(repair, persisted.Message.Payload.BlockNumber, persisted.Message.Payload.BlockHash)
+			repair = f.captureEnvelopeIndexRepairValues(repair, persisted)
 			if repair.generation == 0 {
 				limit--
 				continue

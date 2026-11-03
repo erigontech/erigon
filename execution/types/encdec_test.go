@@ -332,14 +332,6 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 	return txns
 }
 
-func (tr *TRand) RandRawTransactions(size int) [][]byte {
-	txns := make([][]byte, size)
-	for i := range size {
-		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
-	}
-	return txns
-}
-
 func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
 	for i := range size {
@@ -372,24 +364,6 @@ func (tr *TRand) RandRawBody() *RawBody {
 		Transactions: tr.RandRLPTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-	}
-}
-
-func (tr *TRand) RandRawBlock(setNil bool) *RawBlock {
-	if setNil {
-		return &RawBlock{
-			Header: tr.RandHeader(),
-			Body: &RawBody{
-				Uncles:      nil,
-				Withdrawals: nil,
-				// Deposits:     nil,
-			},
-		}
-	}
-
-	return &RawBlock{
-		Header: tr.RandHeader(),
-		Body:   tr.RandRawBody(),
 	}
 }
 

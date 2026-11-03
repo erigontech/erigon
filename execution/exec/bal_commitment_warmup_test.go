@@ -120,7 +120,7 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
 	bal := types.BlockAccessList{
-		{Address: readOnlyAddress.Value(), StorageReads: []accounts.StorageKey{readSlot}},
+		{Address: readOnlyAddress.Value(), StorageReads: []common.Hash{readSlot.Value()}},
 		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
 		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
 			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},

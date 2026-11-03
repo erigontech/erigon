@@ -66,7 +66,7 @@ func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 		pubsub.WithMessageIdFn(p.msgId),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(p.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
+		pubsub.WithMaxMessageSize(int(p.cfg.NetworkConfig.MaxGossipMessageSize())),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),

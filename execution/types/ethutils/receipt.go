@@ -64,20 +64,21 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) *RPCReceipt {
-	var chainId *uint256.Int
-	switch t := txn.(type) {
-	case *types.LegacyTx:
-		if t.Protected() {
-			chainId, _ = types.DeriveChainId(&t.V)
-		}
-	default:
-		chainId = txn.GetChainID()
-	}
-
 	var from *common.Address
 	if signed {
-		signer := types.LatestSignerForChainID(chainId)
-		sender, _ := txn.Sender(*signer)
+		sender, ok := txn.GetSender()
+		if !ok || sender.IsZero() {
+			var chainID *uint256.Int
+			switch t := txn.(type) {
+			case *types.LegacyTx:
+				if t.Protected() {
+					chainID, _ = types.DeriveChainId(&t.V)
+				}
+			default:
+				chainID = txn.GetChainID()
+			}
+			sender, _ = txn.Sender(*types.LatestSignerForChainID(chainID))
+		}
 		address := sender.Value()
 		from = &address
 	}
@@ -86,11 +87,17 @@ func MarshalReceipt(
 
 	switch {
 	case withBlockTimestamp:
-		rpcLogs := make(types.Logs, 0, len(receipt.Logs))
-		for _, l := range receipt.Logs {
-			rpcLogs = append(rpcLogs, types.StampedLog(l, header.Time))
+		stamped := make([]struct {
+			log       types.Log
+			timestamp hexutil.Uint64
+		}, len(receipt.Logs))
+		logsToMarshal = make(types.Logs, len(receipt.Logs))
+		for i, log := range receipt.Logs {
+			stamped[i].log = *log
+			stamped[i].timestamp = hexutil.Uint64(header.Time)
+			stamped[i].log.BlockTimestamp = &stamped[i].timestamp
+			logsToMarshal[i] = &stamped[i].log
 		}
-		logsToMarshal = rpcLogs
 	case receipt.Logs == nil:
 		logsToMarshal = types.Logs{}
 	default:

@@ -310,12 +310,6 @@ func (p *p2pManager) setupENR() error {
 			initialAttnets.SetBitAt(uint64(i), true)
 		}
 		initialSyncnets = bitfield.Bitvector4{byte(0x0f)}
-	} else {
-		// Set a couple of subnets so peers don't see all-zeros and penalize us
-		// as a "useless peer". The VC will update subnets later via committee
-		// subscriptions; this just ensures early handshakes succeed.
-		initialAttnets.SetBitAt(0, true) // subnet 0
-		initialAttnets.SetBitAt(1, true) // subnet 1
 	}
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, initialAttnets.Bytes()))
@@ -355,29 +349,12 @@ func (p *p2pManager) updateENR() {
 	}
 }
 
-func (p *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
-	// Attestation subnets use Bitvector64 (8 bytes for 64 subnets).
-	subnetField := bitfield.NewBitvector64()
-	if err := p.udpv5.LocalNode().Node().Load(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
-		log.Error("[Sentinel] Could not load AttSubnetKey", "err", err)
-		return
+func (p *p2pManager) SetENRAttSubnets(subnets []uint64) {
+	attnets := bitfield.NewBitvector64()
+	for _, subnet := range subnets {
+		attnets.SetBitAt(subnet, true)
 	}
-	subnetField = bytes.Clone(subnetField)
-	if subnetIndex < 0 {
-		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
-		return
-	}
-	if len(subnetField) <= subnetIndex/8 {
-		log.Error("[Sentinel] Att subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
-		return
-	}
-	if on {
-		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
-	} else {
-		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
-	}
-	p.udpv5.LocalNode().Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, &subnetField))
-	log.Debug("[Sentinel] Updated att subnet", "subnetIndex", subnetIndex, "on", on)
+	p.udpv5.LocalNode().Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, attnets.Bytes()))
 }
 
 func (p *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {

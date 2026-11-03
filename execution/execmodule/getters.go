@@ -319,7 +319,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 // API then reports null for that block, per spec, rather than failing the
 // whole request.
 func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
-	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum)
+	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum, nil)
 	if err == nil {
 		return encoded, nil
 	}
@@ -369,6 +369,10 @@ func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.
 		return false, nil
 	}
 	return expectedHash == hash, nil
+}
+
+func (e *ExecModule) IsValidated(blockHash common.Hash) bool {
+	return e.forkValidator.IsValidated(blockHash)
 }
 
 func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error) {

@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -39,11 +40,13 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/p2p"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // PeerBanner is an interface for banning misbehaving peers.
@@ -147,6 +150,7 @@ type GossipManager struct {
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
+	localNodeID    atomic.Pointer[enode.ID]
 
 	publishQueue chan publishJob
 	peerBanQueue chan peerBan
@@ -216,6 +220,11 @@ func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
 }
 
+func (g *GossipManager) SetLocalNodeID(nodeID enode.ID) {
+	g.localNodeID.Store(&nodeID)
+	g.subscribePersistentAttestationSubnets()
+}
+
 // Close gracefully shuts down the GossipManager and all its goroutines.
 func (g *GossipManager) Close() error {
 	g.cancel()
@@ -245,7 +254,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		if topic == "" {
 			return pubsub.ValidationReject
 		}
-		name := extractTopicName(topic)
+		name := gossip.ExtractTopicName(topic)
 		if name == "" {
 			return pubsub.ValidationReject
 		}
@@ -277,7 +286,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		msgData, err = utils.DecompressSnappy(msgData, true)
+		msgData, err = gossip.DecompressMessage(name, msgData, g.beaconConfig, g.networkConfig)
 		if err != nil {
 			log.Debug("[GossipManager] reject decompress message", "topic", name, "err", err)
 			g.stats.addReject(name)
@@ -390,8 +399,41 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
 	g.subscribeUpcomingProposerPreferences()
+	g.subscribePersistentAttestationSubnets()
 	err = nil
 	return
+}
+
+func (g *GossipManager) subscribePersistentAttestationSubnets() {
+	if g.subscribeAll {
+		return
+	}
+	nodeID := g.localNodeID.Load()
+	if nodeID == nil {
+		return
+	}
+	epoch := g.ethClock.GetCurrentEpoch()
+	persistentSubnets, err := subnets.ComputeSubscribedSubnets(g.beaconConfig, g.networkConfig, *nodeID, epoch)
+	if err != nil {
+		log.Warn("[GossipManager] failed to compute persistent attestation subnets", "err", err)
+		return
+	}
+	rotationEpoch := subnets.SubscribedSubnetsRotationEpoch(*nodeID, epoch)
+	expiry := g.ethClock.GetSlotTime(rotationEpoch*g.beaconConfig.SlotsPerEpoch + 1)
+	for _, topic := range g.subscriptions.AllTopics() {
+		name := gossip.ExtractTopicName(topic)
+		if !gossip.IsTopicBeaconAttestation(name) {
+			continue
+		}
+		subnet := extractSubnetIndexByGossipTopic(name)
+		if subnet < 0 || !slices.Contains(persistentSubnets, uint64(subnet)) {
+			continue
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
+			log.Warn("[GossipManager] failed to subscribe persistent attestation subnet", "topic", topic, "err", err)
+		}
+	}
+	g.p2p.SetENRAttSubnets(persistentSubnets)
 }
 
 func (g *GossipManager) defaultExpiryForTopic(name string) time.Time {
@@ -418,8 +460,23 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 	if err := g.subscriptions.SubscribeWithExpiry(topic, expiry); err != nil {
 		return err
 	}
+	for _, registeredTopic := range g.subscriptions.AllTopics() {
+		if registeredTopic == topic || gossip.ExtractTopicName(registeredTopic) != name {
+			continue
+		}
+		if err := g.subscriptions.SubscribeWithExpiry(registeredTopic, expiry); err != nil {
+			log.Warn("[GossipManager] failed to subscribe topic on another fork digest", "topic", registeredTopic, "err", err)
+		}
+	}
 
 	return nil
+}
+
+func (g *GossipManager) ExpectedAttestations(window time.Duration, activeValidators uint64) uint64 {
+	slotDuration := time.Duration(g.beaconConfig.SecondsPerSlot) * time.Second
+	slotBursts := uint64((window + slotDuration - 1) / slotDuration)
+	return g.subscriptions.subscribedAttestationSubnetCount() * activeValidators * slotBursts /
+		(g.beaconConfig.SlotsPerEpoch * g.networkConfig.AttestationSubnetCount)
 }
 
 func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) error {
@@ -565,6 +622,7 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 		}
 
 		g.subscribeUpcomingProposerPreferences()
+		g.subscribePersistentAttestationSubnets()
 
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
@@ -639,7 +697,7 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...s
 	allTopics := g.subscriptions.AllTopics()
 	for _, oldTopic := range allTopics {
 		// replace fork digest with new one
-		name := extractTopicName(oldTopic)
+		name := gossip.ExtractTopicName(oldTopic)
 		if name == "" || len(names) > 0 && !slices.Contains(names, name) {
 			continue
 		}
@@ -680,15 +738,6 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...s
 		}
 	}
 	return nil
-}
-
-func extractTopicName(topic string) string {
-	// /eth2/[fork_digest]/[topic]/ssz_snappy
-	tokens := strings.Split(topic, "/")
-	if len(tokens) != 5 {
-		return ""
-	}
-	return tokens[3]
 }
 
 func extractSubnetIndexByGossipTopic(name string) int {

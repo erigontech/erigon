@@ -62,7 +62,6 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
-	ibs.eip8246 = true
 
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	require.NoError(t, ibs.SetCode(addr, []byte("twenty-two-byte-code!!"), tracing.CodeChangeUnspecified))
@@ -88,16 +87,18 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 func TestSelfdestructVersioned_RevertedNonceBumpAfterDestruct(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x5DBA2"))
-	for _, noMaterialize := range []bool{true, false} {
+	for _, versioned := range []bool{true, false} {
 		for _, created := range []bool{true, false} {
-			t.Run(fmt.Sprintf("noMaterialize=%v/created=%v", noMaterialize, created), func(t *testing.T) {
+			t.Run(fmt.Sprintf("versioned=%v/created=%v", versioned, created), func(t *testing.T) {
 				reader := newAccountStateReader(addr)
 				if created {
 					reader = newAccountStateReader()
 				}
-				ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+				ibs := New(reader)
+				if versioned {
+					ibs = NewWithVersionMap(reader, NewVersionMap(nil))
+				}
 				defer ibs.Close()
-				ibs.SetNoMaterialize(noMaterialize)
 				ibs.SetTxContext(0, 0)
 
 				if created {
