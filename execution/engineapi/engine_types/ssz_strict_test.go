@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	commonssz "github.com/erigontech/erigon/common/ssz"
@@ -42,15 +43,19 @@ func insertSSZGap(buf []byte, insertAt int, offsetPositions ...int) []byte {
 }
 
 func payloadAttributesStrictDecodeFallbackAllowed(obj commonssz.Unmarshaler) bool {
-	_, ok := obj.(*cltypes.Withdrawal)
-	return ok
+	switch obj.(type) {
+	case *cltypes.Withdrawal, *solid.TransactionsSSZ:
+		return true
+	default:
+		return false
+	}
 }
 
 func TestPayloadAttributesStrictSchemaCoverage(t *testing.T) {
-	for version := clparams.BellatrixVersion; version <= clparams.GloasVersion; version++ {
+	for version := clparams.BellatrixVersion; version <= clparams.HezeVersion; version++ {
 		t.Run(version.String(), func(t *testing.T) {
 			attributes := NewPayloadAttributesSSZ(version)
-			fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+			fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil), inclusionList: &solid.TransactionsSSZ{}}
 			schema := attributes.decodeSSZSchema(&fields)
 			if version >= clparams.CapellaVersion {
 				schema = append(schema, (*cltypes.Withdrawal)(nil))
@@ -134,19 +139,22 @@ func TestExecutionPayloadDecodeSSZStrictRoundTrip(t *testing.T) {
 
 func TestPayloadAttributesDecodeSSZStrictRoundTrip(t *testing.T) {
 	tests := []struct {
-		name        string
-		withdrawals []*types.Withdrawal
+		name          string
+		withdrawals   []*types.Withdrawal
+		inclusionList []hexutil.Bytes
 	}{
 		{
-			name:        "empty withdrawals",
-			withdrawals: []*types.Withdrawal{},
+			name:          "empty lists",
+			withdrawals:   []*types.Withdrawal{},
+			inclusionList: []hexutil.Bytes{},
 		},
 		{
-			name:        "populated withdrawals",
-			withdrawals: []*types.Withdrawal{{Index: 1, Validator: 2, Amount: 3}},
+			name:          "populated lists",
+			withdrawals:   []*types.Withdrawal{{Index: 1, Validator: 2, Amount: 3}},
+			inclusionList: []hexutil.Bytes{{0x07}, {0x08, 0x09}},
 		},
 	}
-	for version := clparams.BellatrixVersion; version <= clparams.GloasVersion; version++ {
+	for version := clparams.BellatrixVersion; version <= clparams.HezeVersion; version++ {
 		for _, test := range tests {
 			t.Run(version.String()+"/"+test.name, func(t *testing.T) {
 				attributes := NewPayloadAttributesSSZ(version)
@@ -165,6 +173,9 @@ func TestPayloadAttributesDecodeSSZStrictRoundTrip(t *testing.T) {
 					targetGasLimit := hexutil.Uint64(6)
 					attributes.SlotNumber = &slotNumber
 					attributes.TargetGasLimit = &targetGasLimit
+				}
+				if version >= clparams.HezeVersion {
+					attributes.InclusionListTransactions = test.inclusionList
 				}
 
 				encoded, err := attributes.EncodeSSZ(nil)
@@ -192,6 +203,7 @@ func TestPayloadAttributesSSZForkEncodingSizes(t *testing.T) {
 		{version: clparams.ElectraVersion, size: 96},
 		{version: clparams.FuluVersion, size: 96},
 		{version: clparams.GloasVersion, size: 112},
+		{version: clparams.HezeVersion, size: 116},
 	}
 	for _, test := range tests {
 		t.Run(test.version.String(), func(t *testing.T) {
@@ -205,6 +217,11 @@ func TestPayloadAttributesSSZForkEncodingSizes(t *testing.T) {
 			if test.version < clparams.GloasVersion {
 				require.Nil(t, decoded.SlotNumber)
 				require.Nil(t, decoded.TargetGasLimit)
+			}
+			if test.version < clparams.HezeVersion {
+				require.Nil(t, decoded.InclusionListTransactions)
+			} else {
+				require.NotNil(t, decoded.InclusionListTransactions)
 			}
 		})
 	}

@@ -66,14 +66,15 @@ type ForkChoiceState struct {
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
-	Timestamp             hexutil.Uint64        `json:"timestamp"`
-	PrevRandao            common.Hash           `json:"prevRandao"`
-	SuggestedFeeRecipient common.Address        `json:"suggestedFeeRecipient"`
-	Withdrawals           []*types.Withdrawal   `json:"withdrawals"`
-	ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
-	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
-	TargetGasLimit        *hexutil.Uint64       `json:"targetGasLimit"`
-	SSZVersion            clparams.StateVersion `json:"-"`
+	Timestamp                 hexutil.Uint64        `json:"timestamp"`
+	PrevRandao                common.Hash           `json:"prevRandao"`
+	SuggestedFeeRecipient     common.Address        `json:"suggestedFeeRecipient"`
+	Withdrawals               []*types.Withdrawal   `json:"withdrawals"`
+	ParentBeaconBlockRoot     *common.Hash          `json:"parentBeaconBlockRoot"`
+	SlotNumber                *hexutil.Uint64       `json:"slotNumber"`
+	TargetGasLimit            *hexutil.Uint64       `json:"targetGasLimit"`
+	InclusionListTransactions []hexutil.Bytes       `json:"inclusionListTransactions"`
+	SSZVersion                clparams.StateVersion `json:"-"`
 }
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobsBundle

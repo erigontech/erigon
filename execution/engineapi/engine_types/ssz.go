@@ -319,6 +319,10 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 	if a.TargetGasLimit != nil {
 		targetGasLimit = uint64(*a.TargetGasLimit)
 	}
+	inclusionList := make([][]byte, len(a.InclusionListTransactions))
+	for i, tx := range a.InclusionListTransactions {
+		inclusionList[i] = tx
+	}
 	switch version {
 	case clparams.BellatrixVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:])
@@ -326,8 +330,10 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
-	default: // GloasVersion+
+	case clparams.GloasVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
+	default: // HezeVersion+
+		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit, solid.NewTransactionsSSZFromTransactions(inclusionList))
 	}
 }
 
@@ -345,6 +351,7 @@ type payloadAttributesDecodeFields struct {
 	parentBeaconBlockRoot common.Hash
 	slotNumber            uint64
 	targetGasLimit        uint64
+	inclusionList         *solid.TransactionsSSZ
 }
 
 func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeFields) []any {
@@ -355,15 +362,17 @@ func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeField
 		schema = append(schema, fields.withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:])
-	default: // GloasVersion+
+	case clparams.GloasVersion:
 		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit)
+	default: // HezeVersion+
+		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit, fields.inclusionList)
 	}
 	return schema
 }
 
 func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) error {
 	a.SSZVersion = clparams.StateVersion(version)
-	fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+	fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil), inclusionList: &solid.TransactionsSSZ{}}
 	unmarshal := ssz2.UnmarshalSSZ
 	if strict {
 		unmarshal = ssz2.UnmarshalSSZStrict
@@ -379,7 +388,7 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
 		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
-	default: // GloasVersion+
+	case clparams.GloasVersion:
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
 		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
@@ -387,6 +396,18 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 		a.SlotNumber = &slotNumber
 		tgl := hexutil.Uint64(fields.targetGasLimit)
 		a.TargetGasLimit = &tgl
+	default: // HezeVersion+
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
+		slotNumber := hexutil.Uint64(fields.slotNumber)
+		a.SlotNumber = &slotNumber
+		tgl := hexutil.Uint64(fields.targetGasLimit)
+		a.TargetGasLimit = &tgl
+		a.InclusionListTransactions = make([]hexutil.Bytes, fields.inclusionList.Len())
+		for i, tx := range fields.inclusionList.UnderlyngReference() {
+			a.InclusionListTransactions[i] = tx
+		}
 	}
 	a.Timestamp = hexutil.Uint64(fields.timestamp)
 	return nil
