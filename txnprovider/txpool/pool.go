@@ -146,6 +146,7 @@ type nonceGapState struct {
 	stateNonce        uint64
 	firstMissingNonce uint64
 	minRetryNonce     uint64
+	targetNonce       uint64
 	checkedGeneration uint64
 	progressRevision  uint64
 }
@@ -715,6 +716,7 @@ func (p *TxPool) p2pRetryLocked(tx kv.Tx, hashes Hashes, seenRevision uint64, vi
 	if p.cfg.NoGossip {
 		return false, false, nil
 	}
+	frontiers := make(map[common.Address]nonceRetryFrontier)
 	for i := 0; i < len(hashes); i += 32 {
 		hash := string(hashes[i : i+32])
 		if p.unprocessedRemoteByHash[hash] != nil || p.byHash[hash] != nil || p.minedBlobTxnsByHash[hash] != nil {
@@ -734,7 +736,7 @@ func (p *TxPool) p2pRetryLocked(tx kv.Tx, hashes Hashes, seenRevision uint64, vi
 		if record.reason != txpoolcfg.NonceTooDistant {
 			continue
 		}
-		hashRetry, hashNeedsView, err := p.nonceGapRetryLocked(record.nonceGap, seenRevision, view)
+		hashRetry, hashNeedsView, err := p.nonceGapRetryLocked(record.nonceGap, seenRevision, view, frontiers)
 		if err != nil {
 			return false, false, err
 		}
@@ -744,42 +746,56 @@ func (p *TxPool) p2pRetryLocked(tx kv.Tx, hashes Hashes, seenRevision uint64, vi
 	return retry, needsView, nil
 }
 
-func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, view kvcache.CacheView) (bool, bool, error) {
-	if gap.checkedGeneration != p.stateGeneration {
-		if view == nil {
-			return false, true, nil
-		}
-		encoded, err := view.Get(gap.sender[:])
-		if err != nil {
-			return false, false, err
-		}
-		var account accounts.Account
-		if len(encoded) > 0 {
-			if err := accounts.DeserialiseV3(&account, encoded); err != nil {
+type nonceRetryFrontier struct {
+	stateNonce        uint64
+	firstMissingNonce uint64
+}
+
+func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, view kvcache.CacheView, frontiers map[common.Address]nonceRetryFrontier) (bool, bool, error) {
+	current, cached := frontiers[gap.sender]
+	if !cached {
+		current.stateNonce = gap.stateNonce
+		if gap.checkedGeneration != p.stateGeneration {
+			if view == nil {
+				return false, true, nil
+			}
+			encoded, err := view.Get(gap.sender[:])
+			if err != nil {
 				return false, false, err
 			}
+			var account accounts.Account
+			if len(encoded) > 0 {
+				if err := accounts.DeserialiseV3(&account, encoded); err != nil {
+					return false, false, err
+				}
+			}
+			current.stateNonce = account.Nonce
 		}
-		gap.stateNonce = account.Nonce
-		gap.checkedGeneration = p.stateGeneration
-	}
-	frontier := gap.stateNonce
-	if id, ok := p.senders.getID(gap.sender); ok {
-		p.all.ascend(id, func(txn *metaTxn) bool {
-			if txn.TxnSlot.Nonce < frontier {
+		current.firstMissingNonce = current.stateNonce
+		if id, ok := p.senders.getID(gap.sender); ok {
+			p.all.ascend(id, func(txn *metaTxn) bool {
+				frontier := current.firstMissingNonce
+				if txn.TxnSlot.Nonce < frontier {
+					return true
+				}
+				if frontier == math.MaxUint64 || txn.TxnSlot.Nonce != frontier || txn.subPool&NoNonceGaps == 0 {
+					return false
+				}
+				current.firstMissingNonce++
 				return true
-			}
-			if frontier == math.MaxUint64 || txn.TxnSlot.Nonce != frontier || txn.subPool&NoNonceGaps == 0 {
-				return false
-			}
-			frontier++
-			return true
-		})
+			})
+		}
+		frontiers[gap.sender] = current
 	}
-	if frontier > gap.firstMissingNonce {
+
+	eligible := current.stateNonce <= gap.targetNonce && current.firstMissingNonce >= gap.minRetryNonce
+	if current.stateNonce <= gap.targetNonce && (current.firstMissingNonce > gap.firstMissingNonce || eligible && gap.stateNonce > gap.targetNonce) {
 		gap.progressRevision = p.nonceRetryRevision.Add(1)
 	}
-	gap.firstMissingNonce = frontier
-	return frontier >= gap.minRetryNonce && gap.progressRevision > seenRevision, false, nil
+	gap.stateNonce = current.stateNonce
+	gap.firstMissingNonce = current.firstMissingNonce
+	gap.checkedGeneration = p.stateGeneration
+	return eligible && gap.progressRevision > seenRevision, false, nil
 }
 
 func (p *TxPool) recordPrecheck(hash [32]byte, reason txpoolcfg.DiscardReason) {
@@ -1131,7 +1147,7 @@ func (p *TxPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID Pee
 	needsView := false
 	if retry != nil {
 		for _, txn := range newTxns.Txns {
-			if txn.TxType() != BlobTxnType {
+			if txn.TxType() == SetCodeTxnType {
 				continue
 			}
 			record, found := p.discardReasonsLRU.Peek(string(txn.IDHash[:]))
@@ -1164,8 +1180,9 @@ func (p *TxPool) addRemoteTxnsLocked(newTxns TxnSlots, peerID PeerID, sentry sen
 		if previous != nil && previous.invalidSidecar.Load() {
 			return nil, nil, nil
 		}
+		frontiers := make(map[common.Address]nonceRetryFrontier)
 		for i, txn := range newTxns.Txns {
-			if txn.TxType() != BlobTxnType {
+			if txn.TxType() == SetCodeTxnType {
 				continue
 			}
 			hash := string(txn.IDHash[:])
@@ -1174,14 +1191,14 @@ func (p *TxPool) addRemoteTxnsLocked(newTxns TxnSlots, peerID PeerID, sentry sen
 			}
 			eligible := true
 			if record, found := p.discardReasonsLRU.Peek(hash); found {
-				eligible = false
+				eligible = txn.TxType() != BlobTxnType
 				if record.reason == txpoolcfg.NonceTooDistant {
-					eligible, _, err = p.nonceGapRetryLocked(record.nonceGap, retry.seenRevision(txn.IDHash[:]), view)
+					eligible, _, err = p.nonceGapRetryLocked(record.nonceGap, retry.seenRevision(txn.IDHash[:]), view, frontiers)
 					if err != nil {
 						return nil, nil, err
 					}
 				}
-			} else if p.precheckLRU.Contains(hash) {
+			} else if txn.TxType() == BlobTxnType && p.precheckLRU.Contains(hash) {
 				eligible = false
 			}
 			if !eligible {
@@ -2610,6 +2627,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				stateNonce:        senderNonce,
 				firstMissingNonce: noGapsNonce,
 				minRetryNonce:     minRetryNonce,
+				targetNonce:       mt.TxnSlot.Nonce,
 				checkedGeneration: p.stateGeneration,
 			}
 		}
