@@ -72,21 +72,20 @@ func checkEntryShape(e *ExecutionEntry) error {
 }
 
 // checkCallArrayShape rejects call gas, static calls with value or a revert
-// span, revert spans past the array and spans inside spans.
+// span, revert spans past the array and spans inside spans. A span's calls
+// are checked like any other: the call hash leaves gas out.
 func checkCallArrayShape(calls []CrossChainCall) error {
-	for i := 0; i < len(calls); {
+	for i := range calls {
 		c := &calls[i]
-		if c.Gas != 0 {
+		switch {
+		case c.Gas != 0:
 			return failMaterialize("call %d with call gas", i)
+		case c.IsStatic && (c.Value.Sign() != 0 || c.RevertNextNCalls != 0):
+			return failMaterialize("static call %d with value or a revert span", i)
 		}
-		if c.IsStatic {
-			if c.Value.Sign() != 0 || c.RevertNextNCalls != 0 {
-				return failMaterialize("static call %d with value or a revert span", i)
-			}
-			i++
-			continue
-		}
-		span := int(c.RevertNextNCalls)
+	}
+	for i := 0; i < len(calls); {
+		span := int(calls[i].RevertNextNCalls)
 		if span == 0 {
 			i++
 			continue

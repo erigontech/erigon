@@ -280,3 +280,18 @@ func deepCalls(calls []CrossChainCall) []CrossChainCall {
 	}
 	return out
 }
+
+// TestCheckCallArrayShape: a revert span's calls are checked like any other.
+func TestCheckCallArrayShape(t *testing.T) {
+	span := CrossChainCall{Value: new(big.Int), RevertNextNCalls: 2}
+	plain := CrossChainCall{Value: new(big.Int)}
+	require.NoError(t, checkCallArrayShape([]CrossChainCall{span, plain, plain}))
+	for name, calls := range map[string][]CrossChainCall{
+		"call gas in a span":             {span, {Value: new(big.Int), Gas: 1}},
+		"static call with value in span": {span, {Value: big.NewInt(1), IsStatic: true}},
+		"nested span":                    {span, {Value: new(big.Int), RevertNextNCalls: 1}},
+		"span past the array":            {span},
+	} {
+		require.ErrorIs(t, checkCallArrayShape(calls), ErrMaterialize, name)
+	}
+}
