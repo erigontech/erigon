@@ -89,6 +89,21 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 	}
 }
 
+func (api *OverlayAPIImpl) checkGasCap(txn types.Transaction, isAmsterdam bool) error {
+	if api.GasCap == 0 {
+		return nil
+	}
+	limits, err := protocol.TransactionGasLimits(txn, isAmsterdam)
+	if err != nil {
+		return err
+	}
+	// Match block inclusion: execution and state have separate limits.
+	if gasLimit := max(limits.Execution, limits.State); gasLimit > api.GasCap {
+		return fmt.Errorf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+	}
+	return nil
+}
+
 func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
@@ -157,9 +172,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	creationTx := block.Transactions()[transactionIndex]
 	// Signed frame budgets cannot be clamped like an ordinary message's gas limit.
-	if api.GasCap != 0 && creationTx.Type() == types.FrameTxType {
-		if gasLimit := creationTx.GetGasLimit(); gasLimit > api.GasCap {
-			return nil, fmt.Errorf("frame transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+	if creationTx.Type() == types.FrameTxType {
+		if err := api.checkGasCap(creationTx, chainConfig.IsAmsterdam(block.Time())); err != nil {
+			return nil, err
 		}
 	}
 
@@ -227,11 +242,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if creationTx.IsContractDeploy() && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
-	} else {
-		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
+	msg.ChangeGas(api.GasCap, api.GasCap)
+	// The replacement's RPC allowance may exceed the transaction gas-limit ceiling.
+	msg.SetCheckGas(false)
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: api.GasCap}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: msg.Gas()}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
@@ -463,9 +479,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// Without overrides, changing gas limits can change the replayed state.
 	// Frame budgets are signed and must stay unchanged even with overrides.
 	for _, txn := range replayTransactions {
-		if api.GasCap != 0 && (!hasStateOverrides || txn.Type() == types.FrameTxType) {
-			if gasLimit := txn.GetGasLimit(); gasLimit > api.GasCap {
-				return nil, fmt.Errorf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+		if !hasStateOverrides || txn.Type() == types.FrameTxType {
+			if err := api.checkGasCap(txn, chainConfig.IsAmsterdam(block.Time())); err != nil {
+				return nil, err
 			}
 		}
 	}

@@ -239,6 +239,9 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	require.Equal(t, types.ReceiptStatusFailed, receipt.Status)
 	require.Len(t, receipt.Logs, 1)
 	require.Equal(t, successfulTarget, receipt.Logs[0].Address)
+	_, _, limits, err := frameTx.GasLimits()
+	require.NoError(t, err)
+	require.Greater(t, limits.Execution, limits.State)
 
 	base := newBaseApiForTest(m)
 	blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
@@ -252,12 +255,12 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 	}{
 		{name: "within cap", gasCap: 1_000_000},
 		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: true},
-		{name: "below declared budget", gasCap: frameTx.GetGasLimit() - 1, wantErr: true},
-		{name: "at declared budget", gasCap: frameTx.GetGasLimit()},
+		{name: "below execution budget", gasCap: limits.Execution - 1, wantErr: true},
+		{name: "at execution budget", gasCap: limits.Execution},
 		{name: "unlimited", gasCap: 0},
-		{name: "empty overrides", gasCap: frameTx.GetGasLimit(), overrides: &ethapi.StateOverrides{}},
+		{name: "empty overrides", gasCap: limits.Execution, overrides: &ethapi.StateOverrides{}},
 		{
-			name: "underfunded balance override", gasCap: frameTx.GetGasLimit(),
+			name: "underfunded balance override", gasCap: limits.Execution,
 			overrides: &ethapi.StateOverrides{accounts.InternAddress(sender): {Balance: &overrideBalance}},
 			wantData:  common.LeftPadBytes([]byte{1}, 32),
 		},
@@ -421,19 +424,24 @@ func TestOverlayGetLogsReturnsWorkerBeginError(t *testing.T) {
 }
 
 func TestCallConstructorReturnsOverlayError(t *testing.T) {
-	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	m, _, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
 	base := newBaseApiForTest(m)
-	api := NewOverlayAPI(
-		base,
-		m.DB,
-		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
-		NewOtterscanAPI(base, m.DB, 25),
-	)
-	code := hexutil.Bytes{byte(vm.INVALID)}
-	result, err := api.CallConstructor(m.Ctx, contractAddress, code)
-	require.Nil(t, result)
-	var invalidOpcode *vm.ErrInvalidOpCode
-	require.ErrorAs(t, err, &invalidOpcode)
+	for _, tc := range []struct {
+		name   string
+		gasCap uint64
+	}{
+		{name: "limited", gasCap: 1_000_000},
+		{name: "unlimited", gasCap: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
+			code := hexutil.Bytes{byte(vm.INVALID)}
+			result, err := api.CallConstructor(m.Ctx, contractAddress, code)
+			require.Nil(t, result)
+			var invalidOpcode *vm.ErrInvalidOpCode
+			require.ErrorAs(t, err, &invalidOpcode)
+		})
+	}
 }
 
 func TestFrameCallConstructor(t *testing.T) {
@@ -464,6 +472,9 @@ func TestFrameCallConstructor(t *testing.T) {
 	require.NoError(t, m.InsertChain(pack))
 	base := newBaseApiForTest(m)
 	want := []byte{byte(vm.PUSH0), byte(vm.STOP)}
+	_, _, limits, err := frameTx.GasLimits()
+	require.NoError(t, err)
+	require.Greater(t, limits.State, limits.Execution)
 	for _, tc := range []struct {
 		name    string
 		gasCap  uint64
@@ -471,8 +482,9 @@ func TestFrameCallConstructor(t *testing.T) {
 	}{
 		{name: "within cap", gasCap: 2_000_000},
 		{name: "below consumed gas", gasCap: pack.Receipts[0][0].GasUsed - 1, wantErr: true},
-		{name: "below declared budget", gasCap: frameTx.GetGasLimit() - 1, wantErr: true},
-		{name: "at declared budget", gasCap: frameTx.GetGasLimit()},
+		{name: "below state budget", gasCap: limits.State - 1, wantErr: true},
+		{name: "at state budget", gasCap: limits.State},
+		{name: "unlimited", gasCap: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
