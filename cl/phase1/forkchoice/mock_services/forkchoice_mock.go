@@ -64,6 +64,7 @@ type ForkChoiceStorageMock struct {
 	TryGetHeadNodeFn                      func() (forkchoice.ForkChoiceNode, bool)
 	GetStateAtBlockRootFn                 func(common.Hash) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
+	ViewCurrentStateAtBlockRootFn         func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
 	// HighestImportedDescendantVal is the slot of the highest imported descendant of any root,
 	// unless HasImportedDescendantAfterFn is set.
@@ -95,6 +96,7 @@ type ForkChoiceStorageMock struct {
 	Blocks                                             map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                                          map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	envelopesMu                                        sync.RWMutex
+	executionPayloadMu                                 sync.RWMutex
 	HasEnvelopeFunc                                    func(common.Hash) bool
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
@@ -291,6 +293,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Blocks:                      make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		Envelopes:                   make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
 		ExecutionPayloadReceivedAt:  make(map[common.Hash]time.Time),
+		PendingEnvelopeRoots:        make(map[common.Hash]struct{}),
 		GetBeaconCommitteeMock:      nil,
 		Eth1Hashes:                  make(map[common.Hash]common.Hash),
 		ShouldExtendPayloadVal:      true,
@@ -427,6 +430,17 @@ func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn f
 	return fn(blockState)
 }
 
+func (f *ForkChoiceStorageMock) ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	if f.ViewCurrentStateAtBlockRootFn != nil {
+		return f.ViewCurrentStateAtBlockRootFn(blockRoot, fn)
+	}
+	blockState := f.StateAtBlockRootVal[blockRoot]
+	if blockState == nil {
+		return nil
+	}
+	return fn(blockState)
+}
+
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
 	blockRoot common.Hash,
 ) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool) {
@@ -558,6 +572,26 @@ func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(envelo
 	}
 	f.ValidateExecutionPayloadEnvelopeForGossipCalled = true
 	return f.ValidateExecutionPayloadEnvelopeForGossipErr
+}
+
+func (f *ForkChoiceStorageMock) QueuePendingExecutionPayloadEnvelope(envelope *cltypes.SignedExecutionPayloadEnvelope, _ time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.PendingEnvelopeRoots == nil {
+		f.PendingEnvelopeRoots = make(map[common.Hash]struct{})
+	}
+	f.PendingEnvelopeRoots[envelope.Message.BeaconBlockRoot] = struct{}{}
+}
+
+func (f *ForkChoiceStorageMock) RecordExecutionPayloadArrival(blockRoot common.Hash, _ uint64, receivedAt time.Time) {
+	f.executionPayloadMu.Lock()
+	defer f.executionPayloadMu.Unlock()
+	if f.ExecutionPayloadReceivedAt == nil {
+		f.ExecutionPayloadReceivedAt = make(map[common.Hash]time.Time)
+	}
+	if _, ok := f.ExecutionPayloadReceivedAt[blockRoot]; !ok {
+		f.ExecutionPayloadReceivedAt[blockRoot] = receivedAt
+	}
 }
 
 func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
@@ -739,6 +773,8 @@ func (f *ForkChoiceStorageMock) PayloadVotesRuleOutFull(blockRoot common.Hash) b
 }
 
 func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
 	_, ok := f.PendingEnvelopeRoots[blockRoot]
 	return ok
 }
@@ -761,6 +797,8 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
+	f.executionPayloadMu.RLock()
+	defer f.executionPayloadMu.RUnlock()
 	receivedAt, ok := f.ExecutionPayloadReceivedAt[blockRoot]
 	return ok && receivedAt.Before(deadline)
 }

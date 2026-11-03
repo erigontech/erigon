@@ -258,15 +258,12 @@ type Uint64 uint64
 
 // MarshalText implements encoding.TextMarshaler.
 func (b Uint64) MarshalText() ([]byte, error) {
-	buf := make([]byte, 2, 10)
-	copy(buf, `0x`)
-	buf = strconv.AppendUint(buf, uint64(b), 16)
-	return buf, nil
+	return AppendUint64(make([]byte, 0, 18), uint64(b)), nil
 }
 
 // AppendText implements encoding.TextAppender (alloc-free MarshalText).
 func (b Uint64) AppendText(dst []byte) ([]byte, error) {
-	return strconv.AppendUint(append(dst, `0x`...), uint64(b), 16), nil
+	return AppendUint64(dst, uint64(b)), nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

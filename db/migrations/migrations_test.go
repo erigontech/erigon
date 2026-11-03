@@ -18,6 +18,7 @@ package migrations
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -299,6 +300,54 @@ func TestCommitCallRequired(t *testing.T) {
 		require.Empty(applied)
 		return nil
 	}))
+}
+
+func TestFailureAfterCommitCallbackNotRecorded(t *testing.T) {
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	migrationsDB := newTestMigrationsDB(t)
+	errUp := errors.New("up failed")
+	migrator := NewMigrator(dbcfg.ChainDB)
+	migrator.Migrations = []Migration{{
+		Name: "one",
+		Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			tx, err := db.BeginRw(t.Context())
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if err := BeforeCommit(tx, nil, true); err != nil {
+				return err
+			}
+			return errUp
+		},
+	}}
+	require.ErrorIs(migrator.Apply(db, migrationsDB, "", "", log.New()), errUp)
+
+	require.NoError(migrationsDB.View(t.Context(), func(tx kv.Tx) error {
+		applied, err := AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Empty(applied)
+		return nil
+	}))
+}
+
+func TestDropCodeCacheTable(t *testing.T) {
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := tx.CreateTable(kv.CodeCacheDeprecated); err != nil {
+			return err
+		}
+		return tx.Put(kv.CodeCacheDeprecated, []byte{1}, []byte{2})
+	}))
+	noop := func(kv.RwTx, []byte, bool) error { return nil }
+	for range 2 {
+		require.NoError(dropCodeCacheTable.Up(db, datadir.Dirs{}, nil, noop, log.New()))
+		require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+			exists, err := tx.ExistsTable(kv.CodeCacheDeprecated)
+			require.False(exists)
+			return err
+		}))
+	}
 }
 
 func TestVerifyVersionRefusesNewerDB(t *testing.T) {
