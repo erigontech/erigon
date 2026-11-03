@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -825,16 +826,48 @@ func newLatestLogsTestChain(t *testing.T) *execmoduletester.ExecModuleTester {
 }
 
 func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
-	m := newLatestLogsTestChain(t)
-	crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
-	want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
-	require.NoError(t, err)
-	require.Len(t, want, 3)
-	slices.Reverse(want)
+	for _, rcache := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rcache=%t", rcache), func(t *testing.T) {
+			if rcache {
+				enableHistoricalRCache(t)
+			}
+			m := newLatestLogsTestChain(t)
+			crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+			want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
+			require.NoError(t, err)
+			require.Len(t, want, 3)
+			slices.Reverse(want)
 
-	got, err := NewErigonAPI(newBaseApiForTest(m), m.DB, nil).GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+			api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+			if rcache {
+				requirePersistedReceipt(t, m, api.BaseAPI)
+			}
+			got, err := api.GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func enableHistoricalRCache(t *testing.T) {
+	saved := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+}
+
+// requirePersistedReceipt checks that block 1's first receipt is served from the persistent cache.
+func requirePersistedReceipt(t *testing.T, m *execmoduletester.ExecModuleTester, base *BaseAPI) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
-	require.Equal(t, want, got)
+	defer tx.Rollback()
+	header, err := base._blockReader.HeaderByNumber(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	_, ok, err := base.receiptsGenerator.PersistedReceipt(m.Ctx, tx, header, 0, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 type pinnedHeaderByNumberReader struct {
@@ -924,6 +957,27 @@ type liveCanonicalReader struct {
 
 func (r liveCanonicalReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
 	return r.hash, true, nil
+}
+
+func TestPersistedReceiptDoesNotCacheReceiptReadFromAnotherFork(t *testing.T) {
+	enableHistoricalRCache(t)
+	m := newLatestLogsTestChain(t)
+	base, doms, _, _ := newPublishedOverlayTestBase(t, m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header, err := base._blockReader.HeaderByNumber(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum++
+	require.NoError(t, rawdb.WriteCanonicalHash(doms.BlockOverlay(), common.Hash{0xf0}, 1))
+
+	_, ok, err := base.receiptsGenerator.PersistedReceipt(m.Ctx, tx, header, 0, txNum)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, cached := base.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, 0)
+	require.False(t, cached)
 }
 
 func TestGetReceiptChecksCanonicalInReadViewNotLiveBackend(t *testing.T) {
