@@ -63,15 +63,16 @@ func TestSeedEmptyRemovals(t *testing.T) {
 }
 
 // An account whose last BAL change sets a non-zero balance, nonce or code cannot be empty,
-// so seeding needs no committed-base read for it.
+// and one with only storage changes runs code, so seeding needs no committed-base read for either.
 func TestSeedEmptyRemovalsSkipsBaseReadForProvenNonEmpty(t *testing.T) {
 	t.Parallel()
 	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
-	funded, nonced, coded := addr("0xf1"), addr("0xf2"), addr("0xf3")
+	funded, nonced, coded, stored := addr("0xf1"), addr("0xf2"), addr("0xf3"), addr("0xf4")
 	bal := types.BlockAccessList{
 		{Address: funded.Value(), BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}, {Index: 1, Value: *uint256.NewInt(3)}}},
 		{Address: nonced.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}},
 		{Address: coded.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60}}}},
+		{Address: stored.Value(), StorageChanges: []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(9)}}}}},
 	}
 	reader := &countingAccountReader{}
 

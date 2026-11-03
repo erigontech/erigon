@@ -127,6 +127,9 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
+		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
+			continue
+		}
 		candidates = candidates[:0]
 		for _, c := range ac.BalanceChanges {
 			if c.Value.IsZero() && c.Index != maxIdx {
