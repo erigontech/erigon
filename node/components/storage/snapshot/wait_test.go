@@ -138,3 +138,34 @@ func TestWaitForReady_UndeclaredDuringWaitContinuesUntilCtx(t *testing.T) {
 		"undeclared mid-wait must continue until ctx; got %v", err)
 	require.GreaterOrEqual(t, elapsed, 70*time.Millisecond)
 }
+
+// notify drops a ChangeSet to any subscriber whose buffer is full, so the
+// notification that would have ended a wait can be lost. The waiter must still
+// notice, or the caller is told a ready file is pending.
+func TestWaitForReady_NoticesReadinessWithoutAChangeSet(t *testing.T) {
+	prev := readyPollInterval
+	readyPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { readyPollInterval = prev })
+
+	inv := NewInventory()
+	name := "v1.0-accounts.0-256.kv"
+	require.NoError(t, inv.AddFile(&FileEntry{Name: name, Domain: DomainAccounts}))
+
+	// A channel that never delivers stands in for the dropped notification.
+	never := make(chan ChangeSet)
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		done <- inv.awaitReady(ctx, name, false, never)
+	}()
+
+	require.True(t, inv.MarkLocal(name))
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter never noticed readiness without a ChangeSet")
+	}
+}

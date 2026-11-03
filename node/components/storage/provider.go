@@ -1327,10 +1327,21 @@ func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snaps
 		return
 	}
 
+	// inv.notify drops a ChangeSet to a subscriber whose buffer is full, which
+	// a startup burst does routinely. Losing the one that carries the tip
+	// headers would leave BlockHeadersReady unfired — and Caplin gated behind
+	// it — so re-check on a timer as well.
+	ticker := time.NewTicker(blockHeadersReadyRecheck)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			if p.tryFireBlockHeadersReady(ctx, inv) {
+				return
+			}
 		case _, ok := <-sub:
 			if !ok {
 				return
@@ -1341,6 +1352,10 @@ func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snaps
 		}
 	}
 }
+
+// blockHeadersReadyRecheck bounds how long a dropped ChangeSet can delay
+// BlockHeadersReady.
+var blockHeadersReadyRecheck = 5 * time.Second
 
 // tryFireBlockHeadersReady inspects the inventory for the highest-range
 // *-headers.seg file. If it's at LifecycleDownloaded or beyond (i.e.

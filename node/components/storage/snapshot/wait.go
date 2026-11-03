@@ -19,6 +19,7 @@ package snapshot
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/erigontech/erigon/node/components/storage/views"
 )
@@ -67,23 +68,45 @@ func (inv *Inventory) WaitForReady(ctx context.Context, name string, requireAdve
 	if isReady(e, requireAdvertisable) {
 		return nil
 	}
+	return inv.awaitReady(ctx, name, requireAdvertisable, sub)
+}
+
+// readyPollInterval bounds how long a dropped ChangeSet can hold a waiter.
+// notify drops to any subscriber whose buffer is full, so a burst can lose the
+// very notification that would have ended the wait, and the caller would be
+// told the file is pending when it is ready.
+var readyPollInterval = 250 * time.Millisecond
+
+// awaitReady blocks until the named file is ready, ctx expires, or the
+// subscription closes. Split out so the subscription can be supplied directly.
+func (inv *Inventory) awaitReady(ctx context.Context, name string, requireAdvertisable bool, sub <-chan ChangeSet) error {
+	ticker := time.NewTicker(readyPollInterval)
+	defer ticker.Stop()
+
+	check := func() bool {
+		e, ok := inv.GetByName(name)
+		if !ok {
+			// File un-declared during wait. Don't return ErrNotFound
+			// (the wait STARTED with the file declared); let ctx
+			// decide the give-up moment.
+			return false
+		}
+		return isReady(e, requireAdvertisable)
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return views.ErrPending
+		case <-ticker.C:
+			if check() {
+				return nil
+			}
 		case _, ok := <-sub:
 			if !ok {
 				return views.ErrPending
 			}
-			e, ok := inv.GetByName(name)
-			if !ok {
-				// File un-declared during wait. Don't return ErrNotFound
-				// (the wait STARTED with the file declared); let ctx
-				// decide the give-up moment.
-				continue
-			}
-			if isReady(e, requireAdvertisable) {
+			if check() {
 				return nil
 			}
 		}
