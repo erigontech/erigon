@@ -2084,6 +2084,12 @@ func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMe
 // changesetMu.
 func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
 	prev := sd.getChangesetAccumulatorLocked()
+	if h, ok := sd.mem.(interface {
+		SetStateChangesetAccumulator(*changeset.StateChangeSet)
+	}); ok {
+		h.SetStateChangesetAccumulator(acc)
+		return func() { h.SetStateChangesetAccumulator(prev) }
+	}
 	sd.setChangesetAccumulatorLocked(acc)
 	return func() { sd.setChangesetAccumulatorLocked(prev) }
 }
