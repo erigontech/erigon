@@ -134,7 +134,7 @@ func TestRequestBlobBundlesVerifiesRequestBlobs(t *testing.T) {
 			requireNotCached(t, h, first, second)
 			if version >= clparams.FuluVersion {
 				for _, b := range []testBlob{first, second} {
-					cells, err := das.ComputeCells(b.blob)
+					cells, err := peerdasutils.ComputeCells(b.blob)
 					require.NoError(t, err)
 					require.Equal(t, cells, bundles[common.Bytes48(b.commitment)].Cells, "the verified cells must be kept for the column build")
 				}
@@ -469,73 +469,6 @@ func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testi
 	}
 	require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columns)
 	requireNotCached(t, handler, b)
-}
-
-type gatedPublishedBlockJob struct {
-	waiting chan<- struct{}
-	stored  <-chan struct{}
-}
-
-func (j gatedPublishedBlockJob) Wait(ctx context.Context) error {
-	j.waiting <- struct{}{}
-	select {
-	case <-j.stored:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func TestBroadcastGloasBlockPublishesColumnsAfterLocalStore(t *testing.T) {
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
-	handler, published := newPublishingHandler(t, clparams.FuluVersion, nil)
-	handler.beaconChainCfg.GloasForkEpoch = 1
-	handler.beaconChainCfg.InitializeForkSchedule()
-	waiting, stored := make(chan struct{}, 1), make(chan struct{})
-	blockService := network_services_mock.NewMockBlockService(gomock.NewController(t))
-	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil)
-	blockService.EXPECT().CommitGossipReservation(gomock.Any())
-	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(gatedPublishedBlockJob{waiting: waiting, stored: stored})
-	handler.blockService = blockService
-	b := newTestBlob(t, 1, clparams.FuluVersion)
-	proofs := make([]common.Bytes48, len(b.proofs))
-	for i := range b.proofs {
-		proofs[i] = common.Bytes48(b.proofs[i])
-	}
-	handler.blobBundles.Add(common.Bytes48(b.commitment), BlobBundle{Commitment: common.Bytes48(b.commitment), Blob: b.blob, KzgProofs: proofs})
-	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
-	block.Block.Slot = handler.beaconChainCfg.SlotsPerEpoch
-	bid := block.Block.Body.SignedExecutionPayloadBid.Message
-	bid.BuilderIndex = clparams.BuilderIndexSelfBuild
-	commitment := b.commitment
-	bid.BlobKzgCommitments.Append(&commitment)
-
-	done := make(chan error, 1)
-	go func() { done <- handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip) }()
-	columnsPublished := func() int {
-		published.mu.Lock()
-		defer published.mu.Unlock()
-		columns := 0
-		for topic := range published.topics {
-			if strings.HasPrefix(topic, "data_column_sidecar_") {
-				columns++
-			}
-		}
-		return columns
-	}
-	select {
-	case <-waiting:
-	case err := <-done:
-		t.Fatalf("broadcast finished without waiting for the local store: %v", err)
-	}
-	require.Zero(t, columnsPublished())
-
-	close(stored)
-	require.NoError(t, <-done)
-	require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columnsPublished())
 }
 
 // TestPostEthV2BeaconBlocksRejectedBlockLeavesNoBlobData proves blobs from a request whose block

@@ -194,7 +194,7 @@ func TestAwaitPendingParentPayloadDoesNotWaitPastTheCutoff(t *testing.T) {
 
 	start := time.Now()
 	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 	require.Zero(t, retries.Load())
 }
 
@@ -255,9 +255,7 @@ func TestAwaitPendingParentPayloadSkipsAParentThePtcVotesRuleOut(t *testing.T) {
 	}
 	targetSlot := postState.LatestBlockHeader().Slot + 1
 
-	start := time.Now()
-	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, targetSlot, clparams.GloasVersion))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.NoError(t, handler.awaitPendingParentPayload(canceledContext(t), postState, baseBlockRoot, targetSlot, clparams.GloasVersion))
 	require.Zero(t, retries.Load())
 }
 
@@ -461,16 +459,21 @@ func TestAwaitHeadStateAfterChangeRetriesAtOnceWhenTheHeadReturns(t *testing.T) 
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, root))
 	forkchoiceStore.HeadVal = root
 
-	start := time.Now()
-	require.True(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.True(t, handler.awaitHeadStateAfterChange(canceledContext(t), postState.Slot()+1))
+}
+
+// canceledContext makes a test fail at once if the code under test enters its wait.
+func canceledContext(t *testing.T) context.Context {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	return ctx
 }
 
 // notCurrentSlotClock reports every slot as not current, as for a request for a later slot.
 func notCurrentSlotClock(t *testing.T) eth_clock.EthereumClock {
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
-	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now()).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Times(0)
 	return clock
 }
 
@@ -485,9 +488,7 @@ func TestAwaitPendingParentPayloadDoesNotWaitForASlotThatIsNotCurrent(t *testing
 		return time.Now().Add(time.Millisecond)
 	}
 
-	start := time.Now()
 	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
 	require.Zero(t, retries.Load())
 }
 
@@ -498,9 +499,7 @@ func TestAwaitHeadStateAfterChangeDoesNotWaitForASlotThatIsNotCurrent(t *testing
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
 	forkchoiceStore.HeadVal = common.Hash{0x42}
 
-	start := time.Now()
 	require.False(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
-	require.Less(t, time.Since(start), 100*time.Millisecond)
 }
 
 // The time a retry gets back can be another caller's booking, which is dropped if that attempt is

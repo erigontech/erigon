@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,22 +36,30 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
+var errBlockIndicesPending = errors.New("block indices are not yet available")
+
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+	head, headSlot, err := selectForkChoiceHead(cfg)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	return headSlot, head.Root, notifyServicesOfHead(ctx, logger, cfg, head, headSlot)
+}
+
+func selectForkChoiceHead(cfg *Cfg) (head forkchoice.ForkChoiceNode, headSlot uint64, err error) {
 	// Advance the forkchoice store's internal clock so that epoch-boundary
 	// checkpoint promotions (unrealized → realized) happen on time.
 	cfg.forkChoice.OnTick(utils.SecondsToMilliseconds(cfg.ethClock.GenesisTime() + cfg.ethClock.GetCurrentSlot()*cfg.beaconCfg.SecondsPerSlot))
 
-	var head forkchoice.ForkChoiceNode
 	head, headSlot, err = cfg.forkChoice.GetHeadWithSyncedHeadState()
 	if errors.Is(err, synced_data.ErrNotSynced) {
 		head, headSlot, err = cfg.forkChoice.GetHeadNode()
 	}
 	if err != nil {
-		return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
+		return forkchoice.ForkChoiceNode{}, 0, fmt.Errorf("failed to get head: %w", err)
 	}
-	headRoot = head.Root
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
 	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
@@ -58,7 +67,11 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		monitor.ObserveFrozenBlocks(int(cfg.sn.BlocksAvailable()))
 		monitor.ObserveFrozenBlobs(int(cfg.sn.FrozenBlobs()))
 	}
+	return head, headSlot, nil
+}
 
+func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head forkchoice.ForkChoiceNode, headSlot uint64) error {
+	headRoot := head.Root
 	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
 	executionHead, ready := cfg.forkChoice.GetExecutionHead(head)
 	if !ready {
@@ -72,7 +85,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
 		logger.Debug("Caplin is sending forkchoice")
 
-		if _, err = engine.ForkChoiceUpdate(
+		if _, err := engine.ForkChoiceUpdate(
 			ctx,
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
@@ -83,14 +96,11 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
 				// to lose by carrying on: the next head will send another one.
 				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
-				err = nil
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateBusy):
 				logger.Debug("[Caplin] forkchoice update was not started", "head", headRoot)
 				recordExecutionHead = false
-				err = nil
 			default:
-				err = fmt.Errorf("failed to run forkchoice: %w", err)
-				return
+				return fmt.Errorf("failed to run forkchoice: %w", err)
 			}
 		}
 	}
@@ -109,7 +119,7 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
-	return
+	return nil
 }
 
 // updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
@@ -131,7 +141,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		return fmt.Errorf("failed to read block slot by block root: %w", err)
 	}
 	if storedSlot == nil && headRoot != anchorRoot {
-		return fmt.Errorf("block indices are not yet available for %s", headRoot)
+		return fmt.Errorf("%w for %s", errBlockIndicesPending, headRoot)
 	}
 
 	// Read the current canonical block root for the given slot
@@ -164,7 +174,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		}
 		if newFoundSlot == nil {
 			if currentRoot != anchorRoot {
-				return fmt.Errorf("block indices are not yet available for %s", currentRoot)
+				return fmt.Errorf("%w for %s", errBlockIndicesPending, currentRoot)
 			}
 			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
 			if !ok {
@@ -240,49 +250,87 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	return nil
 }
 
+func currentHeadSnapshot(store forkchoice.ForkChoiceStorageReader, isGloas bool) func() (common.Hash, uint64, string, bool, error) {
+	return func() (common.Hash, uint64, string, bool, error) {
+		head, slot, err := store.GetHeadNode()
+		return head.Root, slot, headPayloadStatus(head, isGloas), store.IsRootOptimistic(head.Root), err
+	}
+}
+
+func headEventSnapshot(store forkchoice.ForkChoiceStorageReader, headSlot uint64, headRoot common.Hash) (forkchoice.ForkChoiceNode, bool, bool, error) {
+	head, slot, err := store.GetHeadNode()
+	if err != nil {
+		return head, false, false, fmt.Errorf("failed to revalidate head event: %w", err)
+	}
+	if head.Root != headRoot || slot != headSlot {
+		return head, false, false, nil
+	}
+	return head, true, store.IsRootOptimistic(headRoot), nil
+}
+
+func headPayloadStatus(head forkchoice.ForkChoiceNode, isGloas bool) string {
+	if isGloas {
+		return beaconevents.PayloadStatusName(head.PayloadStatus)
+	}
+	return "full"
+}
+
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
 func emitHeadEvent(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
-	stateRoot, err := headState.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("failed to hash ssz: %w", err)
+	stateRoot := headState.PeekPreviousStateRoot()
+	if stateRoot == (common.Hash{}) {
+		var err error
+		if stateRoot, err = headState.HashSSZ(); err != nil {
+			return fmt.Errorf("failed to hash ssz: %w", err)
+		}
 	}
-	currentHead, currentHeadSlot, err := store.GetHeadNode()
-	if err != nil {
-		return fmt.Errorf("failed to revalidate head event: %w", err)
+	head, current, executionOptimistic, err := headEventSnapshot(store, headSlot, headRoot)
+	if err != nil || !current {
+		return err
 	}
-	if currentHead.Root != headRoot || currentHeadSlot != headSlot {
-		return nil
-	}
-	isGloas := headState.Version() >= clparams.GloasVersion
-	payloadStatus := "full"
-	if isGloas {
-		payloadStatus = beaconevents.PayloadStatusName(currentHead.PayloadStatus)
-	}
-	executionOptimistic := store.IsRootOptimistic(headRoot)
+	isGloas := beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
 	headEvent, err := beaconevents.BuildHeadV2Data(
 		beaconCfg,
 		headState,
 		headSlot,
 		headRoot,
 		stateRoot,
-		payloadStatus,
+		headPayloadStatus(head, isGloas),
 		executionOptimistic,
 	)
 	if err != nil {
 		return err
 	}
-	return emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
-		head, slot, err := store.GetHeadNode()
-		currentPayloadStatus := "full"
-		if isGloas {
-			currentPayloadStatus = beaconevents.PayloadStatusName(head.PayloadStatus)
-		}
-		return head.Root, slot, currentPayloadStatus, store.IsRootOptimistic(head.Root), err
-	})
+	_, err = emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, currentHeadSnapshot(store, isGloas))
+	return err
 }
 
-func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) error {
+func emitHeadEventBeforeStateCopy(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, emitter *beaconevents.EventEmitter, headSlot uint64, headRoot common.Hash) bool {
+	head, current, executionOptimistic, err := headEventSnapshot(store, headSlot, headRoot)
+	if err != nil || !current {
+		return false
+	}
+	isGloas := beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
+	var headEvent *beaconevents.HeadV2Data
+	var stateRoot common.Hash
+	err = store.ViewCurrentStateAtBlockRoot(headRoot, func(headState *state.CachingBeaconState) error {
+		stateRoot = headState.PeekPreviousStateRoot()
+		if stateRoot == (common.Hash{}) {
+			return nil
+		}
+		headEvent, err = beaconevents.BuildHeadV2Data(beaconCfg, headState, headSlot, headRoot, stateRoot, headPayloadStatus(head, isGloas), executionOptimistic)
+		return err
+	})
+	if err != nil || headEvent == nil {
+		return false
+	}
+	emitted, _ := emitHeadEventsIfCurrent(emitter, headEvent, headSlot, headRoot, stateRoot, currentHeadSnapshot(store, isGloas))
+	return emitted
+}
+
+func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) (bool, error) {
 	var validationErr error
+	emitted := false
 	current := func() bool {
 		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
 		if err != nil {
@@ -305,8 +353,9 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
 		})
 		emitter.State().SendHeadV2(headEvent)
+		emitted = true
 	})
-	return validationErr
+	return emitted, validationErr
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
@@ -453,6 +502,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
+	headEventEmitted := emitHeadEventBeforeStateCopy(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot)
 	// Retrieve the head state.
 	headState, err := cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot)
 	if err != nil {
@@ -464,8 +514,10 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
-	if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
-		logger.Warn("failed to emit head event", "err", err)
+	if !headEventEmitted {
+		if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
+			logger.Warn("failed to emit head event", "err", err)
+		}
 	}
 	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
 		logger.Warn("failed to emit next payload attributes event", "err", err)
@@ -507,21 +559,37 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
 func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-	var (
-		headSlot uint64
-		headRoot common.Hash
-		err      error
-	)
-	if headSlot, headRoot, err = computeAndNotifyServicesOfNewForkChoice(ctx, logger, cfg); err != nil {
+	cfg.forkChoiceWaitingForIndices = false
+	head, headSlot, err := selectForkChoiceHead(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
+	}
+	headRoot := head.Root
+	waitNotified := func() error { return nil }
+	if publishHeadBeforeExecution(cfg.beaconCfg, cfg.forkChoice, headRoot, headSlot) {
+		done := make(chan error, 1)
+		go func() { done <- notifyServicesOfHead(ctx, logger, cfg, head, headSlot) }()
+		waitNotified = sync.OnceValue(func() error { return <-done })
+		defer func() { _ = waitNotified() }()
+	} else if err := notifyServicesOfHead(ctx, logger, cfg, head, headSlot); err != nil {
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
+	cfg.forkChoiceIndicesChanged = cfg.emitter.BlockIndicesChanged()
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 	if err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg); err != nil {
+		if errors.Is(err, errBlockIndicesPending) {
+			cfg.forkChoiceWaitingForIndices = true
+			logger.Debug("[Caplin] waiting to publish fork choice", "err", err)
+			if err := waitNotified(); err != nil {
+				return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
 
@@ -536,7 +604,25 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		"alloc", common.ByteCount(m.Alloc),
 		"sys", common.ByteCount(m.Sys))
 
-	return tx.Commit()
+	notifyErr := waitNotified()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if notifyErr != nil {
+		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", notifyErr)
+	}
+	return nil
+}
+
+// publishHeadBeforeExecution reports whether the head can be served while the execution layer applies it: only when
+// newPayload already returned VALID for its payload, so the update just moves the execution head. A head imported
+// without newPayload, or not yet validated, waits for the update, which is then its first execution check.
+func publishHeadBeforeExecution(beaconCfg *clparams.BeaconChainConfig, store forkchoice.ForkChoiceStorageReader, headRoot common.Hash, headSlot uint64) bool {
+	if beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+		return false
+	}
+	status, ok := store.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	return ok && status == execution_client.PayloadStatusValidated
 }
 
 // we need to generate only one goroutine for pre-caching shuffled set
