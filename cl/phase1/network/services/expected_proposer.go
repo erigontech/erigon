@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -59,6 +60,10 @@ type expectedProposers struct {
 	// that is rebuilding.
 	admitted chan struct{}
 	rebuilds chan struct{}
+	// waiting counts the callers waiting for a shared read, followers of an admitted read included. Each holds a gossip
+	// validation, so beyond maxWaiting a caller is ignored at once.
+	waiting    atomic.Int64
+	maxWaiting int64
 }
 
 func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, forkChoice forkchoice.ForkChoiceStorage) *expectedProposers {
@@ -73,6 +78,8 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 		results:    results,
 		admitted:   make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds),
 		rebuilds:   make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds),
+		// Room for every column sidecar of two blocks.
+		maxWaiting: 2 * int64(cfg.NumberOfColumns),
 	}
 }
 
@@ -90,6 +97,11 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 	if proposer, ok := e.results.Get(key); ok {
 		return proposer, nil
 	}
+	if e.waiting.Add(1) > e.maxWaiting {
+		e.waiting.Add(-1)
+		return 0, fmt.Errorf("%w: too many validations waiting for expected proposers", ErrIgnore)
+	}
+	defer e.waiting.Add(-1)
 	read := e.reads.DoChan(string(parentRoot[:])+strconv.FormatUint(slot, 10), func() (result any, err error) {
 		defer func() {
 			if r := recover(); r != nil {

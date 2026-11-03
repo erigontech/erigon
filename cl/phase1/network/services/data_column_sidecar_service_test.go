@@ -117,8 +117,15 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 	}
 }
 
+// setExpectedProposer stubs the expected-proposer read for blocks of testSlot on testParentRoot, and checks that the
+// service asks for that parent, its slot and the sidecar's slot.
 func (t *dataColumnSidecarTestSuite) setExpectedProposer(proposer uint64, err error) {
-	t.dataColumnSidecarService.(*dataColumnSidecarService).expectedProposer = func(context.Context, common.Hash, uint64, uint64) (uint64, error) {
+	t.dataColumnSidecarService.(*dataColumnSidecarService).expectedProposer = func(_ context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
+		t.Equal(testParentRoot, parentRoot)
+		if parent, ok := t.mockForkChoice.Headers[testParentRoot]; ok {
+			t.Equal(parent.Slot, parentSlot)
+		}
+		t.Equal(testSlot, slot)
 		return proposer, err
 	}
 }

@@ -410,7 +410,14 @@ func TestExpectedProposerReadsBeyondTheRebuildQueueAreIgnoredAtOnce(t *testing.T
 	started, release := make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds), make(chan struct{})
 	releaseRebuilds := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releaseRebuilds)
+	held := common.Hash{0xfe}
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewCurrentStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
+		if root == held {
+			return fn(parentState)
+		}
+		return nil
+	}
 	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
 		started <- struct{}{}
 		<-release
@@ -445,6 +452,8 @@ func TestExpectedProposerReadsBeyondTheRebuildQueueAreIgnoredAtOnce(t *testing.T
 		t.Fatal("a read beyond the queue waited")
 	}
 	require.Len(t, started, 0, "a read beyond the queue started a rebuild")
+	_, err := proposers.get(t.Context(), held, parentState.Slot(), firstSlot)
+	require.NoError(t, err, "a parent state fork choice holds was not read while the rebuild queue was full")
 
 	releaseRebuilds()
 	for _, done := range admitted {
@@ -454,5 +463,51 @@ func TestExpectedProposerReadsBeyondTheRebuildQueueAreIgnoredAtOnce(t *testing.T
 		case <-time.After(5 * time.Second):
 			t.Fatal("a queued read did not finish")
 		}
+	}
+}
+
+// Callers that join a shared read wait for it holding their gossip validations, so their number is bounded too: past
+// the limit a caller is ignored at once instead of joining.
+func TestExpectedProposerWaitersOfASharedReadAreBounded(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	slot := (state.Epoch(parentState)+1)*cfg.SlotsPerEpoch - 1
+	started, release := make(chan struct{}), make(chan struct{})
+	releaseRead := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseRead)
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		close(started)
+		<-release
+		return fn(parentState)
+	}
+	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	get := func() <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+			done <- err
+		}()
+		return done
+	}
+
+	waiters := make([]<-chan error, 0, proposers.maxWaiting)
+	waiters = append(waiters, get())
+	<-started
+	for int64(len(waiters)) < proposers.maxWaiting {
+		waiters = append(waiters, get())
+	}
+	require.Eventually(t, func() bool { return proposers.waiting.Load() == proposers.maxWaiting }, 5*time.Second, time.Millisecond)
+
+	select {
+	case err := <-get():
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(time.Second):
+		t.Fatal("a caller beyond the waiter limit joined the shared read")
+	}
+
+	releaseRead()
+	for _, done := range waiters {
+		require.NoError(t, <-done)
 	}
 }
