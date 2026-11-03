@@ -2161,7 +2161,9 @@ func (result *execResult) calcFees(
 			// A fee credit revives an EOA coinbase a worker removed (EIP-161); retract the
 			// removal. A genuine contract self-destruct keeps its wipe.
 			if coinbaseSelfdestructed && !coinbaseWasContract {
-				addWrites.MarkSelfDestructDeleted(result.Coinbase, taskVersion)
+				addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
+					WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
+				})
 			}
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
@@ -2243,7 +2245,9 @@ func (result *execResult) calcFees(
 		// Retract a worker's EIP-161 removal of the burnt recipient that this fee credit
 		// revives (see the coinbase case above).
 		if burntSelfdestructed && !burntWasContract {
-			addWrites.MarkSelfDestructDeleted(burntAddr, taskVersion)
+			addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+				WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
+			})
 		}
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{

@@ -1601,7 +1601,7 @@ func TestValidatedFeeRecipientsStayEstimates(t *testing.T) {
 		require.NoError(t, err)
 		revived, ok := writes.GetSelfDestruct(s.burntAddr)
 		require.True(t, ok)
-		require.True(t, revived.Deletes(), "the base fee retracts the removal of the recipient it revives")
+		require.False(t, revived.Val, "the base fee retracts the removal of the recipient it revives")
 		require.Equal(t, 0, revived.Version.TxIndex)
 	})
 }
@@ -1786,6 +1786,34 @@ func TestCalcFees_RevivedCoinbaseShadowsStaleNonce(t *testing.T) {
 	nonce, ok := writes.GetNonce(coinbase)
 	require.True(t, ok, "the revival shadows the stale nonce")
 	require.Equal(t, uint64(0), nonce.Val)
+}
+
+// A tip that revives a coinbase the worker removed as touched-empty keeps its storage
+// visible to later txs.
+func TestCalcFees_RevivedCoinbaseKeepsStorageForLaterTxs(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+	slot := accounts.InternKey(common.Hash{31: 7})
+	base := newMapStateReader()
+	empty := accounts.NewAccount()
+	base.accounts[coinbase] = &empty
+	base.storage[coinbase] = map[accounts.StorageKey]uint256.Int{slot: *uint256.NewInt(7)}
+
+	result, task := coinbaseTipResult(coinbase, 1_000)
+	result.TxOut = &state.WriteSet{}
+	result.TxOut.SetEmptyRemoval(coinbase, task.Version())
+	vm := state.NewVersionMap(nil)
+	writes, err := result.calcFees(task, vm, base, &chain.Rules{IsSpuriousDragon: true})
+	require.NoError(t, err)
+	vm.FlushVersionedWrites(result.TxOut, true)
+	vm.FlushVersionedWrites(writes, true)
+
+	later := state.NewWithVersionMap(base, vm)
+	defer later.Close()
+	later.SetTxContext(1, task.Version().TxIndex+1)
+	got, err := later.GetState(coinbase, slot)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), got)
 }
 
 // destroyedOut is a worker write-set that removed addr and stamped a non-empty code hash.

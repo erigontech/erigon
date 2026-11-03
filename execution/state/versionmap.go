@@ -990,10 +990,7 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 		// the read side (readSelfDestructMemo→resolved) already treats it as a
 		// destruct, so this single lifecycle authority must too, or the two disagree
 		// on a validated destruct and a wiped-slot read never settles.
-		// A ValueDeleted stamp retracts the destruct (a fee credit revived a recipient a
-		// worker had already removed): the cell records that a wipe happened, but the
-		// account stays live and keeps its storage.
-		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value && v.valStatus != ValueDeleted {
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}
