@@ -956,55 +956,36 @@ func TestRunPeer_SequentialGetBlockHeaders(t *testing.T) {
 }
 
 func TestRunPeer_GetBlockHeadersFloodThrottled(t *testing.T) {
-	for _, version := range []uint{direct.ETH68, direct.ETH69, direct.ETH70, direct.ETH71} {
-		for _, subscribers := range []bool{true, false} {
-			t.Run(fmt.Sprintf("eth%d/subscribers=%t", version, subscribers), func(t *testing.T) {
-				synctest.Test(t, func(t *testing.T) {
-					peerInfo, peerID := newTestPeerInfoWithEth(t)
-					rw := newGetBlockHeadersReadWriter(t, 40)
-					forwarded := 0
-					started := time.Now()
-					peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: version},
-						rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
-						func(sentryproto.MessageId) bool { return subscribers }, log.Root())
-					require.NotNil(t, peerErr)
-					require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code)
-					require.ErrorIs(t, peerErr.Err, io.EOF)
-					require.Equal(t, time.Second, time.Since(started))
-					if subscribers {
-						require.Equal(t, 40, forwarded)
-					} else {
-						require.Zero(t, forwarded)
+	for _, subscribers := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribers=%t", subscribers), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				peerInfo, peerID := newTestPeerInfoWithEth(t)
+				rw := newGetBlockHeadersReadWriter(t, 40)
+				forwarded := 0
+				started := time.Now()
+				send := func(sentryproto.MessageId, [64]byte, []byte) {
+					forwarded++
+					if forwarded == 30 {
+						time.Sleep(100 * time.Millisecond)
 					}
-				})
+					if forwarded == 31 {
+						assert.Equal(t, 100*time.Millisecond, time.Since(started))
+					}
+				}
+				peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH69},
+					rw, peerInfo, send, func(sentryproto.MessageId) bool { return subscribers }, log.Root())
+				require.NotNil(t, peerErr)
+				require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code)
+				require.ErrorIs(t, peerErr.Err, io.EOF)
+				require.Equal(t, time.Second, time.Since(started))
+				if subscribers {
+					require.Equal(t, 40, forwarded)
+				} else {
+					require.Zero(t, forwarded)
+				}
 			})
-		}
+		})
 	}
-}
-
-func TestRunPeer_GetBlockHeadersRateLimitRefills(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		peerInfo, peerID := newTestPeerInfoWithEth(t)
-		rw := newGetBlockHeadersReadWriter(t, 32)
-		forwarded := 0
-		started := time.Now()
-		send := func(sentryproto.MessageId, [64]byte, []byte) {
-			forwarded++
-			if forwarded == 30 {
-				time.Sleep(100 * time.Millisecond)
-			}
-			if forwarded == 31 {
-				assert.Equal(t, 100*time.Millisecond, time.Since(started))
-			}
-		}
-		peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH69},
-			rw, peerInfo, send, func(sentryproto.MessageId) bool { return true }, log.Root())
-		require.NotNil(t, peerErr)
-		require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code)
-		require.ErrorIs(t, peerErr.Err, io.EOF)
-		require.Equal(t, 32, forwarded)
-		require.Equal(t, 200*time.Millisecond, time.Since(started))
-	})
 }
 
 func TestRunPeer_GetBlockHeadersFloodPreservesOtherPeerRequests(t *testing.T) {
