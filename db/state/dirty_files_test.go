@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -260,4 +261,21 @@ func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
 	require.NoError(t, comp.AddWord([]byte("k")))
 	require.NoError(t, comp.AddWord([]byte("v")))
 	require.NoError(t, comp.Compress())
+}
+
+func TestRetireSkipsAlreadyDetachedItems(t *testing.T) {
+	t.Parallel()
+	dirty := newDirtyFiles()
+	item := &FilesItem{startTxNum: 0, endTxNum: 16}
+	dirty.Set(item)
+
+	require.Equal(t, []*FilesItem{item}, retire(mvcc.RetireReasonWasDeletedFromDisk, dirty, []*FilesItem{item}, "test", log.New()))
+	require.Empty(t, retire(mvcc.RetireReasonAged, dirty, []*FilesItem{item}, "test", log.New()))
+	require.False(t, item.canDelete.Load())
+
+	reopened := &FilesItem{startTxNum: 0, endTxNum: 16}
+	dirty.Set(reopened)
+	require.Empty(t, retire(mvcc.RetireReasonAged, dirty, []*FilesItem{item}, "test", log.New()))
+	_, ok := dirty.Get(reopened)
+	require.True(t, ok, "a stale item must not detach the reopened file of the same range")
 }

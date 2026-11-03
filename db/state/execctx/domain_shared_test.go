@@ -257,6 +257,42 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 		unwindTarget, writeTxNum, v)
 }
 
+// A key written again after an unwind must be iterated with its new value, not
+// hidden by the unwind changeset that still covers it until Flush.
+func TestSharedDomain_IteratePrefixAfterUnwindSeesRewrite(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 100)
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateChangeset := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
+	addr, slot := common.HexToAddress("0x01"), common.HexToHash("0x02")
+	key := composite(addr[:], slot[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x01}, 100, nil))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(50, &diffSet)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x05}, 60, nil))
+
+	got := map[string][]byte{}
+	require.NoError(t, domains.IteratePrefix(kv.StorageDomain, addr[:], rwTx, func(k, v []byte) (bool, error) {
+		got[string(k)] = bytes.Clone(v)
+		return true, nil
+	}))
+	require.Equal(t, map[string][]byte{string(key): {0x05}}, got)
+}
+
 // Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
 // block's begin-system txNum, so the boundary write itself must not survive.
 func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {

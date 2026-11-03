@@ -198,7 +198,9 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 
 	// Update the global registry with merged entries
 	mergedToml := BuildTomlFromMap(merged)
-	snapcfg.SetToml(networkName, mergedToml, false)
+	if err := snapcfg.SetToml(networkName, mergedToml, false); err != nil {
+		return 0, err
+	}
 
 	// Save merged chain.toml locally
 	if err := SaveChainToml(snapDir, mergedToml); err != nil {
