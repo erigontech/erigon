@@ -2,6 +2,7 @@ package sentry_multi_client
 
 import (
 	"context"
+	"encoding/binary"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -139,7 +141,7 @@ func TestUploadRequests_SlowPeerDoesNotBlockOtherPeers(t *testing.T) {
 					}
 					return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
 				}}
-				responses := make(chan *sentryproto.SendMessageByIdRequest, 3)
+				responses := make(chan *sentryproto.SendMessageByIdRequest, 8)
 				var handled sync.WaitGroup
 				stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
 				for range 8 {
@@ -165,8 +167,10 @@ func TestUploadRequests_SlowPeerDoesNotBlockOtherPeers(t *testing.T) {
 
 				close(release)
 				handled.Wait()
-				require.Len(t, responses, 1)
-				requireUploadResponse(t, <-responses, 1)
+				require.Len(t, responses, 5, "serve the active request and four queued requests from the busy peer")
+				for range 5 {
+					requireUploadResponse(t, <-responses, 1)
+				}
 			})
 		})
 	}
@@ -189,7 +193,7 @@ func TestUploadRequests_LimitsSharedAcrossSentries(t *testing.T) {
 			}
 		}}
 		var handled sync.WaitGroup
-		responses := make(chan *sentryproto.SendMessageByIdRequest, 8)
+		responses := make(chan *sentryproto.SendMessageByIdRequest, 10)
 		send := func(response *sentryproto.SendMessageByIdRequest) { responses <- response }
 		first := startUploadTestStream(t, ctx, cs, &handled, send)
 		second := startUploadTestStream(t, ctx, cs, &handled, send)
@@ -214,11 +218,11 @@ func TestUploadRequests_LimitsSharedAcrossSentries(t *testing.T) {
 
 		close(release)
 		handled.Wait()
-		require.Len(t, responses, 4)
+		require.Len(t, responses, 9, "queued requests must drain after the four active handlers finish")
 		handled.Add(1)
 		require.NoError(t, first.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 10, common.Hash{1})))
 		handled.Wait()
-		require.Equal(t, int32(5), calls.Load(), "completed work must release its peer and global slot")
+		require.Equal(t, int32(10), calls.Load(), "completed work must release its peer and global slot")
 	})
 }
 
@@ -258,9 +262,232 @@ func TestUploadRequests_CancellationKeepsSlotUntilHandlerReturns(t *testing.T) {
 
 		release <- struct{}{}
 		synctest.Wait()
+		require.Len(t, responses, 1)
+		requireUploadResponse(t, <-responses, 2)
 		require.NoError(t, second.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 4, common.Hash{1})))
 		synctest.Wait()
 		require.Len(t, responses, 1)
 		requireUploadResponse(t, <-responses, 4)
 	})
+}
+
+func TestUploadRequests_PipelinedRequestsBothAnswered(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		cs := newUploadTestClient(t)
+		release := make(chan struct{})
+		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
+			select {
+			case <-release:
+				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+		var handled sync.WaitGroup
+		responses := make(chan *sentryproto.SendMessageByIdRequest, 2)
+		stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+		handled.Add(2)
+		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 100, common.Hash{1})))
+		synctest.Wait()
+		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_BLOCK_BODIES_66, 1, 101, common.Hash{2})))
+		synctest.Wait()
+		close(release)
+		handled.Wait()
+		require.Len(t, responses, 2, "one peer's concurrent bodies and receipts requests must both get a reply")
+		requireUploadResponse(t, <-responses, 100)
+		requireUploadResponse(t, <-responses, 101)
+	})
+}
+
+func TestUploadRequests_SmallBurstAllAnswered(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		cs := newUploadTestClient(t)
+		release := make(chan struct{})
+		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
+			select {
+			case <-release:
+				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+		var handled sync.WaitGroup
+		responses := make(chan *sentryproto.SendMessageByIdRequest, 5)
+		stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+		for peer := byte(1); peer <= 5; peer++ {
+			handled.Add(1)
+			require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, peer, uint64(peer), common.Hash{1})))
+		}
+		synctest.Wait()
+		close(release)
+		handled.Wait()
+		require.Len(t, responses, 5, "a small burst must drain after active work finishes")
+	})
+}
+
+func TestUploadRequests_WaitingPeersTakeTurns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		cs := newUploadTestClient(t)
+		releases := make([]chan struct{}, 6)
+		for peer := byte(1); peer <= 5; peer++ {
+			cs.blockReader.(*uploadBlockReader).byHash[common.Hash{peer}] = uint64(peer)
+			releases[peer] = make(chan struct{})
+		}
+		started := make(chan uint64, 6)
+		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, block *types.Block) (types.Receipts, error) {
+			started <- block.NumberU64()
+			select {
+			case <-releases[block.NumberU64()]:
+				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+		var handled sync.WaitGroup
+		responses := make(chan *sentryproto.SendMessageByIdRequest, 6)
+		stream := startUploadTestStream(t, ctx, cs, &handled, func(response *sentryproto.SendMessageByIdRequest) { responses <- response })
+		for peer := byte(1); peer <= 4; peer++ {
+			handled.Add(1)
+			require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, peer, uint64(peer), common.Hash{peer})))
+		}
+		synctest.Wait()
+		require.Len(t, started, 4)
+		for range 4 {
+			<-started
+		}
+		handled.Add(2)
+		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 1, 6, common.Hash{1})))
+		synctest.Wait()
+		require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 5, 5, common.Hash{5})))
+		synctest.Wait()
+
+		close(releases[1])
+		synctest.Wait()
+		require.Len(t, started, 1)
+		require.Equal(t, uint64(5), <-started, "a waiting peer must run before a busy peer's next request")
+		close(releases[5])
+		synctest.Wait()
+		require.Len(t, started, 1)
+		require.Equal(t, uint64(1), <-started)
+		for peer := 2; peer <= 4; peer++ {
+			close(releases[peer])
+		}
+		handled.Wait()
+		require.Len(t, responses, 6)
+	})
+}
+
+func TestUploadRequests_CancellationRemovesWaitingWork(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		waitingCtx, cancelWaiting := context.WithCancel(ctx)
+		defer cancelWaiting()
+		cs := newUploadTestClient(t)
+		release := make(chan struct{})
+		cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
+			select {
+			case <-release:
+				return types.Receipts{{CumulativeGasUsed: 21_000}}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+		var active, waiting sync.WaitGroup
+		responses := make(chan *sentryproto.SendMessageByIdRequest, 13)
+		send := func(response *sentryproto.SendMessageByIdRequest) { responses <- response }
+		first := startUploadTestStream(t, ctx, cs, &active, send)
+		second := startUploadTestStream(t, waitingCtx, cs, &waiting, send)
+		for peer := byte(1); peer <= 4; peer++ {
+			active.Add(1)
+			require.NoError(t, first.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, peer, uint64(peer), common.Hash{1})))
+		}
+		synctest.Wait()
+		for peer := byte(1); peer <= 8; peer++ {
+			waiting.Add(1)
+			require.NoError(t, second.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, peer, uint64(peer)+4, common.Hash{1})))
+		}
+		waitingDone := make(chan struct{})
+		go func() {
+			waiting.Wait()
+			close(waitingDone)
+		}()
+		synctest.Wait()
+		select {
+		case <-waitingDone:
+			t.Fatal("requests must wait while all upload slots are busy")
+		default:
+		}
+		cancelWaiting()
+		synctest.Wait()
+		select {
+		case <-waitingDone:
+		default:
+			t.Fatal("cancelled requests must finish without waiting for unrelated active work")
+		}
+		active.Add(1)
+		require.NoError(t, first.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 5, 13, common.Hash{1})))
+		synctest.Wait()
+		close(release)
+		active.Wait()
+		require.Len(t, responses, 5, "cancelled requests must not be served")
+	})
+}
+
+func TestUploadRequests_QueueLimits(t *testing.T) {
+	for _, limit := range []string{"count", "bytes"} {
+		t.Run(limit, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				cs := newUploadTestClient(t)
+				cs.ethApiWrapper = uploadReceiptsGetter{getReceipts: func(ctx context.Context, _ *types.Block) (types.Receipts, error) {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}}
+				stream := startUploadTestStream(t, ctx, cs, nil, func(*sentryproto.SendMessageByIdRequest) {})
+				for peer := byte(1); peer <= 4; peer++ {
+					require.NoError(t, stream.Send(uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, peer, uint64(peer), common.Hash{1})))
+				}
+				synctest.Wait()
+
+				waitingCtx, cancelWaiting := context.WithCancel(ctx)
+				defer cancelWaiting()
+				defer cs.cancelUploads(waitingCtx)
+				message := uploadRequest(t, sentryproto.MessageId_GET_RECEIPTS_69, 100, 1, common.Hash{1})
+				capacity := libsentry.MessagesQueueSize
+				if limit == "bytes" {
+					message.Data = make([]byte, 4*1024*1024)
+					capacity = libsentry.MessagesQueueByteLimit / proto.Size(message)
+				}
+				var completed atomic.Int32
+				done := func() { completed.Add(1) }
+				for i := 0; i <= capacity; i++ {
+					var peerID [64]byte
+					binary.LittleEndian.PutUint64(peerID[:], uint64(i+100))
+					request := &sentryproto.InboundMessage{Id: message.Id, Data: message.Data, PeerId: gointerfaces.ConvertHashToH512(peerID)}
+					cs.enqueueUpload(uploadTask{ctx: waitingCtx, message: request, done: done})
+				}
+				require.Equal(t, int32(1), completed.Load(), "only the request over the limit must be dropped")
+				cancelWaiting()
+				cs.cancelUploads(waitingCtx)
+				require.Equal(t, int32(capacity+1), completed.Load())
+
+				nextCtx, cancelNext := context.WithCancel(ctx)
+				defer cancelNext()
+				defer cs.cancelUploads(nextCtx)
+				cs.enqueueUpload(uploadTask{ctx: nextCtx, message: message, done: done})
+				require.Equal(t, int32(capacity+1), completed.Load(), "cancellation must free the queue budget for new work")
+				cancelNext()
+				cs.enqueueUpload(uploadTask{ctx: nextCtx, message: message, done: done})
+				require.Equal(t, int32(capacity+2), completed.Load(), "cancelled work must not enter the queue")
+			})
+		})
+	}
 }

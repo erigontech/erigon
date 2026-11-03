@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -72,8 +71,6 @@ func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	}
 }
 
-const maxConcurrentUploadRequests = 4
-
 func (cs *MultiClient) RecvUploadMessageLoop(
 	ctx context.Context,
 	sentry sentryproto.SentryClient,
@@ -81,32 +78,15 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 ) {
 	var handlers sync.WaitGroup
 	defer handlers.Wait()
-	handle := func(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
-		peer := gointerfaces.ConvertH512ToHash(message.PeerId)
-		cs.uploadMu.Lock()
-		if cs.uploadPeers[peer] || len(cs.uploadPeers) >= maxConcurrentUploadRequests {
-			cs.uploadMu.Unlock()
-			if wg != nil {
-				wg.Done()
-			}
-			return nil
+	done := func() {
+		if wg != nil {
+			wg.Done()
 		}
-		cs.uploadPeers[peer] = true
-		cs.uploadMu.Unlock()
-
-		handlers.Go(func() {
-			defer func() {
-				cs.uploadMu.Lock()
-				delete(cs.uploadPeers, peer)
-				cs.uploadMu.Unlock()
-				if wg != nil {
-					wg.Done()
-				}
-			}()
-			if err := cs.HandleInboundMessage(ctx, message, sentry); err != nil {
-				cs.logger.Debug("Handling incoming upload message", "err", err)
-			}
-		})
+		handlers.Done()
+	}
+	handle := func(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+		handlers.Add(1)
+		cs.enqueueUpload(uploadTask{ctx: ctx, message: message, sentry: sentry, done: done})
 		return nil
 	}
 	ids := []sentryproto.MessageId{
@@ -116,6 +96,7 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
+		context.AfterFunc(streamCtx, func() { cs.cancelUploads(streamCtx) })
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
@@ -200,8 +181,7 @@ type MultiClient struct {
 	logPeerInfo        bool
 
 	logger           log.Logger
-	uploadMu         sync.Mutex
-	uploadPeers      map[[64]byte]bool
+	uploads          uploadQueue
 	ethApiWrapper    eth.ReceiptsGetter
 	balGenerator     eth.BlockAccessListGetter
 	balReplayLimiter *rate.Limiter
@@ -233,7 +213,7 @@ func NewMultiClient(
 		statusDataProvider: statusDataProvider,
 		logPeerInfo:        logPeerInfo,
 		logger:             logger,
-		uploadPeers:        make(map[[64]byte]bool),
+		uploads:            uploadQueue{peers: make(map[[64]byte]*uploadPeer)},
 		ethApiWrapper:      receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 		balGenerator:       bal.NewRegenerator(blockReader, engine, logger),
 		balReplayLimiter:   rate.NewLimiter(rate.Every(balReplayInterval), 1),
