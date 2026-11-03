@@ -938,13 +938,10 @@ func TestRunPeer_SequentialGetBlockHeaders(t *testing.T) {
 					Origin: eth.HashOrNumber{Number: requestID}, Amount: 1,
 				},
 			}))
-			message, err := client.ReadMsg()
-			require.NoError(t, err, "request %d", requestID)
-			var response eth.BlockHeadersPacket66
-			require.NoError(t, message.Decode(&response))
-			require.Equal(t, requestID, response.RequestId)
-			require.Len(t, response.BlockHeadersPacket, 1)
-			require.Equal(t, requestID, response.BlockHeadersPacket[0].Number.Uint64())
+			require.NoError(t, p2p.ExpectMsg(client, eth.BlockHeadersMsg, &eth.BlockHeadersPacket66{
+				RequestId:          requestID,
+				BlockHeadersPacket: eth.BlockHeadersPacket{{Number: *uint256.NewInt(requestID)}},
+			}), "request %d", requestID)
 			time.Sleep(50 * time.Millisecond)
 		}
 		require.NoError(t, client.Close())
