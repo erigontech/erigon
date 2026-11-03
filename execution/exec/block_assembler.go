@@ -124,19 +124,17 @@ type BlockAssembler struct {
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
-	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg}
-	if cfg.ChainConfig.IsAmsterdam(block.Header.Time) || cfg.ExperimentalBAL {
-		ba.balIO = &state.VersionedIO{}
-		blockContext := protocol.NewEVMBlockContext(
-			block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
-		)
-		ba.blockRules = blockContext.Rules(cfg.ChainConfig)
-	}
+	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg, balIO: &state.VersionedIO{}}
+	blockContext := protocol.NewEVMBlockContext(
+		block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
+	)
+	ba.blockRules = blockContext.Rules(cfg.ChainConfig)
 	return ba
 }
 
+// HasBAL reports whether the assembled block carries a block access list.
 func (ba *BlockAssembler) HasBAL() bool {
-	return ba.balIO != nil
+	return ba.cfg.ChainConfig.IsAmsterdam(ba.Header.Time) || ba.cfg.ExperimentalBAL
 }
 
 // SetStateWriter sets a real state writer for domain writes during block assembly.
@@ -169,17 +167,15 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return err
 	}
-	if ba.HasBAL() {
-		writes, err := ibs.FinalizedWrites(ba.blockRules)
-		if err != nil {
-			return err
-		}
-		ibs.MergeTxIOInto(ba.balIO, writes)
-		// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
-		// first tx observes them across the ResetVersionedIO below.
-		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
+	writes, err := ibs.FinalizedWrites(ba.blockRules)
+	if err != nil {
+		return err
 	}
+	ibs.MergeTxIOInto(ba.balIO, writes)
+	// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
+	// first tx observes them across the ResetVersionedIO below.
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetVersionedIO()
 	return nil
 }
 
@@ -227,23 +223,18 @@ func (ba *BlockAssembler) AddTransactions(
 	// CommitBlock in AssembleBlock writes all final state correctly.
 	writer := state.NewNoopWriter()
 	recordTxIO := func() error {
-		if ba.HasBAL() {
-			writes, err := ibs.FinalizedWrites(ba.blockRules)
-			if err != nil {
-				return err
-			}
-			ibs.MergeTxIOInto(ba.balIO, writes)
-			// Publish this tx's writes to the versionMap so the next tx observes them;
-			// ResetVersionedIO below clears the per-tx write set used for BAL recording.
-			ibs.FlushWritesToVersionMap(writes)
+		writes, err := ibs.FinalizedWrites(ba.blockRules)
+		if err != nil {
+			return err
 		}
+		ibs.MergeTxIOInto(ba.balIO, writes)
+		// Publish this tx's writes to the versionMap so the next tx observes them;
+		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
+		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 		return nil
 	}
 	clearTxIO := func() {
-		if !ba.HasBAL() {
-			return
-		}
 		ibs.ResetVersionedIO()
 	}
 
@@ -415,13 +406,11 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 		return nil, err
 	}
 
-	if ba.HasBAL() {
-		// Set block-end tx context so that system-call I/O (withdrawals, EIP-7002,
-		// EIP-7251, etc.) is recorded at TxIndex = len(userTxns), matching the
-		// validator path (exec3_parallel.go: ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)).
-		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
-		ibs.ResetVersionedIO()
-	}
+	// Set block-end tx context so that system-call I/O (withdrawals, EIP-7002,
+	// EIP-7251, etc.) is recorded at TxIndex = len(userTxns), matching the
+	// validator path (exec3_parallel.go: ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)).
+	ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
+	ibs.ResetVersionedIO()
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
 		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
@@ -431,20 +420,20 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,
 	// so we must modify the block's header directly, not ba.Header.
 	header := block.HeaderNoCopy()
+	writes, err := ibs.FinalizedWrites(ba.blockRules)
+	if err != nil {
+		return nil, err
+	}
+	// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
+	ibs.MergeTxIOInto(ba.balIO, writes)
+	// Publish finalize-phase writes to the versionMap, mirroring the init and
+	// per-tx phases: the versioned commit loop normalizes each phase against the
+	// map and prefers the map value, so a finalize update to an address already
+	// written earlier in the block (fee recipient, withdrawal target) must be
+	// visible there or the commit reuses the stale pre-finalize value.
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetVersionedIO()
 	if ba.HasBAL() {
-		writes, err := ibs.FinalizedWrites(ba.blockRules)
-		if err != nil {
-			return nil, err
-		}
-		// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
-		ibs.MergeTxIOInto(ba.balIO, writes)
-		// Publish finalize-phase writes to the versionMap, mirroring the init and
-		// per-tx phases: the versioned commit loop normalizes each phase against the
-		// map and prefers the map value, so a finalize update to an address already
-		// written earlier in the block (fee recipient, withdrawal target) must be
-		// visible there or the commit reuses the stale pre-finalize value.
-		ibs.FlushWritesToVersionMap(writes)
-		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
 		// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed

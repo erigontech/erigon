@@ -147,9 +147,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}, current)
 	ba.SetStateWriter(stateWriter)
 
-	if ba.HasBAL() {
-		ibs.SetVersionMap(state.NewVersionMap(nil))
-	}
+	ibs.SetVersionMap(state.NewVersionMap(nil))
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
@@ -227,22 +225,19 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	blockHeight := block.NumberU64()
 
-	// When assembled in versioned (BAL) mode, FinalizeBlockExecution skipped the
-	// so.data CommitBlock; commit the accumulated per-phase write-sets to the
+	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
 	// domains via ApplyWrites instead — the same domain apply the parallel
 	// executor and block generation use (rw_v3 handles the self-destruct delete,
 	// EIP-161 removal and storage-subtree cascade). Each recorded phase
 	// (init/txs/finalize) is applied in order.
-	if ibs.IsVersioned() {
-		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-		blockRules := blockCtx.Rules(cfg.chainConfig)
-		for _, ws := range ba.BalIO().Outputs() {
-			if ws == nil || ws.IsEmpty() {
-				continue
-			}
-			if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
-				return fmt.Errorf("apply versioned block writes: %w", err)
-			}
+	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
+	blockRules := blockCtx.Rules(cfg.chainConfig)
+	for _, ws := range ba.BalIO().Outputs() {
+		if ws == nil || ws.IsEmpty() {
+			continue
+		}
+		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+			return fmt.Errorf("apply versioned block writes: %w", err)
 		}
 	}
 
