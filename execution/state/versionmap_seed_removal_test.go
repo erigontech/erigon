@@ -321,3 +321,25 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
 }
+
+// A BAL existence marker at the index that drains the account is not a revival.
+func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	bal := types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+
+	lc, _, _, _ := vm.AccountLifecycleAt(x, 1)
+	require.Equal(t, LifecycleAbsent, lc)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	exists, err := ibs.Exist(x)
+	require.NoError(t, err)
+	require.False(t, exists)
+}

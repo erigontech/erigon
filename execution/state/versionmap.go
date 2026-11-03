@@ -1010,7 +1010,9 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 
 	revivalLimit := txIdx - 1
 	if hi, ok := highestBelow(e.Address, revivalLimit, resolvedRevivalsOnly); ok && hi >= destroyedAt {
-		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
+		if c, _ := e.Address.Get(hi); hi > destroyedAt || c.accSource != AccountFromBAL {
+			return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
+		}
 	}
 	if hi, ok := highestBelow(e.Balance, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
