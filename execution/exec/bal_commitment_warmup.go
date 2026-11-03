@@ -271,9 +271,10 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	var g errgroup.Group
 	for from := chunk; from < len(keys); from += chunk {
 		g.Go(func() error {
-			tx, err := db.BeginRo(ctx)
+			// Best effort: without a free read-tx permit the chunk is skipped, since the parent holds one.
+			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
 			if err != nil {
-				return err
+				return nil
 			}
 			defer tx.Rollback()
 			if ttx, ok := tx.(kv.TemporalTx); ok {
@@ -311,9 +312,9 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 		g.Go(func() error {
 			pp := p
 			if !first {
-				tx, err := db.BeginRo(ctx)
+				tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
 				if err != nil {
-					return err
+					return nil
 				}
 				defer tx.Rollback()
 				ttx, ok := tx.(kv.TemporalTx)
