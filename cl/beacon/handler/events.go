@@ -101,24 +101,27 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("streaming unsupported")).WriteTo(w)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+
+	subscribeTopics := mapset.NewSet[event.EventTopic]()
+	for _, param := range r.URL.Query()["topics"] {
+		for v := range strings.SplitSeq(param, ",") {
+			topic := event.EventTopic(v)
+			if _, ok := validTopics[topic]; !ok {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Topic: %s", v)).WriteTo(w)
+				return
+			}
+			subscribeTopics.Add(topic)
+		}
+	}
+	if subscribeTopics.Cardinality() == 0 {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("topics are required")).WriteTo(w)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-
-	topics := r.URL.Query()["topics"]
-	if len(topics) > 0 {
-		topics = strings.Split(topics[0], ",")
-	}
-	subscribeTopics := mapset.NewSet[event.EventTopic]()
-	for _, v := range topics {
-		topic := event.EventTopic(v)
-		if _, ok := validTopics[topic]; !ok {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Topic: %s", v)).WriteTo(w)
-			return
-		}
-		subscribeTopics.Add(topic)
-	}
-	log.Info("Subscribed to event stream topics", "topics", subscribeTopics)
+	log.Debug("Subscribed to event stream topics", "topics", subscribeTopics)
 	if subscribeTopics.Contains(event.StatePayloadAttributes) {
 		release := a.emitters.TrackPayloadAttributesSubscriber()
 		defer release()
@@ -191,7 +194,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			log.Warn("event error", "err", err)
 			return
 		case <-r.Context().Done():
-			log.Info("Client disconnected from event stream")
+			log.Debug("Client disconnected from event stream")
 			return
 		}
 	}
