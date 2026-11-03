@@ -226,8 +226,9 @@ func TestBlockAboveBlobLimitDoesNotTakeTheELColumnsImport(t *testing.T) {
 	require.Equal(t, []*cltypes.SignedBeaconBlock{valid}, started)
 }
 
-// A block the importer would skip, e.g. one without blobs, does not take the import of its proposer and slot from a
-// block with blobs.
+// A Fulu block whose blob count is out of range, here one without blobs, does not take the import of its proposer and
+// slot from a block with blobs. Only that check runs before the claim: a block the importer skips for another reason,
+// such as a Gloas block or one whose data is already available, still takes it.
 func TestBlockWithoutBlobsDoesNotTakeTheELColumnsImport(t *testing.T) {
 	b, _, _, _ := setupELBlobsBlockService(t)
 	empty, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 0)
