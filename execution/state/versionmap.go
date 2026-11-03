@@ -752,16 +752,15 @@ func (vm *VersionMap) ReadCodeSizeLife(addr accounts.Address, txIdx int) (int, R
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
 	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address })
+	if k := vm.unflushedDeployer(addr, txIdx); k >= 0 && (!ok || res.depIdx < k) {
+		return nil, ReadResult{depIdx: k, incarnation: -1}, false
+	}
 	if ok {
 		return val, res, true
 	}
 	// Origin fallback: the pre-block committed account lives in the lock-free origin layer at
 	// originIndex (immutable), not as a cell. Resolving it here keeps reads and ValidateVersion
 	// (which calls this via ReadStatus) consistent without taking the account's e.mu.
-	if k := vm.unflushedDeployer(addr, txIdx); k >= 0 {
-		res.depIdx = k
-		return val, res, false
-	}
 	if oacc, seeded := vm.LoadOriginAccount(addr); seeded {
 		return oacc, ReadResult{depIdx: originIndex}, true
 	}
