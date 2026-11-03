@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"os"
@@ -86,13 +87,67 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 	return
 }
 
+const maxChainTomlSize = 16 << 20
+
+type chainTomlStorage struct {
+	storage.ClientImplCloser
+	rejected chan error
+}
+
+// The library opens storage before GotInfo, so validate metadata before delegating.
+func (s chainTomlStorage) OpenTorrent(ctx context.Context, info *metainfo.Info, hash metainfo.Hash) (storage.TorrentImpl, error) {
+	if err := validateChainTomlInfo(info); err != nil {
+		select {
+		case s.rejected <- err:
+		default:
+		}
+		return storage.TorrentImpl{}, err
+	}
+	return s.ClientImplCloser.OpenTorrent(ctx, info, hash)
+}
+
+func validateChainTomlInfo(info *metainfo.Info) error {
+	if info == nil {
+		return fmt.Errorf("chain.toml torrent info missing")
+	}
+	if info.HasV2() {
+		return fmt.Errorf("chain.toml torrent uses v2 metadata, expected v1")
+	}
+	if len(info.Files) != 0 {
+		return fmt.Errorf("chain.toml torrent is multi-file (%d files), expected single file", len(info.Files))
+	}
+	if name := info.BestName(); name != ChainTomlFileName {
+		return fmt.Errorf("chain.toml torrent names %q, expected %q", name, ChainTomlFileName)
+	}
+	if info.Length < 0 {
+		return fmt.Errorf("invalid chain.toml torrent length: %d", info.Length)
+	}
+	if info.Length > maxChainTomlSize {
+		return fmt.Errorf("chain.toml exceeds size limit of %d bytes", maxChainTomlSize)
+	}
+	// GeneratePieces loops indefinitely when the piece length is zero.
+	if info.PieceLength <= 0 {
+		return fmt.Errorf("invalid chain.toml torrent piece length: %d", info.PieceLength)
+	}
+	return nil
+}
+
+func readChainToml(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxChainTomlSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxChainTomlSize {
+		return nil, fmt.Errorf("chain.toml exceeds size limit of %d bytes", maxChainTomlSize)
+	}
+	return data, nil
+}
+
 // DownloadChainTomlByInfoHash downloads chain.toml or verifies a completed local copy.
 // New torrents use temporary storage and are dropped on return; existing torrents remain registered.
 // tmpDir must be cleared on startup so downloads left by a crash are removed.
 // A non-nil peer is used only for new torrents, if its ENR advertises a BitTorrent endpoint.
 func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir, tmpDir string, peer *ChainTomlPeer) ([]byte, error) {
-	// The torrent library opens files from metadata before the filename check below.
-	// Keep these writes isolated so rejected metadata cannot modify snapshot files.
 	downloadDir, err := os.MkdirTemp(tmpDir, ".chaintoml-download-")
 	if err != nil {
 		return nil, fmt.Errorf("creating chain.toml download directory: %w", err)
@@ -102,7 +157,10 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 			log.Warn("[chaintoml] failed to remove download directory", "path", downloadDir, "err", cleanupErr)
 		}
 	}()
-	store := storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: downloadDir})
+	store := chainTomlStorage{
+		ClientImplCloser: storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: downloadDir}),
+		rejected:         make(chan error, 1),
+	}
 	defer store.Close()
 
 	t, added := client.AddTorrentOpt(torrent.AddTorrentOpts{InfoHash: infoHash, Storage: store})
@@ -123,23 +181,15 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 
 	select {
 	case <-t.GotInfo():
+	case metadataErr := <-store.rejected:
+		return nil, metadataErr
 	case <-dlCtx.Done():
 		return nil, fmt.Errorf("waiting for chain.toml torrent info: %w", dlCtx.Err())
 	}
 
-	// Validate the torrent's metainfo — a malicious peer could advertise an
-	// info-hash whose torrent is a multi-file bundle or names a file other
-	// than chain.toml. Reject both: consumers should only download manifests
-	// that match the expected single-file shape.
 	info := t.Info()
-	if info == nil {
-		return nil, fmt.Errorf("chain.toml torrent info missing")
-	}
-	if len(info.Files) != 0 {
-		return nil, fmt.Errorf("chain.toml torrent is multi-file (%d files), expected single file", len(info.Files))
-	}
-	if info.Name != ChainTomlFileName {
-		return nil, fmt.Errorf("chain.toml torrent names %q, expected %q", info.Name, ChainTomlFileName)
+	if metadataErr := validateChainTomlInfo(info); metadataErr != nil {
+		return nil, metadataErr
 	}
 
 	filePath := ChainTomlPath(snapDir)
@@ -153,7 +203,12 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		}
 	}
 
-	data, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("opening downloaded chain.toml: %w", err)
+	}
+	defer f.Close()
+	data, err := readChainToml(f)
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
 	}
@@ -162,10 +217,6 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		// Verify the bytes we return, since a separate file read could see different contents.
 		if int64(len(data)) != info.Length {
 			return nil, fmt.Errorf("chain.toml does not match torrent length")
-		}
-		// GeneratePieces loops indefinitely when the piece length is zero.
-		if info.PieceLength <= 0 {
-			return nil, fmt.Errorf("invalid chain.toml torrent piece length: %d", info.PieceLength)
 		}
 		pieces, hashErr := metainfo.GeneratePieces(bytes.NewReader(data), info.PieceLength, nil)
 		if hashErr != nil {
