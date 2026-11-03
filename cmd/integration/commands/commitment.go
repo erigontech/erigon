@@ -633,7 +633,10 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if err != nil || !converted || !opts.TargetV3 {
 		return err
 	}
-	return rawdbreset.ResetExec(ctx, db)
+	if err := rawdbreset.ResetExec(ctx, db); err != nil {
+		return fmt.Errorf("reset execution after commitment conversion; restore with `integration commitment convert --restore`: %w", err)
+	}
+	return nil
 }
 
 // integration commitment visualize

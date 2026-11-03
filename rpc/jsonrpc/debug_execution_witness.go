@@ -1229,7 +1229,17 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 		touch(kv.AccountsDomain, plainKey, postEnc)
 	}
 	for addr := range a.CodeAddrs {
+		if !sdCtx.AcceptsFeed() {
+			sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
+			continue
+		}
 		postEnc, _, _ := post.Read(kv.AccountsDomain, addr[:], stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := pre.Read(kv.AccountsDomain, addr[:], stepSize)
+			if len(preEnc) == 0 {
+				continue
+			}
+		}
 		touch(kv.AccountsDomain, addr[:], postEnc)
 	}
 	for addr, keys := range a.Storage {
@@ -1479,12 +1489,18 @@ func detectCollapseSiblings(
 		})
 	}
 	traced := false
+	var tracedRoot []byte
 	if mode == witnessModeLegacy && hc != nil && hc.records != nil && hc.records.Deleted != nil {
 		if err := checkTracedDeletes(hc.records.Deleted, touchedDeletes, preReader, domains.StepSize()); err != nil {
 			return nil, err
 		}
-		if traced, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
+		if traced, tracedRoot, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
+		}
+		if traced && len(tracedRoot) != 0 {
+			if err := verifyTracedWitnessRoot(expectedBlockRoot, tracedRoot); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if !traced {
@@ -1521,6 +1537,13 @@ func detectCollapseSiblings(
 		siblingPaths = append(siblingPaths, c.siblingPath)
 	}
 	return siblingPaths, nil
+}
+
+func verifyTracedWitnessRoot(expected common.Hash, got []byte) error {
+	if !bytes.Equal(expected[:], got) {
+		return fmt.Errorf("[debug_executionWitness] traced commitment root mismatch: got %x, want %x", got, expected)
+	}
+	return nil
 }
 
 func checkTracedDeletes(verified [][]byte, traced map[string]struct{}, pre commitmentdb.StateReader, stepSize uint64) error {

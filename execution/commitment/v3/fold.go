@@ -25,6 +25,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -77,6 +78,36 @@ func fold(n *node, depth int) ([32]byte, error) {
 		return extensionRef(n.path, childHash), nil
 	}
 
+	refs, err := branchRefs(n)
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	branchHash := branchRef(&refs)
+	if depth == 0 && len(n.path) != 0 {
+		return extensionRef(n.path, branchHash[:]), nil
+	}
+	return branchHash, nil
+}
+
+func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
+	if ref, ok := n.cachedLeafRef(nib); ok && !includeNib {
+		return append(out, ref...), nil
+	}
+	var keyScratch [65]byte
+	var compactScratch [34]byte
+	compact, _, _, payload, err := leafParts(n, nib, includeNib, keyScratch[:0], compactScratch[:0])
+	if err != nil {
+		return nil, err
+	}
+	var encScratch [leafRefScratch]byte
+	if n.plane == planeAccount {
+		return append(out, leafRef(compact, payload, encScratch[:0])...), nil
+	}
+	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
+}
+
+func branchRefs(n *node) ([16][]byte, error) {
 	var refs [16][]byte
 	var refStore [16][32]byte
 	for nib := range 16 {
@@ -92,49 +123,42 @@ func fold(n *node, depth int) ([32]byte, error) {
 			ref, err = foldBranchChild(n, nib)
 		}
 		if err != nil {
-			return [32]byte{}, err
+			return [16][]byte{}, err
 		}
 		refs[nib] = ref
 	}
-
-	branchHash := branchRef(&refs)
-	if depth == 0 && len(n.path) != 0 {
-		return extensionRef(n.path, branchHash[:]), nil
-	}
-	return branchHash, nil
+	return refs, nil
 }
 
-func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
-	if ref, ok := n.cachedLeafRef(nib); ok && !includeNib {
-		return append(out, ref...), nil
-	}
+func leafParts(n *node, nib int, includeNib bool, keyDst, compactDst []byte) (compact, leafKey, rawPayload, encodedPayload []byte, err error) {
 	suffixCount := 64 - len(n.path) - 1
-	suffix, payload := n.leafAt(nib)
+	suffix, rawPayload := n.leafAt(nib)
 	if len(suffix) != packedLen(suffixCount) {
-		return nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
+		return nil, nil, nil, nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
 	}
-	var keyScratch [65]byte
-	key := keyScratch[:0]
+	leafKey = keyDst[:0]
 	if includeNib {
-		key = append(key, byte(nib))
+		leafKey = append(leafKey, byte(nib))
 	}
-	start := len(key)
-	key = key[:start+suffixCount]
-	unpackPath(suffix, suffixCount, key[start:start+suffixCount:start+suffixCount])
-	key = append(key, nibbles.Terminator)
-	var compactScratch [34]byte
-	compact := nibbles.HexToCompactInto(compactScratch[:0], key)
-	var encScratch [leafRefScratch]byte
+	start := len(leafKey)
+	leafKey = append(leafKey, make([]byte, suffixCount)...)
+	unpackPath(suffix, suffixCount, leafKey[start:start+suffixCount:start+suffixCount])
+	var compactKey [65]byte
+	copy(compactKey[:], leafKey)
+	compactKey[len(leafKey)] = nibbles.Terminator
+	compact = nibbles.HexToCompactInto(compactDst[:0], compactKey[:len(leafKey)+1])
+	encodedPayload = rawPayload
 	if n.plane == planeAccount {
-		nonce, balance, codeHash, storageRoot, err := decodeAccountLeaf(payload)
-		if err != nil {
-			return nil, fmt.Errorf("%w: account leaf %d: %w", errFoldNode, nib, err)
+		nonce, balance, codeHash, storageRoot, decodeErr := decodeAccountLeaf(rawPayload)
+		if decodeErr != nil {
+			return nil, nil, nil, nil, fmt.Errorf("%w: account leaf %d: %w", errFoldNode, nib, decodeErr)
 		}
 		var accScratch [accountRLPScratch]byte
-		payload = accountConsensusRLP(nonce, &balance, storageRoot, codeHash, accScratch[:0])
-		return append(out, leafRef(compact, payload, encScratch[:0])...), nil
+		encodedPayload = accountConsensusRLP(nonce, &balance, storageRoot, codeHash, accScratch[:0])
+	} else if len(rawPayload) > length.Hash {
+		return nil, nil, nil, nil, fmt.Errorf("%w: storage leaf %d payload length %d", errFoldNode, nib, len(rawPayload))
 	}
-	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
+	return compact, leafKey, rawPayload, encodedPayload, nil
 }
 
 func foldBranchChild(parent *node, nib int) ([]byte, error) {

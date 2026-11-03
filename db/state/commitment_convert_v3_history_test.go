@@ -44,25 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
-	tb.Helper()
-	byNibble := map[byte][][]byte{}
-	for i := uint64(1); ; i++ {
-		slot := make([]byte, length.Hash)
-		binary.BigEndian.PutUint64(slot[length.Hash-8:], i)
-		nibble := crypto.Keccak256(slot)[0] >> 4
-		byNibble[nibble] = append(byNibble[nibble], slot)
-		if len(byNibble[nibble]) < 2 {
-			continue
-		}
-		for other := range byte(16) {
-			if other != nibble && len(byNibble[other]) != 0 {
-				return [][]byte{byNibble[nibble][0], byNibble[nibble][1], byNibble[other][0]}
-			}
-		}
-	}
-}
-
 func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps int) (kv.TemporalRwDB, *state.Aggregator, map[uint64][]byte) {
 	t.Helper()
 	previousSchema := statecfg.Schema

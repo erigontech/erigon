@@ -447,11 +447,12 @@ func (b *witnessBed) v3Collapses(t *testing.T, batch []commitmenttest.Op, traceO
 	if traceOnly {
 		before, err := tr.RootHash()
 		require.NoError(t, err)
-		require.NoError(t, tr.TraceCollapses(ctx, u, record))
+		root, err := tr.TraceCollapsesRoot(ctx, u, record)
+		require.NoError(t, err)
 		after, err := tr.RootHash()
 		require.NoError(t, err)
 		require.Equal(t, before, after, "trace-only leaves the trie at the parent root")
-		return events, nil
+		return events, root
 	}
 	tr.SetCollapseTracer(record)
 	root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
@@ -498,8 +499,9 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 				label := fmt.Sprintf("seed=%d batch=%d ops", seed, len(batch))
 				require.Equal(t, wantRoot, gotRoot, label)
 				require.Equal(t, wantEvents, gotEvents, label)
-				traceEvents, _ := newWitnessBed(t, pre).v3Collapses(t, batch, true)
+				traceEvents, traceRoot := newWitnessBed(t, pre).v3Collapses(t, batch, true)
 				require.Equal(t, wantEvents, traceEvents, label+" trace-only")
+				require.Equal(t, wantRoot, traceRoot, label+" trace-only root")
 				requireSameChildCounts(t, b, pre, batch, wantEvents, label)
 			}
 		})

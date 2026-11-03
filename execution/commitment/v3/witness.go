@@ -26,8 +26,8 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 var errWitnessHash = errors.New("commitment v3: witness node hash differs from its reference")
@@ -266,44 +266,23 @@ func (w *witnessWalk) leaf(plane byte, fullKey, k, leafKey, payload []byte) erro
 }
 
 func branchRLP(n *node) ([]byte, error) {
-	var refs [16][]byte
-	var leafRefs [16][32]byte
-	for nib := range 16 {
-		bit := uint16(1) << nib
-		if n.childMask&bit == 0 {
-			continue
-		}
-		var err error
-		if n.leafMask&bit != 0 {
-			refs[nib], err = foldLeaf(n, nib, false, leafRefs[nib][:0])
-		} else {
-			refs[nib], err = foldBranchChild(n, nib)
-		}
-		if err != nil {
-			return nil, err
-		}
+	refs, err := branchRefs(n)
+	if err != nil {
+		return nil, err
 	}
 	return appendBranchRLP(nil, &refs), nil
 }
 
 func leafRLP(n *node, nib int, includeNib bool) (rlp, leafKey, payload []byte, err error) {
-	suffixCount := 64 - len(n.path) - 1
-	suffix, payload := n.leafAt(nib)
-	if len(suffix) != packedLen(suffixCount) {
-		return nil, nil, nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
+	compact, leafKey, payload, encodedPayload, err := leafParts(n, nib, includeNib, nil, nil)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	leafKey = make([]byte, 0, suffixCount+1)
-	if includeNib {
-		leafKey = append(leafKey, byte(nib))
-	}
-	leafKey = append(leafKey, unpackPath(suffix, suffixCount, nil)...)
-	compact := nibbles.HexToCompact(append(bytes.Clone(leafKey), nibbles.Terminator))
 	if n.plane != planeAccount {
+		if len(payload) > length.Hash {
+			return nil, nil, nil, fmt.Errorf("%w: storage leaf %d payload length %d", errFoldNode, nib, len(payload))
+		}
 		return appendStorageLeafRLP(nil, compact, payload), leafKey, payload, nil
 	}
-	nonce, balance, codeHash, storageRoot, err := decodeAccountLeaf(payload)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: account leaf %d: %w", errFoldNode, nib, err)
-	}
-	return appendLeafRLP(nil, compact, accountConsensusRLP(nonce, &balance, storageRoot, codeHash, nil)), leafKey, payload, nil
+	return appendLeafRLP(nil, compact, encodedPayload), leafKey, payload, nil
 }

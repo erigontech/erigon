@@ -699,6 +699,53 @@ func TestRebuildCommitmentShardSkipsEmptyKeyOfExhaustedIterator(t *testing.T) {
 	require.Equal(t, uint64(n), keys, "the (false, nil) that ends the iterator is not a key")
 }
 
+func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	it, err := tx.HistoryRange(kv.CommitmentDomain, 0, int(toTxNum), order.Asc, -1)
+	require.NoError(t, err)
+	keys := map[string]struct{}{}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		if !commitment.IsCommitmentStateKey(k) {
+			keys[string(k)] = struct{}{}
+		}
+	}
+	it.Close()
+	require.NotEmpty(t, keys)
+	values := map[string][]byte{}
+	for k := range keys {
+		for ts := uint64(0); ts < toTxNum; ts += 3 {
+			v, _, err := tx.HistorySeek(kv.CommitmentDomain, []byte(k), ts)
+			require.NoError(t, err)
+			values[fmt.Sprintf("%x@%d", k, ts)] = bytes.Clone(v)
+		}
+	}
+	return values
+}
+
+func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
+	tb.Helper()
+	byNibble := map[byte][][]byte{}
+	for i := uint64(1); ; i++ {
+		slot := make([]byte, length.Hash)
+		binary.BigEndian.PutUint64(slot[length.Hash-8:], i)
+		nibble := crypto.Keccak256(slot)[0] >> 4
+		byNibble[nibble] = append(byNibble[nibble], slot)
+		if len(byNibble[nibble]) < 2 {
+			continue
+		}
+		for other := range byte(16) {
+			if other != nibble && len(byNibble[other]) != 0 {
+				return [][]byte{byNibble[nibble][0], byNibble[nibble][1], byNibble[other][0]}
+			}
+		}
+	}
+}
+
 func composite(k, k2 []byte) []byte {
 	return append(bytes.Clone(k), k2...)
 }
@@ -1226,32 +1273,4 @@ func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
 	useCommitmentSchema(t, true)
 	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
 	require.NoError(t, agg.MergeLoop(t.Context()))
-}
-
-func commitmentHistory(t *testing.T, db kv.TemporalRoDB, toTxNum uint64) map[string][]byte {
-	t.Helper()
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	it, err := tx.HistoryRange(kv.CommitmentDomain, 0, int(toTxNum), order.Asc, -1)
-	require.NoError(t, err)
-	keys := map[string]struct{}{}
-	for it.HasNext() {
-		k, _, err := it.Next()
-		require.NoError(t, err)
-		if !commitment.IsCommitmentStateKey(k) {
-			keys[string(k)] = struct{}{}
-		}
-	}
-	it.Close()
-	require.NotEmpty(t, keys)
-	values := map[string][]byte{}
-	for k := range keys {
-		for ts := uint64(0); ts < toTxNum; ts += 3 {
-			v, _, err := tx.HistorySeek(kv.CommitmentDomain, []byte(k), ts)
-			require.NoError(t, err)
-			values[fmt.Sprintf("%x@%d", k, ts)] = bytes.Clone(v)
-		}
-	}
-	return values
 }

@@ -766,22 +766,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				curBlock = blockNum
 			}
-			if domains.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
-				if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
-					return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
-				}
-			} else {
-				var domain kv.Domain
-				switch len(rawKey) {
-				case 20:
-					domain = kv.AccountsDomain
-				case 52:
-					domain = kv.StorageDomain
-				default:
-					return fmt.Errorf("[rebuild_commitment_history] block %d: unexpected rawKey length %d (hex %s)",
-						blockNum, len(rawKey), hex.EncodeToString(rawKey))
-				}
-				domains.GetCommitmentCtx().TouchKey(domain, string(rawKey), nil)
+			if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
+				return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
 			}
 			totalKeysProcessed++
 			return nil

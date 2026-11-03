@@ -822,3 +822,59 @@ func TestUnfoldRejectsInvalidRecords(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRejectsUnsafeDepths(t *testing.T) {
+	t.Run("depth 64", func(t *testing.T) {
+		data := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 1, Leaves: [16]commitmenttest.Leaf{0: {Suffix: bytes.Repeat([]byte{1}, 31), Value: []byte{2}}}})
+		require.NotPanics(t, func() {
+			require.Error(t, Validate(data, 64))
+		})
+	})
+
+	t.Run("child extension reaches suffix", func(t *testing.T) {
+		data := commitmenttest.Record(&commitmenttest.RecordSpec{
+			Flags:         hdrHasChildExt,
+			ChildMask:     1,
+			ExtensionMask: 1,
+			Extensions:    [16][]byte{0: extFixture(bytes.Repeat([]byte{1}, 63))},
+		})
+		require.Error(t, Validate(data, 0))
+	})
+
+	t.Run("self extension over 63", func(t *testing.T) {
+		data := commitmenttest.Record(&commitmenttest.RecordSpec{
+			Flags:         hdrHasSelfExt,
+			ChildMask:     1,
+			SelfExtension: extFixture(bytes.Repeat([]byte{1}, 64)),
+		})
+		require.Error(t, Validate(data, 0))
+	})
+}
+
+func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
+	data := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 1, Leaves: [16]commitmenttest.Leaf{0: {Suffix: bytes.Repeat([]byte{1}, 31), Value: []byte{2}}}})
+	var records []recordDelta
+	var err error
+	require.NotPanics(t, func() {
+		err = enumerateRecordChildren(nil, [32]byte{}, nil, data, 64, &records)
+	})
+	require.Error(t, err)
+}
+
+func TestComputeLeafRefsRejectsOversizedStorageValue(t *testing.T) {
+	data := commitmenttest.Record(&commitmenttest.RecordSpec{
+		ChildMask: 1,
+		LeafMask:  1,
+		Leaves: [16]commitmenttest.Leaf{
+			0: {Suffix: bytes.Repeat([]byte{1}, 31), Value: bytes.Repeat([]byte{2}, 33)},
+		},
+	})
+	require.NoError(t, Validate(data, 1))
+	var refs *commitment.LeafRefs
+	var err error
+	require.NotPanics(t, func() {
+		refs, err = ComputeLeafRefs([]byte{planeStorage, 1}, data)
+	})
+	require.Error(t, err)
+	require.Nil(t, refs)
+}

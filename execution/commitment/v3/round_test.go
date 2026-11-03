@@ -18,6 +18,7 @@ package v3
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -532,7 +533,7 @@ type leafRefContext struct {
 }
 
 func (c *leafRefContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
-	refs := ComputeLeafRefs(key, data)
+	refs, _ := ComputeLeafRefs(key, data)
 	if refs != nil && c.corrupt {
 		for i := range refs.Refs {
 			refs.Refs[i][0] ^= 0xff
@@ -737,6 +738,21 @@ func TestWarmup(t *testing.T) {
 		_, stop = warmupStepV3(nil, make([]byte, 64), 0)
 		require.True(t, stop)
 	})
+
+	t.Run("prefetch_stops_on_truncated_extension", func(t *testing.T) {
+		record := commitmenttest.Record(&commitmenttest.RecordSpec{
+			Flags:         hdrHasChildExt,
+			ChildMask:     1 << 4,
+			ExtensionMask: 1 << 4,
+			Extensions:    [16][]byte{4: extFixture([]byte{1, 2, 3})},
+		})
+		record = record[:len(record)-1]
+		addrHash := make([]byte, 32)
+		addrHash[0] = 0x40
+		require.NotPanics(t, func() {
+			PrefetchPath(func([]byte) []byte { return record }, addrHash, nil, 0)
+		})
+	})
 }
 
 func TestMetrics(t *testing.T) {
@@ -772,6 +788,42 @@ func TestMetrics(t *testing.T) {
 			require.Positive(t, after[i]-before[i], "deferred rounds still bill %s", names[i])
 		}
 	})
+}
+
+func TestMeteredContextCountsBranchLoads(t *testing.T) {
+	ctx := &meteredContext{PatriciaContext: newMockContext(), meterCounts: new(meterCounts)}
+	_, _, err := ctx.BranchOwned([]byte{1})
+	require.NoError(t, err)
+	m := new(commitment.Metrics)
+	m.AddBranchLoad(ctx.branchLoads.Load())
+	require.Positive(t, m.AsValues().LoadBranch)
+}
+
+type failingPutContext struct {
+	*mockContext
+	calls  int
+	failAt int
+}
+
+func (c *failingPutContext) PutBranch(key, data, prev []byte) error {
+	if c.calls == c.failAt {
+		c.calls++
+		return errors.New("put failed")
+	}
+	c.calls++
+	return c.mockContext.PutBranch(key, data, prev)
+}
+
+func TestFailedPutBillsOnlyAppliedWrites(t *testing.T) {
+	ctx := &failingPutContext{mockContext: newMockContext(), failAt: 1}
+	tr := &Trie{scheduleWorkers: 1}
+	tr.ResetContext(ctx)
+	updates := testUpdates(t, commitment.ModeCollect, benchEntries("storage", 64))
+	before := metrics.GetOrCreateCounter("commitment_branch_writes_total").GetValueUint64()
+	_, err := tr.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
+	after := metrics.GetOrCreateCounter("commitment_branch_writes_total").GetValueUint64()
+	require.Error(t, err)
+	require.EqualValues(t, 1, after-before)
 }
 
 type slotFactory struct {

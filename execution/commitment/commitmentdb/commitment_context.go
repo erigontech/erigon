@@ -461,13 +461,21 @@ type collapseTracingTrie interface {
 	TraceCollapses(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) error
 }
 
-func (sdc *SharedDomainsCommitmentContext) TraceCollapses(ctx context.Context, tx kv.TemporalTx, blockNum, txNum uint64, tracer commitment.CollapseTracer) (bool, error) {
+type collapseRootTracingTrie interface {
+	TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error)
+}
+
+func (sdc *SharedDomainsCommitmentContext) TraceCollapses(ctx context.Context, tx kv.TemporalTx, blockNum, txNum uint64, tracer commitment.CollapseTracer) (bool, []byte, error) {
+	sdc.trieContext(tx, blockNum, txNum, ctx, nil)
+	if t, ok := sdc.patriciaTrie.(collapseRootTracingTrie); ok {
+		root, err := t.TraceCollapsesRoot(ctx, sdc.updates, tracer)
+		return true, root, err
+	}
 	t, ok := sdc.patriciaTrie.(collapseTracingTrie)
 	if !ok {
-		return false, nil
+		return false, nil, nil
 	}
-	sdc.trieContext(tx, blockNum, txNum, ctx, nil)
-	return true, t.TraceCollapses(ctx, sdc.updates, tracer)
+	return true, nil, t.TraceCollapses(ctx, sdc.updates, tracer)
 }
 
 // BranchChildCount returns a branch's child count from the post-compute view.
@@ -1068,7 +1076,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 			return 0, 0, err
 		}
 		if len(v3) > 0 {
-			return 0, 0, errors.New("the datadir holds commitment v3 records: start with --experimental.commitment-v3")
+			return 0, 0, errors.New("the datadir holds commitment v3 records: start with COMMITMENT_V3=true")
 		}
 	}
 	// handle case when we have no commitment, but have executed blocks

@@ -122,8 +122,14 @@ func splitDepthV3(data, hashedKey []byte, depth int) int {
 		packed, _ = record.leafAt(l, nib)
 	case l.tree()&bit != 0 && l.ext&bit != 0:
 		ext := record.extAt(l, nib)
+		if len(ext) == 0 {
+			return 0
+		}
 		packed, count = ext[1:], int(ext[0])
 	default:
+		return 0
+	}
+	if len(packed) == 0 || count > len(rest) {
 		return 0
 	}
 	var scratch [64]byte

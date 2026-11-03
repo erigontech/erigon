@@ -150,6 +150,45 @@ func (t *Trie) TraceCollapses(ctx context.Context, updates *commitment.Updates, 
 	return traceCollapses(cache, items, tracer)
 }
 
+func (t *Trie) TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error) {
+	if t.ctx == nil {
+		return nil, errTrieContext
+	}
+	if updates == nil || updates.Mode() != commitment.ModeCollect {
+		return nil, errors.New("commitment v3: TraceCollapses requires ModeCollect updates")
+	}
+	items, err := drainFeed(ctx, updates, t.scheduleWorkers)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(items, compareFeed)
+	cache := &recordCache{PatriciaContext: t.ctx, recs: make(map[string][]byte)}
+	t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
+	if err := traceCollapses(cache, items, tracer); err != nil {
+		return nil, err
+	}
+	post := commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
+	defer post.Close()
+	for i := range items {
+		post.TouchPlainKeyDirect(items[i].plainKey, items[i].update)
+	}
+	rootBefore := bytes.Clone(t.root)
+	deferredBefore := t.deferred
+	deferUpdatesBefore := t.deferUpdates
+	preRecsBefore, preRootBefore := t.preRecs, t.preRoot
+	t.deferUpdates = true
+	t.deferred = nil
+	root, err := t.Process(ctx, post, "", nil, commitment.WarmupConfig{})
+	t.root = rootBefore
+	t.deferred = deferredBefore
+	t.deferUpdates = deferUpdatesBefore
+	t.preRecs, t.preRoot = preRecsBefore, preRootBefore
+	if err != nil {
+		return nil, err
+	}
+	return root, nil
+}
+
 func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
 	if feed == nil {
 		return nil, errors.New("commitment v3: nil feed")
@@ -180,10 +219,10 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 	if err != nil {
 		return nil, err
 	}
-	metered.countDeltas(parts)
 	if t.deferUpdates {
 		t.deferred = parts
-	} else if err := applyDeltas(parts, t.ctx.PutBranch); err != nil {
+		metered.countDeltas(parts)
+	} else if err := applyDeltasCounted(parts, t.ctx.PutBranch, metered.countDelta); err != nil {
 		return nil, err
 	}
 	t.root = append(t.root[:0], root[:]...)

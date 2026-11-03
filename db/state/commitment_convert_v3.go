@@ -49,7 +49,10 @@ import (
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
-const commitmentV3Batch = 1024
+const (
+	commitmentV3Batch      = 1024
+	commitmentV3BatchBytes = 1 << 20
+)
 
 type kvBatch struct {
 	seq   uint64
@@ -75,6 +78,9 @@ type convertedBatch struct {
 }
 
 func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) error {
+	if len(b.ents) != 0 && len(b.buf)+len(k)+1+len(v) > commitmentV3BatchBytes {
+		return errConvertedBatchFull
+	}
 	k0 := len(b.buf)
 	b.buf = append(b.buf, k...)
 	v0 := len(b.buf)
@@ -82,6 +88,8 @@ func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) error {
 	b.ents = append(b.ents, [3]int{k0, v0, len(b.buf)})
 	return nil
 }
+
+var errConvertedBatchFull = errors.New("converted batch full")
 
 var (
 	kvBatchPool        = sync.Pool{New: func() any { return &kvBatch{pairs: make([][2][]byte, 0, commitmentV3Batch)} }}
@@ -227,17 +235,41 @@ func convertCommitmentFileV3(
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
+				send := func() error {
+					if len(res.ents) == 0 {
+						return nil
+					}
+					select {
+					case out <- res:
+						res = convertedBatchPool.Get().(*convertedBatch)
+						res.buf, res.ents = res.buf[:0], res.ents[:0]
+						return nil
+					case <-gctx.Done():
+						return gctx.Err()
+					}
+				}
+				emit := func(k, v []byte, kind v3.LegacyKind) error {
+					emitErr := res.emit(k, v, kind)
+					if errors.Is(emitErr, errConvertedBatchFull) {
+						if sendErr := send(); sendErr != nil {
+							return sendErr
+						}
+						return res.emit(k, v, kind)
+					} else {
+						return emitErr
+					}
+				}
 				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, conv, reach, delta, res.emit); convErr != nil {
+					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, conv, reach, delta, emit); convErr != nil {
 						return convErr
 					}
 				}
 				kvBatchPool.Put(batch)
-				select {
-				case out <- res:
-				case <-gctx.Done():
-					return gctx.Err()
+				sendErr := send()
+				if sendErr != nil {
+					return sendErr
 				}
+				convertedBatchPool.Put(res)
 			}
 			return nil
 		})
@@ -660,6 +692,16 @@ func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logg
 	}
 	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
 		"records", common.PrettyCounter(c.Records), "orphans", common.PrettyCounter(c.Orphans), "took", time.Since(started).Round(time.Millisecond))
+	if err := verifyCommitmentV3Check(c); err != nil {
+		return err
+	}
+	return nil
+}
+
+func verifyCommitmentV3Check(c CommitmentV3Check) error {
+	if c.Orphans != 0 {
+		return fmt.Errorf("%d orphan records (block %d, %d records)", c.Orphans, c.BlockNum, c.Records)
+	}
 	return nil
 }
 

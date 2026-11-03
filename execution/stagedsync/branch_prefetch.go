@@ -189,7 +189,7 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 		return data
 	}
 	data = bytes.Clone(data)
-	refs := v3.ComputeLeafRefs(key, data)
+	refs, _ := v3.ComputeLeafRefs(key, data)
 	s := p.shard(key)
 	s.mu.Lock()
 	if old, ok := s.records[string(key)]; ok {

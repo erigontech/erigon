@@ -538,7 +538,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			}
 			batch.keys = append(batch.keys, key)
 			batch.spans = append(batch.spans, [2]int{start, len(batch.txNums)})
-			if len(batch.keys) == commitmentV3HistoryBatch {
+			if len(batch.keys) == commitmentV3HistoryBatch || len(batch.buf) >= commitmentV3BatchBytes {
 				if sendErr := send(); sendErr != nil {
 					return sendErr
 				}
@@ -580,9 +580,29 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			var beforeChildren, afterChildren []legacyChild
 			var key, rootKey []byte
 			var res *convertedBatch
+			send := func() error {
+				if res == nil || len(res.ents) == 0 {
+					return nil
+				}
+				select {
+				case out <- res:
+					res = convertedBatchPool.Get().(*convertedBatch)
+					res.buf, res.ents = res.buf[:0], res.ents[:0]
+					return nil
+				case <-gctx.Done():
+					return gctx.Err()
+				}
+			}
 			emit := func(k []byte, txNum uint64, v []byte, kind v3.LegacyKind) error {
 				key = binary.BigEndian.AppendUint64(appendEscapedKey(key[:0], k), txNum)
-				return res.emit(key, v, kind)
+				if err := res.emit(key, v, kind); errors.Is(err, errConvertedBatchFull) {
+					if sendErr := send(); sendErr != nil {
+						return sendErr
+					}
+					return res.emit(key, v, kind)
+				} else {
+					return err
+				}
 			}
 			convert := func(legacyKey, value []byte, asOf uint64, dst *historyVersion) error {
 				dst.reset()
@@ -832,11 +852,10 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					}
 				}
 				historyChainBatchPool.Put(batch)
-				select {
-				case out <- res:
-				case <-gctx.Done():
-					return gctx.Err()
+				if err := send(); err != nil {
+					return err
 				}
+				convertedBatchPool.Put(res)
 			}
 			return nil
 		})

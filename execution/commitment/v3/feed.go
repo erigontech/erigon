@@ -118,7 +118,7 @@ func partitionFeed(items []feedEntry, workers int) ([]storageTask, []accountEntr
 
 func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, sorted func([]feedEntry) error) ([]storageTask, []accountEntry, int, error) {
 	if workers <= 0 {
-		workers = runtime.NumCPU()
+		workers = runtime.GOMAXPROCS(0)
 	}
 	items, err := drainFeed(ctx, updates, workers)
 	if err != nil {
@@ -161,7 +161,7 @@ func drainFeed(ctx context.Context, updates *commitment.Updates, workers int) ([
 
 func partitionAccounts(feed []commitment.FeedAccount, workers int) ([]storageTask, []accountEntry) {
 	if workers <= 0 {
-		workers = runtime.NumCPU()
+		workers = runtime.GOMAXPROCS(0)
 	}
 	bounds := bucketBy(feed, func(a *commitment.FeedAccount) int { return int(a.Hash[0]) })
 	var storage [256][]storageTask

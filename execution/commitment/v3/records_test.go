@@ -56,6 +56,20 @@ func TestDeltas(t *testing.T) {
 			})
 			require.ErrorIs(t, err, wantErr)
 		}},
+		{"E40/ApplyDeltasCountsOnlyAppliedWrites", func(t *testing.T) {
+			metered := &meteredContext{meterCounts: new(meterCounts)}
+			err := applyDeltasCounted(deltaParts{{
+				{Key: []byte{1}, Data: []byte{2}},
+				{Key: []byte{3}, Data: []byte{4}},
+			}}, func(key, data, prev []byte) error {
+				if key[0] == 3 {
+					return errors.New("put failed")
+				}
+				return nil
+			}, metered.countDelta)
+			require.Error(t, err)
+			require.EqualValues(t, 1, metered.writes.Load())
+		}},
 		{"E40/MaterializeFoldsAndEncodesRecordInOneWalk", func(t *testing.T) {
 			ctx := newMockContext()
 			n := newNode(planeStorage)

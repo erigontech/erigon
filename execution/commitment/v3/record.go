@@ -150,6 +150,9 @@ func Validate(data []byte, depth int) error {
 	if data[0]&(hdrFormatMask|hdrHasEmb) != recordFormat {
 		return ErrRecordFormat
 	}
+	if depth < 0 || depth > 63 {
+		return fmt.Errorf("%w: depth %d", ErrRecordRoot, depth)
+	}
 	r := Record{data: data, depth: depth}
 	if r.isLeafRoot() {
 		if data[0]&(hdrHasSelfExt|hdrHasChildExt) != 0 || depth != 0 {
@@ -169,7 +172,7 @@ func Validate(data []byte, depth int) error {
 		}
 		extLen := int(data[1])
 		end := 2 + packedLen(extLen)
-		if extLen == 0 || extLen > 64 {
+		if extLen == 0 || extLen > 63 {
 			return fmt.Errorf("%w: self extension length %d", ErrRecordRoot, extLen)
 		}
 		if end > len(data) {
@@ -203,7 +206,7 @@ func Validate(data []byte, depth int) error {
 			return ErrRecordTruncated
 		}
 		extLen := int(data[off])
-		if extLen > suffixCount {
+		if extLen >= suffixCount {
 			return fmt.Errorf("%w: extension length %d", ErrRecordTrailer, extLen)
 		}
 		end := off + 1 + packedLen(extLen)

@@ -240,10 +240,15 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			currentFileVersion := fileInfo.Version
 
-			if dir := filepath.Dir(path); statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
+			dir := filepath.Dir(path)
+			if statecfg.Schema.CommitmentDomain.CommitmentV3Records && fileInfo.TypeString == "commitment" &&
 				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major < 3 {
 				return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
 					"convert the datadir with `integration commitment convert --v3`", fileInfo.Name(), currentFileVersion.Major)
+			}
+			if !statecfg.ExperimentalCommitmentV3 && fileInfo.TypeString == "commitment" &&
+				(dir == d.SnapDomain || dir == d.SnapHistory) && (fileInfo.Ext == ".kv" || fileInfo.Ext == ".v") && currentFileVersion.Major >= 3 {
+				return fmt.Errorf("commitment file %s requires commitment v3; run with COMMITMENT_V3=true", fileInfo.Name())
 			}
 
 			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]

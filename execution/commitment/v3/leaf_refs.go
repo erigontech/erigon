@@ -37,18 +37,18 @@ func (c *meteredContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	return leafRefsOf(c.PatriciaContext, key, data)
 }
 
-func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
+func ComputeLeafRefs(key, data []byte) (*commitment.LeafRefs, error) {
 	if len(key) < 2 || len(data) == 0 {
-		return nil
+		return nil, nil
 	}
 	plane, depth := key[0], int(key[len(key)-1])
 	if depth == 0 || depth > 63 || plane != planeAccount && plane != planeStorage || Validate(data, depth) != nil {
-		return nil
+		return nil, nil
 	}
 	record := Record{data: data, depth: depth}
 	l := record.layout()
 	if l.leaf == 0 {
-		return nil
+		return nil, nil
 	}
 	var path [64]byte
 	n := node{path: path[:depth], record: record, layout: l, plane: plane, childMask: l.child, leafMask: l.leaf, hashMask: l.child &^ l.leaf}
@@ -59,16 +59,19 @@ func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
 			continue
 		}
 		ref, err := foldLeaf(&n, nib, false, out[:0])
-		if err != nil || len(ref) != 32 {
+		if err != nil {
+			return nil, err
+		}
+		if len(ref) != 32 {
 			continue
 		}
 		refs.Mask |= uint16(1) << nib
 		refs.Refs = append(refs.Refs, [32]byte(ref))
 	}
 	if refs.Mask == 0 {
-		return nil
+		return nil, nil
 	}
-	return refs
+	return refs, nil
 }
 
 func (n *node) cachedLeafRef(nib int) ([]byte, bool) {

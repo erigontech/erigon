@@ -108,31 +108,15 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageRoots := make([][32]byte, len(storage))
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
-	storageDone := make(chan error, 1)
 	storageAsync := factory != nil && storageWorkers > 1
-	if storageAsync {
-		go func() {
-			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
-		}()
-	} else {
-		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
-	}
-
 	g := graph{plane: planeAccount}
-	root, err := g.loadRoot(rawCtx)
-	if err != nil {
-		<-storageDone
-		return [32]byte{}, nil, err
-	}
-	plans := make([]accountPlan, len(accounts))
-	accountResults := make([]accountResult, len(plans))
-	accountValues := make([]byte, accountLeafScratch*len(plans))
 	storageReady := make(chan struct{})
 	var storageErr error
 	var results map[[32]byte][32]byte
 	collectStorage := func() {
 		defer close(storageReady)
-		if storageErr = <-storageDone; storageErr != nil {
+		storageErr = runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
+		if storageErr != nil {
 			return
 		}
 		results = make(map[[32]byte][32]byte, len(storage))
@@ -145,6 +129,14 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	} else {
 		collectStorage()
 	}
+	root, err := g.loadRoot(rawCtx)
+	if err != nil {
+		<-storageReady
+		return [32]byte{}, nil, err
+	}
+	plans := make([]accountPlan, len(accounts))
+	accountResults := make([]accountResult, len(plans))
+	accountValues := make([]byte, accountLeafScratch*len(plans))
 	encode := func(i int) {
 		plan := &plans[i]
 		if plan.skip || plan.delete {

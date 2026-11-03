@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-type meterCounts struct{ readBytes, writeBytes, writes atomic.Uint64 }
+type meterCounts struct{ readBytes, branchLoads, writeBytes, writes atomic.Uint64 }
 
 type meteredContext struct {
 	commitment.PatriciaContext
@@ -34,6 +34,7 @@ type meteredContext struct {
 }
 
 func (c *meteredContext) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
+	c.branchLoads.Add(1)
 	data, step, err := branchOwned(c.PatriciaContext, prefix)
 	if len(data) != 0 {
 		c.readBytes.Add(uint64(len(data)))
@@ -54,14 +55,16 @@ func branchOwned(ctx commitment.PatriciaContext, prefix []byte) ([]byte, kv.Step
 }
 
 func (c *meteredContext) countDeltas(parts deltaParts) {
-	size := 0
 	for _, part := range parts {
-		c.writes.Add(uint64(len(part)))
 		for i := range part {
-			size += len(part[i].Data)
+			c.countDelta(part[i])
 		}
 	}
-	c.writeBytes.Add(uint64(size))
+}
+
+func (c *meteredContext) countDelta(delta recordDelta) {
+	c.writes.Add(1)
+	c.writeBytes.Add(uint64(len(delta.Data)))
 }
 
 func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment.TrieContextFactory {
@@ -78,8 +81,9 @@ func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment
 }
 
 func (c *meteredContext) publish(start time.Time, keys uint64) {
-	m := commitment.NewMetrics("")
+	m := new(commitment.Metrics)
 	m.AddRoundKeys(keys)
+	m.AddBranchLoad(c.branchLoads.Load())
 	m.AddBranchRead(int(c.readBytes.Load()))
 	commitment.ObserveRound(m, start)
 	commitment.PublishBranchWrites(int(c.writes.Load()), int(c.writeBytes.Load()), nil)

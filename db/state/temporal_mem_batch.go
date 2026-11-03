@@ -371,25 +371,7 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 }
 
 func (sd *TemporalMemBatch) updatePutMetrics(domain kv.Domain, putKeySize int, putValueSize int) {
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
-	sd.metrics.CachePutCount++
-	sd.metrics.CachePutSize += putKeySize + putValueSize
-	sd.metrics.CachePutKeySize += putKeySize
-	sd.metrics.CachePutValueSize += putValueSize
-	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CachePutCount++
-		dm.CachePutSize += putKeySize + putValueSize
-		dm.CachePutKeySize += putKeySize
-		dm.CachePutValueSize += putValueSize
-	} else {
-		sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
-			CachePutCount:     1,
-			CachePutSize:      putKeySize + putValueSize,
-			CachePutKeySize:   putKeySize,
-			CachePutValueSize: putValueSize,
-		}
-	}
+	sd.addPutMetrics(domain, 1, putKeySize, putValueSize)
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {

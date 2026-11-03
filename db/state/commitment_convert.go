@@ -762,15 +762,15 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 	// Phase 5: reload aggregator.
 	if reloadErr := at.a.ReloadFiles(); reloadErr != nil {
-		return false, fmt.Errorf("[commitment_convert] phase 5 ReloadFiles: %w", reloadErr)
+		return false, fmt.Errorf("[commitment_convert] phase 5 ReloadFiles; restore with `integration commitment convert --restore`: %w", reloadErr)
 	}
 	if opts.TargetV3 {
 		if err := verifyCommitmentV3Files(ctx, at.a, logger); err != nil {
-			return false, fmt.Errorf("[commitment_convert] v3 verification: %w", err)
+			return false, fmt.Errorf("[commitment_convert] v3 verification; restore with `integration commitment convert --restore`: %w", err)
 		}
 		if len(historyRanges) > 0 {
 			if err := verifyCommitmentV3History(ctx, at.a, historyRanges, logger); err != nil {
-				return false, fmt.Errorf("[commitment_convert] v3 history verification: %w", err)
+				return false, fmt.Errorf("[commitment_convert] v3 history verification; restore with `integration commitment convert --restore`: %w", err)
 			}
 		}
 	}

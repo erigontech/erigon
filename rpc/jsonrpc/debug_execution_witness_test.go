@@ -49,6 +49,12 @@ type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
 }
 
+func TestVerifyTracedWitnessRootRejectsCorruption(t *testing.T) {
+	var expected common.Hash
+	err := verifyTracedWitnessRoot(expected, []byte{1})
+	require.ErrorContains(t, err, "traced commitment root mismatch")
+}
+
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
