@@ -426,15 +426,18 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 }
 
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
-	if mmap.BatchPrefetch {
-		go prefetchBAL(ctx, db, bal)
-	}
 	var txCodeDestinations map[accounts.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
+	if mmap.BatchPrefetch {
+		group.Go(func() error {
+			prefetchBAL(ctx, db, bal)
+			return nil
+		})
+	}
 	group.Go(func() error {
 		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
 	})

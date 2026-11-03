@@ -87,9 +87,7 @@ func BlockingRead(fd int, off int64, length int) {
 	}
 	pr := <-ringPool
 	pr.offs[0], pr.lens[0], pr.bufs[0] = off, length, pr.buf
-	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil {
-		pr.r.reset()
-	}
+	_ = pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:])
 	ringPool <- pr
 }
 

@@ -160,8 +160,13 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 }
 
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
-// io_uring, keeping up to the ring size in flight. It returns after all complete.
-func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
+// io_uring, keeping up to the ring size in flight. It returns after all complete; on error it resets the ring for reuse.
+func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) (err error) {
+	defer func() {
+		if err != nil {
+			r.reset()
+		}
+	}()
 	n := len(offsets)
 	done := 0
 	for done < n {

@@ -110,7 +110,17 @@ type Probe struct {
 	coldData bool
 }
 
-func NewProbe() *Probe { return &Probe{resident: map[uintptr]struct{}{}} }
+// NewProbe returns nil when ReadPages cannot read pages, so callers fall back to ordinary reads.
+func NewProbe() *Probe {
+	if !BatchPrefetch {
+		return nil
+	}
+	batchRingsOnce.Do(initBatchRings)
+	if batchRings == nil {
+		return nil
+	}
+	return &Probe{resident: map[uintptr]struct{}{}}
+}
 
 // TouchData is Touch for the first page of a value, so the caller can read the whole value once it is cold.
 func (pr *Probe) TouchData(p unsafe.Pointer) {
