@@ -103,16 +103,12 @@ var (
 	brokenRings []*pooledRing
 )
 
-// replaceBroken parks a failed ring and returns a fresh one; without one the slot stops reading.
+// replaceBroken parks a failed ring; its slot stops reading, so parked rings stay bounded by the pool size.
 func replaceBroken(pr *pooledRing) *pooledRing {
 	brokenMu.Lock()
 	brokenRings = append(brokenRings, pr)
 	brokenMu.Unlock()
-	r, err := New(8)
-	if err != nil {
-		return &pooledRing{}
-	}
-	return &pooledRing{r: r, buf: make([]byte, MaxReadSize)}
+	return &pooledRing{}
 }
 
 // Available reports whether io_uring can be set up in this process (kernel support,

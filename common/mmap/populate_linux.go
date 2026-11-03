@@ -172,7 +172,7 @@ func newBatchRing() (*batchRing, bool) {
 	return br, true
 }
 
-// errNoBatchRing reports a pool slot whose failed ring could not be replaced, so the pages stay cold.
+// errNoBatchRing reports a pool slot whose ring failed earlier, so the pages stay cold.
 var errNoBatchRing = errors.New("mmap: no io_uring ring for this batch")
 
 // brokenBatchRings keeps failed rings and their buffers alive: the kernel may still write into them.
@@ -181,16 +181,12 @@ var (
 	brokenBatchRings []*batchRing
 )
 
-// replaceBrokenBatchRing parks a failed ring and returns a fresh one; without one the slot stops reading.
+// replaceBrokenBatchRing parks a failed ring; its slot stops reading, so parked rings stay bounded by the pool size.
 func replaceBrokenBatchRing(br *batchRing) *batchRing {
 	brokenMu.Lock()
 	brokenBatchRings = append(brokenBatchRings, br)
 	brokenMu.Unlock()
-	fresh, ok := newBatchRing()
-	if !ok {
-		return &batchRing{}
-	}
-	return fresh
+	return &batchRing{}
 }
 
 // ReadPages reads the given mapped pages into the page cache with io_uring, up to 8 rings of 256 reads in flight; a
