@@ -58,6 +58,7 @@ Flags:
       --http.addr string                            HTTP server listening interface (default "localhost")
       --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
       --http.compression                            Disable http compression (default true)
+      --http.compression.loopback                   Also compress HTTP-RPC responses to loopback clients (default false)
       --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
       --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
       --http.enabled                                enable http server (default true)

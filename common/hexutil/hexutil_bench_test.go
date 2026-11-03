@@ -18,6 +18,7 @@ package hexutil
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -66,4 +67,25 @@ func BenchmarkDecodeHex(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkAppendUint64(b *testing.B) {
+	values := []uint64{0, 3, 157, 0x1918bce, 1 << 40, math.MaxUint64}
+	buf := make([]byte, 0, 256)
+	b.Run("strconv", func(b *testing.B) {
+		for b.Loop() {
+			buf = buf[:0]
+			for _, v := range values {
+				buf = strconv.AppendUint(append(buf, "0x"...), v, 16)
+			}
+		}
+	})
+	b.Run("AppendUint64", func(b *testing.B) {
+		for b.Loop() {
+			buf = buf[:0]
+			for _, v := range values {
+				buf = AppendUint64(buf, v)
+			}
+		}
+	})
 }

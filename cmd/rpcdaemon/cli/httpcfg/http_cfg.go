@@ -72,14 +72,15 @@ type HttpCfg struct {
 	TLSCACert                string
 	TLSKeyFile               string
 
-	HttpServerEnabled  bool
-	HttpURL            string
-	HttpListenAddress  string
-	HttpPort           int
-	HttpCORSDomain     []string
-	HttpVirtualHost    []string
-	AuthRpcVirtualHost []string
-	HttpCompression    bool
+	HttpServerEnabled       bool
+	HttpURL                 string
+	HttpListenAddress       string
+	HttpPort                int
+	HttpCORSDomain          []string
+	HttpVirtualHost         []string
+	AuthRpcVirtualHost      []string
+	HttpCompression         bool
+	HttpCompressionLoopback bool
 
 	HttpsServerEnabled bool
 	HttpsURL           string

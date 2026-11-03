@@ -63,8 +63,9 @@ type ForkChoiceStorageReader interface {
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
 	GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
-	// ViewStateAtBlockRoot callbacks must not call fork choice, mutate the state or keep it after returning.
+	// State-view callbacks must not call fork choice, mutate the state or keep it after returning.
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
+	ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
@@ -148,6 +149,10 @@ type ForkChoiceStorageWriter interface {
 	BeginPendingPayloadEnvelope(common.Hash) func()
 	OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error
 	OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error
+	// OnBlock and OnBlockWithEquivocationCheck can return nil for old blocks they ignore.
+	// Confirm initial acceptance through GetHeader before writing indices: an unvalidated
+	// state root can overwrite another block's mapping. GetBlock can expose blocks before
+	// validation finishes, so it does not prove acceptance.
 	OnBlock(
 		ctx context.Context,
 		block *cltypes.SignedBeaconBlock,
@@ -177,6 +182,8 @@ type ForkChoiceStorageWriter interface {
 	FinishExecutionPayloadEnvelopeForGossip(ExecutionPayloadEnvelopeAdmissionToken, bool)
 	ForgetExecutionPayloadEnvelopeForGossip(common.Hash, uint64)
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time)
+	RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time)
 	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.

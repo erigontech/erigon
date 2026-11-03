@@ -190,36 +190,19 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 // putLatest reports whether this write is a same-txNum update of the key,
 // replacing the key's last entry in place instead of appending a version.
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
-	sd.latestStateLocks[domain].Lock()
-	defer sd.latestStateLocks[domain].Unlock()
-
-	updateMetrics := func(domain kv.Domain, putKeySize int, putValueSize int) {
-		sd.metrics.Lock()
-		defer sd.metrics.Unlock()
-		sd.metrics.CachePutCount++
-		sd.metrics.CachePutSize += putKeySize + putValueSize
-		sd.metrics.CachePutKeySize += putKeySize
-		sd.metrics.CachePutValueSize += putValueSize
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.CachePutCount++
-			dm.CachePutSize += putKeySize + putValueSize
-			dm.CachePutKeySize += putKeySize
-			dm.CachePutValueSize += putValueSize
-		} else {
-			sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
-				CachePutCount:     1,
-				CachePutSize:      putKeySize + putValueSize,
-				CachePutKeySize:   putKeySize,
-				CachePutValueSize: putValueSize,
-			}
-		}
-	}
-
 	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
 	valWithStep := dataWithTxNum{data: bytes.Clone(val), txNum: txNum}
-	putKeySize := 0
-	putValueSize := 0
+	sameTxNumUpdate, putKeySize, putValueSize := sd.putLatestLocked(domain, key, valWithStep)
+	sd.updatePutMetrics(domain, putKeySize, putValueSize)
+	return sameTxNumUpdate
+}
+
+func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
+	sd.latestStateLocks[domain].Lock()
+	defer sd.latestStateLocks[domain].Unlock()
+
+	val, txNum := valWithStep.data, valWithStep.txNum
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
 			switch {
@@ -242,8 +225,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			putValueSize += len(val)
 		}
 
-		updateMetrics(domain, putKeySize, putValueSize)
-		return sameTxNumUpdate
+		return sameTxNumUpdate, putKeySize, putValueSize
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
@@ -267,8 +249,29 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		putValueSize += len(val)
 	}
 
-	updateMetrics(domain, putKeySize, putValueSize)
-	return sameTxNumUpdate
+	return sameTxNumUpdate, putKeySize, putValueSize
+}
+
+func (sd *TemporalMemBatch) updatePutMetrics(domain kv.Domain, putKeySize int, putValueSize int) {
+	sd.metrics.Lock()
+	defer sd.metrics.Unlock()
+	sd.metrics.CachePutCount++
+	sd.metrics.CachePutSize += putKeySize + putValueSize
+	sd.metrics.CachePutKeySize += putKeySize
+	sd.metrics.CachePutValueSize += putValueSize
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CachePutCount++
+		dm.CachePutSize += putKeySize + putValueSize
+		dm.CachePutKeySize += putKeySize
+		dm.CachePutValueSize += putValueSize
+	} else {
+		sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
+			CachePutCount:     1,
+			CachePutSize:      putKeySize + putValueSize,
+			CachePutKeySize:   putKeySize,
+			CachePutValueSize: putValueSize,
+		}
+	}
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
@@ -304,24 +307,10 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 		return nil, kv.NoStepBound, false
 	}
 
-	keyS := common.ToStringZeroCopy(key)
-	var dataWithTxNums []dataWithTxNum
-	if domain == kv.StorageDomain {
-		dataWithTxNums, ok = sd.storage.Get(keyS)
-		if !ok {
-			return unwoundLatest(domain, keyS)
-		}
-		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
-
+	if latest, ok := sd.overlayLatest(domain, key); ok {
+		return latest.data, kv.Step(latest.txNum / sd.stepSize), true
 	}
-
-	dataWithTxNums, ok = sd.domains[domain][keyS]
-	if !ok {
-		return unwoundLatest(domain, keyS)
-	}
-	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+	return unwoundLatest(domain, common.ToStringZeroCopy(key))
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -421,6 +410,9 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	if sd.unwindChangeset != nil {
 		if values := sd.unwindChangeset[domain]; len(values) > 0 {
 			wrappedIt = func(k []byte, v []byte) (cont bool, err error) {
+				if latest, ok := sd.overlayLatest(domain, k); ok { // overlay wins over the changeset, as in getLatest
+					return it(k, latest.data)
+				}
 				if entry, ok := values[common.ToStringZeroCopy(k)]; ok {
 					if len(entry.Value) == 0 {
 						// Pre-unwind state had no value at this key — skip it.
@@ -434,6 +426,22 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 		}
 	}
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, wrappedIt, roTx)
+}
+
+// overlayLatest requires the domain lock to be held.
+func (sd *TemporalMemBatch) overlayLatest(domain kv.Domain, k []byte) (dataWithTxNum, bool) {
+	keyS := common.ToStringZeroCopy(k)
+	var vals []dataWithTxNum
+	var ok bool
+	if domain == kv.StorageDomain {
+		vals, ok = sd.storage.Get(keyS)
+	} else {
+		vals, ok = sd.domains[domain][keyS]
+	}
+	if !ok || len(vals) == 0 {
+		return dataWithTxNum{}, false
+	}
+	return vals[len(vals)-1], true
 }
 
 func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
