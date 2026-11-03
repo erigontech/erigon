@@ -494,24 +494,24 @@ func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
 	return nil
 }
 
-func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) error {
+func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer c.Close()
 	minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, blockNum)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, blockNum)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !hasMin || !hasMax || maxTxNum <= minTxNum {
-		return fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
+		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
 	}
-	return checkTxIndex(blockNum, txIndex, int(maxTxNum-minTxNum)-1)
+	return minTxNum, checkTxIndex(blockNum, txIndex, int(maxTxNum-minTxNum)-1)
 }
 
 // checkPruneHistory requires history from the block's first system transaction.

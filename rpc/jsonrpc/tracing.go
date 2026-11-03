@@ -336,7 +336,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	var txIndex int
 	if config != nil && config.TxIndex != nil {
 		txIndex = int(min(*config.TxIndex, math.MaxInt))
-		if err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+		if _, err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
 			return err
 		}
 	}
@@ -456,7 +456,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	if simulateContext.TransactionIndex != nil {
-		if err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
+		if _, err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
 			return err
 		}
 	}
