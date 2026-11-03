@@ -89,7 +89,7 @@ func StageBuilderExecCfg(
 //
 // State changes flow through a single execution path:
 //  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
-//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
+//  2. the builder applies the assembler's per-phase write sets to sd
 //  3. ComputeCommitment(sd) produces the state root
 //  4. sd writes are discarded when Builder.Build returns (tx is read-only, sd is never flushed)
 //
@@ -113,7 +113,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 	sd.SetTxNum(txNum)
 
-	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	// filterSd is a separate SharedDomains used only for filterBadTransactions.
@@ -145,7 +144,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
 	}, current)
-	ba.SetStateWriter(stateWriter)
 
 	ibs.SetVersionMap(state.NewVersionMap(nil))
 

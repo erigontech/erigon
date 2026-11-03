@@ -114,12 +114,11 @@ func (mb *AssembledBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 
 type BlockAssembler struct {
 	*AssembledBlock
-	cfg         AssemblerCfg
-	balIO       *state.VersionedIO // nil when the block carries no access list
-	writeSets   []*state.WriteSet  // per-phase writes, applied by the builder in order
-	blockRules  *chain.Rules
-	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
-	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
+	cfg        AssemblerCfg
+	balIO      *state.VersionedIO // nil when the block carries no access list
+	writeSets  []*state.WriteSet  // per-phase writes, applied by the builder in order
+	blockRules *chain.Rules
+	gasUsed    protocol.GasUsed // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
@@ -141,21 +140,6 @@ func (ba *BlockAssembler) HasBAL() bool {
 	return ba.cfg.ChainConfig.IsAmsterdam(ba.Header.Time) || ba.cfg.ExperimentalBAL
 }
 
-// SetStateWriter sets a real state writer for domain writes during block assembly.
-// When set, state changes are written to the backing store (e.g. SharedDomains)
-// instead of being discarded via NoopWriter. This enables computing state root
-// directly from the assembled block without re-executing via ExecV3.
-func (ba *BlockAssembler) SetStateWriter(w state.StateWriter) {
-	ba.stateWriter = w
-}
-
-func (ba *BlockAssembler) writer() state.StateWriter {
-	if ba.stateWriter != nil {
-		return ba.stateWriter
-	}
-	return state.NewNoopWriter()
-}
-
 func (ba *BlockAssembler) WriteSets() []*state.WriteSet {
 	return ba.writeSets
 }
@@ -169,12 +153,6 @@ func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.
 }
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
-	// Use NoopWriter for FinalizeTx during initialization. Intermediate state
-	// writes to SharedDomains would become stale if later system calls (e.g.
-	// EIP-7002 dequeue) revert storage slots back to their original values,
-	// because CommitBlock's blockOriginStorage==dirtyStorage check skips the
-	// undo write. All final state is correctly written by CommitBlock in
-	// AssembleBlock using the real writer.
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
 		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return err
@@ -229,11 +207,7 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	// Use NoopWriter for FinalizeTx after each user transaction. See
-	// Initialize comment for rationale — intermediate writes to
-	// SharedDomains become stale when system calls revert storage slots.
-	// CommitBlock in AssembleBlock writes all final state correctly.
-	writer := state.NewNoopWriter()
+	writer := state.NewNoopWriter() // the builder applies the recorded write sets
 	recordTxIO := func() error {
 		writes, err := ibs.FinalizedWrites(ba.blockRules)
 		if err != nil {
@@ -424,7 +398,7 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 	ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 	ibs.ResetVersionedIO()
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
-		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
+		state.NewNoopWriter(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
