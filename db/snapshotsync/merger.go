@@ -104,7 +104,6 @@ func (m *Merger) mergeSubSegment(
 		}
 		if err != nil {
 			newDirtySegment.close()
-			newDirtySegment = nil
 			f := sn.Path
 			_ = dir.RemoveFile(f)
 			_ = dir.RemoveFile(f + ".torrent")

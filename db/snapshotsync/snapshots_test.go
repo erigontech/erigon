@@ -328,7 +328,8 @@ func TestMergeSubSegmentClosesOutputOnIndexFailure(t *testing.T) {
 	merger.DisableFsync()
 	seg, err := merger.mergeSubSegment(t.Context(), snaptype2.Headers.FileInfo(dir, 0, 20_000), toMerge, dir, true, nil)
 	require.ErrorContains(t, err, "salt not found") // the index build fails without salt-blocks.txt
-	require.True(t, seg == nil || seg.Decompressor == nil, "a failed merge output must be closed")
+	require.NotNil(t, seg)
+	require.Nil(t, seg.Decompressor, "a failed merge output must be closed")
 }
 
 // A frozen merge output retires only the non-frozen segments it covers, not ones below its range.
