@@ -297,8 +297,7 @@ func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasU
 		// instead of the gas usage observed when each individual call exited.
 		for i := range min(len(receipt.FrameReceipts), len(t.callstack[0].Calls)) {
 			frame, call := &receipt.FrameReceipts[i], &t.callstack[0].Calls[i]
-			call.Gas = hexutil.Uint64(t.frameTx.Frames[i].Limits.Total())
-			call.GasUsed = hexutil.Uint64(frame.GasUsed.Total())
+			call.GasUsed = hexutil.Uint64(frame.GasUsed.Execution)
 			stateGasUsed := hexutil.Int64(frame.GasUsed.State)
 			call.StateGasUsed = &stateGasUsed
 			if t.config.WithLog {

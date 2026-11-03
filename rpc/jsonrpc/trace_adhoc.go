@@ -445,9 +445,8 @@ func (ot *OeTracer) OnTxEndV2(receipt *types.Receipt, usage mdgas.TxnGasUsage, e
 			trace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), StateGasUsed: &stateGas}
 		case 1:
 			i := trace.TraceAddress[0]
-			trace.Action.(*CallTraceAction).Gas = hexutil.U256(*uint256.NewInt(ot.frameTx.Frames[i].Limits.Total()))
 			if result, ok := trace.Result.(*TraceResult); ok {
-				result.GasUsed = (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[i].GasUsed.Total()))
+				result.GasUsed = (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[i].GasUsed.Execution))
 				stateGas := hexutil.Int64(receipt.FrameReceipts[i].GasUsed.State)
 				result.StateGasUsed = &stateGas
 			}

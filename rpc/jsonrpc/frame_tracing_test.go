@@ -86,14 +86,16 @@ func traceFrameRPC(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, name s
 }
 
 type frameCallTrace struct {
-	Type    string            `json:"type"`
-	From    common.Address    `json:"from"`
-	To      common.Address    `json:"to"`
-	Gas     hexutil.Uint64    `json:"gas"`
-	GasUsed hexutil.Uint64    `json:"gasUsed"`
-	Error   string            `json:"error"`
-	Calls   []frameCallTrace  `json:"calls"`
-	Logs    []json.RawMessage `json:"logs"`
+	Type         string            `json:"type"`
+	From         common.Address    `json:"from"`
+	To           common.Address    `json:"to"`
+	Gas          hexutil.Uint64    `json:"gas"`
+	StateGas     hexutil.Uint64    `json:"stateGasReservoir"`
+	GasUsed      hexutil.Uint64    `json:"gasUsed"`
+	StateGasUsed *hexutil.Int64    `json:"stateGasUsed"`
+	Error        string            `json:"error"`
+	Calls        []frameCallTrace  `json:"calls"`
+	Logs         []json.RawMessage `json:"logs"`
 }
 
 func TestFrameCallTracer(t *testing.T) {
@@ -108,7 +110,7 @@ func TestFrameCallTracer(t *testing.T) {
 	require.Len(t, trace.Calls, len(tx.Frames))
 	for i, frame := range tx.Frames {
 		require.Equal(t, frame.ResolvedTarget(tx.SenderAddress), trace.Calls[i].To)
-		require.EqualValues(t, frame.Limits.Total(), trace.Calls[i].Gas)
+		require.EqualValues(t, frame.Limits.Execution, trace.Calls[i].Gas)
 	}
 	require.Equal(t, "STATICCALL", trace.Calls[0].Type)
 	require.Equal(t, vm.FrameEntryPoint.Value(), trace.Calls[0].From)
@@ -197,10 +199,15 @@ func TestFrameCallTracerStateGas(t *testing.T) {
 	var trace frameCallTrace
 	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "callTracer", json.RawMessage(`{}`)), &trace))
 	require.Len(t, trace.Calls, 2)
-	require.EqualValues(t, tx.Frames[1].Limits.Total(), trace.Calls[1].Gas)
+	require.EqualValues(t, tx.GetGasLimit(), trace.Gas)
+	require.EqualValues(t, tx.Frames[1].Limits.Execution, trace.Calls[1].Gas)
+	require.EqualValues(t, tx.Frames[1].Limits.State, trace.Calls[1].StateGas)
+	require.NotNil(t, trace.Calls[1].StateGasUsed)
+	require.EqualValues(t, params.StateGasPerStorageSet, *trace.Calls[1].StateGasUsed)
 	intrinsic, _, _, err := tx.GasLimits()
 	require.NoError(t, err)
-	require.EqualValues(t, uint64(trace.GasUsed)-intrinsic-uint64(trace.Calls[0].GasUsed), trace.Calls[1].GasUsed)
+	executionUsed := intrinsic + uint64(trace.Calls[0].GasUsed) + uint64(trace.Calls[1].GasUsed)
+	require.EqualValues(t, executionUsed+uint64(*trace.Calls[1].StateGasUsed), trace.GasUsed)
 }
 
 func TestFrameCallTracerAtomicBatch(t *testing.T) {
@@ -521,9 +528,12 @@ func TestFrameParityTracerStateGas(t *testing.T) {
 	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}
 	result, receipt := traceParityFrame(t, evm, tx, true)
 	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.GetGasLimit())), result.Trace[0].Action.(*CallTraceAction).Gas)
+	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), result.Trace[0].Result.(*TraceResult).GasUsed)
 	child := result.Trace[2]
-	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.Frames[1].Limits.Total())), child.Action.(*CallTraceAction).Gas)
-	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Total())), child.Result.(*TraceResult).GasUsed)
+	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.Frames[1].Limits.Execution)), child.Action.(*CallTraceAction).Gas)
+	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Execution)), child.Result.(*TraceResult).GasUsed)
+	require.NotNil(t, child.Result.(*TraceResult).StateGasUsed)
+	require.EqualValues(t, params.StateGasPerStorageSet, *child.Result.(*TraceResult).StateGasUsed)
 }
 
 func TestFrameParityTracerFailedFrame(t *testing.T) {
@@ -564,7 +574,7 @@ func TestFrameParityTracerFailedFrame(t *testing.T) {
 					require.IsType(t, &TraceResult{}, frame.Result)
 					reverted := frame.Result.(*TraceResult)
 					require.Equal(t, hexutil.Bytes(tc.output), reverted.Output)
-					require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Total())), reverted.GasUsed)
+					require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Execution)), reverted.GasUsed)
 				}
 			})
 		}
