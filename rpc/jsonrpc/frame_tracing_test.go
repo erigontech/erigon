@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -31,11 +32,13 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -43,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -301,6 +305,54 @@ func TestFrameParityTracer(t *testing.T) {
 			require.NotEmpty(t, executed.Op)
 		}
 	}
+}
+
+// The proposed trace format makes the synthetic root discoverable through
+// toAddress: [ENTRY_POINT], even though it executes no entry-point code.
+// https://github.com/ethereum/execution-apis/pull/909
+func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			target: {Code: []byte{byte(vm.STOP)}},
+		},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newTraceApiForTest(m)
+	traces, err := api.Transaction(m.Ctx, frameTx.Hash(), nil, nil)
+	require.NoError(t, err)
+	require.Len(t, traces, 3)
+	entryPoint := vm.FrameEntryPoint.Value()
+	require.Empty(t, traces[0].TraceAddress)
+	require.Equal(t, sender, traces[0].Action.(*CallTraceAction).From)
+	require.Equal(t, entryPoint, traces[0].Action.(*CallTraceAction).To)
+
+	blockNumber := rpc.BlockNumber(pack.Blocks[0].NumberU64())
+	stream := jsonstream.New(nil)
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{
+		FromBlock: &blockNumber, ToBlock: &blockNumber,
+		ToAddress: []*common.Address{&entryPoint},
+	}, nil, nil, stream))
+	want, err := jsonstream.Marshal(ParityTraces{traces[0]})
+	require.NoError(t, err)
+	require.JSONEq(t, string(want), string(stream.Buffer()))
 }
 
 func TestFrameParityTracerStackResults(t *testing.T) {
