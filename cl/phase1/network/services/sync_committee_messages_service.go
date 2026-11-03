@@ -78,6 +78,11 @@ type syncCommitteeMessagesService struct {
 	poolMu sync.Mutex
 	// cleanedAtHeadSlot is the head slot of the last cleanup of seenSyncCommitteeMessages, guarded by poolMu.
 	cleanedAtHeadSlot uint64
+	// seenMu orders claims of seenSyncCommitteeMessages, under its read lock, against evictions, under its write
+	// lock. evictedBelow, guarded by it, only grows: records of slots below it are evicted and are never claimed
+	// again, also after the head slot goes back in a reorg.
+	seenMu       sync.RWMutex
+	evictedBelow uint64
 }
 
 type SyncCommitteeMessageForGossip struct {
@@ -148,34 +153,47 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 }
 
 // storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
-// if another message for them was verified at the same time and recorded first.
+// if another message for them was verified at the same time and recorded first, or if this content was already
+// published.
 func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
-	// A verification that ended after the head moved two slots past the message is outside the slot window the gossip
-	// checks admitted it for. Recording it would add an entry this head slot's cleanup has already passed, and the
-	// cleanup may have removed the record of an earlier message from the validator for that slot.
-	if isStaleSyncCommitteeMessageSlot(msg.Slot, s.syncedDataManager.HeadSlot()) {
-		return ErrIgnore
-	}
 	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
-	verified, loaded := s.seenSyncCommitteeMessages.LoadOrStore(key, verifiedSyncCommitteeMessage{
+	recorded := false
+	var ignored error
+	// The freshness check and the claim happen under one read lock of seenMu, so no eviction runs between them. A
+	// verification that ended after the head moved two slots past the message is outside the slot window the gossip
+	// checks admitted it for, and a slot already evicted stays evicted.
+	s.seenMu.RLock()
+	if msg.Slot < s.evictedBelow || isStaleSyncCommitteeMessageSlot(msg.Slot, s.syncedDataManager.HeadSlot()) {
+		ignored = ErrIgnore
+	} else if verified, loaded := s.seenSyncCommitteeMessages.LoadOrStore(key, verifiedSyncCommitteeMessage{
 		beaconBlockRoot: msg.BeaconBlockRoot,
 		signature:       msg.Signature,
-	})
-	if loaded {
-		if !verified.(verifiedSyncCommitteeMessage).matches(msg.BeaconBlockRoot, msg.Signature) {
-			return ErrIgnore
-		}
-		return nil
+	}); !loaded {
+		recorded = true
+	} else if v := verified.(verifiedSyncCommitteeMessage); !v.matches(msg.BeaconBlockRoot, msg.Signature) || v.published {
+		ignored = ErrIgnore
+	}
+	s.seenMu.RUnlock()
+	if !recorded {
+		return ignored
 	}
 	// One addition at a time holds a head-state view: an addition waiting for the pool inside a view would keep a
 	// head-state write, and every reader queued behind it, waiting.
 	s.poolMu.Lock()
 	defer s.poolMu.Unlock()
 	s.cleanupOldSyncCommitteeMessages()
+	stale := false
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// The head may have moved past the message while it waited for the pool.
+		if stale = isStaleSyncCommitteeMessageSlot(msg.Slot, headState.Slot()); stale {
+			return nil
+		}
 		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
 	}); err != nil {
 		log.Debug("failed to add sync committee message to pool", "err", err)
+	}
+	if stale {
+		return ErrIgnore
 	}
 	return nil
 }
@@ -264,26 +282,26 @@ func (s *syncCommitteeMessagesService) MarkPublished(subnet, slot, validatorInde
 }
 
 // cleanupOldSyncCommitteeMessages removes messages of slots before the previous one. Only messages of the current slot
-// are admitted, so entries go stale only when the head slot advances, and one cleanup per head slot is enough. The
-// caller holds poolMu.
+// are admitted, so entries go stale only when the head slot advances, and one cleanup per head slot is enough. It
+// raises evictedBelow before removing, so a removed slot cannot be claimed again. The caller holds poolMu.
 func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
 	if headSlot == s.cleanedAtHeadSlot {
 		return
 	}
 	s.cleanedAtHeadSlot = headSlot
-
-	entriesToRemove := []seenSyncCommitteeMessage{}
-	s.seenSyncCommitteeMessages.Range(func(key, value any) bool {
-		k := key.(seenSyncCommitteeMessage)
-		if isStaleSyncCommitteeMessageSlot(k.slot, headSlot) {
-			entriesToRemove = append(entriesToRemove, k)
+	if headSlot < 2 {
+		return
+	}
+	s.seenMu.Lock()
+	defer s.seenMu.Unlock()
+	s.evictedBelow = max(s.evictedBelow, headSlot-1)
+	s.seenSyncCommitteeMessages.Range(func(key, _ any) bool {
+		if k := key.(seenSyncCommitteeMessage); k.slot < s.evictedBelow {
+			s.seenSyncCommitteeMessages.Delete(k)
 		}
 		return true
 	})
-	for _, k := range entriesToRemove {
-		s.seenSyncCommitteeMessages.Delete(k)
-	}
 }
 
 // isStaleSyncCommitteeMessageSlot reports whether messages of slot are older than the previous slot of the head.
