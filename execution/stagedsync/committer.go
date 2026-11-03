@@ -65,12 +65,12 @@ func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 // every blockResult. It owns its own commitment.Updates buffer and reads
 // block-boundary state from sd.mem (the execLoop flushes before each blockResult).
 type commitmentCalculator struct {
-	probeApply time.Duration
-	probeTxs   int
-	probeFirst time.Time
-	probeLast  time.Time
-	probeCkpt  time.Duration
-	probeCkptN int
+	probeApply  time.Duration
+	probeTxs    int
+	probeFirst  time.Time
+	probeLast   time.Time
+	probeCkpt   time.Duration
+	probeCkptN  int
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
