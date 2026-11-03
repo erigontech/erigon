@@ -250,10 +250,10 @@ func setWriteDeadline(rc *http.ResponseController, deadline time.Time) error {
 // eventStreamFeedBuffer is the buffer of each feed subscription of a stream.
 const eventStreamFeedBuffer = 128
 
-// eventStreamSubscription subscribes a stream only to the feeds that carry its topics, each into its own buffer. The
-// operation feed carries gossip traffic, thousands of events per slot; in a shared buffer it pushed out the few state
-// events, and head is sent without waiting for subscribers, so a full buffer dropped it. A channel and subscription of a
-// feed the stream does not need stay nil, and a nil channel is never ready in a select.
+// eventStreamSubscription subscribes a stream only to the feeds that carry its topics, each into its own buffer. State
+// events must never share a buffer with operation events: the operation feed carries thousands of gossip events per
+// slot, and head is sent without waiting for subscribers, so it is dropped when its buffer is full. A channel and
+// subscription of a feed the stream does not need stay nil, and a nil channel is never ready in a select.
 type eventStreamSubscription struct {
 	state, op       chan *event.EventStream
 	stateSub, opSub ethevent.Subscription
