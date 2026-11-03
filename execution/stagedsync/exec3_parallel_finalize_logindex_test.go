@@ -93,11 +93,10 @@ func foldLogIndexTestResults(t *testing.T, pe *parallelExecutor, tx kv.TemporalT
 	return finalize
 }
 
-// The final virtual transaction clears the latest receipt-cache value, while
-// history preserves the last regular receipt. Indexing block-end system-call
-// logs must leave that receipt readable in the historical state after the
-// regular transaction.
-func TestParallelBlockEndLogsPreserveReceiptHistory(t *testing.T) {
+// With receipt history enabled, block-end logs must reach the persisted indexes
+// at the final virtual transaction's txNum. That transaction clears the latest
+// cached receipt, while history retains the last regular receipt.
+func TestParallelBlockEndLogsWithReceiptHistory(t *testing.T) {
 	savedRCache := statecfg.Schema.RCacheDomain
 	statecfg.EnableHistoricalRCache()
 	t.Cleanup(func() { statecfg.Schema.RCacheDomain = savedRCache })
