@@ -224,7 +224,7 @@ func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitme
 }
 
 type latestPrefetcher interface {
-	PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
+	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
 }
 
 type prefetchStats struct {
@@ -299,7 +299,7 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 // prefetchKeys splits keys over prefetchPar planners, each with its own tx; stats keep the slowest planner's times.
 func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
 	if prefetchPar <= 1 || len(keys) < 2*prefetchPar {
-		stats.add(p.PrefetchLatest(domain, keys))
+		stats.add(p.PrefetchLatest(ctx, domain, keys))
 		return nil
 	}
 	var mu sync.Mutex
@@ -325,7 +325,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 					return nil
 				}
 			}
-			waves, pages, plan, io := pp.PrefetchLatest(domain, keys)
+			waves, pages, plan, io := pp.PrefetchLatest(ctx, domain, keys)
 			mu.Lock()
 			defer mu.Unlock()
 			part.waves, part.pages = max(part.waves, waves), part.pages+pages

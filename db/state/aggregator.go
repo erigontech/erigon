@@ -2741,7 +2741,7 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
 // Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
 // stay correct without it.
-func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
+func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
 	dt := at.d[domain]
 	span := uintptr(1)
 	if domain == kv.CodeDomain {
@@ -2754,11 +2754,14 @@ func (at *AggregatorRoTx) PrefetchLatest(domain kv.Domain, keys [][]byte) (waves
 	}
 	defer func() { dt.probe = nil }()
 	pending := keys
-	for ; len(pending) > 0 && waves < 64; waves++ {
+	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		t0 := time.Now()
 		cold := make([]uintptr, 0, len(pending))
 		next := pending[:0:0]
 		for _, k := range pending {
+			if ctx.Err() != nil {
+				return waves, pages, plan, io
+			}
 			if page, ok := probeLatestFromFiles(dt, k); ok {
 				n := uintptr(1)
 				if dt.probe.ColdData() {
