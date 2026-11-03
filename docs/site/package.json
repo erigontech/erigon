@@ -63,7 +63,6 @@
     "follow-redirects": "^1.16.2",
     "joi": "^17.13.9",
     "js-yaml": "^4.3.0",
-    "brace-expansion": "^1.1.17",
     "gray-matter": {
       "js-yaml": "3.14.2"
     },
@@ -77,6 +76,9 @@
     "qs": "^6.17.0",
     "tinypool": "^2.1.2",
     "katex": ">=0.18.2 <0.18.5",
-    "postcss-selector-parser": "^7.1.6"
+    "postcss-selector-parser": "^7.1.6",
+    "serve-handler": {
+      "minimatch": "^11.0.4"
+    }
   }
 }
