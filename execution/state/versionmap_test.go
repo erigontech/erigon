@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"runtime"
 	"testing"
 	"time"
 
@@ -826,6 +827,7 @@ func TestMarkWritesCompleteRunsUnderReadersOfTheEntry(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
+		e.mu.RUnlock()
 		t.Fatal("MarkWritesComplete waited for a reader of the entry")
 	}
 	e.mu.RUnlock()
@@ -2154,4 +2156,44 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, MVReadResultDone, res.Status())
 	require.Equal(t, 1, res.DepIdx())
 	require.Equal(t, *uint256.NewInt(42), val)
+}
+
+// Readers combine a destruct's flag with other cells' flags, so marking an entry with destruct
+// cells must wait for its readers.
+func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(52)
+	vm := NewVersionMap(nil)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	// A writer waiting for Lock makes TryRLock fail; a mark under RLock finishes instead.
+	for {
+		select {
+		case <-done:
+			e.mu.RUnlock()
+			t.Fatal("MarkWritesComplete marked a destruct entry under a reader")
+		default:
+		}
+		if !e.mu.TryRLock() {
+			break
+		}
+		e.mu.RUnlock()
+		runtime.Gosched()
+	}
+	e.mu.RUnlock()
+	<-done
+	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res.Status())
 }

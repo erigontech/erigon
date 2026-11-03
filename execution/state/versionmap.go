@@ -143,6 +143,8 @@ type AddressEntry struct {
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
 	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
+	// MarkWritesComplete flips flags to Done under RLock only while SelfDestruct
+	// is nil: readers combine several cells' flags only through destruct cells.
 	mu sync.RWMutex
 }
 
@@ -1343,7 +1345,18 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
 		e.mu.RLock()
-		defer e.mu.RUnlock()
+		exclusive := e.SelfDestruct != nil
+		if exclusive {
+			e.mu.RUnlock()
+			e.mu.Lock()
+		}
+		defer func() {
+			if exclusive {
+				e.mu.Unlock()
+			} else {
+				e.mu.RUnlock()
+			}
+		}()
 		if vw, ok := writes.address[addr]; ok {
 			markCellComplete(e.Address, addr, AddressPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 		}
