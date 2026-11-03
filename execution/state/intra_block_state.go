@@ -2808,12 +2808,6 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	return writes, ibs.StateReadError()
 }
 
-// encodeExistingEmptyRemovals emits the EIP-161 delete for a pre-existing account
-// left empty (balance 0, nonce 0, empty code): its account-field writes are
-// dropped and replaced with a SelfDestructPath write, so the domain apply and the
-// commitment calculator both remove the leaf from the writes without re-deriving
-// emptiness. Created-empty accounts are already withheld by
-// withholdCreatedEmptyAccounts, so only pre-existing empties reach here.
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return

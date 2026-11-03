@@ -210,9 +210,6 @@ func (v *versionMapWriteView) AccountChanges() iter.Seq[accounts.Address] {
 
 var _ WriteSetView = (*versionMapWriteView)(nil)
 
-// WithoutVanished returns ws without the accounts tx txIdx created and self-destructed
-// that did not exist before it: they leave no state, so publishing their deletes would
-// only cost domain lookups and commitment work. preBlock reads the state before the block.
 func WithoutVanished(ws *WriteSet, vm *VersionMap, txIdx int, eip8246 bool, preBlock StateReader) (*WriteSet, error) {
 	var vanished map[accounts.Address]bool
 	for addr := range ws.SelfDestructs() {

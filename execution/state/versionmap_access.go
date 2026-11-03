@@ -31,12 +31,6 @@ import (
 // txNum = baseTxNum + TxIndex + 1.
 func (vm *VersionMap) SetBaseTxNum(baseTxNum uint64) { vm.baseTxNum.Store(baseTxNum) }
 
-// VersionMapView is a post-seal, data-only read over the version map pinned at a
-// global txNum. It composes each account/slot from the map cells, falling back to base
-// for fields no cell covers, and carries no lifecycle or EIP reasoning — the add/remove
-// verdict is read straight off the sealed state. It is a pure access class: construct
-// one for a txNum, then read by address/key. Execution does not use it; exec reads the
-// live, lifecycle-aware map mid-block.
 type VersionMapView struct {
 	vm    *VersionMap
 	txNum uint64
