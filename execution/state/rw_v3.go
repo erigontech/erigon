@@ -918,11 +918,11 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	return r.ReadAccountStorageValue(address, key.Value())
+	return r.ReadAccountStorageByPlainKey(address, key.Value())
 }
 
-// ReadAccountStorageValue is ReadAccountStorage for a slot that is not interned.
-func (r *ReaderV3) ReadAccountStorageValue(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
+// ReadAccountStorageByPlainKey is ReadAccountStorage for a slot that is not interned.
+func (r *ReaderV3) ReadAccountStorageByPlainKey(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])

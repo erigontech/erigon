@@ -410,7 +410,7 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 		if slotIndex < storageChanges {
 			_, _, err = stateReader.ReadAccountStorage(address, account.StorageChanges[slotIndex].Slot)
 		} else {
-			_, _, err = stateReader.ReadAccountStorageValue(address, account.StorageReads[slotIndex-storageChanges])
+			_, _, err = stateReader.ReadAccountStorageByPlainKey(address, account.StorageReads[slotIndex-storageChanges])
 		}
 		if err != nil {
 			return err
@@ -584,7 +584,7 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 						if err := workerCtx.Err(); err != nil {
 							return err
 						}
-						if _, _, err := stateReader.ReadAccountStorageValue(addr, slot); err != nil {
+						if _, _, err := stateReader.ReadAccountStorageByPlainKey(addr, slot); err != nil {
 							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}
 					}
@@ -739,7 +739,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						_, _, _ = stateReader.ReadAccountStorageValue(accounts.InternAddress(list.Address), slot)
+						_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
 					}
 				}
 			}
