@@ -150,6 +150,39 @@ func resumePBinAtWithBase(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *sta
 	})
 }
 
+func TestPBinResumeUsesWorkerAbsentView(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	run := openPBinRangeWriterRun(t, 100000, 4, 8)
+	base := slices.Clone(pbinRangeWriterCorpora()[0].leaves)
+	for i := range base {
+		base[i].Stamp = 0
+	}
+	_, err := run.write(t.Context(), base)
+	require.NoError(t, err)
+	activityBefore := run.activity.Load()
+
+	resume, err := state.NewPBinRangeWriterForResume(run.agg, kv.CommitmentBinDomain, 8, 16)
+	require.NoError(t, err)
+	resume.SetWorkersForTest(4)
+	updated := slices.Clone(base)
+	for i := range updated {
+		if i%2 == 0 {
+			updated[i].Value = make([]byte, eip8297.ValueLength)
+		}
+	}
+	root, err := resume.WriteAtBlock(t.Context(), run.tx, run.domains, func(emit func(state.PBinLeaf) error) error {
+		for _, leaf := range updated {
+			if emitErr := emit(leaf); emitErr != nil {
+				return emitErr
+			}
+		}
+		return nil
+	}, 0)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, root)
+	require.Greater(t, run.activity.Load(), activityBefore+1)
+}
+
 func TestPBinResumeEmptyGapKeepsBaseRoot(t *testing.T) {
 	selectPBinLeafStreamHash(t)
 	baseDB, baseAgg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)

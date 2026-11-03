@@ -397,7 +397,14 @@ func (v *pbinRangeWriterView) PutBranch(prefix, _, _ []byte) error {
 }
 
 func (v *pbinRangeWriterView) Absent(key []byte) bool {
-	return v.overlay.Absent(key)
+	if _, held := v.overlay.writes[string(key)]; held {
+		return false
+	}
+	if !v.overlay.base {
+		return true
+	}
+	data, _, err := v.PatriciaContext.Branch(key)
+	return err != nil || len(data) == 0
 }
 
 func (o *pbinRangeWriterOverlay) FlushFinished(lookahead [][]byte) error {
