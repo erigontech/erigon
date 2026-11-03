@@ -181,6 +181,11 @@ func (b *wsb) code(addr accounts.Address, ver state.Version, val accounts.Code) 
 	return b
 }
 
+func (b *wsb) codeSize(addr accounts.Address, ver state.Version, val int) *wsb {
+	b.ws.SetCodeSize(addr, &state.VersionedWrite[int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.CodeSizePath, Version: ver}, Val: val})
+	return b
+}
+
 func (b *wsb) selfDestruct(addr accounts.Address, ver state.Version, val bool) *wsb {
 	b.ws.SetSelfDestruct(addr, &state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: ver}, Val: val})
 	return b

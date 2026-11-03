@@ -50,6 +50,10 @@ func (f *chainFetcher) FetchHeadersBackwards(_ context.Context, hash common.Hash
 	return p2p.FetcherResponse[[]*types.Header]{Data: headers}, nil
 }
 
+func (f *chainFetcher) FetchHeaders(context.Context, uint64, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
+}
+
 func (f *chainFetcher) FetchBodies(_ context.Context, headers []*types.Header, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Body], error) {
 	bodies := make([]*types.Body, len(headers))
 	for i, h := range headers {
@@ -68,7 +72,7 @@ func newExecLagEngineServer(t *testing.T, loopBlockLimit uint, lag int) (*Engine
 	}
 	peerTracker := p2p.NewPeerTracker(m.Log, nil)
 	peerTracker.PeerConnected(p2p.PeerIdFromUint64(1))
-	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, &p2p.PeerPenalizer{}, peerTracker, t.TempDir())
+	bbd := p2p.NewBackwardBlockDownloader(m.Log, fetcher, peerTracker, t.TempDir())
 	syncCfg := m.Cfg().Sync
 	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), m.Log, m.ExecModule, m.BlockReader, m.DB, m.ChainConfig, syncCfg, bbd)
 	srv := NewEngineServer(m.Log, m.ChainConfig, m.ExecModule, downloader, false, false, false, true, nil, nil, 0, syncCfg.MaxReorgDepth)

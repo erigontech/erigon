@@ -217,7 +217,7 @@ func ExecV3(ctx context.Context,
 		defer doms.SetDeferCommitmentUpdates(false)
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForWarmup(ctx)
+		cfg.readAheader.WaitForRunningWarmup(ctx)
 	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -353,7 +353,7 @@ func execV3Serial(ctx context.Context,
 		defer doms.SetDeferCommitmentUpdates(false)
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForWarmup(ctx)
+		cfg.readAheader.WaitForRunningWarmup(ctx)
 	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
@@ -584,6 +584,9 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	if dbg.CallNoMaterialize {
+		priorIbs.SetVersionMap(state.NewVersionMap(nil))
+	}
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -767,7 +770,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case readAhead <- blockNum:
 			default:
 			}
-			go warmTxsHashes(b)
+			go warmTxsHashes(b, te.cfg.chainConfig.ChainID)
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

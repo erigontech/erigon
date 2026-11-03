@@ -333,13 +333,13 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	}
 	defer tx.Rollback()
 	oracle := api.newGasOracle(tx)
-	tipcap, err := oracle.SuggestTipCap(ctx)
+	tipcap, number, hash, err := oracle.SuggestTipCapAtHead(ctx)
 	if err != nil {
 		return nil, err
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	head, err := api.currentHeader(ctx, tx)
+	head, err := api.headerByHashAndNumber(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
