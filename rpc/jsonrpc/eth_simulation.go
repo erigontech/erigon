@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1367,19 +1368,25 @@ type historicalPutDel struct {
 	sweptStorage map[accounts.Address]struct{}
 }
 
-func (p *historicalPutDel) prev(domain kv.Domain, k, prevVal []byte) ([]byte, error) {
+func (p *historicalPutDel) prev(domain kv.Domain, k, v, prevVal []byte) ([]byte, error) {
 	if prevVal != nil {
 		return prevVal, nil
 	}
 	enc, err := p.view.getEncoded(domain, k)
+	if err != nil {
+		return nil, err
+	}
+	if bytes.Equal(enc, v) {
+		return nil, nil // equal to the view: SharedDomains keeps it unless it equals head, which a BAL block's root reads
+	}
 	if enc == nil {
 		enc = []byte{} // absent: a nil prevVal would make SharedDomains read head state
 	}
-	return enc, err
+	return enc, nil
 }
 
 func (p *historicalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	prevVal, err := p.prev(domain, k, prevVal)
+	prevVal, err := p.prev(domain, k, v, prevVal)
 	if err != nil {
 		return err
 	}
@@ -1395,7 +1402,7 @@ func (p *historicalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, p
 			return err
 		}
 	}
-	prevVal, err := p.prev(domain, k, prevVal)
+	prevVal, err := p.prev(domain, k, nil, prevVal)
 	if err != nil {
 		return err
 	}

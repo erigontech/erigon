@@ -449,3 +449,43 @@ func systemContractsGenesis(t *testing.T, cfg *chain.Config) (*execmoduletester.
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: alloc, GasLimit: 60_000_000}), execmoduletester.WithKey(bankKey))
 	return m, bankKey, bankAddr
 }
+
+// A historical override equal to the base but not to head must still reach the root of a later BAL block.
+func TestSimulateV1HistoricalOverrideEqualToBaseAcrossAmsterdam(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = common.NewUint64(15)
+	changed := common.HexToAddress("0x00000000000000000000000000000000c0ffee30")
+	to := common.HexToAddress("0x00000000000000000000000000000000c0ffee31")
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	signer := types.LatestSignerForChainID(cfg.ChainID)
+	send := func(b *blockgen.BlockGen, bank, recipient common.Address) {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), To: &recipient, Value: *uint256.NewInt(1), GasLimit: 21_000},
+			ChainID:  *uint256.MustFromBig(cfg.ChainID.ToBig()),
+			FeeCap:   *uint256.NewInt(1_000_000_000_000),
+		}, *signer, bankKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	}
+	base := types.GenesisAccount{Balance: big.NewInt(5)}
+
+	m, bankAddr := contractGenesis(t, cfg, changed, base)
+	head, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { send(b, bankAddr, changed) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(head))
+
+	oracle, _ := contractGenesis(t, cfg, changed, base)
+	wants, err := oracle.GenerateChain(2, func(_ int, b *blockgen.BlockGen) { send(b, bankAddr, to) })
+	require.NoError(t, err)
+	require.Less(t, wants.Blocks[0].Time(), *cfg.AmsterdamTime)
+	require.GreaterOrEqual(t, wants.Blocks[1].Time(), *cfg.AmsterdamTime)
+
+	five := (*hexutil.U256)(uint256.NewInt(5))
+	sameAsBase := &ethapi.StateOverrides{accounts.InternAddress(changed): {Balance: &five}}
+	got := simulateAsGenerated(t, m, wants.Blocks, bankAddr, rpc.BlockNumberOrHashWithNumber(0), simulateAsGeneratedOptions{stateOverrides: sameAsBase})
+	require.Nil(t, got[0].BlockAccessListHash)
+	require.NotNil(t, got[1].BlockAccessListHash)
+	require.Equal(t, wants.Blocks[0].Root(), got[0].StateRoot)
+	require.Equal(t, wants.Blocks[1].Root(), got[1].StateRoot)
+}
