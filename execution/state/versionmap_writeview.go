@@ -115,13 +115,6 @@ func (v *versionMapWriteView) SelfDestructs() iter.Seq2[accounts.Address, *Versi
 			val := kw.Val
 			if sd, res, ok := v.vm.ReadSelfDestruct(addr, v.txIdx+1); ok && res.resolved() {
 				val = sd
-				if sd {
-					// Take the lifecycle verdict (WasDestroyed), not the raw cell — a retracted
-					// destruct stays live, so apply must not wipe it. On a map miss the key-set
-					// value stands, so an uncelled delete is not dropped.
-					st, _, _, _ := v.vm.AccountLifecycleAt(addr, v.txIdx+1)
-					val = st != LifecycleLive
-				}
 			}
 			vw = VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath}, Val: val}
 			if !yield(addr, &vw) {
