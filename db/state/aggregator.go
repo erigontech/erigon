@@ -2748,7 +2748,14 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		dt.probe = nil
 		return 0, 0, 0, 0
 	}
-	defer func() { dt.probe = nil }()
+	defer func() {
+		dt.probe = nil
+		for _, r := range dt.dataReaders {
+			if r != nil {
+				r.SetProbe(nil)
+			}
+		}
+	}()
 	pending := keys
 	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		t0 := time.Now()
