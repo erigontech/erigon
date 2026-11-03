@@ -546,3 +546,89 @@ func TestForwardBeaconDownloaderRescansSlotInProgressAtHTTPRequest(t *testing.T)
 	require.Equal(t, []uint64{9, 10}, processedSlots)
 	require.Equal(t, successor.Block.Slot, downloader.gloasLookahead.Block.Slot)
 }
+
+// A block held back for its missing envelope after its successor arrived is not imported as a tip; the batch path imports it.
+func TestForwardBeaconDownloaderKeepsFullFrontierAfterEmptyAnswer(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	empty := makeGloasBlock(9, hash(0xa0), common.Hash{})
+	full, envelope, _ := makeFullGloasTipAndEnvelope(t, cfg, 10)
+	linkBeaconBlocks(t, empty, full)
+	fullRoot, err := full.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = fullRoot
+	envelopeBytes, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	successor := makeGloasBlock(11, hash(0xcc), full.Block.Body.SignedExecutionPayloadBid.Message.BlockHash)
+	linkBeaconBlocks(t, full, successor)
+	encoded := map[string][]byte{}
+	for _, block := range []*cltypes.SignedBeaconBlock{empty, full, successor} {
+		b, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		encoded[fmt.Sprintf("/eth/v2/beacon/blocks/%d", block.Block.Slot)] = b
+	}
+	envelopePath := fmt.Sprintf("/eth/v1/beacon/execution_payload_envelopes/0x%x", fullRoot)
+	var serveEnvelope atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, ok := encoded[r.URL.Path]
+		if r.URL.Path == envelopePath && serveEnvelope.Load() {
+			b, ok = envelopeBytes, true
+		}
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		_, _ = w.Write(b)
+	}))
+	t.Cleanup(server.Close)
+
+	downloader := NewForwardBeaconDownloader(t.Context(), nil, cfg)
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 13 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+	var processed []uint64
+	var processedEnvelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processed = append(processed, block.Block.Slot)
+			highest = block.Block.Slot
+		}
+		if len(blocks) > 0 {
+			processedEnvelopes = envelopes
+		}
+		return highest, nil
+	})
+
+	require.False(t, requestMoreWithin(t, downloader))
+	require.Equal(t, []uint64{9}, processed)
+	require.Equal(t, full.Block.Slot, downloader.gloasLookahead.Block.Slot)
+
+	downloader.httpPreferred.Store(false)
+	answerEmpty := func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "lagging-peer", nil
+	}
+	downloader.requestBlocksByRange = answerEmpty
+	require.True(t, requestMoreWithin(t, downloader))
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{full}, "duplicate-peer", nil
+	}
+	require.False(t, requestMoreWithin(t, downloader))
+	downloader.requestBlocksByRange = answerEmpty
+	require.True(t, requestMoreWithin(t, downloader))
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+	require.Equal(t, []uint64{9}, processed)
+	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
+
+	serveEnvelope.Store(true)
+	downloader.httpPreferred.Store(true)
+	require.False(t, requestMoreWithin(t, downloader))
+	require.Equal(t, []uint64{9, 10}, processed)
+	require.NotNil(t, processedEnvelopes[fullRoot])
+
+	require.True(t, requestMoreWithin(t, downloader))
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+	require.Equal(t, []uint64{9, 10, 11}, processed)
+}

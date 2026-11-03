@@ -70,6 +70,8 @@ type ForwardBeaconDownloader struct {
 	gloasLookaheadPeer string
 	gloasNextUnscanned uint64
 	gloasTipRetrySlot  uint64
+	// gloasSuccessorSeen is set once a downloaded block followed the held lookahead, so it is not a tip.
+	gloasSuccessorSeen bool
 }
 
 const forwardRequestRetryInterval = 300 * time.Millisecond
@@ -555,6 +557,7 @@ Process:
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	var nextGloasLookahead *cltypes.SignedBeaconBlock
 	nextGloasCursor := nextSlotAfterRange(resp.rangeStart, resp.rangeCount)
+	lastBatchBlock := processBlocks[len(processBlocks)-1]
 	if hasGloasBlocks {
 		// A Gloas block needs its successor to determine whether its envelope exists.
 		processCount := min(int(count), len(processBlocks)-1)
@@ -641,6 +644,7 @@ Process:
 	}
 	if nextGloasLookahead != nil && nextGloasLookahead.Block.Slot > f.highestSlotProcessed {
 		f.gloasLookahead = nextGloasLookahead
+		f.gloasSuccessorSeen = nextGloasLookahead != lastBatchBlock || nextGloasLookahead == lookahead && f.gloasSuccessorSeen
 		f.gloasLookaheadPeer = pid
 		if nextGloasLookahead == lookahead {
 			f.gloasLookaheadPeer = lookaheadPeer
@@ -765,12 +769,12 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 
 // ImportHeldGloasTip processes the held Gloas block with the envelope that arrives within envelopeTimeout and reports
 // whether processing reached the block and accepted(root) holds. A tip that processing rejects is dropped; any other
-// tip that is not imported is tried again in the next slot.
+// tip that is not imported is tried again in the next slot. A held block with a downloaded successor is left to the batch path.
 func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, accepted func(common.Hash) bool) bool {
 	f.mu.Lock()
-	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
+	tip, tipPeer, retrySlot, successorSeen := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot, f.gloasSuccessorSeen
 	f.mu.Unlock()
-	if tip == nil {
+	if tip == nil || successorSeen {
 		return false
 	}
 	root, err := tip.Block.HashSSZ()
