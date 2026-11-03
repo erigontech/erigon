@@ -750,11 +750,21 @@ func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() 
 // WindowOffsets returns the data offsets of the first and last record in the in-memory node window that can hold
 // key, so a batch reader can fetch the window's pages before the lookup; pr touches the offset pages it reads.
 func (b *BtIndex) WindowOffsets(key []byte, pr *mmap.Probe) (lo, hi uint64, ok bool) {
+	return b.NarrowWindowOffsets(key, 0, pr)
+}
+
+// NarrowWindowOffsets is WindowOffsets cut to delta records around the interpolation guess for key; delta 0 keeps
+// the whole window. The cut window may miss the key, which then costs an ordinary cold read.
+func (b *BtIndex) NarrowWindowOffsets(key []byte, delta uint64, pr *mmap.Probe) (lo, hi uint64, ok bool) {
 	if b.Empty() || b.bplus == nil {
 		return 0, 0, false
 	}
-	l, r, _, _ := b.bplus.bs(key)
+	l, r, klo, khi := b.bplus.bs(key)
 	last := b.bplus.offt.Count() - 1
+	if delta > 0 && r > l+2*delta && klo != nil && khi != nil {
+		m := interpMid(key, klo, khi, l, r)
+		l, r = max(l, m-min(m, delta)), min(r, m+delta)
+	}
 	l, r = min(l, last), min(r, last)
 	return b.bplus.offt.GetProbe(l, pr), b.bplus.offt.GetProbe(r, pr), true
 }

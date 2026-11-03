@@ -2842,6 +2842,10 @@ func (at *AggregatorRoTx) BatchPrefetchLatest(ctx context.Context, domain kv.Dom
 	return waves + 1, pages + len(data), plan, io
 }
 
+// batchGetDelta (BAL_BATCHGET_DELTA) cuts each BatchPrefetchLatest window to that many records around the
+// interpolation guess; 0 reads the whole node window.
+var batchGetDelta = uint64(dbg.EnvInt("BAL_BATCHGET_DELTA", 0))
+
 func probeWindow(bt *btindex.BtIndex, k []byte, pr *mmap.Probe) (lo, hi uint64, ok bool, page uintptr, cold bool) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -2852,7 +2856,7 @@ func probeWindow(bt *btindex.BtIndex, k []byte, pr *mmap.Probe) (lo, hi uint64, 
 			page, cold = uintptr(p), true
 		}
 	}()
-	lo, hi, ok = bt.WindowOffsets(k, pr)
+	lo, hi, ok = bt.NarrowWindowOffsets(k, batchGetDelta, pr)
 	return lo, hi, ok, 0, false
 }
 

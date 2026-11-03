@@ -869,3 +869,37 @@ func TestBtIndex_WindowOffsetsCoverTheKeysRecord(t *testing.T) {
 		require.LessOrEqual(t, offset, hi, "key %x", k)
 	}
 }
+
+func TestBtIndex_NarrowWindowUsuallyCoversTheKey(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	compressFlags := seg.CompressKeys | seg.CompressVals
+	dataPath := generateKV(t, tmp, 52, 180, 20000, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+	for _, delta := range []uint64{4, 8, 16, 32} {
+		covered := 0
+		for _, k := range keys {
+			lo, hi, ok := bt.NarrowWindowOffsets(k, delta, nil)
+			require.True(t, ok)
+			_, _, offset, found, err := bt.Get(k, nil, getter)
+			require.NoError(t, err)
+			require.True(t, found)
+			if lo <= offset && offset <= hi {
+				covered++
+			}
+		}
+		t.Logf("delta %d covers %d/%d", delta, covered, len(keys))
+		if delta >= 16 {
+			require.Greater(t, covered*10, len(keys)*9)
+		}
+	}
+}
