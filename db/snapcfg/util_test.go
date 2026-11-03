@@ -250,3 +250,7 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 		})
 	}
 }
+
+func TestSetTomlRejectsMalformedToml(t *testing.T) {
+	require.Error(t, SetToml("mainnet", []byte("<html>not toml</html>"), false))
+}

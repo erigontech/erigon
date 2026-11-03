@@ -373,7 +373,18 @@ func stAddmod(_ uint64, scope *CallContext) string {
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y, z := scope.Stack.pop2Peek1()
-	z.MulMod(x, y, z)
+	if z[3] == 0 {
+		z.MulMod(x, y, z)
+		return pc, nil, nil
+	}
+	if *z != scope.mulmodModulus {
+		if x.IsZero() || y.IsZero() {
+			z.Clear()
+			return pc, nil, nil
+		}
+		scope.mulmodModulus, scope.mulmodReciprocal = *z, uint256.Reciprocal(z)
+	}
+	z.MulModWithReciprocal(x, y, z, &scope.mulmodReciprocal)
 	return pc, nil, nil
 }
 
