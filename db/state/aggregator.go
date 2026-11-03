@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -2770,6 +2771,82 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		pending = next
 	}
 	return waves, pages, plan, io
+}
+
+// BatchPrefetchLatest is PrefetchLatest for btree-indexed domains without re-running lookups: for each key's newest
+// candidate file it reads the offset pages of the key's in-memory node window, then all windows' data pages, each
+// stage in io_uring batches.
+func (at *AggregatorRoTx) BatchPrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
+	dt := at.d[domain]
+	if !dt.d.Accessors.Has(statecfg.AccessorBTree) {
+		return at.PrefetchLatest(ctx, domain, keys)
+	}
+	pr := mmap.NewProbe()
+	if pr == nil || len(keys) == 0 {
+		return 0, 0, 0, 0
+	}
+	type window struct {
+		file   int
+		key    []byte
+		lo, hi uint64
+		ok     bool
+	}
+	t0 := time.Now()
+	wins := make([]window, 0, len(keys))
+	for _, k := range keys {
+		hash, _ := dt.ht.iit.hashKey(k)
+		for i, f := range slices.Backward(dt.files) {
+			if f.src.existence == nil || f.src.existence.ContainsHash(hash) {
+				wins = append(wins, window{file: i, key: k})
+				break
+			}
+		}
+	}
+	pending := make([]int, len(wins))
+	for i := range pending {
+		pending[i] = i
+	}
+	for ; len(pending) > 0 && waves < 16 && ctx.Err() == nil; waves++ {
+		var cold []uintptr
+		next := pending[:0:0]
+		for _, w := range pending {
+			lo, hi, ok, page, isCold := probeWindow(dt.statelessBtree(wins[w].file), wins[w].key, pr)
+			if isCold {
+				cold, next = append(cold, page), append(next, w)
+				continue
+			}
+			wins[w].lo, wins[w].hi, wins[w].ok = lo, hi, ok
+		}
+		t1 := time.Now()
+		mmap.ReadPages(cold)
+		plan, io, t0 = plan+t1.Sub(t0), io+time.Since(t1), time.Now()
+		pages += len(cold)
+		pending = next
+	}
+	var data []uintptr
+	for _, w := range wins {
+		if w.ok {
+			data = dt.reusableReader(w.file).AppendPages(data, w.lo, w.hi+uint64(os.Getpagesize()))
+		}
+	}
+	t1 := time.Now()
+	mmap.ReadPages(data)
+	plan, io = plan+t1.Sub(t0), io+time.Since(t1)
+	return waves + 1, pages + len(data), plan, io
+}
+
+func probeWindow(bt *btindex.BtIndex, k []byte, pr *mmap.Probe) (lo, hi uint64, ok bool, page uintptr, cold bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			p, isCold := r.(mmap.ColdPage)
+			if !isCold {
+				panic(r)
+			}
+			page, cold = uintptr(p), true
+		}
+	}()
+	lo, hi, ok = bt.WindowOffsets(k, pr)
+	return lo, hi, ok, 0, false
 }
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {

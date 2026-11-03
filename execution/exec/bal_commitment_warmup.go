@@ -225,6 +225,17 @@ func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitme
 
 type latestPrefetcher interface {
 	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
+	BatchPrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
+}
+
+// prefetchBatchGet (BAL_PREFETCH_MODE=batchget) prefetches accounts and storage by node window instead of probed lookups.
+var prefetchBatchGet = dbg.EnvString("BAL_PREFETCH_MODE", "probe") == "batchget"
+
+func prefetchLatest(ctx context.Context, p latestPrefetcher, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
+	if prefetchBatchGet && domain != kv.CommitmentDomain {
+		return p.BatchPrefetchLatest(ctx, domain, keys)
+	}
+	return p.PrefetchLatest(ctx, domain, keys)
 }
 
 type prefetchStats struct {
@@ -298,7 +309,7 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 // prefetchKeys splits keys over prefetchPar planners, each with its own tx; stats keep the slowest planner's times.
 func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
 	if prefetchPar <= 1 || len(keys) < 2*prefetchPar {
-		stats.add(p.PrefetchLatest(ctx, domain, keys))
+		stats.add(prefetchLatest(ctx, p, domain, keys))
 		return nil
 	}
 	var mu sync.Mutex
@@ -324,7 +335,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 					return nil
 				}
 			}
-			waves, pages, plan, io := pp.PrefetchLatest(ctx, domain, keys)
+			waves, pages, plan, io := prefetchLatest(ctx, pp, domain, keys)
 			mu.Lock()
 			defer mu.Unlock()
 			part.waves, part.pages = max(part.waves, waves), part.pages+pages
@@ -364,7 +375,7 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
 		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
-		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
+		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "batchget", prefetchBatchGet, "elapsed", time.Since(started), "err", err)
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {

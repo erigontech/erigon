@@ -1433,3 +1433,18 @@ func (d *Decompressor) calcCompressedMinSize() int64 {
 
 	return compressedMinSize + 2
 }
+
+// AppendPages appends the start addresses of the mapped pages that hold data[from:to].
+func (g *Getter) AppendPages(pages []uintptr, from, to uint64) []uintptr {
+	n := uint64(len(g.data))
+	if from >= n {
+		return pages
+	}
+	to = min(to, n-1)
+	ps := uintptr(os.Getpagesize())
+	end := uintptr(unsafe.Pointer(&g.data[to])) &^ (ps - 1)
+	for p := uintptr(unsafe.Pointer(&g.data[from])) &^ (ps - 1); p <= end; p += ps {
+		pages = append(pages, p)
+	}
+	return pages
+}

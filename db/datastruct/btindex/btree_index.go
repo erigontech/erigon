@@ -746,3 +746,15 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
+
+// WindowOffsets returns the data offsets of the first and last record in the in-memory node window that can hold
+// key, so a batch reader can fetch the window's pages before the lookup; pr touches the offset pages it reads.
+func (b *BtIndex) WindowOffsets(key []byte, pr *mmap.Probe) (lo, hi uint64, ok bool) {
+	if b.Empty() || b.bplus == nil {
+		return 0, 0, false
+	}
+	l, r, _, _ := b.bplus.bs(key)
+	last := b.bplus.offt.Count() - 1
+	l, r = min(l, last), min(r, last)
+	return b.bplus.offt.GetProbe(l, pr), b.bplus.offt.GetProbe(r, pr), true
+}

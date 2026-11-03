@@ -843,3 +843,29 @@ func TestAddKeyRefusesNodeSectionOverUint32(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "node section offset")
 }
+
+func TestBtIndex_WindowOffsetsCoverTheKeysRecord(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	logger := log.New()
+	compressFlags := seg.CompressKeys | seg.CompressVals
+	dataPath := generateKV(t, tmp, 52, 180, 5000, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+	for _, k := range keys {
+		lo, hi, ok := bt.WindowOffsets(k, nil)
+		require.True(t, ok)
+		_, _, offset, found, err := bt.Get(k, nil, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.LessOrEqual(t, lo, offset, "key %x", k)
+		require.LessOrEqual(t, offset, hi, "key %x", k)
+	}
+}
