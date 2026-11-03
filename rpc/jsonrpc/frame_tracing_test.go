@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -83,6 +84,76 @@ func traceFrameRPC(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, name s
 	_, err = transactions.TraceTx(context.Background(), nil, tx, msg, evm.Context, protocol.NewEVMTxContext(msg), uint256.NewInt(1), common.Hash{}, 0, evm.IntraBlockState(), traceConfig, evm.ChainConfig(), jsonstream.New(&out), time.Second*10, nil)
 	require.NoError(t, err)
 	return out.Bytes()
+}
+
+func TestFrameTraceBlockAfterTracerError(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			target: {Code: program.New().Push0().Op(vm.CALLDATALOAD).Push0().Op(vm.SSTORE, vm.STOP).Bytes()},
+		},
+	}))
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		// Earlier writes must become the next transaction's original storage values,
+		// even when producing the earlier transaction's trace fails.
+		for nonce, value := range []uint64{1, 0} {
+			data := common.BigToHash(new(big.Int).SetUint64(value))
+			b.AddTx(&types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(nonce), SenderAddress: sender,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+				Frames: []types.Frame{
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+					{Mode: types.FrameSender, Target: &target, Data: data[:], Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
+				},
+			})
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newDebugApiForTest(m)
+	tracer := `{
+		fault: function() {},
+		result: function(ctx) {
+			if (ctx.txIndex === 0) throw new Error("trace result failed");
+			return {gasUsed: ctx.gasUsed, stateGasUsed: ctx.stateGasUsed};
+		}
+	}`
+	for _, versioned := range []bool{false, true} {
+		t.Run(map[bool]string{false: "materialized", true: "versioned"}[versioned], func(t *testing.T) {
+			previous := dbg.CallNoMaterialize
+			dbg.CallNoMaterialize = versioned
+			t.Cleanup(func() { dbg.CallNoMaterialize = previous })
+			var out bytes.Buffer
+			stream := jsonstream.New(&out)
+			require.NotPanics(t, func() {
+				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &config.TraceConfig{Tracer: &tracer}, stream))
+			})
+			require.NoError(t, stream.Flush())
+			var traces []struct {
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+				Result struct {
+					GasUsed      uint64 `json:"gasUsed"`
+					StateGasUsed uint64 `json:"stateGasUsed"`
+				} `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(out.Bytes(), &traces))
+			require.Len(t, traces, 2)
+			require.NotNil(t, traces[0].Error)
+			require.Contains(t, traces[0].Error.Message, "trace result failed")
+			require.Nil(t, traces[1].Error)
+			require.Equal(t, pack.Receipts[0][1].GasUsed, traces[1].Result.GasUsed)
+			require.Zero(t, traces[1].Result.StateGasUsed)
+		})
+	}
 }
 
 type frameCallTrace struct {
