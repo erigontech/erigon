@@ -17,6 +17,7 @@
 package mmap
 
 import (
+	"errors"
 	"os"
 	"slices"
 	"sync"
@@ -171,6 +172,9 @@ func newBatchRing() (*batchRing, bool) {
 	return br, true
 }
 
+// errNoBatchRing reports a pool slot whose failed ring could not be replaced, so the pages stay cold.
+var errNoBatchRing = errors.New("mmap: no io_uring ring for this batch")
+
 // brokenBatchRings keeps failed rings and their buffers alive: the kernel may still write into them.
 var (
 	brokenMu         sync.Mutex
@@ -222,6 +226,7 @@ func ReadPages(pages []uintptr) error {
 				br := <-batchRings
 				defer func() { batchRings <- br }()
 				if br.r == nil {
+					errOnce.Do(func() { firstErr = errNoBatchRing })
 					return
 				}
 				lens := make([]int, len(chunk))
