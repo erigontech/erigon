@@ -216,7 +216,7 @@ func mirror(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s: indexed %d batches through L1 block %d, stored %d blobs\n", index, stats.Indexed, to, stats.Stored)
+	fmt.Printf("%s: indexed %d batches through L1 block %d, stored %d blobs, replaced %d corrupt\n", index, stats.Indexed, to, stats.Stored, len(stats.Corrupt))
 	if n := len(stats.Unavailable); n > 0 {
 		return fmt.Errorf("%d batches with blobs not served, L1 blocks %d to %d", n, stats.Unavailable[0].L1Block, stats.Unavailable[n-1].L1Block)
 	}

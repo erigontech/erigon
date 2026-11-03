@@ -17,6 +17,7 @@
 package tools_test
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -99,4 +100,18 @@ func TestMirror(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, stats.Stored)
 	require.Empty(t, stats.Unavailable)
+
+	// A file that is not its blob is reported, removed and fetched again.
+	require.NoError(t, os.WriteFile(filepath.Join(blobs, gone.Hex()+".blob"), []byte("truncated"), 0o644))
+	stats, err = tools.Mirror(ctx, scanner, l1.NewBlobDir(blobs, nil), index, l2.RegistryDeployBlock, last, logger)
+	require.NoError(t, err)
+	require.Equal(t, []common.Hash{gone}, stats.Corrupt)
+	require.Equal(t, holding, stats.Unavailable)
+	stats, err = tools.Mirror(ctx, scanner, l1.NewBlobDir(blobs, all), index, l2.RegistryDeployBlock, last, logger)
+	require.NoError(t, err)
+	require.Empty(t, stats.Corrupt)
+	require.Equal(t, 1, stats.Stored)
+	blob, err := l1.NewBlobDir(blobs, nil).Load(gone)
+	require.NoError(t, err)
+	require.Len(t, blob, l1.BlobSize)
 }

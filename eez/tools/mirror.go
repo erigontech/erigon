@@ -18,13 +18,19 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"runtime"
+	"slices"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -73,6 +79,9 @@ type MirrorStats struct {
 	Indexed int
 	// Stored is the number of blobs written to the directory.
 	Stored int
+	// Corrupt lists the blobs whose file held another blob or none; they
+	// were removed and fetched again.
+	Corrupt []common.Hash
 	// Unavailable lists the indexed batches with a blob neither the
 	// directory nor its source holds.
 	Unavailable []MirrorEntry
@@ -84,7 +93,8 @@ const mirrorAttempts = 6
 
 // Mirror appends to the index at path the batches scanner finds after the
 // last indexed one, or from from when the index is empty, through to. It
-// then stores in dir every indexed blob dir lacks, read through dir from
+// then checks every indexed blob dir holds against its versioned hash, and
+// stores in dir every one it lacks or holds corrupt, read through dir from
 // its source.
 func Mirror(ctx context.Context, scanner *l1.Scanner, dir *l1.BlobDir, path string, from, to uint64, logger log.Logger) (MirrorStats, error) {
 	var stats MirrorStats
@@ -100,14 +110,21 @@ func Mirror(ctx context.Context, scanner *l1.Scanner, dir *l1.BlobDir, path stri
 			return stats, err
 		}
 	}
+	missing, corrupt, err := check(ctx, dir, entries)
+	if err != nil {
+		return stats, err
+	}
+	for _, h := range corrupt {
+		logger.Warn("[eez] mirror: corrupt blob file, fetching it again", "hash", h)
+		if err := dir.Remove(h); err != nil {
+			return stats, err
+		}
+	}
+	stats.Corrupt = corrupt
 	for _, e := range entries {
 		var need []common.Hash
 		for _, h := range e.Blobs {
-			ok, err := dir.Has(h)
-			if err != nil {
-				return stats, err
-			}
-			if !ok {
+			if missing[h] {
 				need = append(need, h)
 			}
 		}
@@ -132,6 +149,9 @@ func Mirror(ctx context.Context, scanner *l1.Scanner, dir *l1.BlobDir, path stri
 		case err != nil:
 			return stats, fmt.Errorf("blobs of L1 block %d: %w", e.L1Block, err)
 		default:
+			for _, h := range need {
+				delete(missing, h)
+			}
 			stats.Stored += len(need)
 			if stats.Stored%500 < len(need) {
 				logger.Info("[eez] mirror", "stored", stats.Stored, "l1Block", e.L1Block)
@@ -139,6 +159,52 @@ func Mirror(ctx context.Context, scanner *l1.Scanner, dir *l1.BlobDir, path stri
 		}
 	}
 	return stats, nil
+}
+
+// check returns the blobs of entries dir lacks or holds corrupt, the
+// corrupt ones also listed in hash order, each file checked against its
+// versioned hash on every core.
+func check(ctx context.Context, dir *l1.BlobDir, entries []MirrorEntry) (missing map[common.Hash]bool, corrupt []common.Hash, err error) {
+	seen := map[common.Hash]bool{}
+	var hashes []common.Hash
+	for _, e := range entries {
+		for _, h := range e.Blobs {
+			if !seen[h] {
+				seen[h] = true
+				hashes = append(hashes, h)
+			}
+		}
+	}
+	missing = map[common.Hash]bool{}
+	var mu sync.Mutex
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for _, h := range hashes {
+		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			_, err := dir.Load(h)
+			bad := errors.Is(err, l1.ErrInconsistent)
+			if err != nil && !bad && !errors.Is(err, l1.ErrBlobUnavailable) {
+				return err
+			}
+			if err != nil {
+				mu.Lock()
+				missing[h] = true
+				if bad {
+					corrupt = append(corrupt, h)
+				}
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, nil, err
+	}
+	slices.SortFunc(corrupt, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
+	return missing, corrupt, nil
 }
 
 // appendIndex appends to the index at path the batches of [from, to], each

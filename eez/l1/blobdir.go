@@ -60,6 +60,11 @@ func (d *BlobDir) Has(hash common.Hash) (bool, error) {
 	return true, nil
 }
 
+// Remove deletes the file of hash, if any.
+func (d *BlobDir) Remove(hash common.Hash) error {
+	return dir.RemoveFile(d.path(hash))
+}
+
 // Load reads the blob of hash, whose KZG versioned hash must be hash.
 func (d *BlobDir) Load(hash common.Hash) ([]byte, error) {
 	blob, err := os.ReadFile(d.path(hash))
