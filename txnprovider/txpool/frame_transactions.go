@@ -495,6 +495,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		return nil
 	}
 	blockTime := changes.ChangeBatch[len(changes.ChangeBatch)-1].BlockTime
+	// Match validation's pending-block time so expired frames release their reservations.
+	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -527,7 +529,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
-		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < blockTime {
+		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < pendingTime {
 			p.removeFromSubPool(mt, "frame expired")
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 			continue

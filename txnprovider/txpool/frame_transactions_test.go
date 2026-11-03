@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -434,13 +435,14 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 	for _, action := range []string{"replacement", "mined", "expired", "revalidation rejected", "revalidation payer change", "pool overflow"} {
 		t.Run(action, func(t *testing.T) {
 			ctx, pool, payer := keyedFramePoolEnv(t)
+			deadline := uint64(time.Now().Add(time.Hour).Unix())
 			backend := pool.ethBackend.(*frameValidationBackend)
 			backend.balance = common.Ether
 			sender := common.Address{2}
 			tx := &types.FrameTransaction{
 				NonceKeys: []uint256.Int{{1}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 				Frames: []types.Frame{
-					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, 100), Limits: mdgas.MdGas{Execution: 5_000}},
+					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
 				},
 				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2)},
@@ -472,7 +474,7 @@ func TestFramePoolReservationReleasePromotesOrdinary(t *testing.T) {
 			case "mined":
 				mined.Append(frame, sender[:], false)
 			case "expired":
-				change.ChangeBatch[0].BlockTime = 101
+				change.ChangeBatch[0].BlockTime = deadline + 1
 			case "revalidation rejected":
 				backend.valid = false
 				change = newBlockChangeForAccounts(common.Hash{1}, 0, sender)
@@ -496,13 +498,14 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 	for _, action := range []string{"revalidation rejected", "expired", "parked pool overflow"} {
 		t.Run(action, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
+			deadline := uint64(time.Now().Add(time.Hour).Unix())
 			backend := pool.ethBackend.(*frameValidationBackend)
 			payer := common.Address{0x44}
 			backend.payer = payer
 			tx := &types.FrameTransaction{
 				ChainID: *uint256.NewInt(1), NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
 				Frames: []types.Frame{
-					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, 100), Limits: mdgas.MdGas{Execution: 5_000}},
+					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
 					{Mode: types.FrameVerify, Flags: types.FrameApproveExecution, Limits: mdgas.MdGas{Execution: 100}},
 					{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer, Limits: mdgas.MdGas{Execution: 100}},
 				},
@@ -531,7 +534,7 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 			case "revalidation rejected":
 				backend.valid = false
 			case "expired":
-				change.ChangeBatch[0].BlockTime = 101
+				change.ChangeBatch[0].BlockTime = deadline + 1
 			case "parked pool overflow":
 				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 0, 1
 				backend.err = context.DeadlineExceeded
@@ -2099,86 +2102,103 @@ func TestFramePoolExpiry(t *testing.T) {
 		deadline               uint64
 		blockTime              uint64
 		baseFee                uint64
+		elapsed                time.Duration
+		gnosis                 bool
 		expired                bool
 		verifierChanged        bool
 		verifierBalanceChanged bool
 	}{
-		{name: "before deadline", deadline: 100, blockTime: 99, baseFee: 1},
-		{name: "at deadline", deadline: 100, blockTime: 100, baseFee: 1},
-		{name: "waiting for base fee", deadline: 100, blockTime: 99, baseFee: 2},
-		{name: "expired", deadline: 100, blockTime: 101, baseFee: 1, expired: true},
-		{name: "expired below base fee", deadline: 100, blockTime: 101, baseFee: 2, expired: true},
-		{name: "zero deadline", baseFee: 1},
-		{name: "expired zero deadline", blockTime: 1, baseFee: 1, expired: true},
-		{name: "verifier code changed", deadline: 100, blockTime: 99, baseFee: 1, verifierChanged: true},
-		{name: "verifier balance changed", deadline: 100, blockTime: 99, baseFee: 1, verifierBalanceChanged: true},
+		{name: "before deadline", deadline: 100, blockTime: 87, baseFee: 1},
+		{name: "at deadline", deadline: 100, blockTime: 88, baseFee: 1},
+		{name: "waiting for base fee", deadline: 100, blockTime: 87, baseFee: 2},
+		{name: "expired", deadline: 100, blockTime: 89, baseFee: 1, expired: true},
+		{name: "expired below base fee", deadline: 100, blockTime: 89, baseFee: 2, expired: true},
+		{name: "expired zero deadline", baseFee: 1, expired: true},
+		{name: "missed slot", deadline: 100, blockTime: 88, elapsed: 101 * time.Second, baseFee: 1, expired: true},
+		{name: "short slots at deadline", deadline: 100, blockTime: 95, baseFee: 1, gnosis: true},
+		{name: "short slots past deadline", deadline: 100, blockTime: 96, baseFee: 1, gnosis: true, expired: true},
+		{name: "verifier code changed", deadline: 100, blockTime: 87, baseFee: 1, verifierChanged: true},
+		{name: "verifier balance changed", deadline: 100, blockTime: 87, baseFee: 1, verifierBalanceChanged: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, pool, sender := keyedFramePoolEnv(t)
-			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
-			initial.PendingBlockBaseFee = tc.baseFee
-			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-			tx := &types.FrameTransaction{
-				NonceKeys: []uint256.Int{{1}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
-				Frames: []types.Frame{
-					{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, tc.deadline), Limits: mdgas.MdGas{Execution: 5_000}},
-					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
-				},
-				Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
-			}
-			var encoded bytes.Buffer
-			require.NoError(t, tx.MarshalBinary(&encoded))
-			slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
-			var txns TxnSlots
-			txns.Append(slot, sender[:], true)
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-			backend := pool.ethBackend.(*frameValidationBackend)
-			require.Len(t, backend.calls, 1)
-			backend.calls = nil
-			backend.valid = false
-			wantPool := PendingSubPool
-			if tc.baseFee > 1 {
-				wantPool = BaseFeeSubPool
-			}
-			require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+			_, pool, sender := keyedFramePoolEnv(t)
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				now := uint64(time.Now().Unix())
+				deadline := tc.deadline
+				if deadline != 0 {
+					deadline += now
+				}
+				if tc.gnosis {
+					pool.chainConfig.Aura = &chain.AuRaConfig{}
+				}
+				initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+				initial.ChangeBatch[0].BlockTime = now
+				initial.PendingBlockBaseFee = tc.baseFee
+				require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				tx := &types.FrameTransaction{
+					NonceKeys: []uint256.Int{{1}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
+					Frames: []types.Frame{
+						{Mode: types.FrameVerify, Target: &types.FrameExpiryVerifier, Data: binary.BigEndian.AppendUint64(nil, deadline), Limits: mdgas.MdGas{Execution: 5_000}},
+						{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}},
+					},
+					Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
+				}
+				var encoded bytes.Buffer
+				require.NoError(t, tx.MarshalBinary(&encoded))
+				slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+				var txns TxnSlots
+				txns.Append(slot, sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				backend := pool.ethBackend.(*frameValidationBackend)
+				require.Len(t, backend.calls, 1)
+				backend.calls = nil
+				backend.valid = false
+				wantPool := PendingSubPool
+				if tc.baseFee > 1 {
+					wantPool = BaseFeeSubPool
+				}
+				require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
 
-			change := &remoteproto.StateChangeBatch{
-				PendingBlockBaseFee: tc.baseFee, BlockGasLimit: 1_000_000,
-				ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockTime: tc.blockTime, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2})}},
-			}
-			if tc.verifierChanged {
-				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
-					Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_CODE, Code: []byte{0xfe},
-				}}
-			}
-			if tc.verifierBalanceChanged {
-				acc := accounts.NewAccount()
-				acc.Balance.SetUint64(1)
-				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
-					Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_UPSERT, Data: accounts.SerialiseV3(&acc),
-				}}
-			}
-			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-			if tc.verifierChanged {
-				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
-			} else {
-				require.Empty(t, backend.calls, "the fixed deadline must not require another simulation")
-			}
-			if tc.expired || tc.verifierChanged {
-				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
-				require.Empty(t, pool.frameReservations)
-				require.Empty(t, pool.all.senderIDFrameTxn)
-				require.Zero(t, pool.pending.Len()+pool.baseFee.Len()+pool.queued.Len())
-				reason, ok := pool.discardReasonsLRU.Get(string(slot.IDHash[:]))
-				require.True(t, ok)
-				require.Equal(t, txpoolcfg.FrameStateChanged, reason)
-				return
-			}
-			require.Contains(t, pool.byHash, string(slot.IDHash[:]))
-			require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[sender].cost)
-			require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+				change := &remoteproto.StateChangeBatch{
+					PendingBlockBaseFee: tc.baseFee, BlockGasLimit: 1_000_000,
+					ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockTime: now + tc.blockTime, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{2})}},
+				}
+				if tc.verifierChanged {
+					change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+						Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_CODE, Code: []byte{0xfe},
+					}}
+				}
+				if tc.verifierBalanceChanged {
+					acc := accounts.NewAccount()
+					acc.Balance.SetUint64(1)
+					change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+						Address: gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier), Action: remoteproto.Action_UPSERT, Data: accounts.SerialiseV3(&acc),
+					}}
+				}
+				time.Sleep(tc.elapsed)
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				if tc.verifierChanged {
+					require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+				} else {
+					require.Empty(t, backend.calls, "the fixed deadline must not require another simulation")
+				}
+				if tc.expired || tc.verifierChanged {
+					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+					require.Empty(t, pool.frameReservations)
+					require.Empty(t, pool.all.senderIDFrameTxn)
+					require.Zero(t, pool.pending.Len()+pool.baseFee.Len()+pool.queued.Len())
+					reason, ok := pool.discardReasonsLRU.Get(string(slot.IDHash[:]))
+					require.True(t, ok)
+					require.Equal(t, txpoolcfg.FrameStateChanged, reason)
+					return
+				}
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Equal(t, slot.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+				require.Equal(t, wantPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+			})
 		})
 	}
 }
