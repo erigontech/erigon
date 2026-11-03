@@ -1466,11 +1466,13 @@ func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *tes
 	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
 	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
 	cleared := common.HexToAddress("0x00000000000000000000000000000000000000cc")
-	// SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0) unless slot 0 is zero, so a call on cleared storage writes nothing
-	clearCode := []byte{0x60, 0x00, 0x54, 0x15, 0x60, 0x16, 0x57, 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x5b}
+	// With calldata: SSTORE(3, 1). Without: SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0) unless slot 0 is zero,
+	// so a call on cleared storage writes nothing.
+	clearCode := []byte{0x36, 0x15, 0x60, 0x0b, 0x57, 0x60, 0x01, 0x60, 0x03, 0x55, 0x00, 0x5b,
+		0x60, 0x00, 0x54, 0x15, 0x60, 0x22, 0x57, 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x5b}
 	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
 	const simulatedBlocks = 8
-	newChain := func(recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	newChain := func(lastData []byte, recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
 			bank: {Balance: funds},
 			cleared: {Code: clearCode, Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{
@@ -1482,20 +1484,24 @@ func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *tes
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 		cp, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
-			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 100_000, uint256.NewInt(0), nil), *signer, bankKey)
+			var data []byte
+			if i == len(recipients)-1 {
+				data = lastData
+			}
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 100_000, uint256.NewInt(0), data), *signer, bankKey)
 			require.NoError(t, err)
 			b.AddTx(txn)
 		})
 		require.NoError(t, err)
 		return m, cp
 	}
-	m, cp := newChain(beneficiary, beneficiary)
+	m, cp := newChain([]byte{1}, beneficiary, cleared) // the head writes slot 3, absent at the base
 	require.NoError(t, m.InsertChain(cp))
 	oracleRecipients := []common.Address{beneficiary}
 	for range simulatedBlocks {
 		oracleRecipients = append(oracleRecipients, cleared)
 	}
-	_, oracle := newChain(oracleRecipients...)
+	_, oracle := newChain(nil, oracleRecipients...)
 	wants := oracle.Blocks[1:]
 
 	overrides := ethapi.StateOverrides{accounts.InternAddress(cleared): {State: &map[common.Hash]common.Hash{}}}
@@ -1530,17 +1536,12 @@ func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *tes
 
 	parent := sim.base
 	blockHashOverrides := ethapi.BlockHashOverrides{}
-	firstTouched := 0
 	for i := range blocks {
 		result, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &blocks[i], headers[i], parent, headers[:i], false, blockHashOverrides)
 		require.NoError(t, err)
 		require.Equal(t, wants[i].Root(), result.StateRoot, "block %d", wants[i].NumberU64())
 		touched := len(sim.touchedKeys[accounts.InternAddress(cleared)])
-		if i == 0 {
-			require.Positive(t, touched)
-			firstTouched = touched
-		}
-		require.Equal(t, firstTouched, touched, "touched keys after block %d", wants[i].NumberU64())
+		require.Equal(t, 3, touched, "touched keys after block %d: the base slots only", wants[i].NumberU64())
 		blockHashOverrides[current.NumberU64()] = current.Hash()
 		headers[i] = current.Header()
 		parent = current.Header()
