@@ -358,10 +358,9 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	return nil
 }
 
-// ApplyTxIndexes writes trace indices, log indices, and receipts. skipReceiptCache
-// skips the receipt-cache domain write for the parallel executor's block-finalize
-// txResult, which shares the system-tx-end txNum: a second DomainPut there would
-// overwrite the last regular tx's receipt history entry.
+// ApplyTxIndexes writes trace indices, log indices, and receipts.
+// A nil receipt clears the cached value when receipt caching is enabled.
+// skipReceiptCache leaves the receipt cache and its history unchanged.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
