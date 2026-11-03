@@ -514,7 +514,8 @@ func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum 
 	if !hasMin || !hasMax || maxTxNum <= minTxNum {
 		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
 	}
-	return minTxNum, checkTxIndex(blockNum, txIndex, int(maxTxNum-minTxNum)-1)
+	txCount := int(maxTxNum-minTxNum) - 1
+	return minTxNum, checkTxIndex(blockNum, txIndex, txCount)
 }
 
 // checkPruneHistory requires history from the block's first system transaction.

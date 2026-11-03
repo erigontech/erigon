@@ -410,10 +410,16 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			_, err = tc.call(api, uint64(len(block.Transactions())))
 			require.NoError(t, err, "the position after the last user transaction is valid")
 			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, math.MaxUint64 - 1} {
-				for _, reader := range []*DebugAPIImpl{baseline, api} {
-					_, err = tc.call(reader, index)
+				for _, variant := range []struct {
+					name string
+					api  *DebugAPIImpl
+				}{
+					{"baseline", baseline},
+					{"pruned", api},
+				} {
+					_, err = tc.call(variant.api, index)
 					var invalidParams *rpc.InvalidParamsError
-					require.ErrorAs(t, err, &invalidParams, "index %d", index)
+					require.ErrorAs(t, err, &invalidParams, "%s, index %d", variant.name, index)
 				}
 			}
 		})
