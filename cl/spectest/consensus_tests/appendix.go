@@ -262,7 +262,7 @@ func addSszTests() {
 		)).
 		With("IndexedPayloadAttestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.IndexedPayloadAttestation {
-				return cltypes.NewIndexedPayloadAttestation()
+				return cltypes.NewIndexedPayloadAttestation(&clparams.MainnetBeaconConfig)
 			}, runAfterVersion(clparams.GloasVersion),
 		)).
 		With("PayloadAttestation", sszStaticTestByEmptyObject(&cltypes.PayloadAttestation{}, runAfterVersion(clparams.GloasVersion))).
