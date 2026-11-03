@@ -341,6 +341,32 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
+// dbg: BAL_TRIE_GATE_PERMILLE skips the trie prefetch when a sample of its flat prefixes has fewer cold pages
+// per prefix than that (in 1/1000); 0 disables the gate.
+var trieGatePermille = dbg.EnvInt("BAL_TRIE_GATE_PERMILLE", 0)
+
+const trieGateSample = 256
+
+// sampleTrieColdPages probes the flat-depth prefixes of evenly spaced keys and returns the cold pages it read.
+func sampleTrieColdPages(ctx context.Context, p latestPrefetcher, hashedKeys [][]byte) (cold, probed int) {
+	step := max(1, len(hashedKeys)/trieGateSample)
+	compact := make([]byte, 0, 128)
+	seen := map[string]struct{}{}
+	var prefixes [][]byte
+	for i := 0; i < len(hashedKeys); i += step {
+		k := hashedKeys[i]
+		for depth := 0; depth <= min(max(prefetchFlatDepth, 0), len(k)); depth++ {
+			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+			if _, ok := seen[pfx]; !ok {
+				seen[pfx] = struct{}{}
+				prefixes = append(prefixes, []byte(pfx))
+			}
+		}
+	}
+	_, pages, _, _ := p.PrefetchLatest(ctx, kv.CommitmentDomain, prefixes)
+	return pages, len(prefixes)
+}
+
 // dbg split arms: BAL_PREFETCH_NO_TRIE prefetches accounts and storage only, BAL_PREFETCH_TRIE_ONLY the trie only.
 var (
 	prefetchNoTrie   = dbg.EnvBool("BAL_PREFETCH_NO_TRIE", false)
@@ -433,6 +459,14 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 		return nil
 	}
 	compact := make([]byte, 0, 128)
+	if trieGatePermille > 0 && len(hashedKeys) > 0 {
+		cold, probed := sampleTrieColdPages(ctx, p, hashedKeys)
+		skip := probed > 0 && cold*1000 < probed*trieGatePermille
+		log.Info("[warmBAL] trie gate", "keys", len(hashedKeys), "probed", probed, "cold", cold, "permille", trieGatePermille, "skip", skip)
+		if skip {
+			return nil
+		}
+	}
 	if prefetchFlatDepth >= 0 {
 		seen := map[string]struct{}{}
 		var prefixes [][]byte
