@@ -27,6 +27,9 @@ var (
 	// while an out-of-memory error should not.
 	ErrInvalidBlock = errors.New("invalid block")
 
+	// ErrInvalidHeader marks a block rejected by header or uncle verification, before execution.
+	ErrInvalidHeader = errors.New("invalid header")
+
 	// ErrUnknownAncestor is returned when validating a block requires an ancestor
 	// that is unknown.
 	ErrUnknownAncestor = errors.New("unknown ancestor")
