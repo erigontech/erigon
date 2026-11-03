@@ -236,8 +236,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
-	// Execute the transaction message
-	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
+	// Later frames may read the payer's balance after payment approval.
+	gasBailout := creationTx.Type() != types.FrameTxType
+	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
 	if ct.err != nil {
 		return nil, ct.err
 	}

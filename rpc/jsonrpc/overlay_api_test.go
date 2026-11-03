@@ -390,6 +390,52 @@ func TestFrameCallConstructor(t *testing.T) {
 	}
 }
 
+func TestFrameCallConstructorFeeAccounting(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, factory := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	const initialBalance = 1_000_000_000_000_000_000
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	// Skipping the fee debit takes the revert branch before CREATE.
+	code := program.New().Push(sender).Op(vm.BALANCE).Push(initialBalance).Op(vm.EQ)
+	revertJump := code.Size()
+	code.Push(0).Op(vm.JUMPI).Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP)
+	_, revertPC := code.Jumpdest()
+	require.Less(t, revertPC, uint64(256))
+	code.Bytes()[revertJump+1] = byte(revertPC)
+	code.Push0().Push0().Op(vm.REVERT)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(initialBalance),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			factory: {Code: code.Bytes()},
+		},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	want := []byte{byte(vm.PUSH0), byte(vm.STOP)}
+	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(factory, 0), program.New().ReturnData(want).Bytes())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Code)
+	require.Equal(t, hexutil.Bytes(want), *result.Code)
+}
+
 func TestCallConstructorRejectsNonContract(t *testing.T) {
 	m, bankAddress, _, _ := chainWithDeployedContract(t)
 	base := newBaseApiForTest(m)
