@@ -583,13 +583,18 @@ func TestOwnsChangeset(t *testing.T) {
 // commitment calculator needs for its own read tx.
 func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
+	return setupStepTestWithStepSize(t, 16)
+}
+
+func setupStepTestWithStepSize(t *testing.T, stepSize uint64) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx)
+	agg, err := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(ctx)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -975,4 +980,56 @@ func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
 	require.ErrorIs(t, published[0].err, ErrWrongTrieRoot)
 	require.Zero(t, rejected, "a rejected root must leave no branch record in the commitment domain")
 	require.False(t, pending, "the rejected round's output must be released")
+}
+
+// A step checkpoint folds only the keys dirtied after the previous checkpoint, and the
+// block roots match a run whose blocks cross no step edge.
+func TestHandleMessage_StepCheckpointFoldsOnlyKeysSinceThePreviousOne(t *testing.T) {
+	run := func(stepSize uint64) (secondCheckpointUpdates uint64, roots [3][]byte) {
+		ctx := context.Background()
+		db, tx, doms := setupStepTestWithStepSize(t, stepSize)
+		doms.SavePastChangesetAccumulator(common.Hash{0x01}, 1, &changeset.StateChangeSet{})
+		doms.SavePastChangesetAccumulator(common.Hash{0x02}, 2, &changeset.StateChangeSet{})
+		in := make(chan applyResult, 64)
+		out := make(chan commitmentResult, 64)
+		// In-window blocks, as at the chain tip; the zero header roots make every
+		// block-end compute publish its root as a mismatch.
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+
+		rnd := rand.New(rand.NewSource(42))
+		write := func(txNum, blockNum uint64) {
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+			cc.handleMessage(ctx, &txResult{blockNum: blockNum, blockHash: common.Hash{byte(blockNum)}, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)})
+			if txNum == 31 {
+				secondCheckpointUpdates = cc.lastCommitProgress.UpdateCount
+			}
+		}
+		for txNum := uint64(1); txNum <= 10; txNum++ {
+			write(txNum, 1)
+		}
+		cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 10})
+		for txNum := uint64(11); txNum <= 40; txNum++ { // step edges at 15 and 31
+			write(txNum, 2)
+		}
+		cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: 40})
+		cc.Stop()
+		for len(out) > 0 {
+			r := <-out
+			require.ErrorIs(t, r.err, ErrWrongTrieRoot)
+			roots[r.blockNum] = r.rootHash
+		}
+		return secondCheckpointUpdates, roots
+	}
+
+	updates, roots := run(16)
+	_, plainRoots := run(1 << 20)
+	require.NotEmpty(t, plainRoots[2])
+	require.Equal(t, plainRoots, roots)
+	require.Equal(t, uint64(16), updates, "the second checkpoint must fold only txNums 16..31")
 }
