@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -575,4 +576,33 @@ func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
 	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
+}
+
+// In storage-driven mode this stage builds no download requests — the
+// orchestrator owns downloads and OtterSync is a wait-and-return. Blocking on
+// manifest discovery there holds the stage's RW tx and the exec-module
+// semaphore for two minutes and buys nothing, and a deep unwind re-enters the
+// stage as a first cycle on every forkchoice, so the wait is paid again each
+// time while InsertBlocks starves.
+func TestDownloadAndIndexSnapshots_StorageDrivenDoesNotWaitForManifest(t *testing.T) {
+	stateReady := make(chan struct{})
+	close(stateReady)
+	cfg := SnapshotsCfg{
+		lifecycleDrivenByStorage: true,
+		initialStateReady:        stateReady,
+		manifestReady:            make(chan struct{}), // discovery never completes
+	}
+	s := &StageState{CurrentSyncCycle: CurrentSyncCycleInfo{IsFirstCycle: true}}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- DownloadAndIndexSnapshotsIfNeed(s, t.Context(), nil, cfg, log.New())
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("stage blocked on manifest discovery although storage owns downloads")
+	}
 }

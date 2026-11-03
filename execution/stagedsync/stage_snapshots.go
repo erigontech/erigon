@@ -355,9 +355,49 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	log.Info("[OtterSync] Starting Ottersync")
 
-	// If P2P manifest mode is enabled, wait for chain.toml discovery before
-	// building download requests. Without this, the preverified registry is
-	// empty and OtterSync would complete instantly with nothing to download.
+	// Ordered before the manifest wait: this branch builds no download requests,
+	// so blocking on discovery would hold the stage's RW tx and the exec-module
+	// semaphore for nothing, and a deep unwind re-enters the stage as a first
+	// cycle on every forkchoice.
+	//
+	// Storage-owned download: when the orchestrator drives the
+	// lifecycle, OtterSync delegates download entirely. We skip both
+	// SyncSnapshots calls and instead wait on the orchestrator's
+	// initialStateReady signal before proceeding to the post-download
+	// bookkeeping (file open, agg reload). Stages 2-6 then run
+	// concurrently with whatever historical-tail download remains, per
+	// the V2 architectural target (gap (d) in
+	// .claude/plans/time-to-get-back-generic-mist.md).
+	if cfg.lifecycleDrivenByStorage && cfg.initialStateReady != nil {
+		// (C) Step 4: OtterSync is a pure wait-and-return in
+		// storageDriven mode. The storage component owns ALL the
+		// post-download bookkeeping (OpenFolder, Aggregator.OpenFolder,
+		// FillDBFromSnapshots, etc.) and runs them via the orchestrator's
+		// postIndexed callback BEFORE InitialStateReady fires.
+		//
+		// The wait MUST happen with NO MDBX writer-tx held. Erigon's
+		// framework opens an RW tx in ProcessFrozenBlocks that wraps
+		// the entire stage loop including this stage; if we hold that
+		// tx here while waiting on initialStateReady, the orchestrator's
+		// postIndexed (running in its own goroutine) deadlocks trying
+		// to acquire its own MDBX writer slot. The fix lives in
+		// ProcessFrozenBlocks (executor.go): it waits on initialStateReady
+		// BEFORE BeginTemporalRw. By the time control reaches this stage,
+		// the signal has already fired and the channel-receive below
+		// returns immediately — no deadlock, no held lock, OtterSync
+		// returns instantly.
+		select {
+		case <-cfg.initialStateReady:
+			log.Info(fmt.Sprintf("[%s] Storage signalled minimal set ready, OtterSync DONE", s.LogPrefix()))
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	// Reached only when this stage owns the download itself. If P2P manifest
+	// mode is enabled, wait for chain.toml discovery before building download
+	// requests: without it the preverified registry is empty and OtterSync
+	// would complete instantly with nothing to download.
 	//
 	// Bounded wait: if discovery never succeeds (no peers with chain-toml ENR,
 	// unreachable info-hash, etc.) we fall through to the centralized preverified
@@ -388,41 +428,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
-	// Storage-owned download: when the orchestrator drives the
-	// lifecycle, OtterSync delegates download entirely. We skip both
-	// SyncSnapshots calls and instead wait on the orchestrator's
-	// initialStateReady signal before proceeding to the post-download
-	// bookkeeping (file open, agg reload). Stages 2-6 then run
-	// concurrently with whatever historical-tail download remains, per
-	// the V2 architectural target (gap (d) in
-	// .claude/plans/time-to-get-back-generic-mist.md).
-	storageDriven := cfg.lifecycleDrivenByStorage && cfg.initialStateReady != nil
-	if storageDriven {
-		// (C) Step 4: OtterSync is a pure wait-and-return in
-		// storageDriven mode. The storage component owns ALL the
-		// post-download bookkeeping (OpenFolder, Aggregator.OpenFolder,
-		// FillDBFromSnapshots, etc.) and runs them via the orchestrator's
-		// postIndexed callback BEFORE InitialStateReady fires.
-		//
-		// The wait MUST happen with NO MDBX writer-tx held. Erigon's
-		// framework opens an RW tx in ProcessFrozenBlocks that wraps
-		// the entire stage loop including this stage; if we hold that
-		// tx here while waiting on initialStateReady, the orchestrator's
-		// postIndexed (running in its own goroutine) deadlocks trying
-		// to acquire its own MDBX writer slot. The fix lives in
-		// ProcessFrozenBlocks (executor.go): it waits on initialStateReady
-		// BEFORE BeginTemporalRw. By the time control reaches this stage,
-		// the signal has already fired and the channel-receive below
-		// returns immediately — no deadlock, no held lock, OtterSync
-		// returns instantly.
-		select {
-		case <-cfg.initialStateReady:
-			log.Info(fmt.Sprintf("[%s] Storage signalled minimal set ready, OtterSync DONE", s.LogPrefix()))
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -460,85 +465,83 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// small subset, so its ratio would jump backwards once the full set is known.
 	var commitBlock uint64
 	var downloadCompleted bool
-	if !storageDriven {
-		mustReopenUnderlyingFilesTx(tx)
+	mustReopenUnderlyingFilesTx(tx)
 
-		stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
-		defer func() {
-			// A panic unwinds with err == nil; stopping as a success would clear the
-			// last honest sample. Stop as a failure instead, then keep unwinding.
-			if r := recover(); r != nil {
-				stopReporter(fmt.Errorf("snapshots stage panic: %v", r), downloadCompleted, 0)
-				panic(r)
+	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
+	defer func() {
+		// A panic unwinds with err == nil; stopping as a success would clear the
+		// last honest sample. Stop as a failure instead, then keep unwinding.
+		if r := recover(); r != nil {
+			stopReporter(fmt.Errorf("snapshots stage panic: %v", r), downloadCompleted, 0)
+			panic(r)
+		}
+		stopReporter(err, downloadCompleted, commitBlock)
+	}()
+
+	if err := snapshotsync.SyncSnapshots(
+		ctx,
+		s.LogPrefix(),
+		"snapshots",
+		false, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+		agg.StepSize(),
+		cfg.dirs.Snap,
+	); err != nil {
+		return err
+	}
+	downloadCompleted = true
+
+	if cfg.afterDownload != nil {
+		if err := cfg.afterDownload(ctx); err != nil {
+			return fmt.Errorf("after snapshot download: %w", err)
+		}
+	}
+
+	{ // Now can open all files
+		// (A) bridge for the InitialStateReady race: the orchestrator
+		// fires the signal when state-domain downloads are complete, but
+		// the per-file lifecycle's Indexing transitions for block-header
+		// .seg files (which produce .idx accessors) race the signal by
+		// ~hundreds of ms in practice. OpenFolder's openSegments path
+		// lstat's each .idx; if any is mid-build it fails the whole stage
+		// and the publisher errors out at startup. Retry until either
+		// OpenFolder succeeds (the .idx files have landed) or a generous
+		// budget expires. End-state (see
+		// docs/plans/20260518-storage-owns-post-download-pipeline.md) is
+		// for storage to run OpenFolder itself as part of the pre-signal
+		// pipeline; this retry is the stopgap.
+		const openFolderTimeout = 30 * time.Second
+		const openFolderBackoff = 100 * time.Millisecond
+		openFolderDeadline := time.Now().Add(openFolderTimeout)
+		for {
+			err := cfg.blockReader.Snapshots().OpenFolder()
+			if err == nil {
+				break
 			}
-			stopReporter(err, downloadCompleted, commitBlock)
-		}()
-
-		if err := snapshotsync.SyncSnapshots(
-			ctx,
-			s.LogPrefix(),
-			"snapshots",
-			false, /*headerChain=*/
-			cfg.blobs,
-			cfg.caplinState,
-			cfg.prune,
-			cstate,
-			tx,
-			cfg.blockReader,
-			cfg.chainConfig,
-			cfg.snapshotDownloader,
-			cfg.syncConfig,
-			agg.StepSize(),
-			cfg.dirs.Snap,
-		); err != nil {
+			if time.Now().After(openFolderDeadline) {
+				return err
+			}
+			log.Debug(fmt.Sprintf("[%s] OpenFolder retry (lifecycle still indexing)", s.LogPrefix()), "err", err)
+			select {
+			case <-time.After(openFolderBackoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
 			return err
 		}
-		downloadCompleted = true
 
-		if cfg.afterDownload != nil {
-			if err := cfg.afterDownload(ctx); err != nil {
-				return fmt.Errorf("after snapshot download: %w", err)
-			}
-		}
-
-		{ // Now can open all files
-			// (A) bridge for the InitialStateReady race: the orchestrator
-			// fires the signal when state-domain downloads are complete, but
-			// the per-file lifecycle's Indexing transitions for block-header
-			// .seg files (which produce .idx accessors) race the signal by
-			// ~hundreds of ms in practice. OpenFolder's openSegments path
-			// lstat's each .idx; if any is mid-build it fails the whole stage
-			// and the publisher errors out at startup. Retry until either
-			// OpenFolder succeeds (the .idx files have landed) or a generous
-			// budget expires. End-state (see
-			// docs/plans/20260518-storage-owns-post-download-pipeline.md) is
-			// for storage to run OpenFolder itself as part of the pre-signal
-			// pipeline; this retry is the stopgap.
-			const openFolderTimeout = 30 * time.Second
-			const openFolderBackoff = 100 * time.Millisecond
-			openFolderDeadline := time.Now().Add(openFolderTimeout)
-			for {
-				err := cfg.blockReader.Snapshots().OpenFolder()
-				if err == nil {
-					break
-				}
-				if time.Now().After(openFolderDeadline) {
-					return err
-				}
-				log.Debug(fmt.Sprintf("[%s] OpenFolder retry (lifecycle still indexing)", s.LogPrefix()), "err", err)
-				select {
-				case <-time.After(openFolderBackoff):
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-			if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
-				return err
-			}
-
-			if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
-				return err
-			}
+		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
+			return err
 		}
 	}
 
