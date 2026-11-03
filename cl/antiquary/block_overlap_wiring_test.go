@@ -47,8 +47,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// Startup is the only removal a default node gets: the dump sites run under snapgen, which is off
-// by default, and downloaded files overlap too.
 func TestLoopRemovesCoveredBlockSegmentsAtStartup(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -221,4 +219,45 @@ func TestAntiquateMergesOneBeaconBlocksTierPerCall(t *testing.T) {
 	for _, f := range upperSubFiles {
 		require.NoFileExists(t, filepath.Join(a.dirs.Snap, f))
 	}
+}
+
+func TestAntiquateFillsAHoleWithoutRewritingTheSegmentAboveIt(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeStateFixture(t, dirs.Snap, "beaconblocks", 0, limit, logger)
+	above := writeStateFixture(t, dirs.Snap, "beaconblocks", 2*limit, 3*limit, logger)
+	before, err := os.Stat(above)
+	require.NoError(t, err)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var prevRoot common.Hash
+		for slot := uint64(limit); slot < 3*limit; slot += 500 {
+			var root common.Hash
+			binary.BigEndian.PutUint64(root[:], slot+1)
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
+				return err
+			}
+			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {
+				return err
+			}
+			prevRoot = root
+		}
+		return beacon_indicies.WriteHighestFinalized(tx, 3*limit+safetyMargin)
+	}))
+	sn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, &clparams.MainnetBeaconConfig, dirs, logger)
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	a := NewAntiquary(t.Context(), nil, nil, nil, &clparams.MainnetBeaconConfig, dirs, nil, db, nil, sn, nil, nil, logger, false, true, false, true, nil)
+	require.NoError(t, a.antiquate())
+
+	require.FileExists(t, snaptype.BeaconBlocks.FileInfo(dirs.Snap, limit, 2*limit).Path)
+	after, err := os.Stat(above)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(before, after), "the indexed segment above the hole must not be dumped again")
 }

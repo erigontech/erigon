@@ -469,6 +469,7 @@ type BaseRoSnapshots struct {
 	// keepUnindexedlyCovered opts RemoveOverlaps into refusing to unlink a subset whose only
 	// covering superset has no index. EL relies on the plain behaviour; caplin state does not.
 	keepUnindexedlyCovered bool
+	anchoredAtLowestDirty  []snaptype.Enum
 
 	// (type, from, to) of files a producer is currently building — a merge
 	// output, a dump, or a missed-index rebuild. The data file can be on disk
@@ -739,6 +740,25 @@ func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSeg
 	return newVisibleSegments
 }
 
+func dirtyReachesWithoutHole(dirtySegments *btree.BTreeG[*DirtySegment], slot uint64) bool {
+	var end uint64
+	started, reached := false, false
+	dirtySegments.Walk(func(segments []*DirtySegment) bool {
+		for _, sn := range segments {
+			if started && sn.from > end {
+				return false
+			}
+			started, end = true, max(end, sn.to)
+			if end >= slot {
+				reached = true
+				return false
+			}
+		}
+		return true
+	})
+	return reached
+}
+
 func truncateAtGap(segments VisibleSegments) VisibleSegments {
 	// protect from gaps
 	if len(segments) > 0 {
@@ -776,6 +796,9 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 
 	for _, t := range s.enums {
 		newVisibleSegments := RecalcVisibleSegments(s.dirty[t])
+		if len(newVisibleSegments) > 0 && slices.Contains(s.anchoredAtLowestDirty, t) && !dirtyReachesWithoutHole(s.dirty[t], newVisibleSegments[0].from) {
+			newVisibleSegments = nil
+		}
 		visible[t] = newVisibleSegments
 		var to uint64
 		if len(newVisibleSegments) > 0 {
@@ -977,6 +1000,10 @@ func (s *BaseRoSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*Dirty
 		}
 		return true
 	})
+}
+
+func (s *BaseRoSnapshots) AnchorVisibleAtLowestDirty(segtype snaptype.Enum) {
+	s.anchoredAtLowestDirty = append(s.anchoredAtLowestDirty, segtype)
 }
 
 // VisibleSegmentsMaxTo is the exclusive upper bound of the last visible segment of segtype.

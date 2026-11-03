@@ -600,7 +600,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				return
 			case <-time.After(10 * time.Second):
 				if err := antiq.Loop(); err != nil {
-					logger.Debug("Antiquary failed", "err", err)
+					logger.Warn("Antiquary failed", "err", err)
 				} else {
 					keepGoing = false
 				}

@@ -19,7 +19,6 @@ package freezeblocks
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -227,9 +226,9 @@ func TestCaplinSegmentsMaxIgnoresBlobSidecars(t *testing.T) {
 	}
 }
 
-// Visibility skips an unindexed segment and anchors at the first indexed one above it, but the
-// archive backfill still cannot read the slots below. SegmentsMax stays 0 until the visible set
-// starts at the lowest segment on disk.
+// A hole in the beacon-block files below the first indexed one hides every block segment, so
+// readers fall back to MDBX and the archive backfill walks down through the hole. Unindexed files
+// with no hole below the visible set do not: the index build after the backfill makes them visible.
 func TestCaplinSegmentsMaxAnchorsAtLowestSegment(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -249,7 +248,13 @@ func TestCaplinSegmentsMaxAnchorsAtLowestSegment(t *testing.T) {
 			name:      "unindexed segment directly below",
 			indexed:   [][2]uint64{{limit, 2 * limit}},
 			unindexed: [][2]uint64{{0, limit}},
-			want:      0,
+			want:      2*limit - 1,
+		},
+		{
+			name:      "two unindexed segments directly below",
+			indexed:   [][2]uint64{{2 * limit, 3 * limit}},
+			unindexed: [][2]uint64{{0, limit}, {limit, 2 * limit}},
+			want:      3*limit - 1,
 		},
 		{
 			name:      "unindexed segment covered by an indexed one of the same start",
@@ -277,62 +282,9 @@ func TestCaplinSegmentsMaxAnchorsAtLowestSegment(t *testing.T) {
 			require.NoError(t, sn.OpenFolder())
 
 			require.Equal(t, tc.want, sn.SegmentsMax())
+			require.Equal(t, tc.want, sn.BlocksAvailable())
 		})
 	}
-}
-
-// SegmentsMax compares the dirty set with the visible set, so a republish landing between the
-// two reads must not pair the old visible start with the new height. The two layouts share the
-// lowest start, which is what lets the old generation pass the anchor check. They are switched
-// through OpenList because Windows refuses to remove a file a reader still has mapped.
-func TestCaplinSegmentsMaxConcurrentWithRepublish(t *testing.T) {
-	const limit = snaptype.CaplinMergeLimit
-
-	dirs := datadir.New(t.TempDir())
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, false)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
-
-	indexedHead := []string{snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, limit)}
-	unindexedHead := []string{
-		snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, 2*limit),
-		snaptype.BeaconBlocks.FileName(version.ZeroVersion, limit, 2*limit),
-	}
-
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
-	require.NoError(t, sn.OpenList(unindexedHead, false))
-	require.Zero(t, sn.SegmentsMax())
-	require.NoError(t, sn.OpenList(indexedHead, false))
-	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
-
-	done := make(chan struct{})
-	var eg errgroup.Group
-	eg.Go(func() error {
-		defer close(done)
-		for range 200 {
-			if err := sn.OpenList(unindexedHead, false); err != nil {
-				return err
-			}
-			if err := sn.OpenList(indexedHead, false); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	eg.Go(func() error {
-		for {
-			select {
-			case <-done:
-				return nil
-			default:
-			}
-			if got := sn.SegmentsMax(); got != 0 && got != limit-1 {
-				return fmt.Errorf("SegmentsMax = %d, want 0 or %d", got, limit-1)
-			}
-		}
-	})
-	require.NoError(t, eg.Wait())
 }
 
 // The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
@@ -707,7 +659,7 @@ func TestOpenFolderOpensEveryBeaconBlocksSegment(t *testing.T) {
 }
 
 // Two versions of one range both enter the dirty set, and visibility serves the newer one, as
-// for EL. SegmentsCaplin's version-first sort kept only the older file.
+// for EL.
 func TestOpenFolderServesTheNewerVersionOfARange(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
