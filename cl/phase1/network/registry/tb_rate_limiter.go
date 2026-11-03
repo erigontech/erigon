@@ -53,6 +53,7 @@ type tokenBucketRateLimiter struct {
 	mu      sync.Mutex
 	rate    rate.Limit
 	burst   int
+	now     func() time.Time
 }
 
 func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRateLimiter {
@@ -61,6 +62,7 @@ func newTokenBucketRateLimiter(ratePerSecond float64, burst int) *tokenBucketRat
 		mu:      sync.Mutex{},
 		rate:    rate.Limit(ratePerSecond),
 		burst:   burst,
+		now:     time.Now,
 	}
 	go tb.cleanup()
 	return tb
@@ -76,8 +78,9 @@ func (r *tokenBucketRateLimiter) acquire(key string) bool {
 		r.limiter[key] = limiter
 	}
 
-	limiter.lastAccess = time.Now()
-	return limiter.limiter.Allow()
+	now := r.now()
+	limiter.lastAccess = now
+	return limiter.limiter.AllowN(now, 1)
 }
 
 func (r *tokenBucketRateLimiter) cleanup() {
