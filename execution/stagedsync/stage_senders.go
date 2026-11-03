@@ -177,6 +177,21 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			}
 		}
 	}()
+	var stopOnce sync.Once
+	stopWorkers := func() {
+		stopOnce.Do(func() {
+			close(jobs)
+			wg.Wait()
+			close(out)
+		})
+	}
+	// Runs before collectorSenders.Close: the result goroutine must exit before the collector is closed.
+	defer func() {
+		cancelWorkers()
+		stopWorkers()
+		for range errCh {
+		}
+	}()
 
 	var minBlockNum uint64 = math.MaxUint64
 	var minBlockHash common.Hash
@@ -268,10 +283,11 @@ Loop:
 		// Skip blocks with no transactions
 		if len(body.Transactions) == 0 {
 			// Write empty senders for blocks with no transactions
-			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil); err != nil {
+			err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil)
+			pendingMu.Unlock()
+			if err != nil {
 				return err
 			}
-			pendingMu.Unlock()
 			continue
 		}
 		pendingBlocks[blockIndex] = &pendingBlock{
@@ -305,9 +321,7 @@ Loop:
 		}
 	}
 
-	close(jobs)
-	wg.Wait()
-	close(out)
+	stopWorkers()
 	for recoveryErr := range errCh {
 		if recoveryErr.err != nil {
 			cancelWorkers()

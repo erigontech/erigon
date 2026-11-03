@@ -88,6 +88,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AuthRpcPort,
 	&utils.JWTSecretPath,
 	&utils.HttpCompressionFlag,
+	&utils.HttpCompressionLoopbackFlag,
 	&utils.HTTPCORSDomainFlag,
 	&utils.HTTPVirtualHostsFlag,
 	&utils.AuthRpcVirtualHostsFlag,
@@ -208,6 +209,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
 	&utils.OverrideAmsterdamFlag,
+	&utils.OverrideGenesisFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
