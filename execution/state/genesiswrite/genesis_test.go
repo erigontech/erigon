@@ -209,16 +209,59 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	require.NoError(t, m.InsertChain(chainBlocks))
 
 	overrideOsakaTime := common.NewUint64(500)
-	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
+	for name, genesis := range map[string]*types.Genesis{
+		"stored genesis":   nil,
+		"supplied genesis": gspec,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := genesiswrite.CommitGenesisBlockWithOverride(m.DB, genesis, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
 
-	require.Error(t, err)
+			require.Error(t, err)
+			var compatErr *chain.ConfigCompatError
+			require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
+			require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
+			require.True(t, compatErr.HasTimestampConflict())
+			require.Zero(t, compatErr.RewindToTime)
+			require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
+				"applyOverrides must not write through into the shared config")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsChainIDChange(t *testing.T) {
+	genesis := &types.Genesis{
+		Config: &chain.Config{
+			ChainID:               uint256.NewInt(1337),
+			HomesteadBlock:        common.NewUint64(0),
+			TangerineWhistleBlock: common.NewUint64(0),
+			SpuriousDragonBlock:   common.NewUint64(0),
+		},
+		GasLimit: 30_000_000,
+	}
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	blocks, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(blocks))
+	require.NoError(t, m.DB.View(context.Background(), func(tx kv.Tx) error {
+		head := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
+		require.NotNil(t, head)
+		require.Equal(t, uint64(1), *head)
+		return nil
+	}))
+	storedCfg := readStoredChainConfig(t, m.DB)
+
+	changed := *genesis
+	changed.Config = genesis.Config.Copy()
+	changed.Config.ChainID = uint256.NewInt(1338)
+	_, _, err = genesiswrite.CommitGenesisBlock(m.DB, &changed, "", datadir.New(t.TempDir()), log.New())
+
 	var compatErr *chain.ConfigCompatError
-	require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
-	require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
-	require.True(t, compatErr.HasTimestampConflict())
-	require.Zero(t, compatErr.RewindToTime)
-	require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
-		"applyOverrides must not write through into the shared config")
+	require.ErrorAs(t, err, &compatErr)
+	require.Equal(t, "EIP155 chain ID", compatErr.What)
+	require.Zero(t, compatErr.RewindTo)
+	require.Equal(t, storedCfg, readStoredChainConfig(t, m.DB))
 }
 
 // dropHeadHeader deletes only the kv.Headers row, leaving HeadHeaderKey and the

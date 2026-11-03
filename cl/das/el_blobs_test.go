@@ -124,6 +124,21 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	}
 }
 
+func TestImportColumnsFromBlobsStoresAllColumnsOnCustodyLookupError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
+}
+
 func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)

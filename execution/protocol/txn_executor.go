@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -127,7 +128,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
-	RecoveredAuthorities() *types.RecoveredAuthorities
+	Authorities(chainID *uint256.Int) *types.RecoveredAuthorities
 	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -544,8 +545,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				// An in-flight dependency pauses and re-reads (see waitCommit), it
-				// does not panic, so any panic here is a genuine failure.
+				// An in-flight dependency aborts via result.Dep, it does not panic,
+				// so any panic here is a genuine failure.
 				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
 			}
 		}()
@@ -684,6 +685,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.CreateWithNonce(sender, st.data, st.gasRemaining, st.value, st.msg.Nonce(), bailout)
 		case contractCreation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+		case st.chargeSenderAtValidation && RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, vmConfig.Tracer, rules, st.state.StateReader()):
+			tracer := vmConfig.Tracer
+			tracer.EmitEnter(0, byte(vm.CALL), sender, st.to(), false, st.data, st.gasRemaining, st.value, nil)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 		default:
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
@@ -862,6 +867,19 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 	return gasRemaining, gasUsed, err
 }
 
+// RecipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
+// recipient exists and has no code, so validation credits it after every lower tx. A recorded read
+// of the recipient would conflict with each lower credit, so the run peeks at block-start state and
+// validation re-checks the code. A tracer that follows balances or gas needs the frame.
+func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value uint256.Int, tracer *tracing.Hooks, rules *chain.Rules, blockStart state.StateReader) bool {
+	if value.IsZero() || to == coinbase || to == from || tracer.HasGasChangeHook() || tracer != nil && tracer.OnBalanceChange != nil ||
+		slices.Contains(vm.ActivePrecompiles(rules), to) {
+		return false
+	}
+	acc, err := blockStart.ReadAccountData(to)
+	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
+}
+
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;
 // callers must first validate the list with validateSetCodePrerequisites.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
@@ -876,6 +894,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
+	recovered := st.msg.Authorities(chainID)
 	for i := range auths {
 		auth := &auths[i]
 
@@ -888,9 +907,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		// 2. authority recover
 		var signer common.Address
 		var err error
-		// The pre-pass may start this list mid-loop: each auth checks again and waits for it from then on.
-		if r := st.msg.RecoveredAuthorities(); r != nil {
-			signer, err = r.Signers[i], r.Errs[i]
+		if recovered != nil {
+			signer, err = recovered.Signers[i], recovered.Errs[i]
 		} else {
 			signer, err = auth.RecoverSigner()
 		}
