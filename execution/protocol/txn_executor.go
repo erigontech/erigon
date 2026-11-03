@@ -156,11 +156,17 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 // executionGas returns the gas msg executes with: its gas limit or, when it
 // takes its gas from the block, what the block has left up to that limit.
 func executionGas(msg Message, gp *GasPool) uint64 {
-	fromBlock, ok := msg.(interface{ GasFromBlock() bool })
-	if !ok || !fromBlock.GasFromBlock() || gp == nil {
+	if !TakesGasFromBlock(msg) || gp == nil {
 		return msg.Gas()
 	}
 	return min(msg.Gas(), gp.ExecutionGasAvailable())
+}
+
+// TakesGasFromBlock reports whether msg executes with the gas its block has
+// left, at most its gas limit: a replay of it alone needs a pool of that gas.
+func TakesGasFromBlock(msg Message) bool {
+	fromBlock, ok := msg.(interface{ GasFromBlock() bool })
+	return ok && fromBlock.GasFromBlock()
 }
 
 // mintsValue reports whether msg has a registered type whose value the outer

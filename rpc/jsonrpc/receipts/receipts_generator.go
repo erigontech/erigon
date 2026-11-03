@@ -420,6 +420,21 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
+		if !calculatePostState && index > 0 {
+			// The earlier transactions did not run: a message that takes its gas
+			// from the block runs with what the receipt domain says they left.
+			msg, err := txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, evm.ChainRules())
+			if err != nil {
+				return nil, err
+			}
+			if protocol.TakesGasFromBlock(msg) {
+				gasBefore, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+				if err != nil {
+					return nil, err
+				}
+				genEnv.gp = protocol.NewGasPool(header.GasLimit-min(header.GasLimit, gasBefore), cfg.GetMaxBlobGasPerBlock(header.Time))
+			}
+		}
 		ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 		defer cancel()
 		defer context.AfterFunc(ctx, evm.Cancel)()
