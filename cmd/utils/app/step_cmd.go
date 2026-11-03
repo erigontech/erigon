@@ -23,7 +23,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -88,19 +90,25 @@ func planStepRebase(ctx context.Context, dirs datadir.Dirs, settings *state.Erig
 	var alignEnd uint64
 	var stoppedEnds map[kv.Domain]uint64
 	var merged []string
-	if err := withStepRebaseAgg(ctx, dirs, keepBlocks, logger, func(agg *state.Aggregator) error {
-		var stoppedEnd uint64
-		if newStepSize > settings.StepSize {
+	if newStepSize > settings.StepSize {
+		if err := withStepRebaseAgg(ctx, dirs, keepBlocks, logger, func(agg *state.Aggregator) error {
+			var stoppedEnd uint64
 			var err error
 			if alignEnd, stoppedEnd, err = agg.StepAlignedEnd(newStepSize); err != nil {
 				return err
 			}
 			merged = agg.StepAlignedNames()
+			stoppedEnds = stoppedCommitmentEnds(agg, stoppedEnd)
+			return nil
+		}); err != nil {
+			return stepRebasePlan{}, err
 		}
-		stoppedEnds = stoppedCommitmentEnds(agg, stoppedEnd)
-		return nil
-	}); err != nil {
-		return stepRebasePlan{}, err
+	} else {
+		var err error
+		stoppedEnds, err = readStoppedCommitmentEnds(ctx, dirs)
+		if err != nil {
+			return stepRebasePlan{}, err
+		}
 	}
 	return buildStepRebasePlan(dirs, settings, newStepSize, keepBlocks, alignEnd, stoppedEnds, merged, logger)
 }
@@ -112,6 +120,11 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 	}
 	if currentStepSize > newStepSize && currentStepSize%newStepSize != 0 {
 		return stepRebasePlan{}, fmt.Errorf("new step size must be divisible from %d", currentStepSize)
+	}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if _, ok := settings.FrozenAt(domain); ok {
+			return stepRebasePlan{}, fmt.Errorf("%s domain is frozen, its files cannot be rebased", domain)
+		}
 	}
 	if len(stoppedEnds) > 0 && !keepBlocks {
 		return stepRebasePlan{}, fmt.Errorf("a stopped commitment domain needs --keep-blocks: its stop marker is kept in chaindata")
@@ -143,6 +156,9 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 		keep := stoppedEndSteps(stoppedEnds, currentStepSize)
 		tail, err := collectFilesPast(stateSnapDirs(dirs), alignEnd/currentStepSize, keep)
 		if err != nil {
+			return stepRebasePlan{}, err
+		}
+		if err := refuseReferencedCommitmentFiles(dirs.SnapDomain, factor, alignEnd/currentStepSize, keep); err != nil {
 			return stepRebasePlan{}, err
 		}
 		if err := refuseUnmergedMisaligned(stateSnapDirs(dirs), factor, alignEnd/currentStepSize, keep, merged); err != nil {
@@ -199,6 +215,50 @@ func stoppedCommitmentEnds(agg *state.Aggregator, end uint64) map[kv.Domain]uint
 	return ends
 }
 
+func readStoppedCommitmentEnds(ctx context.Context, dirs datadir.Dirs) (map[kv.Domain]uint64, error) {
+	exists, err := dir.FileExist(filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
+	chainDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Accede(false).Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer chainDB.Close()
+	var stopped map[kv.Domain]uint64
+	err = chainDB.View(ctx, func(tx kv.Tx) error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			isStopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
+			if err != nil {
+				return err
+			}
+			if isStopped {
+				if stopped == nil {
+					stopped = make(map[kv.Domain]uint64)
+				}
+				stopped[domain] = 0
+			}
+		}
+		return nil
+	})
+	return stopped, err
+}
+
+func stoppedCommitmentSetsEqual(got, want map[kv.Domain]uint64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for domain := range want {
+		if _, ok := got[domain]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func stoppedEndSteps(ends map[kv.Domain]uint64, stepSize uint64) map[string]uint64 {
 	steps := make(map[string]uint64, len(ends))
 	for d, end := range ends {
@@ -234,6 +294,13 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 	}
 	if current.StepSize != plan.fromStepSize {
 		return fmt.Errorf("step size is %d, the plan was made at %d", current.StepSize, plan.fromStepSize)
+	}
+	stoppedEnds, err := readStoppedCommitmentEnds(ctx, dirs)
+	if err != nil {
+		return err
+	}
+	if !stoppedCommitmentSetsEqual(stoppedEnds, plan.stoppedEnds) {
+		return fmt.Errorf("commitment stop markers changed since the plan")
 	}
 	renames, deletions := plan.renames, slices.Clone(plan.deletions)
 	if plan.alignFactor != 0 {
@@ -351,12 +418,53 @@ func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, 
 	if _, err := features.EnableSyncCfg(chainDB, ethconfig.Sync{}); err != nil {
 		return err
 	}
+	if !exists {
+		hasRCache, err := hasSnapshotFiles([]string{dirs.SnapHistory, dirs.SnapIdx}, kv.RCacheDomain.String())
+		if err != nil {
+			return err
+		}
+		if hasRCache {
+			statecfg.EnableHistoricalRCache()
+		}
+		hasCommitmentHistory, err := hasSnapshotFiles([]string{dirs.SnapHistory, dirs.SnapIdx}, kv.CommitmentDomain.String())
+		if err != nil {
+			return err
+		}
+		if !hasCommitmentHistory {
+			hasCommitmentHistory, err = hasSnapshotFiles([]string{dirs.SnapHistory, dirs.SnapIdx}, kv.CommitmentBinDomain.String())
+			if err != nil {
+				return err
+			}
+		}
+		if hasCommitmentHistory {
+			statecfg.EnableHistoricalCommitment()
+		}
+	}
 	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
 	return fn(agg)
+}
+
+func hasSnapshotFiles(roots []string, filenameBase string) (bool, error) {
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false, err
+		}
+		for _, entry := range entries {
+			matches := stepFileRe.FindStringSubmatch(entry.Name())
+			if len(matches) >= 3 && matches[2] == filenameBase {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func collectFilesPast(roots []string, endStep uint64, keepTo map[string]uint64) ([]string, error) {
@@ -419,6 +527,45 @@ func refuseUnmergedMisaligned(roots []string, factor, endStep uint64, keepTo map
 			if to <= limit && (from%factor != 0 || to%factor != 0) {
 				return fmt.Errorf("%s is not merged by the aggregator and does not start and end at a multiple of %d steps", filepath.Join(root, entry.Name()), factor)
 			}
+		}
+	}
+	return nil
+}
+
+func refuseReferencedCommitmentFiles(root string, factor, endStep uint64, keepTo map[string]uint64) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		matches := stepFileRe.FindStringSubmatch(entry.Name())
+		if len(matches) < 6 || matches[2] != kv.CommitmentDomain.String() || matches[5] != "kv" {
+			continue
+		}
+		from, err := strconv.ParseUint(matches[3], 10, 64)
+		if err != nil {
+			return err
+		}
+		to, err := strconv.ParseUint(matches[4], 10, 64)
+		if err != nil {
+			return err
+		}
+		limit, ok := keepTo[matches[2]]
+		if !ok {
+			limit = endStep
+		}
+		if to > limit || from%factor != 0 || to%factor != 0 {
+			continue
+		}
+		ver, err := version.ParseVersion(entry.Name())
+		if err != nil {
+			return err
+		}
+		if state.CommitmentBranchReferenced(ver, 1, from, to) && !state.CommitmentBranchReferenced(ver, 1, from/factor, to/factor) {
+			return fmt.Errorf("%s: referenced commitment branches would be read as plain at the new step size", filepath.Join(root, entry.Name()))
 		}
 	}
 	return nil

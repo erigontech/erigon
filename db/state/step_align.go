@@ -135,7 +135,9 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64, stopped []kv.Domain) (
 	if end, err = stepAlignedListsEnd(at.stepAlignedFileLists(stopped, false), stepSize, math.MaxUint64); err != nil {
 		return 0, 0, err
 	}
-	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled {
+	if com := at.d[kv.CommitmentDomain]; com != nil && com.d.Enabled && slices.ContainsFunc(com.files, func(file visibleFile) bool {
+		return file.endTxNum <= end && CommitmentBranchReferenced(file.Version(), at.StepSize(), file.startTxNum, file.endTxNum)
+	}) {
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 			if dt := at.d[d]; dt != nil && dt.d.Enabled && !slices.Equal(fileRangesUpTo(dt.files, end), fileRangesUpTo(com.files, end)) {
 				return 0, 0, fmt.Errorf("%s and commitment files differ below txNum %d", d, end)

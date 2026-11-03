@@ -1,24 +1,30 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
@@ -140,33 +146,49 @@ func TestStepRebaseKeepBlocksFailsWithoutChaindata(t *testing.T) {
 
 func TestStepRebaseKeepsDatadirSettings(t *testing.T) {
 	commitmentflags.Restore(t)
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	refs := false
-	variant := state.TrieVariantHexBin
-	hash := commitment.PBinHashBlake3
-	conversionBlock, conversionTxNum := uint64(5), uint64(37)
-	want := state.ErigonDBSettings{
-		StepSize:                       16,
-		StepsInFrozenFile:              4,
-		ReferencesInCommitmentBranches: &refs,
-		TrieVariant:                    &variant,
-		TrieHash:                       &hash,
-		FrozenAtTxNum:                  map[string]uint64{kv.CommitmentDomain.String(): 64},
-		ConversionBlockNum:             &conversionBlock,
-		ConversionTxNum:                &conversionTxNum,
+	for _, tc := range []struct {
+		name   string
+		frozen bool
+	}{
+		{name: "frozen", frozen: true},
+		{name: "unfrozen"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			dirs := datadir.New(t.TempDir())
+			refs := false
+			variant := state.TrieVariantHexBin
+			hash := commitment.PBinHashBlake3
+			conversionBlock, conversionTxNum := uint64(5), uint64(37)
+			want := state.ErigonDBSettings{
+				StepSize:                       16,
+				StepsInFrozenFile:              4,
+				ReferencesInCommitmentBranches: &refs,
+				TrieVariant:                    &variant,
+				TrieHash:                       &hash,
+				ConversionBlockNum:             &conversionBlock,
+				ConversionTxNum:                &conversionTxNum,
+			}
+			if tc.frozen {
+				want.FrozenAtTxNum = map[string]uint64{kv.CommitmentDomain.String(): 64}
+			}
+			require.NoError(t, state.WriteErigonDBSettings(dirs, &want))
+			settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+			require.NoError(t, err)
+			plan, err := buildStepRebasePlan(dirs, settings, 8, false, 0, nil, nil, logger)
+			if tc.frozen {
+				require.ErrorContains(t, err, "commitment domain is frozen")
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, applyStepRebasePlan(context.Background(), dirs, plan, logger))
+			rebased, err := state.ReadErigonDBSettings(dirs)
+			require.NoError(t, err)
+			want.StepSize = 8
+			want.StepsInFrozenFile = 8
+			require.Equal(t, want, *rebased)
+		})
 	}
-	require.NoError(t, state.WriteErigonDBSettings(dirs, &want))
-	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
-	require.NoError(t, err)
-	plan, err := buildStepRebasePlan(dirs, settings, 8, false, 0, nil, nil, logger)
-	require.NoError(t, err)
-	require.NoError(t, applyStepRebasePlan(context.Background(), dirs, plan, logger))
-	rebased, err := state.ReadErigonDBSettings(dirs)
-	require.NoError(t, err)
-	want.StepSize = 8
-	want.StepsInFrozenFile = 8
-	require.Equal(t, want, *rebased)
 }
 
 func TestStepRebaseIncreaseRefusesMisalignedFile(t *testing.T) {
@@ -194,6 +216,18 @@ func TestStepRebaseIncreaseRefusesReferencedCommitmentReadAsPlain(t *testing.T) 
 	writeTestFile(t, filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-1.kv"))
 	_, err = collectRenameList(dirs.SnapDomain, true, 4, math.MaxUint64, nil)
 	require.NoError(t, err)
+
+	dirs = datadir.New(t.TempDir())
+	path := filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-10.kv")
+	writeTestFile(t, path)
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+	settings := &state.ErigonDBSettings{StepSize: 10}
+	_, err = buildStepRebasePlan(dirs, settings, 100, false, 100, nil, nil, log.New())
+	require.ErrorContains(t, err, "v2.1-commitment.0-10.kv: referenced commitment branches would be read as plain")
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(before, after))
 }
 
 func TestStepRebaseIncreaseRenamesStoppedShadowOnlyUpToItsOwnEnd(t *testing.T) {
@@ -328,7 +362,7 @@ func TestStepRebaseKeepBlocksKeepsStoppedCommitmentMarker(t *testing.T) {
 	db.Close()
 	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	require.NoError(t, err)
-	plan, err := buildStepRebasePlan(dirs, settings, 8, true, 0, nil, nil, logger)
+	plan, err := planStepRebase(context.Background(), dirs, settings, 8, true, logger)
 	require.NoError(t, err)
 	require.NoError(t, applyStepRebasePlan(context.Background(), dirs, plan, logger))
 	tx, err := openTestChaindata(t, dirs).BeginRo(context.Background())
@@ -374,6 +408,29 @@ func TestStepRebaseDecreaseRefusesStoppedCommitmentWithoutKeepBlocks(t *testing.
 	require.FileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
 }
 
+func TestStepRebaseDecreaseRefusesChangedStoppedCommitment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, 16, 4)
+	writeTestChaindata(t, dirs)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := buildStepRebasePlan(dirs, settings, 8, true, 0, nil, nil, logger)
+	require.NoError(t, err)
+	db := openTestChaindata(t, dirs)
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+	}))
+	db.Close()
+	require.ErrorContains(t, applyStepRebasePlan(context.Background(), dirs, plan, logger), "commitment stop markers changed since the plan")
+	require.FileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	untouched, err := state.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	require.Equal(t, uint64(16), untouched.StepSize)
+}
+
 func TestStepRebasePlanWithoutChaindataDoesNotCreateIt(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -388,6 +445,45 @@ func TestStepRebasePlanWithoutChaindataDoesNotCreateIt(t *testing.T) {
 	leftovers, err := os.ReadDir(dirs.Tmp)
 	require.NoError(t, err)
 	require.Empty(t, leftovers)
+}
+
+func TestStepRebaseDecreasePlansPastGap(t *testing.T) {
+	const helperEnv = "ERIGON_STEP_REBASE_GAP_HELPER"
+	if os.Getenv(helperEnv) == "1" {
+		runStepRebaseDecreasePlansPastGap(t)
+		return
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run", "^TestStepRebaseDecreasePlansPastGap$")
+	cmd.Env = append(os.Environ(), helperEnv+"=1")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+}
+
+func runStepRebaseDecreasePlansPastGap(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, 10, 64)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	db, closeDB := openTestTemporalDB(t, dirs, settings)
+	writeAccountSteps(t, db, 20)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
+	agg.WaitForFiles()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state.SavePruneValProgress(tx, kv.TblAccountVals, &prune.Stat{TxTo: 20, KeyProgress: prune.Done, ValueProgress: prune.Done})
+	}))
+	closeDB()
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	require.NoError(t, dir.RemoveFile(files[len(files)-1]))
+	settings, err = state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	_, err = planStepRebase(t.Context(), dirs, settings, 5, false, logger)
+	require.NoError(t, err)
 }
 
 func writeTestErigonDBSettings(t *testing.T, dirs datadir.Dirs, stepSize, stepsInFrozenFile uint64) {

@@ -155,20 +155,13 @@ func TestStepRebaseIncreaseMergesReceiptCacheFiles(t *testing.T) {
 		return stages.SaveStageProgress(tx, stages.Execution, 7)
 	}))
 	closeDB()
+	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 	statecfg.Schema.RCacheDomain = saved
 	unmerged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.16-20.v"))
 	require.NoError(t, err)
 	require.Len(t, unmerged, 1)
 
-	var end uint64
-	var names []string
-	require.NoError(t, withStepRebaseAgg(t.Context(), dirs, true, logger, func(agg *state.Aggregator) (err error) {
-		names = agg.StepAlignedNames()
-		end, _, err = agg.StepAlignedEnd(newStepSize)
-		return err
-	}))
-	require.Equal(t, 20*stepSize, end)
-	plan, err := buildStepRebasePlan(dirs, settings, newStepSize, true, end, nil, names, logger)
+	plan, err := planStepRebase(t.Context(), dirs, settings, newStepSize, false, logger)
 	require.NoError(t, err)
 	require.NoError(t, applyStepRebasePlan(t.Context(), dirs, plan, logger))
 	merged, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-rcache.0-2.v"))

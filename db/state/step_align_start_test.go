@@ -61,29 +61,27 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 	require.ErrorContains(t, err, "no visible file for txNum 40-80")
 }
 
-func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
+func TestStepAlignedEndAllowsPlainCommitmentRangeMismatch(t *testing.T) {
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
-	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
-	generateAccountsFile(t, dirs, split)
-	generateStorageFile(t, dirs, split)
-	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
-	agg.DisableInterDomainDependencies()
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	generateAccountsFile(t, dirs, []testFileRange{{0, 2}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 2}})
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 1}, {1, 2}})
 	require.NoError(t, agg.OpenFolder(db))
-	_, _, err := agg.AlignFilesToStepSize(t.Context(), 30)
-	require.ErrorContains(t, err, "accounts and commitment files differ below txNum 120")
+	end, _, err := agg.StepAlignedEnd(20)
+	require.NoError(t, err)
+	require.Equal(t, uint64(20), end)
 }
 
-func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
+func TestStepAlignedEndRefusesReferencedCommitmentRangeMismatch(t *testing.T) {
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 7}, {7, 8}}
 	generateAccountsFile(t, dirs, split)
 	generateStorageFile(t, dirs, split)
-	generatePlainCommitmentFile(t, dirs, append(split, testFileRange{4, 8}))
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 8}})
 	require.NoError(t, agg.OpenFolder(db))
 	_, _, err := agg.StepAlignedEnd(20)
 	require.ErrorContains(t, err, "accounts and commitment files differ below txNum 80")
