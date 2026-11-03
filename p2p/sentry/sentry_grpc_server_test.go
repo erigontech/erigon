@@ -985,7 +985,7 @@ func TestRunPeer_GetBlockHeadersFloodThrottled(t *testing.T) {
 	}
 }
 
-func TestRunPeer_GetBlockHeadersFloodPreservesOtherPeerRequests(t *testing.T) {
+func TestRunPeer_GetBlockHeadersBurstPreservesOtherPeerRequests(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
