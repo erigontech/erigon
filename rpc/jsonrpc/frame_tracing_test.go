@@ -334,6 +334,37 @@ func TestFramePrestateTracerRollback(t *testing.T) {
 	}
 }
 
+func TestFramePrestateTracerRetainedBalance(t *testing.T) {
+	evm, tx := frameTraceTestEnv(t)
+	ibs := evm.IntraBlockState()
+	factory := common.HexToAddress("0x2000")
+	child := types.CreateAddress(factory, 0)
+	runtime := program.New().Push(1).Push0().Op(vm.SSTORE, vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
+	initCode := program.New().ReturnData(runtime).Bytes()
+	factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
+	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+	tx.Frames = append(tx.Frames, types.Frame{
+		Mode: types.FrameSender, Target: &child, Value: uint256.Int{7},
+		Limits: mdgas.MdGas{Execution: 30_000, State: 100_000},
+	})
+	var diff struct {
+		Pre  map[common.Address]json.RawMessage `json:"pre"`
+		Post map[common.Address]json.RawMessage `json:"post"`
+	}
+	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
+	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	require.NoError(t, ibs.FinalizeTx(evm.ChainRules(), state.NewNoopWriter()))
+	balance, err := ibs.GetBalance(accounts.InternAddress(child))
+	require.NoError(t, err)
+	require.Equal(t, uint256.Int{7}, balance)
+	require.NotContains(t, diff.Pre, child)
+	require.Contains(t, diff.Post, child)
+	require.JSONEq(t, `{"balance":"0x7"}`, string(diff.Post[child]))
+}
+
 func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, traceVM bool) (*TraceCallResult, *types.Receipt) {
 	t.Helper()
 	result := &TraceCallResult{Trace: []*ParityTrace{}}

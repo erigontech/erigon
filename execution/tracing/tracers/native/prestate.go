@@ -304,8 +304,9 @@ func (t *prestateTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.Txn
 
 func (t *prestateTracer) processDiffState() {
 	for addr, state := range t.pre {
+		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		// A deleted account belongs only in the prestate.
-		if state.selfdestructed {
+		if state.selfdestructed && (!t.env.ChainConfig.IsAmsterdam(t.env.Time) || newBalance.IsZero()) {
 			continue
 		}
 		modified := false
@@ -313,12 +314,17 @@ func (t *prestateTracer) processDiffState() {
 			Storage: make(map[common.Hash]common.Hash),
 		}
 
-		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
-		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
-		// GetCode returns empty bytes for both deleted and codeless accounts;
-		// GetCodeHash distinguishes them (deleted → zero hash).
-		codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
-		newCodeHash := codeHash.Value()
+		// EIP-8246 keeps the balance but clears nonce, code and storage.
+		// OnTxEnd can run before finalization, so do not read those fields back.
+		var newNonce uint64
+		newCodeHash := empty.CodeHash
+		if !state.selfdestructed {
+			newNonce, _ = t.env.IntraBlockState.GetNonce(addr)
+			// GetCode returns empty bytes for both deleted and codeless accounts;
+			// GetCodeHash distinguishes them (deleted → zero hash).
+			codeHash, _ := t.env.IntraBlockState.GetCodeHash(addr)
+			newCodeHash = codeHash.Value()
+		}
 
 		if newBalance != uint256.Int(*state.Balance) {
 			modified = true
@@ -340,7 +346,10 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		if !t.config.DisableCode {
-			newCode, _ := t.env.IntraBlockState.GetCode(addr)
+			var newCode []byte
+			if !state.selfdestructed {
+				newCode, _ = t.env.IntraBlockState.GetCode(addr)
+			}
 			prevCode := common.Deref(state.Code)
 			if !bytes.Equal(newCode, prevCode) {
 				modified = true
@@ -355,7 +364,10 @@ func (t *prestateTracer) processDiffState() {
 					delete(state.Storage, key)
 				}
 
-				newVal, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+				var newVal uint256.Int
+				if !state.selfdestructed {
+					newVal, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+				}
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
 					delete(state.Storage, key)

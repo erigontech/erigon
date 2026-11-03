@@ -204,6 +204,65 @@ func TestPrestateTracerDiffModeAfterFinalization(t *testing.T) {
 	require.NotContains(t, diff.Post, contract.Value())
 }
 
+func TestPrestateTracerRetainedBalance(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		finalize  bool
+		prefund   uint64
+	}{
+		{name: "before finalization", amsterdam: true},
+		{name: "after finalization", amsterdam: true, finalize: true},
+		{name: "unchanged balance before finalization", amsterdam: true, prefund: 7},
+		{name: "unchanged balance after finalization", amsterdam: true, finalize: true, prefund: 7},
+		{name: "before Amsterdam"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := executionstate.New(executionstate.NewNoopReader())
+			t.Cleanup(ibs.Close)
+			from := accounts.InternAddress(common.HexToAddress("0x1000"))
+			contract := accounts.InternAddress(common.HexToAddress("0x2000"))
+			require.NoError(t, ibs.SetBalance(contract, *uint256.NewInt(tc.prefund), tracing.BalanceChangeUnspecified))
+			cfg := &chain.Config{}
+			if tc.amsterdam {
+				cfg.AmsterdamTime = common.NewUint64(0)
+			}
+			tracer, err := newPrestateTracer(nil, json.RawMessage(`{"diffMode":true}`))
+			require.NoError(t, err)
+			tx := types.NewTransaction(0, contract.Value(), new(uint256.Int), 100_000, new(uint256.Int), nil)
+			tracer.OnTxStart(&tracing.VMContext{ChainConfig: cfg, Coinbase: accounts.ZeroAddress, IntraBlockState: ibs}, tx, from)
+			require.NoError(t, ibs.CreateAccount(contract, true))
+			require.NoError(t, ibs.SetNonce(contract, 1, tracing.NonceChangeUnspecified))
+			require.NoError(t, ibs.SetCode(contract, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+			tracer.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{}, mdgas.MdGasCost{}, &fakeOpContext{addr: contract, stack: []uint256.Int{{1}, {}}}, nil, 1, nil)
+			require.NoError(t, ibs.SetState(contract, accounts.InternKey(common.Hash{}), uint256.Int{1}))
+			_, err = ibs.Selfdestruct(contract, tc.amsterdam)
+			require.NoError(t, err)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
+			// Settlement can credit an account after the root call has returned.
+			require.NoError(t, ibs.SetBalance(contract, uint256.Int{7}, tracing.BalanceChangeUnspecified))
+			if tc.finalize {
+				require.NoError(t, ibs.FinalizeTx(&chain.Rules{IsAmsterdam: tc.amsterdam}, executionstate.NewNoopWriter()))
+			}
+			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
+			result, err := tracer.GetResult()
+			require.NoError(t, err)
+			var diff struct {
+				Pre  map[common.Address]json.RawMessage `json:"pre"`
+				Post map[common.Address]json.RawMessage `json:"post"`
+			}
+			require.NoError(t, json.Unmarshal(result, &diff))
+			require.NotContains(t, diff.Pre, contract.Value())
+			if tc.amsterdam && tc.prefund == 0 {
+				require.Contains(t, diff.Post, contract.Value())
+				require.JSONEq(t, `{"balance":"0x7"}`, string(diff.Post[contract.Value()]))
+			} else {
+				require.NotContains(t, diff.Post, contract.Value())
+			}
+		})
+	}
+}
+
 // TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched pins the
 // account.empty invariant (see its field doc) against a virgin-SLOAD account.
 func TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched(t *testing.T) {
