@@ -193,3 +193,33 @@ func TestPostIndexed_RefreshesReadersForAFileLandingAfterTheGate(t *testing.T) {
 		return postIndexedCalls.Load() == 2
 	}, 2*time.Second, "postIndexed to run again for the re-downloaded file")
 }
+
+// Inventory.notify drops a ChangeSet to any subscriber whose 16-slot buffer is
+// full, and the post-Indexed gate is re-evaluated only on those ChangeSets. On
+// a bootstrap that floods the buffer the lost edge can be the last one, after
+// which nothing re-checks and the node never leaves head 0. The watcher must
+// therefore re-check on its own clock as well.
+func TestPostIndexed_GateIsRecheckedWithoutAChangeSet(t *testing.T) {
+	bus := newBusForTest()
+	inv := snapshot.NewInventory()
+	storage := &recordingStorage{inv: inv}
+	o := NewWithStorage(bus, storage, logger())
+
+	var postIndexedCalls atomic.Int32
+	require.NoError(t, o.SetPostIndexed(func(ctx context.Context) error {
+		postIndexedCalls.Add(1)
+		return nil
+	}))
+	o.postIndexedRecheck = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// A channel that never delivers stands in for the dropped notification.
+	never := make(chan snapshot.ChangeSet)
+	go o.watchInventoryForPostIndexed(ctx, never, func() {})
+
+	waitUntil(t, func() bool {
+		return postIndexedCalls.Load() >= 1
+	}, 2*time.Second, "the gate to be re-checked without any ChangeSet")
+}

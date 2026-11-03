@@ -224,6 +224,10 @@ type Orchestrator struct {
 	postIndexed     func(ctx context.Context) error
 	postIndexedDone bool
 
+	// postIndexedRecheck is how often the gate is re-evaluated without a
+	// ChangeSet. Zero means defaultPostIndexedRecheck; tests shorten it.
+	postIndexedRecheck time.Duration
+
 	// ctx is captured at Start() so async re-checks triggered from the
 	// inventory ChangeSet subscription can call postIndexed with the
 	// orchestrator's lifecycle ctx.
@@ -256,6 +260,10 @@ type Orchestrator struct {
 // absorb sub-second inter-peer skew; short enough to keep canonical
 // responsive under normal cadence.
 const defaultCanonicalDebounce = 3 * time.Second
+
+// defaultPostIndexedRecheck bounds how long a dropped inventory ChangeSet can
+// delay the post-Indexed gate.
+const defaultPostIndexedRecheck = 5 * time.Second
 
 // SetCanonicalDebounce overrides the default canonical-recompute
 // debounce. Must be called before Start. Tests use tiny values (tens of
@@ -744,10 +752,22 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 // in the inventory are not authoritative.
 func (o *Orchestrator) watchInventoryForPostIndexed(ctx context.Context, sub <-chan snapshot.ChangeSet, unsub func()) {
 	defer unsub()
+	// Inventory.notify drops a ChangeSet to any subscriber whose buffer is
+	// full, so the edge that would re-open the gate can be lost — and losing
+	// the last one leaves the node at head 0 with nothing to re-check it.
+	// Re-check on a timer too, which bounds a dropped notification to a tick.
+	recheck := o.postIndexedRecheck
+	if recheck <= 0 {
+		recheck = defaultPostIndexedRecheck
+	}
+	ticker := time.NewTicker(recheck)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			o.tryFireInitialStateReady(ctx)
 		case _, ok := <-sub:
 			if !ok {
 				return
