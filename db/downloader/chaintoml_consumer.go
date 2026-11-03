@@ -94,9 +94,10 @@ type chainTomlStorage struct {
 	rejected chan error
 }
 
-// The library opens storage before GotInfo, so validate metadata before delegating.
+// The library opens storage before closing GotInfo, so validate before opening any files.
 func (s chainTomlStorage) OpenTorrent(ctx context.Context, info *metainfo.Info, hash metainfo.Hash) (storage.TorrentImpl, error) {
 	if err := validateChainTomlInfo(info); err != nil {
+		// Rejected metadata leaves GotInfo open, so notify the downloader directly.
 		select {
 		case s.rejected <- err:
 		default:
@@ -110,6 +111,7 @@ func validateChainTomlInfo(info *metainfo.Info) error {
 	if info == nil {
 		return fmt.Errorf("chain.toml torrent info missing")
 	}
+	// Manifests use v1; v2 file lengths live in the file tree instead of info.Length.
 	if info.HasV2() {
 		return fmt.Errorf("chain.toml torrent uses v2 metadata, expected v1")
 	}
@@ -125,7 +127,7 @@ func validateChainTomlInfo(info *metainfo.Info) error {
 	if info.Length > maxChainTomlSize {
 		return fmt.Errorf("chain.toml exceeds size limit of %d bytes", maxChainTomlSize)
 	}
-	// GeneratePieces loops indefinitely when the piece length is zero.
+	// GeneratePieces loops indefinitely for a zero or negative piece length.
 	if info.PieceLength <= 0 {
 		return fmt.Errorf("invalid chain.toml torrent piece length: %d", info.PieceLength)
 	}
@@ -143,9 +145,9 @@ func readChainToml(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
-// DownloadChainTomlByInfoHash downloads chain.toml or verifies a completed local copy.
-// New torrents use temporary storage and are dropped on return; existing torrents remain registered.
-// tmpDir must be cleared on startup so downloads left by a crash are removed.
+// DownloadChainTomlByInfoHash downloads chain.toml into temporary storage or verifies a completed local copy.
+// It drops only torrents it creates and rejects incomplete existing torrents.
+// The caller must clear tmpDir on startup to remove downloads left by a crash.
 // A non-nil peer is used only for new torrents, if its ENR advertises a BitTorrent endpoint.
 func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir, tmpDir string, peer *ChainTomlPeer) ([]byte, error) {
 	downloadDir, err := os.MkdirTemp(tmpDir, ".chaintoml-download-")
@@ -175,7 +177,7 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		addTorrentPeerFromENR(t, peer)
 	}
 
-	// Use a timeout to avoid blocking the discovery loop indefinitely.
+	// Bound network waits so an unresponsive peer does not stall discovery.
 	dlCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 

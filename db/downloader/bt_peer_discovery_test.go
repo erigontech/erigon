@@ -20,10 +20,8 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// TestBTPeerDiscovery_AddPeersFromENR verifies that a leecher can discover
-// and download from a seeder using only the BT port from the seeder's ENR.
-// This is the core mechanism for decentralized snapshot distribution:
-// no DHT, no tracker — just direct peer injection from ENR records.
+// TestBTPeerDiscovery_AddPeersFromENR downloads a manifest from an ENR-advertised peer
+// without DHT or trackers and preserves the local manifest.
 func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
