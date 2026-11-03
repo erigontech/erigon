@@ -1782,9 +1782,6 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 }
 
 func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, chainConfig *chain.Config, logger log.Logger) error {
-	if s == nil {
-		return nil
-	}
 	var newIdxBuilt bool
 
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
