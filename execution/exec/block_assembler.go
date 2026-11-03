@@ -115,7 +115,8 @@ func (mb *AssembledBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 type BlockAssembler struct {
 	*AssembledBlock
 	cfg         AssemblerCfg
-	balIO       *state.VersionedIO
+	balIO       *state.VersionedIO // nil when the block carries no access list
+	writeSets   []*state.WriteSet  // per-phase writes, applied by the builder in order
 	blockRules  *chain.Rules
 	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
 	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
@@ -124,7 +125,10 @@ type BlockAssembler struct {
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
-	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg, balIO: &state.VersionedIO{}}
+	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg}
+	if ba.HasBAL() {
+		ba.balIO = &state.VersionedIO{}
+	}
 	blockContext := protocol.NewEVMBlockContext(
 		block.Header, protocol.GetHashFn(block.Header, nil), cfg.Engine, accounts.NilAddress, cfg.ChainConfig,
 	)
@@ -152,8 +156,16 @@ func (ba *BlockAssembler) writer() state.StateWriter {
 	return state.NewNoopWriter()
 }
 
-func (ba *BlockAssembler) BalIO() *state.VersionedIO {
-	return ba.balIO
+func (ba *BlockAssembler) WriteSets() []*state.WriteSet {
+	return ba.writeSets
+}
+
+// recordPhase keeps a finished phase's writes for the builder and, for a block with an access list, its I/O.
+func (ba *BlockAssembler) recordPhase(ibs *state.IntraBlockState, writes *state.WriteSet) {
+	ba.writeSets = append(ba.writeSets, writes)
+	if ba.balIO != nil {
+		ibs.MergeTxIOInto(ba.balIO, writes)
+	}
 }
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
@@ -171,7 +183,7 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 	if err != nil {
 		return err
 	}
-	ibs.MergeTxIOInto(ba.balIO, writes)
+	ba.recordPhase(ibs, writes)
 	// Publish block-init writes (EIP-4788, etc.) to the versionMap so the
 	// first tx observes them across the ResetVersionedIO below.
 	ibs.FlushWritesToVersionMap(writes)
@@ -227,7 +239,7 @@ func (ba *BlockAssembler) AddTransactions(
 		if err != nil {
 			return err
 		}
-		ibs.MergeTxIOInto(ba.balIO, writes)
+		ba.recordPhase(ibs, writes)
 		// Publish this tx's writes to the versionMap so the next tx observes them;
 		// ResetVersionedIO below clears the per-tx write set used for BAL recording.
 		ibs.FlushWritesToVersionMap(writes)
@@ -425,7 +437,7 @@ func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.Tempor
 		return nil, err
 	}
 	// Record finalize system call I/O (EIP-7002, EIP-7251, etc.)
-	ibs.MergeTxIOInto(ba.balIO, writes)
+	ba.recordPhase(ibs, writes)
 	// Publish finalize-phase writes to the versionMap, mirroring the init and
 	// per-tx phases: the versioned commit loop normalizes each phase against the
 	// map and prefers the map value, so a finalize update to an address already

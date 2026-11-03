@@ -232,7 +232,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	// (init/txs/finalize) is applied in order.
 	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
 	blockRules := blockCtx.Rules(cfg.chainConfig)
-	for _, ws := range ba.BalIO().Outputs() {
+	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
