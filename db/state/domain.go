@@ -1671,7 +1671,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		getFromFileCache = dt.getFromFileCache
 	}
 	if getFromFileCache != nil && useCache {
-		if cv, ok := getFromFileCache.Get(hi); ok {
+		if cv, ok := getFromFileCache.get(k, hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1715,7 +1715,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		}
 
 		if dt.getFromFileCache != nil && useCache {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
+			dt.getFromFileCache.add(k, hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
@@ -1724,7 +1724,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 	}
 
 	if dt.getFromFileCache != nil && useCache {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
+		dt.getFromFileCache.add(k, hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }
@@ -1741,7 +1741,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	if useCache && dt.getFromFileCache != nil {
-		if cv, ok := dt.getFromFileCache.Get(hi); ok {
+		if cv, ok := dt.getFromFileCache.get(k, hi); ok {
 			return len(cv.v), true, nil
 		}
 	}

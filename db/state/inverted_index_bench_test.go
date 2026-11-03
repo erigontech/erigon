@@ -48,3 +48,24 @@ func BenchmarkInvertedIndexSeekInFiles(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkIISeekInFilesCacheHit(b *testing.B) {
+	iit := storageDomainTxWithFileKey(b, equalHashSalt, equalHashKeyA, []byte{1}).ht.iit
+	if found, _, err := iit.seekInFiles(equalHashKeyA, 0); err != nil || !found {
+		b.Fatal(found, err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, _, err := iit.seekInFiles(equalHashKeyA, 0); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkIISeekInFilesCacheInsert(b *testing.B) {
+	c := NewIISeekInFilesCache()
+	b.ReportAllocs()
+	for i := uint64(0); b.Loop(); i++ {
+		c.add(equalHashKeyA, i*0x9E3779B97F4A7C15, iiSeekInFilesCacheItem{requested: i, found: i + 1, fileIdx: 1})
+	}
+}
