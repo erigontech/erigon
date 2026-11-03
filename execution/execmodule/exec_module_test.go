@@ -728,6 +728,57 @@ func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testin
 func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
 	t.Helper()
 	ctx := t.Context()
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, invalidExecutionProgress)
+
+	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
+	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
+	// so the no-unwind branch fires. The handler then writes canonical entries
+	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
+	//
+	// Because the domain was ahead of blocks when the FCU started, the handler
+	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
+	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
+	// handle by inserting the missing canonical blocks and retrying.
+	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
+
+	// After the FCU, TxNums must have caught up to (or past) commitBlock so
+	// the next NewSharedDomains() will not return ErrBehindCommitment.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
+}
+
+// A re-sent fork choice for a canonical head below the commitment block keeps
+// that head, so it needs no unwind and must not be rejected as ReorgTooDeep.
+func TestUpdateForkChoiceResentHeadBelowCommitment(t *testing.T) {
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false)
+	head := chainPack.Blocks[6].Header()
+	require.Less(t, head.Number.Uint64(), commitBlock)
+	for i := range 2 {
+		res, err := m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "fork choice %d", i+1)
+	}
+}
+
+// A fork choice back to a canonical ancestor keeps the ancestor, so like a fork
+// from it, it needs changesets only for the blocks above it.
+func TestUpdateForkChoiceBackToCanonicalAncestorAtRetentionEdge(t *testing.T) {
+	m, chainPack := newTransferChain(t, 5, execmoduletester.WithMaxReorgDepth(2))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+	res, err := m.UpdateForkChoice(t.Context(), chainPack.Blocks[1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
+}
+
+func newTransferChain(t *testing.T, n int, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -737,8 +788,9 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
-	chainPack, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
+	opts = append([]execmoduletester.Option{execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey)}, opts...)
+	m := execmoduletester.New(t, opts...)
+	chainPack, err := m.GenerateChain(n, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -748,7 +800,14 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	require.Len(t, chainPack.Blocks, 10)
+	require.Len(t, chainPack.Blocks, n)
+	return m, chainPack
+}
+
+func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
+	t.Helper()
+	ctx := t.Context()
+	m, chainPack := newTransferChain(t, 10)
 
 	// Drive the full chain in (insert + validate + UFC). State commitBlock and
 	// TxNums.Last are now both at block 10.
@@ -783,29 +842,7 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
 		return nil
 	}))
-
-	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
-	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
-	// so the no-unwind branch fires. The handler then writes canonical entries
-	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
-	//
-	// Because the domain was ahead of blocks when the FCU started, the handler
-	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
-	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
-	// handle by inserting the missing canonical blocks and retrying.
-	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
-	require.NoError(t, err)
-	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
-	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
-
-	// After the FCU, TxNums must have caught up to (or past) commitBlock so
-	// the next NewSharedDomains() will not return ErrBehindCommitment.
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
-		return nil
-	}))
+	return m, chainPack, commitBlock
 }
 
 // Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also
