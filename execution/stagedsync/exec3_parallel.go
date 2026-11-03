@@ -2601,6 +2601,8 @@ type blockExecutor struct {
 	selfLoopDispatched map[int]bool
 }
 
+var validationSkipHook func(int)
+
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
 // order: exec-complete and not already validated. The self-loop worker only sends a
 // result once its read-set re-validates, so no dependency/coinbase gate is needed.
@@ -3121,6 +3123,9 @@ func (be *blockExecutor) arrivalValid(txIdx int, valStamp uint64) bool {
 		return be.validateNow(txIdx)
 	}
 	be.cntValidationSkip++
+	if validationSkipHook != nil {
+		validationSkipHook(txIdx)
+	}
 	if dbg.AssertEnabled {
 		if be.oracleHook != nil {
 			be.oracleHook()

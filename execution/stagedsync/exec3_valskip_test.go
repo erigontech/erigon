@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -38,6 +39,14 @@ func armAssert(t *testing.T) {
 
 func TestValidationSkipOracleOnReplayedBlock(t *testing.T) {
 	armAssert(t)
+	var skipCount atomic.Int64
+	previous := validationSkipHook
+	validationSkipHook = func(txIdx int) {
+		if txIdx >= 1 {
+			skipCount.Add(1)
+		}
+	}
+	t.Cleanup(func() { validationSkipHook = previous })
 	fx, err := blockreplay.Load(fixturePath(t))
 	require.NoError(t, err)
 	require.NotNil(t, fx.Outputs)
@@ -49,6 +58,7 @@ func TestValidationSkipOracleOnReplayedBlock(t *testing.T) {
 	defer doms.Close()
 
 	require.NoError(t, r.exec(tx, doms))
+	require.Greater(t, skipCount.Load(), int64(0))
 	require.NoError(t, r.verify(tx, doms, fx.Outputs))
 }
 
