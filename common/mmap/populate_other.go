@@ -21,4 +21,4 @@ func NewProbe() *Probe { return nil }
 
 func (*Probe) Touch(unsafe.Pointer) {}
 
-func ReadPages([]uintptr) {}
+func ReadPages([]uintptr) error { return nil }

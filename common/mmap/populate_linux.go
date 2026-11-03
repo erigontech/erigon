@@ -147,14 +147,14 @@ func initBatchRings() {
 }
 
 // ReadPages reads the given mapped pages into the page cache with io_uring, up to 8 rings of 256 reads in flight; a
-// page outside the registered file mappings is skipped.
-func ReadPages(pages []uintptr) {
+// page outside the registered file mappings is skipped. It returns the first failed batch's error.
+func ReadPages(pages []uintptr) error {
 	if len(pages) == 0 || !BatchPrefetch {
-		return
+		return nil
 	}
 	batchRingsOnce.Do(initBatchRings)
 	if batchRings == nil {
-		return
+		return nil
 	}
 	byFd := map[int][]int64{}
 	seen := make(map[uintptr]struct{}, len(pages))
@@ -168,6 +168,8 @@ func ReadPages(pages []uintptr) {
 		}
 	}
 	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
 	for fd, offs := range byFd {
 		for len(offs) > 0 {
 			n := min(len(offs), batchRingEntries)
@@ -180,9 +182,12 @@ func ReadPages(pages []uintptr) {
 				for i := range lens {
 					lens[i] = int(osPageSize)
 				}
-				_ = br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)])
+				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
+					errOnce.Do(func() { firstErr = err })
+				}
 			})
 		}
 	}
 	wg.Wait()
+	return firstErr
 }

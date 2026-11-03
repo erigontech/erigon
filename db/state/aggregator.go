@@ -2771,9 +2771,13 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			}
 		}
 		t1 := time.Now()
-		mmap.ReadPages(cold)
+		err := mmap.ReadPages(cold)
 		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
 		pages += len(cold)
+		if err != nil {
+			// The pages stay cold, so the next wave would only resubmit them.
+			break
+		}
 		pending = next
 	}
 	return waves, pages, plan, io
