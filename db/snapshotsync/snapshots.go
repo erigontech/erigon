@@ -1647,21 +1647,6 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 	return nil
 }
 
-func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, cc *chain.Config, logger log.Logger) error {
-	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, tmpDir, cc, logger)
-	if err != nil {
-		return fmt.Errorf("can't build missed indices: %w", err)
-	}
-
-	if newIdxBuilt {
-		if err := s.OpenFolder(); err != nil {
-			return err
-		}
-		s.LogStat("missed-idx:open")
-	}
-	return nil
-}
-
 // delete removes the named segment from dirty and returns it (nil if not found) so
 // the caller can retire it. Physical unlink happens later, at the reader watermark. Must
 // be called with dirtyLock held.
@@ -1796,10 +1781,11 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
-func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, tmpDir string, chainConfig *chain.Config, logger log.Logger) (newIdxBuilt bool, err error) {
+func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, chainConfig *chain.Config, logger log.Logger) error {
 	if s == nil {
-		return
+		return nil
 	}
+	var newIdxBuilt bool
 
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
@@ -1889,13 +1875,19 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 	// Block main thread
 	select {
 	case <-finish:
-		if err = g.Wait(); err != nil {
-			return
-		}
-		return newIdxBuilt, ie
 	case <-ctx.Done():
-		return newIdxBuilt, ctx.Err()
+		return fmt.Errorf("can't build missed indices: %w", ctx.Err())
 	}
+	if ie != nil {
+		return fmt.Errorf("can't build missed indices: %w", ie)
+	}
+	if newIdxBuilt {
+		if err := s.OpenFolder(); err != nil {
+			return err
+		}
+		s.LogStat("missed-idx:open")
+	}
+	return nil
 }
 
 // View pins one whole generation of files for its entire life: a tx passes through
