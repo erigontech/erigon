@@ -771,13 +771,13 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 // unflushedDeployer returns the earlier tx the access list shows deploying code at addr while
 // that tx is neither sealed nor validated, or -1. Until it flushes, addr has no account cell.
 func (vm *VersionMap) unflushedDeployer(addr accounts.Address, txIdx int) int {
-	k := -1
-	for _, idx := range vm.deployers[addr.Value()] {
-		if idx < txIdx {
-			k = idx
-		}
+	idxs := vm.deployers[addr.Value()]
+	i := sort.SearchInts(idxs, txIdx)
+	if i == 0 {
+		return -1
 	}
-	if k < 0 || (vm.sealedArmed.Load() && int64(k) <= vm.sealed.Load()) {
+	k := idxs[i-1]
+	if vm.sealedArmed.Load() && int64(k) <= vm.sealed.Load() {
 		return -1
 	}
 	if _, rr, ok := vm.ReadCode(addr, k+1); ok && rr.validated {
