@@ -74,10 +74,6 @@ type builderClient struct {
 	preferencesAdmissionOnce sync.Once
 }
 
-func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig) *builderClient {
-	return newBlockBuilderClient(baseUrl, beaconConfig, BuilderTargetPolicy{}, true)
-}
-
 func NewDynamicBuilderClient(beaconConfig *clparams.BeaconChainConfig, policy BuilderTargetPolicy) *builderClient {
 	return newBlockBuilderClient("", beaconConfig, policy, false)
 }
@@ -397,7 +393,7 @@ func (b *builderClient) builderEndpoint(ctx context.Context, policy BuilderTarge
 		return builderTarget{}, errors.New("builder URL must be an HTTP(S) URL without user information")
 	}
 	hostname := target.Hostname()
-	addresses := []net.IPAddr(nil)
+	var addresses []net.IPAddr
 	if ip := net.ParseIP(hostname); ip != nil {
 		addresses = []net.IPAddr{{IP: ip}}
 	} else {

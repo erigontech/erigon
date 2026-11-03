@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -338,7 +339,7 @@ func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys []
 				if !insideStorage && len(k) > 0 {
 					if vn, ok := n.Val.(ValueNode); ok {
 						var acc accounts.Account
-						if decErr := acc.DecodeForHashing(vn); decErr == nil && acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
+						if decErr := acc.DecodeForHashing(vn); decErr == nil && acc.Root != empty.RootHash && acc.Root != (common.Hash{}) {
 							sn, srlp, sErr := nodeAt(acc.Root)
 							if sErr != nil {
 								return nil, sErr
@@ -605,14 +606,14 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 	if proof.Value == nil {
 		proof.Value = new(hexutil.U256)
 	}
-	if storageRoot == EmptyRoot || storageRoot == (common.Hash{}) {
+	if storageRoot == empty.RootHash || storageRoot == (common.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
 			return errors.New("empty storage root cannot have non-zero values")
 		}
 		// if storage root is zero (0000000) then we should have an empty proof
 		// if it corresponds to empty storage tree, having value EmptyRoot above
 		// then proof should be RLP encoding of empty proof (0x80)
-		if storageRoot == EmptyRoot {
+		if storageRoot == empty.RootHash {
 			for i := range proof.Proof {
 				if len(proof.Proof[i]) != 1 || proof.Proof[i][0] != 0x80 {
 					return errors.New("empty storage root should have RLP encoding of empty proof")
@@ -651,41 +652,11 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 	return nil
 }
 
-type proofNode struct {
-	hash common.Hash
-	node Node
-}
-
-// proofMap creates a map from hash to proof node
-func orderedProofNodes(proof []hexutil.Bytes) (res []proofNode, err error) {
-	for _, proofB := range proof {
-		hash := crypto.Keccak256Hash(proofB)
-		node, err := decodeNode(proofB)
-		if err != nil {
-			return nil, err
-		}
-		res = append(res, proofNode{hash, node})
-	}
-	return res, nil
-}
-
-// Print proof to human readable format
-func PrintProof(proof []hexutil.Bytes) error {
-	proofNodes, err := orderedProofNodes(proof)
-	if err != nil {
-		return err
-	}
-	for i, proofNode := range proofNodes {
-		fmt.Printf("Level %d: hash=%x -> %s\n", i, proofNode.hash, proofNode.node.String())
-	}
-	return nil
-}
-
 // ProofFromNodes returns the proof for key (keybytes) and its leaf value, which is nil when key is absent.
 func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte, value []byte, err error) {
 	enc, ok := byHash[string(root)]
 	if !ok {
-		if common.BytesToHash(root) == EmptyRoot { // an empty trie proves absence with no nodes at all
+		if common.BytesToHash(root) == empty.RootHash { // an empty trie proves absence with no nodes at all
 			return nil, nil, nil
 		}
 		return nil, nil, fmt.Errorf("proof node %x absent", root)

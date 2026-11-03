@@ -82,9 +82,9 @@ func (s *testService) Echo(str string, i int, args *echoArgs) echoResult {
 	return echoResult{str, i, args}
 }
 
-// StreamEcho is a streamable method (last arg jsonstream.Stream, returns only error): it writes its
+// StreamEcho is a streamable method (last arg *jsonstream.Stream, returns only error): it writes its
 // result directly to the stream rather than returning a value.
-func (s *testService) StreamEcho(str string, stream jsonstream.Stream) error {
+func (s *testService) StreamEcho(str string, stream *jsonstream.Stream) error {
 	stream.WriteString(str)
 	return nil
 }
@@ -176,6 +176,11 @@ func (s *notificationTestService) SomeSubscription(ctx context.Context, n, val i
 		}
 	}()
 	return subscription, nil
+}
+
+// FailingSubscription refuses the subscription and so creates none.
+func (s *notificationTestService) FailingSubscription(ctx context.Context) (*Subscription, error) {
+	return nil, errors.New("refused")
 }
 
 // HangSubscription blocks on s.unblockHangSubscription before sending anything.

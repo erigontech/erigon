@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"runtime/debug"
 
@@ -55,13 +56,13 @@ const AccountRangeMaxResultsWithStorage = 256
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
 	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
-	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
-	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
+	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error
+	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error
+	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
+	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
@@ -169,6 +170,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 		return StorageRangeResult{}, err
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return StorageRangeResult{}, err
+	}
+	if err := api.checkTxIndexInBlock(ctx, tx, blockNumber, int(min(txIndex, math.MaxInt))); err != nil {
 		return StorageRangeResult{}, err
 	}
 
@@ -520,9 +524,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, err
 	}
 
-	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
+	startNum, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(startHash, true), tx, api._blockReader)
 	if err != nil {
-		return nil, fmt.Errorf("start block %x not found", startHash)
+		return nil, fmt.Errorf("start block: %w", err)
 	}
 	if startNum > latestBlock {
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
@@ -545,9 +549,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 
 	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
-	endNum, err := api.headerNumberByHash(ctx, tx, *endHash)
+	endNum, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(*endHash, true), tx, api._blockReader)
 	if err != nil {
-		return nil, fmt.Errorf("end block %x not found", *endHash)
+		return nil, fmt.Errorf("end block: %w", err)
 	}
 	if endNum > latestBlock {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
@@ -603,6 +607,9 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, errors.New("block hash is not canonical")
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
+		return nil, err
+	}
+	if err := api.checkTxIndexInBlock(ctx, tx, *blockNumber, int(min(txIndex, math.MaxInt))); err != nil {
 		return nil, err
 	}
 

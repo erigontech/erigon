@@ -18,6 +18,8 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -35,5 +37,33 @@ func BenchmarkPruneFloorCacheHit(b *testing.B) {
 		if _, err := cache.get(context.Background(), 1, read); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkPruneFloorCacheHitParallel(b *testing.B) {
+	for _, views := range []uint64{1, 8} {
+		b.Run(fmt.Sprintf("views=%d", views), func(b *testing.B) {
+			cache := pruneFloorCache[uint64]{ttl: time.Hour}
+			ctx := context.Background()
+			read := func() (uint64, error) { return 1, nil }
+			for view := range views {
+				key := pruneFloorCacheKey{head: 1, dbViewID: view}
+				if _, err := cache.getForKey(ctx, key, read); err != nil {
+					b.Fatal(err)
+				}
+			}
+			var worker atomic.Uint64
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				key := pruneFloorCacheKey{head: 1, dbViewID: (worker.Add(1) - 1) % views}
+				for pb.Next() {
+					if _, err := cache.getForKey(ctx, key, read); err != nil {
+						b.Error(err)
+						return
+					}
+				}
+			})
+		})
 	}
 }

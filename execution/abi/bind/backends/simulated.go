@@ -194,7 +194,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	}
 	b.pendingReaderTx = tx
 	b.pendingReader = b.m.NewStateReader(b.pendingReaderTx)
-	b.pendingState = state.New(b.pendingReader)
+	b.pendingState = state.NewWithVersionMap(b.pendingReader, state.NewVersionMap(nil))
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
@@ -764,11 +764,9 @@ func (b *SimulatedBackend) callContract(_ context.Context, call bind.CallMsg, bl
 		call.MaxFeePerBlobGas = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
-	from, err := statedb.GetOrNewStateObject(accounts.InternAddress(call.From))
-	if err != nil {
+	if err := statedb.SetBalance(accounts.InternAddress(call.From), *(&uint256.Int{}).SetAllOne(), tracing.BalanceChangeUnspecified); err != nil {
 		return nil, err
 	}
-	from.SetBalance(*(&uint256.Int{}).SetAllOne(), true, tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
 
@@ -815,6 +813,14 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	); err != nil {
 		return err
 	}
+	blockContext := protocol.NewEVMBlockContext(b.pendingHeader, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine, accounts.InternAddress(b.pendingHeader.Coinbase), b.m.ChainConfig)
+	writes, err := b.pendingState.FinalizedWrites(blockContext.Rules(b.m.ChainConfig))
+	if err != nil {
+		return err
+	}
+	b.pendingState.FlushWritesToVersionMap(writes)
+	b.pendingState.ResetVersionedIO()
+	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions())+1)
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
@@ -897,12 +903,16 @@ func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCa
 func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) CheckGas() bool                        { return true }
+func (m callMsg) SkipExecutionGasCap() bool             { return false }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+func (m callMsg) DynamicFeeArgs() bool                  { return false }
 func (m callMsg) IsFree() bool                          { return false }
 func (m callMsg) SetIsFree(_ bool)                      {}
+
+func (m callMsg) Authorities(*uint256.Int) *types.RecoveredAuthorities { return nil }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

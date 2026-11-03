@@ -205,11 +205,32 @@ func CheckBlockGasInclusion(gp *GasPool, executionGas, stateGas, blobGas uint64)
 //
 //	execution = min(MaxTxnGasLimit, tx.gas)
 //	state     = tx.gas
-func InclusionContributions(gas uint64, isAmsterdam bool) (uint64, uint64) {
+//
+// With skipExecutionGasCap (read-only RPC calls) the execution gas is not capped, so the
+// whole gas_limit is reserved in the execution dimension too.
+func InclusionContributions(gas uint64, isAmsterdam, skipExecutionGasCap bool) (uint64, uint64) {
 	if !isAmsterdam {
 		return gas, 0
 	}
+	if skipExecutionGasCap {
+		return gas, gas
+	}
 	return min(params.MaxTxnGasLimit, gas), gas
+}
+
+// MaxInclusionGas returns the largest gas_limit that CheckBlockGasInclusion admits
+// from gp for the InclusionContributions of the same rules. With the execution cap,
+// a tx reserves at most MaxTxnGasLimit of execution gas, so once that much remains
+// only the state reservoir binds.
+func MaxInclusionGas(gp *GasPool, isAmsterdam, skipExecutionGasCap bool) uint64 {
+	execution, state := gp.ExecutionGasAvailable(), gp.StateGasAvailable()
+	if !isAmsterdam {
+		return execution
+	}
+	if !skipExecutionGasCap && execution >= params.MaxTxnGasLimit {
+		return state
+	}
+	return min(execution, state)
 }
 
 // BlobGas returns the blob gas remaining.

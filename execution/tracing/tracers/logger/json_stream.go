@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -43,10 +44,11 @@ import (
 type JsonStreamLogger struct {
 	ctx    context.Context
 	cfg    LogConfig
-	stream jsonstream.Stream
+	stream *jsonstream.Stream
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
+	stackHex     []stackHexSlot
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
@@ -56,7 +58,7 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.Stream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsonstream.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
@@ -88,6 +90,26 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
+// stackHexSlot holds the quoted hex of the value last written for a stack slot.
+// Between steps only the top of the stack changes, so most slots hit.
+type stackHexSlot struct {
+	val    uint256.Int
+	quoted [68]byte // `"0x` + 64 digits + `"`
+	n      uint8    // 0 until the slot is first written
+}
+
+func (l *JsonStreamLogger) writeStackValue(i int, v *uint256.Int) {
+	if i == len(l.stackHex) {
+		l.stackHex = append(l.stackHex, stackHexSlot{})
+	}
+	slot := &l.stackHex[i]
+	if slot.n == 0 || slot.val != *v {
+		slot.val = *v
+		slot.n = uint8(copy(slot.quoted[:], l.hexQuoted(v)))
+	}
+	l.stream.WriteRaw(common.ToStringZeroCopy(slot.quoted[:slot.n]))
+}
+
 // hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
 // rather than a slice so the result is known to fit; the buffer is not resized.
 func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
@@ -104,8 +126,7 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
-// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes.
 func (l *JsonStreamLogger) writeWord(word []byte) {
 	padded := l.hexEncodeBuf[:32]
 	clear(padded[copy(padded, word):])
@@ -150,7 +171,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 	l.writePrologueOnce()
 	l.opcodeSteps++
 	var outputStorage bool
-	if !l.cfg.DisableStorage {
+	if !l.cfg.DisableStorage && err == nil {
 		// initialise new changed values storage container for this contract
 		// if not present.
 		if l.storage[contractAddr] == nil {
@@ -210,7 +231,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 		l.stream.Field("stack")
 		l.stream.WriteArrayStart()
 		for i := range stack {
-			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
+			l.writeStackValue(i, &stack[i])
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -224,8 +245,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.Field("returnData")
-		l.stream.WriteHex(rData)
+		ethjson.Data(l.stream, "returnData", rData)
 	}
 	if outputStorage {
 		l.stream.Field("storage")

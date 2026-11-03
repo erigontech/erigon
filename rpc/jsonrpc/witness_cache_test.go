@@ -17,8 +17,12 @@
 package jsonrpc
 
 import (
+	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -40,6 +44,160 @@ func mkResult() *ExecutionWitnessResult {
 // mkSized returns a result whose resident cost (witnessResultSize) is n.
 func mkSized(n int) *ExecutionWitnessResult {
 	return &ExecutionWitnessResult{State: []hexutil.Bytes{make(hexutil.Bytes, n-sliceHeaderBytes)}}
+}
+
+func registerFinishedBuild(c *witnessResultCache, hash common.Hash, r *ExecutionWitnessResult) {
+	b := &witnessBuild{done: make(chan struct{}), result: r}
+	close(b.done)
+	c.building[hash] = b
+}
+
+func TestWitnessResultCacheBuildOnceSharesRunningBuild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newWitnessResultCache(96, 0, false, false)
+		hash, want := hashN(1), mkResult()
+		release := make(chan struct{})
+		var builds atomic.Int32
+		build := func(context.Context) (*ExecutionWitnessResult, error) {
+			builds.Add(1)
+			<-release
+			return want, nil
+		}
+		const callers = 4
+		results := make(chan *ExecutionWitnessResult, callers)
+		for range callers {
+			go func() {
+				r, err := c.buildOnce(t.Context(), hash, build, nil)
+				if err != nil {
+					t.Error(err)
+				}
+				results <- r
+			}()
+		}
+		synctest.Wait()
+		started := builds.Load()
+		close(release)
+		for range callers {
+			require.Same(t, want, <-results)
+		}
+		require.Equal(t, int32(1), started, "concurrent callers for one hash must share one build")
+		require.Empty(t, c.building, "a finished build must leave the in-flight map")
+	})
+}
+
+func TestWitnessResultCacheBuildOnceStoresBeforeRelease(t *testing.T) {
+	c := newWitnessResultCache(96, 0, true, true)
+	hash, want := hashN(1), mkResult()
+	stores := 0
+	_, err := c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) { return want, nil },
+		func(r *ExecutionWitnessResult, _ time.Duration) {
+			stores++
+			c.mu.Lock()
+			_, running := c.building[hash]
+			c.mu.Unlock()
+			require.True(t, running, "the result must be stored while the build is still visible to awaitBuild")
+			c.store(1, hash, r)
+		})
+	require.NoError(t, err)
+	require.Equal(t, 1, stores)
+	got, ok := c.awaitBuild(t.Context(), hash)
+	require.True(t, ok, "a build that already left the in-flight map must be found in the cache")
+	require.Same(t, want, got)
+}
+
+func TestWitnessResultCacheBuildOnceJoinerStoresUnstoredBuild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newWitnessResultCache(96, 0, false, false)
+		hash, want := hashN(1), mkResult()
+		const buildTime = 250 * time.Millisecond
+		go func() {
+			_, _ = c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) {
+				time.Sleep(buildTime)
+				return want, nil
+			}, nil)
+		}()
+		synctest.Wait()
+		var stored []time.Duration
+		r, err := c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) {
+			t.Error("a joiner must not build while the leader runs")
+			return nil, nil
+		}, func(r *ExecutionWitnessResult, took time.Duration) {
+			require.Same(t, want, r)
+			stored = append(stored, took)
+		})
+		require.NoError(t, err)
+		require.Same(t, want, r)
+		require.Equal(t, []time.Duration{buildTime}, stored, "a joiner stores a build nobody stored, with the leader's build time")
+	})
+}
+
+func TestWitnessResultCacheBuildOnceOutlivesCanceledLeader(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newWitnessResultCache(96, 0, false, false)
+		hash, want := hashN(1), mkResult()
+		leaderCtx, cancel := context.WithCancel(t.Context())
+		release := make(chan struct{})
+		leaderErr := make(chan error, 1)
+		go func() {
+			_, err := c.buildOnce(leaderCtx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-release:
+					return want, nil
+				}
+			}, nil)
+			leaderErr <- err
+		}()
+		synctest.Wait()
+		waiter := make(chan *ExecutionWitnessResult, 1)
+		go func() {
+			r, err := c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) {
+				t.Error("a waiter must not rebuild after the leader's caller gives up")
+				return nil, nil
+			}, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			waiter <- r
+		}()
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		close(release)
+		require.NoError(t, <-leaderErr, "the leader's cancellation must not abort the shared build")
+		require.Same(t, want, <-waiter)
+	})
+}
+
+func TestWitnessResultCacheBuildOncePanicReachesWaiters(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newWitnessResultCache(96, 0, false, false)
+		hash, want := hashN(1), mkResult()
+		release := make(chan struct{})
+		go func() {
+			defer func() { _ = recover() }()
+			_, _ = c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) {
+				<-release
+				panic("build failed")
+			}, nil)
+		}()
+		synctest.Wait()
+		waiterErr := make(chan error, 1)
+		go func() {
+			_, err := c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) {
+				t.Error("a waiter must not build while the leader runs")
+				return nil, nil
+			}, nil)
+			waiterErr <- err
+		}()
+		synctest.Wait()
+		close(release)
+		require.ErrorIs(t, <-waiterErr, errWitnessBuildPanicked)
+		r, err := c.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) { return want, nil }, nil)
+		require.NoError(t, err)
+		require.Same(t, want, r, "a panicked build must leave the in-flight map")
+	})
 }
 
 // TestNewWitnessResultCacheClampsBlocks pins the only behaviour the constructor

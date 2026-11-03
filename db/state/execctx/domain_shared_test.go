@@ -256,6 +256,42 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 		unwindTarget, writeTxNum, v)
 }
 
+// A key written again after an unwind must be iterated with its new value, not
+// hidden by the unwind changeset that still covers it until Flush.
+func TestSharedDomain_IteratePrefixAfterUnwindSeesRewrite(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 100)
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateChangeset := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(stateChangeset)
+
+	addr, slot := common.HexToAddress("0x01"), common.HexToHash("0x02")
+	key := composite(addr[:], slot[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x01}, 100, nil))
+
+	var diffSet [kv.DomainLen][]kv.DomainEntryDiff
+	for idx, d := range stateChangeset.Diffs {
+		diffSet[idx] = d.GetDiffSet()
+	}
+	domains.Unwind(50, &diffSet)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, []byte{0x05}, 60, nil))
+
+	got := map[string][]byte{}
+	require.NoError(t, domains.IteratePrefix(kv.StorageDomain, addr[:], rwTx, func(k, v []byte) (bool, error) {
+		got[string(k)] = bytes.Clone(v)
+		return true, nil
+	}))
+	require.Equal(t, map[string][]byte{string(key): {0x05}}, got)
+}
+
 // Unwind(t) prunes overlay writes in [t, ∞) and keeps [0, t); t is the resume
 // block's begin-system txNum, so the boundary write itself must not survive.
 func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
@@ -1733,7 +1769,7 @@ func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	err = sd.InitBlockOverlay(tx, t.TempDir())
+	err = sd.InitBlockOverlay(tx)
 	require.NoError(t, err)
 
 	txNum := uint64(42)
@@ -1814,10 +1850,144 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer sd.Close()
-	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(tx))
 	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), inFlightLogIdx, 0, 0, inFlightTxNum))
 
 	_, _, got, err := rawtemporaldb.ReceiptAsOf(sd.BlockOverlay().NewReadView(tx), inFlightTxNum+1)
 	require.NoError(t, err)
 	require.Equal(t, inFlightLogIdx, got, "must serve the in-flight block's log index, not the last committed one")
+}
+
+// TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress verifies that a
+// zero-update commitment advances the persisted execution position without
+// changing the state root or serialized trie state.
+func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
+	const (
+		stepSize = uint64(100)
+		block1   = uint64(1)
+		txNum1   = uint64(10)
+		block2   = uint64(2)
+		txNum2   = uint64(20)
+	)
+
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+
+	rwTx1, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx1.Rollback()
+
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, 0, 0))
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, block1, txNum1))
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, block2, txNum2))
+
+	domains1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New())
+	require.NoError(t, err)
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0x42
+
+	acc := accounts.Account{
+		Nonce:       1,
+		Balance:     *uint256.NewInt(12345),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 0,
+	}
+
+	prev, _, err := domains1.GetLatest(
+		kv.AccountsDomain,
+		rwTx1,
+		addr,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, domains1.DomainPut(
+		kv.AccountsDomain,
+		rwTx1,
+		addr,
+		accounts.SerialiseV3(&acc),
+		txNum1,
+		prev,
+	))
+
+	root1, err := domains1.ComputeCommitment(
+		ctx,
+		rwTx1,
+		true,
+		block1,
+		txNum1,
+		"",
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, root1)
+
+	require.NoError(t, domains1.Flush(ctx, rwTx1))
+	domains1.Close()
+	require.NoError(t, rwTx1.Commit())
+
+	rwTx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx2.Rollback()
+
+	state1, _, err := rwTx2.GetLatest(
+		kv.CommitmentDomain,
+		commitmentdb.KeyCommitmentState,
+		kv.GetLatestOptions{},
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(state1), 16)
+
+	storedTx1, storedBlock1 := commitmentdb.DecodeTxBlockNums(state1)
+
+	require.Equal(t, block1, storedBlock1)
+	require.Equal(t, txNum1, storedTx1)
+
+	// GetLatest may return transaction-backed memory. Preserve the serialized
+	// trie payload before committing and reopening the database transaction.
+	trieState1 := bytes.Clone(state1[16:])
+
+	domains2, err := execctx.NewSharedDomains(
+		ctx,
+		rwTx2,
+		log.New(),
+	)
+	require.NoError(t, err)
+
+	// Deliberately perform NO DomainPut/DomainDel calls here.
+
+	root2, err := domains2.ComputeCommitment(
+		ctx,
+		rwTx2,
+		true,
+		block2,
+		txNum2,
+		"",
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, root2)
+	require.Equal(t, root1, root2)
+
+	require.NoError(t, domains2.Flush(ctx, rwTx2))
+	domains2.Close()
+	require.NoError(t, rwTx2.Commit())
+
+	rwTx3, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx3.Rollback()
+
+	state2, _, err := rwTx3.GetLatest(
+		kv.CommitmentDomain,
+		commitmentdb.KeyCommitmentState,
+		kv.GetLatestOptions{},
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(state2), 16)
+
+	storedTx2, storedBlock2 := commitmentdb.DecodeTxBlockNums(state2)
+
+	require.Equal(t, block2, storedBlock2)
+	require.Equal(t, txNum2, storedTx2)
+	require.Equal(t, trieState1, state2[16:])
 }

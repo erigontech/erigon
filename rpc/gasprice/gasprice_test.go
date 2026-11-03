@@ -269,6 +269,10 @@ func (m *mockOracleBackend) HeaderByNumber(_ context.Context, number rpc.BlockNu
 	return header, nil
 }
 
+func (m *mockOracleBackend) LatestHead(context.Context) (uint64, common.Hash, error) {
+	return m.head.Number.Uint64(), m.head.Hash(), nil
+}
+
 func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber) (*types.Block, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -654,6 +658,25 @@ func TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, uint64(common.GWei/1000), got.Uint64(),
 		"empty-block fallback must be GWei/1000 to match Geth's default start price")
+}
+
+// TestSuggestTipCap_CachedHeadReadsNoHeader pins that a request served from the
+// tip cache identifies the head without reading its header.
+func TestSuggestTipCap_CachedHeadReadsNoHeader(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+
+	backend := &mockOracleBackend{head: head}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), nil, log.New())
+
+	cold, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	backend.headerCalls.Store(0)
+
+	cached, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, cold, cached)
+	require.Zero(t, backend.headerCalls.Load(), "a cached request must not read the head header")
 }
 
 // TestSuggestTipCap_ContextCancelled verifies that a cancelled caller context is

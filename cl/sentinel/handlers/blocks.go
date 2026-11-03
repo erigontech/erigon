@@ -17,11 +17,14 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -37,9 +40,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return err
 	}
 
-	// Consume additional rate-limit tokens proportional to the requested block count.
+	if req.StartSlot+req.Count < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
+
+	// Consume additional rate-limit tokens proportional to the blocks we may serve.
 	// The wrapper already consumed 1 token for admission.
-	if cost := min(int(req.Count), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := int(min(req.Count, MaxRequestsBlocks)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -49,10 +56,17 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	written := uint64(0)
-	for slot := req.StartSlot; slot < req.StartSlot+MaxRequestsBlocks; slot++ {
+	// Serve only blocks in [start_slot, start_slot+count): empty slots are left out, not replaced by
+	// later blocks. Search up to MAX_REQUEST_BLOCKS_DENEB slots and answer with at most
+	// MaxRequestsBlocks blocks; the spec allows a response with fewer blocks than requested.
+	endSlot := req.StartSlot + min(req.Count, c.beaconConfig.MaxRequestBlocksDeneb)
+	written := 0
+	for slot := req.StartSlot; slot < endSlot && written < MaxRequestsBlocks; slot++ {
 		block, err := c.beaconDB.ReadBlockBySlot(c.ctx, tx, slot)
 		if err != nil {
+			if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+				break
+			}
 			return err
 		}
 		if block == nil {
@@ -76,9 +90,6 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 		written++
-		if written >= req.Count {
-			break
-		}
 	}
 
 	return nil
@@ -118,6 +129,9 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	var block *cltypes.SignedBeaconBlock
 	req.Range(func(index int, blockRoot common.Hash, length int) bool {
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+			block, err = nil, nil
+		}
 		if err != nil {
 			return false
 		}

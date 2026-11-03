@@ -68,7 +68,8 @@ func TestEthSubscribe(t *testing.T) {
 	onNewSnapshot := sync.OnceFunc(subscriptionReadyWg.Done)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait() // This is needed *before* inserting the blocks, which sends NEW_HEADER events
-	newHeads, id := ff.SubscribeNewHeads(16, "")
+	newHeads, id, err := ff.SubscribeNewHeads(16, "")
+	require.NoError(t, err)
 	defer ff.UnsubscribeHeads(id)
 	highestSeenHeader := chain.TopBlock.NumberU64()
 	err = m.InsertChain(chain)
@@ -134,7 +135,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 // pointer receiver or a renamed method fails here instead of sending {} to every subscriber.
 var (
 	_ interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
+		MarshalFastJSONTo(*jsonstream.Stream) error
 	} = sharedJSON[*types.Header, *types.Header]{}
 	_ interface{ LocalValue() any } = sharedJSON[*types.Header, *types.Header]{}
 )
@@ -154,7 +155,7 @@ func TestSharedJSONEncodesTheValue(t *testing.T) {
 // shows which one ran.
 type fastOnly struct{}
 
-func (fastOnly) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (fastOnly) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteRaw(`"fast"`)
 	return nil
 }

@@ -237,8 +237,7 @@ func BenchmarkHeaderMarshalFastJSONTo(b *testing.B) {
 	for b.Loop() {
 		rec.Body.Reset()
 		s := jsonstream.Get(rec)
-		rs := jsonstream.NewLazyFieldStream(s, "result", false)
-		if err := h.MarshalFastJSONTo(rs.Open()); err != nil {
+		if err := h.MarshalFastJSONTo(s); err != nil {
 			b.Fatal(err)
 		}
 		if err := s.Flush(); err != nil {

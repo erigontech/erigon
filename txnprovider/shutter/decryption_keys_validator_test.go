@@ -20,10 +20,12 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -516,10 +518,10 @@ func TestDecryptionKeysValidators(t *testing.T) {
 					TxnPointer:    txnPointer,
 					Slot:          slot,
 					SignerIndices: signerIndices,
-					Signatures:    maliciousSigs,
+					Signatures:    sigs,
 				}),
 			),
-			slotCalculator: testhelpers.MockSlotCalculatorCreator(),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(testhelpers.WithCalcCurrentSlotMockResult(slot)),
 			eonTracker: testhelpers.MockEonTrackerCreator(
 				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
 				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
@@ -527,6 +529,56 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			wantErr:               shutter.ErrInvalidKey,
 			wantValidationResult:  pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{"rejecting decryption keys msg due to", "invalid key: ip=0x"},
+		},
+		{
+			name:   "slot checked before keys",
+			config: config,
+			msg: testhelpers.MockDecryptionKeysMsg(
+				shutter.DecryptionKeysTopic,
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+					Version:       shutterproto.EnvelopeVersion,
+					InstanceId:    instanceId,
+					EonIndex:      eonIndex,
+					Keys:          maliciousKeys,
+					TxnPointer:    txnPointer,
+					Slot:          6334,
+					SignerIndices: signerIndices,
+					Signatures:    sigs,
+				}),
+			),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(testhelpers.WithCalcCurrentSlotMockResult(slot)),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
+			),
+			wantErr:               shutter.ErrSlotInThePast,
+			wantValidationResult:  pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{"rejecting decryption keys msg due to", "slot in the past: msgSlot=6334, currentSlot=6336"},
+		},
+		{
+			name:   "signatures checked before keys",
+			config: config,
+			msg: testhelpers.MockDecryptionKeysMsg(
+				shutter.DecryptionKeysTopic,
+				testhelpers.TestMustMockDecryptionKeysEnvelopeData(t, testhelpers.MockDecryptionKeysEnvelopeDataOptions{
+					Version:       shutterproto.EnvelopeVersion,
+					InstanceId:    instanceId,
+					EonIndex:      eonIndex,
+					Keys:          maliciousKeys,
+					TxnPointer:    txnPointer,
+					Slot:          slot,
+					SignerIndices: signerIndices,
+					Signatures:    maliciousSigs,
+				}),
+			),
+			slotCalculator: testhelpers.MockSlotCalculatorCreator(testhelpers.WithCalcCurrentSlotMockResult(slot)),
+			eonTracker: testhelpers.MockEonTrackerCreator(
+				testhelpers.WithCurrentEonMockResult(testhelpers.CurrentEonMockResult{Eon: eon, Ok: true}),
+				testhelpers.WithRecentEonMockResult(testhelpers.RecentEonMockResult{Eon: eon, Ok: true}),
+			),
+			wantErr:               shutter.ErrInvalidSignature,
+			wantValidationResult:  pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{"rejecting decryption keys msg due to", "invalid signature: i=0, slot=6336, eon=76"},
 		},
 		{
 			name:   "accept valid msg",
@@ -636,4 +688,22 @@ func (tc decryptionKeysValidationTestCase) testExtendedValidator(t *testing.T) {
 		tc.wantValidationLogMsgs,
 		logHandler.FormattedRecords(),
 	)
+}
+
+func TestPubSubDecryptionKeysSourceRunWithUnreachableBootstrapNodes(t *testing.T) {
+	t.Parallel()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	config := shuttercfg.P2pConfig{
+		PrivateKey: privKey,
+		BootstrapNodes: []string{
+			"/ip4/127.0.0.1/tcp/1/p2p/12D3KooWSdm5guPBdn8DSaBphVBzUUgPLg9sZLnazEUrcbtLy254",
+			"/ip4/127.0.0.1/tcp/1/p2p/12D3KooWPP6bp2PJQR8rUvG1SD4qNH4WFrKve6DMgWThyKxwNbbH",
+		},
+	}
+	source := shutter.NewPubSubDecryptionKeysSource(testlog.Logger(t, log.LvlCrit), config, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.ErrorContains(t, source.Run(ctx), "failed to connect to any bootstrap node")
 }

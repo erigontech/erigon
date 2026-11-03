@@ -491,21 +491,6 @@ func TestBodyStorage(t *testing.T) {
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1); entry == nil {
-		// if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
-		t.Fatalf("Stored body RLP not found")
-	} else {
-		bodyRlp, err := rlp.EncodeToBytes(entry)
-		if err != nil {
-			log.Error("ReadBodyRLP failed", "err", err)
-		}
-		hasher := keccak.NewFastKeccak()
-		_, _ = hasher.Write(bodyRlp)
-
-		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
-			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
-		}
-	}
 	// Delete the body and verify the execution
 	rawdb.DeleteBody(tx, hash, 1)
 	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 1); entry != nil {
@@ -617,17 +602,17 @@ func TestBlockStorage(t *testing.T) {
 
 	// prune: [1: N)
 	var deleted int
-	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
+	deleted, err = bw.PruneBlocks(tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	deleted, err = bw.PruneBlocks(ctx, tx, 1, 1)
+	deleted, err = bw.PruneBlocks(tx, 1, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	deleted, err = bw.PruneBlocks(ctx, tx, 2, 1)
+	deleted, err = bw.PruneBlocks(tx, 2, 1)
 	require.NoError(err)
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
@@ -907,6 +892,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteHeader(tx, header))
 	// Insert the body that corresponds to the receipts
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(rawdb.AppendCanonicalTxNums(tx, 1))
 	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	var txNum uint64
@@ -974,6 +960,7 @@ func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
 	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	badReceipt := &types.Receipt{
@@ -1025,6 +1012,7 @@ func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
 	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
 
 	receipt1 := &types.Receipt{
@@ -1184,17 +1172,17 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 	// prune: [1: N)
 	var deleted int
-	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
+	deleted, err = bw.PruneBlocks(tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	deleted, err = bw.PruneBlocks(ctx, tx, 1, 1)
+	deleted, err = bw.PruneBlocks(tx, 1, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.NotNil(entry)
-	deleted, err = bw.PruneBlocks(ctx, tx, 2, 1)
+	deleted, err = bw.PruneBlocks(tx, 2, 1)
 	require.NoError(err)
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())

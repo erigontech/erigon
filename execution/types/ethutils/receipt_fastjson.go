@@ -25,7 +25,7 @@ import (
 // however the element is written.
 type RPCReceipts []*RPCReceipt
 
-func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	if rs == nil {
 		w.WriteNil()
 		return nil

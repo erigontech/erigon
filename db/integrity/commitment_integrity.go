@@ -1273,7 +1273,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 		var checkErr error
 		if startTxNum == 0 {
 			// Base file: forward check (commitment refs count <= domain entries count)
-			checkErr = checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
+			checkErr = checkStateCorrespondenceBase(ctx, file, failFast, logger)
 		} else {
 			// Non-base file: reverse check (every domain key is in commitment refs)
 			// Include the next commitment file's refs to handle step boundary effects:
@@ -1290,7 +1290,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 					prevFiles = append(prevFiles, files[j])
 				}
 			}
-			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, stepSize, failFast, logger)
+			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, failFast, logger)
 		}
 		if checkErr != nil {
 			if !errors.Is(checkErr, ErrIntegrity) {
@@ -1311,7 +1311,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 // checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
 // branches reference ALL keys in the trie, and the accounts/storage files contain
 // all those keys. Forward check: commitment ref count <= domain entry count.
-func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -1515,7 +1515,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
 		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
-		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		hashErr := checkHashVerification(ctx, file, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
 		}
@@ -1532,7 +1532,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 //
 // Approach: walk commitment branches → write all extracted plain keys to temp files →
 // sort+dedup → merge-join with domain .kv files (which are also sorted by key).
-func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile, nextFile state.VisibleFile, prevFiles []state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile, nextFile state.VisibleFile, prevFiles []state.VisibleFile, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -1701,14 +1701,14 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	slices.SortFunc(prevCommitmentPaths, func(a, b string) int {
 		return cmp.Compare(b, a)
 	})
-	accMissing, err := reverseCheckDomainKeys(ctx, accDecomp, kv.AccountsDomain, accCollector, prevCommitmentPaths, fileName, failFast, logger)
+	accMissing, err := reverseCheckDomainKeys(ctx, accDecomp, kv.AccountsDomain, accCollector, prevCommitmentPaths, fileName, logger)
 	if err != nil && !errors.Is(err, ErrIntegrity) {
 		return err
 	}
 	if err != nil {
 		integrityErr = err
 	}
-	stoMissing, err := reverseCheckDomainKeys(ctx, stoDecomp, kv.StorageDomain, stoCollector, prevCommitmentPaths, fileName, failFast, logger)
+	stoMissing, err := reverseCheckDomainKeys(ctx, stoDecomp, kv.StorageDomain, stoCollector, prevCommitmentPaths, fileName, logger)
 	if err != nil && !errors.Is(err, ErrIntegrity) {
 		return err
 	}
@@ -1725,7 +1725,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
 		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
-		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		hashErr := checkHashVerification(ctx, file, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
 		}
@@ -1745,7 +1745,7 @@ type missingEntry struct {
 // prevCommitmentPaths are commitment file paths for previous steps (newest-first).
 // When a key is missing from refs, its value is compared with previous domain files
 // to detect no-op writes (same value recorded redundantly).
-func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domain kv.Domain, sortedKeys *etl.Collector, prevCommitmentPaths []string, commitFileName string, failFast bool, logger log.Logger) (missing uint64, retErr error) {
+func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domain kv.Domain, sortedKeys *etl.Collector, prevCommitmentPaths []string, commitFileName string, logger log.Logger) (missing uint64, retErr error) {
 	compression := statecfg.Schema.GetDomainCfg(domain).Compression
 	reader := seg.NewReader(decomp.MakeGetter(), compression)
 	reader.Reset(0) // start from beginning
@@ -2042,7 +2042,7 @@ var valMapPool = sync.Pool{New: func() any { return make(map[string][]byte, 8) }
 // matches the hash recomputed from the actual domain values. Uses a producer-consumer
 // pattern: 1 producer reads the commitment file sequentially, N workers each open their
 // own domain readers and verify hashes in parallel.
-func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, numWorkers int, logger log.Logger) error {
+func checkHashVerification(ctx context.Context, file state.VisibleFile, failFast bool, numWorkers int, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 

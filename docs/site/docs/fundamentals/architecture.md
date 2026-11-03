@@ -92,7 +92,7 @@ Erigon stores everything under a single **datadir**. Two kinds of files live the
 
 This split is what enables Erigon's small disk footprint relative to other archive nodes:
 
-- **`chaindata/` is small (~22 GB on Ethereum mainnet, rarely more than 25 GB)** because it only holds latest state and recently-updated values.
+- **`chaindata/` is small (~22 GB on Ethereum mainnet, rarely more than 25 GB)** because it only holds the latest state and recently-updated values.
 - **`snapshots/` is large but content-addressed.** Once a `.seg` file is finalised it is the *same file* on every Erigon node in the world — meaning it can be distributed via BitTorrent and verified by hash. There is no rewrite-amplification penalty for keeping history.
 
 For the exact directory layout, file sizes on mainnet, and how to split storage across fast/slow disks, see [Database](database) and [Optimizing Storage](optimizing-storage).
@@ -110,7 +110,7 @@ See [Caplin](caplin) for full details.
 Where most clients store account state in a Merkle Patricia Trie *inside* the database, Erigon stores it as **flat key-value pairs** and computes the trie root incrementally as part of Execution. Trade-off:
 
 - **Read path is direct** — `getAccount(addr)` is a single key lookup, not a multi-level trie traversal.
-- **Write path defers trie hashing** — updates accumulate in the KV store and the trie is rebuilt only when state-root computation requires it.
+- **Write path defers trie hashing** — updates accumulate in the key-value (KV) store and the trie is rebuilt only when state-root computation requires it.
 
 This is the single largest reason Erigon's RPC performance stays flat under load: there is no background trie compaction that can spike CPU during an `eth_call` burst.
 

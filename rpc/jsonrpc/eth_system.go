@@ -37,10 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -92,22 +92,20 @@ type CapabilitiesResult struct {
 	StateProofs CapabilityField `json:"stateproofs"`
 }
 
-// stricterRetention returns the policy that bounds availability more and
-// widerRetention the one that bounds it less. The oldest blocks alone cannot rank
-// them: a window that has not started pruning reports zero like keep-all, so a tie
-// there is resolved on the retention the policies will apply.
+// Physical availability does not rank deletion policies: a wider configured window
+// can start later on disk while it refills. Combine the boundaries and policies separately.
 func stricterRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
-	if oldestA > oldestB || (oldestA == oldestB && retentionBlocks(a) <= retentionBlocks(b)) {
-		return oldestA, a
+	if retentionBlocks(b) < retentionBlocks(a) {
+		a = b
 	}
-	return oldestB, b
+	return max(oldestA, oldestB), a
 }
 
 func widerRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
-	if oldestA < oldestB || (oldestA == oldestB && retentionBlocks(a) >= retentionBlocks(b)) {
-		return oldestA, a
+	if retentionBlocks(b) > retentionBlocks(a) {
+		a = b
 	}
-	return oldestB, b
+	return min(oldestA, oldestB), a
 }
 
 // retentionBlocks measures a policy by the window it keeps, every sentinel counting
@@ -173,17 +171,26 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if err != nil {
 		return nil, err
 	}
-	onDiskFloors, err := api.historyStartBlocks(ctx, tx, headBlock)
+	onDiskFloors, commitmentFloors, err := api.historyAndCommitmentStartBlocks(ctx, tx, headBlock, keepExecutionProofs)
 	if err != nil {
 		return nil, err
 	}
 	stateOldest = max(stateOldest, onDiskFloors.postState)
-	historyOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.wholeBlock)
+	receiptHistoryOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.wholeBlock)
+	receiptHistoryAmount := pruneMode.History
 	replayOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.replay)
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
-		stateproofs = avail(stateOldest, pruneMode.History)
+		// eth_getProof gates commitment history by its on-disk start, not its
+		// configured window. Report the tighter deletion policy without moving that boundary.
+		proofAmount := pruneMode.CommitmentHistoryAmount()
+		if retentionBlocks(pruneMode.History) < retentionBlocks(proofAmount) {
+			proofAmount = pruneMode.History
+		}
+		stateproofs = avail(max(stateOldest, commitmentFloors.postState), proofAmount)
+		receiptHistoryOldest = max(receiptHistoryOldest, commitmentFloors.wholeBlock)
+		receiptHistoryAmount = proofAmount
 	} else {
 		stateproofs = CapabilityField{Disabled: true}
 	}
@@ -211,17 +218,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, replayOldest, pruneMode.History)
 		}
 	}
-	// Below Byzantium the receipt carries a post state the cache does not store, so
-	// those blocks are re-executed and reach only as far as history. This mirrors
-	// postStateCalculated, down to the shape that computes the post state at all and
-	// to a chain that never reaches the fork.
+	// Pre-Byzantium receipt roots need state history and, when enabled, commitment
+	// history from the block's initial system transaction. The persistent receipt
+	// cache does not store these roots.
 	byzantium := uint64(math.MaxUint64)
 	if chainConfig.ByzantiumBlock != nil {
 		byzantium = *chainConfig.ByzantiumBlock
 	}
 	if receipts.PostStateCalculated(chainConfig, receiptsOldest, keepExecutionProofs, api._blockReader) {
-		if historyOldest < byzantium {
-			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, historyOldest, pruneMode.History)
+		if receiptHistoryOldest < byzantium {
+			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, receiptHistoryOldest, receiptHistoryAmount)
 		} else {
 			// The fork sets a fixed availability boundary, not a rolling deletion
 			// window, so it has no retention distance of its own to report.
@@ -235,9 +241,9 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	// A log query filtered by address or topic searches LogAddrIdx and LogTopicIdx,
 	// standalone indices retired at the history cutoff whatever the receipt retention is.
-	// The field takes that stricter form: an unfiltered query reads straight from the
-	// receipts and reaches further back than advertised.
-	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, replayOldest, pruneMode.History)
+	// Logs do not need receipt post-state roots or commitment history. Unfiltered
+	// queries can reach further back when the receipt cache outlives state history.
+	logsOldest, logsAmount := stricterRetention(blocksOldest, pruneMode.Blocks, replayOldest, pruneMode.History)
 	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{
@@ -327,13 +333,17 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	}
 	defer tx.Rollback()
 	oracle := api.newGasOracle(tx)
-	tipcap, err := oracle.SuggestTipCap(ctx)
+	tipcap, number, hash, err := oracle.SuggestTipCapAtHead(ctx)
 	if err != nil {
 		return nil, err
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+	head, err := api.headerByHashAndNumber(ctx, tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	if head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -365,7 +375,7 @@ type feeHistoryResult struct {
 }
 
 // MarshalFastJSONTo writes r in encoding/json's field order and number forms.
-func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if r == nil {
 		s.WriteNil()
 		return nil
@@ -398,11 +408,11 @@ func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	return nil
 }
 
-func writeU256s(s *jsonstream.StackStream, vs *[]hexutil.U256) {
+func writeU256s(s *jsonstream.Stream, vs *[]hexutil.U256) {
 	jsonstream.ArrayValue(s, *vs, writeU256)
 }
 
-func writeU256(s *jsonstream.StackStream, v *hexutil.U256) { s.WriteQuotedText(v) }
+func writeU256(s *jsonstream.Stream, v *hexutil.U256) { s.WriteQuotedText(v) }
 
 func allFinite(fs []float64) bool {
 	for _, f := range fs {
@@ -415,7 +425,7 @@ func allFinite(fs []float64) bool {
 
 // writeJSONFloat writes f as encoding/json does: 'e' notation outside [1e-6, 1e21), and no
 // leading zero in a negative exponent.
-func writeJSONFloat(s *jsonstream.StackStream, f *float64) {
+func writeJSONFloat(s *jsonstream.Stream, f *float64) {
 	format := byte('f')
 	if abs := math.Abs(*f); abs != 0 && (abs < 1e-6 || abs >= 1e21) {
 		format = 'e'
@@ -458,7 +468,10 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -484,7 +497,10 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header, err := api.currentHeader(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if header == nil {
 		return nil, nil
 	}
@@ -784,6 +800,22 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 
+func (b *GasPriceOracleBackend) LatestHead(ctx context.Context) (uint64, common.Hash, error) {
+	tx := b.baseApi.filters.WithOverlay(b.tx)
+	number, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	hash, ok, err := b.baseApi._blockReader.CanonicalHash(ctx, tx, number)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	if !ok {
+		return 0, common.Hash{}, rpc.BlockNotFoundErr{BlockId: rpc.LatestBlockNumber.String()}
+	}
+	return number, hash, nil
+}
+
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	available, err := b.isBlockAvailable(ctx, number.Uint64())
 	if err != nil || !available {
@@ -793,8 +825,16 @@ func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.Bl
 }
 
 func (b *GasPriceOracleBackend) isBlockAvailable(ctx context.Context, number uint64) (bool, error) {
-	// Resolve the floor once per backend to avoid repeated availability lookups.
-	// Local files are pinned, but remote lookups use a separate server-side view.
+	// Genesis can survive below the contiguous floor; use its single-block gate.
+	if number == 0 {
+		err := b.baseApi.checkPruneBlocks(ctx, b.tx, number)
+		if errors.Is(err, state.ErrPruned) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	// A fork can pin different files even when its canonical blocks match.
+	// Remote lookups use separate server-side views and remain best effort.
 	b.blocksFloorOnce.Do(func() {
 		head, err := rpchelper.GetLatestBlockNumber(b.tx)
 		if err != nil {

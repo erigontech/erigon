@@ -358,8 +358,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	// I'm kinda curious... but it was false before.
-	d.InitBackgroundLogger(true)
+	d.InitBackgroundLogger()
 	if seedbox {
 		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
@@ -414,8 +413,8 @@ var manifestCmd = &cobra.Command{
 	Use:     "manifest",
 	Example: "go run ./cmd/downloader manifest --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := debug.SetupCobra(cmd, "downloader")
-		if err := manifest(cmd.Context(), logger); err != nil {
+		debug.SetupCobra(cmd, "downloader")
+		if err := manifest(); err != nil {
 			log.Error(err.Error())
 		}
 		return nil
@@ -589,7 +588,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
 }
 
-func manifest(ctx context.Context, logger log.Logger) error {
+func manifest() error {
 	dirs := datadir.New(cobraFlagValues.datadir)
 
 	files, err := downloader.SeedableFiles(dirs, chain, true)

@@ -9,7 +9,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields Log declares, in that order.
-func (x *Log) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *Log) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -23,7 +23,7 @@ func (x *Log) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *Log) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *Log) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Data(s, "address", x.Address[:])
 	ethjson.DataList(s, "topics", x.Topics)
 	ethjson.Data(s, "data", x.Data[:])

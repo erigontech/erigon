@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -160,6 +162,15 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 		}
 	}
 	return acc, err
+}
+
+func (s *RecordingState) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (s *RecordingState) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (s *RecordingState) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -539,7 +550,7 @@ type ExecutionWitnessResult struct {
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
-func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if m == nil {
 		s.WriteNil()
 		return nil
@@ -561,7 +572,7 @@ func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) er
 	return nil
 }
 
-func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
+func writeHexElem(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {
@@ -623,6 +634,8 @@ func (api *BaseAPI) buildAccessedState(
 	// Create the in-block state with the recording state as reader
 	ibs := state.New(recordingState)
 	defer ibs.Close()
+	transactions.VersionedBlockState(ibs)
+	ibs.SetTxContext(blockNum, -1)
 
 	// Get header for block context
 	header := block.HeaderNoCopy()
@@ -651,12 +664,15 @@ func (api *BaseAPI) buildAccessedState(
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 	}
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -678,7 +694,7 @@ func (api *BaseAPI) buildAccessedState(
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
 
-		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+		if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 			return nil, nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -686,6 +702,7 @@ func (api *BaseAPI) buildAccessedState(
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
+	ibs.SetTxContext(blockNum, len(block.Transactions()))
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
@@ -698,7 +715,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+	if err = ethapi.CommitCallState(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -755,14 +772,21 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+	build := func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+	}
+	if api.witnessCache == nil || resolvedMode != witnessModeLegacy {
+		return build(ctx)
+	}
+	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build, nil)
 }
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
-// is enabled and holds an exact (num, hash) match for the requested block. A nil
-// cache, a canonical request, an unresolvable block, or a miss all report hit=false
-// so the caller falls through to the unchanged on-demand build (or, in cache-only mode,
-// to the typed out-of-window error). A by-hash request whose block number is no longer
+// is enabled and holds an exact (num, hash) match for the requested block. On a
+// cache-only node a miss first waits for a running build of that hash. A nil cache,
+// a canonical request, an unresolvable block, or a miss all report hit=false so the
+// caller falls through to the on-demand build (or, in cache-only mode, to the typed
+// out-of-window error). A by-hash request whose block number is no longer
 // canonical never serves its still-resident entry; reorgedAway then flags the distinct
 // orphan case so the cache-only caller can report it separately from a plain miss.
 func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
@@ -795,6 +819,12 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 		}
 	}
 	result, ok := api.witnessCache.Get(hash)
+	if !ok && api.witnessCache.CacheOnly() {
+		if result, ok = api.witnessCache.awaitBuild(ctx, hash); ok {
+			witnessCacheAwaitCounter.Inc()
+			return result, true, false
+		}
+	}
 	if ok {
 		witnessCacheHitCounter.Inc()
 	} else {
@@ -968,7 +998,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// canonical omits it. Added after stateless verification, which rejects the bare node.
 	if mode == witnessModeLegacy {
 		for _, node := range result.State {
-			if bytes.Contains(node, trie.EmptyRoot[:]) {
+			if bytes.Contains(node, empty.RootHash[:]) {
 				result.State = append(result.State, hexutil.Bytes{0x80})
 				break
 			}
@@ -1641,6 +1671,15 @@ func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*a
 	return s.ReadAccountData(address)
 }
 
+func (s *witnessStateless) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
+	return acc != nil, err
+}
+
+func (s *witnessStateless) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(accounts.InternAddress(address))
+}
+
 func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
 	addrHash := crypto.Keccak256Hash(addr[:])
@@ -1912,7 +1951,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
@@ -2003,7 +2042,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
@@ -2042,6 +2081,8 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
+	transactions.VersionedBlockState(ibs)
+	ibs.SetTxContext(blockNum, -1)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
@@ -2057,7 +2098,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -2081,7 +2122,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		}
 
 		// Finalize tx - state changes go to the witness stateless
-		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+		if err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless); err != nil {
 			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -2089,6 +2130,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 	}
+	ibs.SetTxContext(blockNum, len(block.Transactions()))
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
 	allLogs := ibs.Logs()
@@ -2102,7 +2144,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ibs.CommitBlock(blockRules, stateless)
+	err = ethapi.CommitCallState(ibs, blockRules, stateless)
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}

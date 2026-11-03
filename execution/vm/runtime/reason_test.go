@@ -104,7 +104,7 @@ func TestCreateEmitsNonceChangeContractCreator(t *testing.T) {
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
 	defer cfg.State.Close()
 
-	_, _, _, err := Create(initCode, cfg, 0)
+	_, _, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	// Filter for NonceChangeContractCreator events.
@@ -140,7 +140,7 @@ func TestCreateEmitsNonceChangeNewContract(t *testing.T) {
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
 	defer cfg.State.Close()
 
-	_, contractAddr, _, err := Create(initCode, cfg, 0)
+	_, contractAddr, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	newContractAddr := accounts.InternAddress(contractAddr)
@@ -192,7 +192,7 @@ func TestCreateEmitsCodeChangeContractCreation(t *testing.T) {
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
 	defer cfg.State.Close()
 
-	_, contractAddr, _, err := Create(initCode, cfg, 0)
+	_, contractAddr, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	newContractAddr := accounts.InternAddress(contractAddr)
@@ -241,7 +241,7 @@ func TestCreateReasonOrdering(t *testing.T) {
 	cfg := newTestIBS(t, tracer)
 	defer cfg.State.Close()
 
-	_, _, _, err := Create(initCode, cfg, 0)
+	_, _, _, err := Create(initCode, cfg)
 	require.NoError(t, err)
 
 	expected := []event{

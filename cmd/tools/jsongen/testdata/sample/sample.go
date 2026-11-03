@@ -87,10 +87,10 @@ type Sample struct {
 // Inners is a named slice, whose emptiness len reports, so it may be omitempty.
 type Inners []Inner
 
-func (in Inners) MarshalFastJSONTo(s *jsonstream.StackStream) error { return nil }
+func (in Inners) MarshalFastJSONTo(s *jsonstream.Stream) error { return nil }
 
 // Inner writes itself, which is what an objects field needs of its type.
-func (x *Inner) MarshalFastJSONTo(s *jsonstream.StackStream) error { return nil }
+func (x *Inner) MarshalFastJSONTo(s *jsonstream.Stream) error { return nil }
 
 // writeComputedJSON stands for a value the struct does not hold, such as a header's hash.
-func (x *Sample) writeComputedJSON(s *jsonstream.StackStream) {}
+func (x *Sample) writeComputedJSON(s *jsonstream.Stream) {}

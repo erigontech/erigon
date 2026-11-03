@@ -74,7 +74,7 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(m.Ctx, tx, m.Log)
 	require.NoError(t, err)
 	defer sd.Close()
-	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(tx))
 	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), overlayLogIdx, 0, 0, firstTxNum))
 
 	events := shards.NewEvents()
@@ -127,4 +127,54 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true, true)
 	bloom := types.CreateBloom(types.Receipts{receipt})
 	require.Equal(t, &bloom, served.LogsBloom)
+}
+
+// TestGetReceiptReplayMatchesWithoutNoMaterialize pins that a replayed receipt of a contract call
+// that writes storage and emits a log is the same with CALL_NO_MATERIALIZE on and off. A fresh
+// generator and no persistent receipt cache force the replay in both modes.
+func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
+	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
+
+	signer := types.LatestSignerForChainID(nil)
+	runtime := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // SSTORE(0, 1) LOG0 STOP
+	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
+	contract := types.CreateAddress(testAddr, 0)
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+		if i == 0 {
+			txn = types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode)
+		} else {
+			txn = types.NewTransaction(block.TxNonce(testAddr), contract, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil)
+		}
+		signed, err := types.SignTx(txn, *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(signed)
+	})
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const blockNum = uint64(2)
+	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+	txNum := minTxNum + 1 // txIndex 0, past the block's system tx
+	header, txn := block.HeaderNoCopy(), block.Transactions()[0]
+
+	replay := func(noMaterialize bool) *types.Receipt {
+		dbg.CallNoMaterialize = noMaterialize
+		gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+		receipt, err := gen.GetReceipt(m.Ctx, m.ChainConfig, tx, header, txn, 0, txNum, nil)
+		require.NoError(t, err)
+		return receipt
+	}
+	nm, materialized := replay(true), replay(false)
+	require.Equal(t, types.ReceiptStatusSuccessful, materialized.Status)
+	require.Len(t, materialized.Logs, 1)
+	require.Equal(t, materialized.Status, nm.Status)
+	require.Equal(t, materialized.GasUsed, nm.GasUsed)
+	require.Equal(t, materialized.CumulativeGasUsed, nm.CumulativeGasUsed)
+	require.Equal(t, materialized.Logs, nm.Logs)
 }

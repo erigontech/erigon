@@ -15,6 +15,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -36,6 +37,7 @@ type P2PConfig struct {
 	Port          int
 	TCPPort       uint
 	QUICPort      uint
+	DisableQUIC   bool
 
 	// Optional
 	LocalIP        string
@@ -53,8 +55,13 @@ type P2PConfig struct {
 	NAT        p2pnat.Interface
 	ExternalIP net.IP // resolved from NAT at startup; set by NewP2Pmanager
 
-	MaxPeerCount       uint64
-	SubscribeAllTopics bool // When true, advertise all attnets/syncnets in ENR
+	MaxPeerCount uint64
+	// TrustedCIDRs are exempt from every per-address and per-block cap; each shares one limit, except
+	// loopback, which stays unlimited.
+	TrustedCIDRs []string
+	// DisableIPBlockLimits restores go-libp2p's default connection limits, as released.
+	DisableIPBlockLimits bool
+	SubscribeAllTopics   bool // When true, advertise all attnets/syncnets in ENR
 
 	DataDir string // persistent storage dir; used to save the node key so ENR is stable across restarts
 }
@@ -64,6 +71,7 @@ type p2pManager struct {
 	pubsub   *pubsub.PubSub
 	bwc      *metrics.BandwidthCounter
 	host     host.Host
+	gater    *Gater
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
 }
@@ -126,17 +134,22 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		host.Close()
 		return nil, fmt.Errorf("failed to bind TCP listener on port %d", cfg.TCPPort)
 	}
-	quicPort := hostQUICPort(host)
-	if quicPort == 0 {
-		host.Close()
-		return nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
-	}
 	cfg.TCPPort = tcpPort
-	cfg.QUICPort = quicPort
+	if cfg.DisableQUIC {
+		cfg.QUICPort = 0
+	} else {
+		quicPort := hostQUICPort(host)
+		if quicPort == 0 {
+			host.Close()
+			return nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
+		}
+		cfg.QUICPort = quicPort
+	}
 
 	p := p2pManager{
 		cfg:      cfg,
 		host:     host,
+		gater:    gater,
 		bwc:      bwc,
 		ethClock: ethClock,
 	}
@@ -187,6 +200,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	logger.Info("[Caplin] P2P networking started",
 		"tcp_port", cfg.TCPPort,
+		"quic_enabled", !cfg.DisableQUIC,
 		"quic_port", cfg.QUICPort,
 		"enr_quic", enrQUIC,
 		"advertised_addrs", host.Addrs())
@@ -197,6 +211,9 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 }
 
 func discoveryAndQUICPortConflict(cfg *P2PConfig) bool {
+	if cfg.DisableQUIC {
+		return false
+	}
 	if cfg.Port <= 0 || uint(cfg.Port) != cfg.QUICPort {
 		return false
 	}
@@ -248,6 +265,10 @@ func (p *p2pManager) Host() host.Host {
 	return p.host
 }
 
+func (p *p2pManager) SetDialPolicy(dialable func(peer.ID) bool) {
+	p.gater.SetDialPolicy(dialable)
+}
+
 func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {
 	return p.bwc
 }
@@ -289,12 +310,6 @@ func (p *p2pManager) setupENR() error {
 			initialAttnets.SetBitAt(uint64(i), true)
 		}
 		initialSyncnets = bitfield.Bitvector4{byte(0x0f)}
-	} else {
-		// Set a couple of subnets so peers don't see all-zeros and penalize us
-		// as a "useless peer". The VC will update subnets later via committee
-		// subscriptions; this just ensures early handshakes succeed.
-		initialAttnets.SetBitAt(0, true) // subnet 0
-		initialAttnets.SetBitAt(1, true) // subnet 1
 	}
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, initialAttnets.Bytes()))
@@ -334,29 +349,12 @@ func (p *p2pManager) updateENR() {
 	}
 }
 
-func (p *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
-	// Attestation subnets use Bitvector64 (8 bytes for 64 subnets).
-	subnetField := bitfield.NewBitvector64()
-	if err := p.udpv5.LocalNode().Node().Load(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
-		log.Error("[Sentinel] Could not load AttSubnetKey", "err", err)
-		return
+func (p *p2pManager) SetENRAttSubnets(subnets []uint64) {
+	attnets := bitfield.NewBitvector64()
+	for _, subnet := range subnets {
+		attnets.SetBitAt(subnet, true)
 	}
-	subnetField = bytes.Clone(subnetField)
-	if subnetIndex < 0 {
-		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
-		return
-	}
-	if len(subnetField) <= subnetIndex/8 {
-		log.Error("[Sentinel] Att subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
-		return
-	}
-	if on {
-		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
-	} else {
-		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
-	}
-	p.udpv5.LocalNode().Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, &subnetField))
-	log.Debug("[Sentinel] Updated att subnet", "subnetIndex", subnetIndex, "on", on)
+	p.udpv5.LocalNode().Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, attnets.Bytes()))
 }
 
 func (p *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
@@ -98,25 +99,25 @@ func logRangeLatestOnly(tx kv.Tx, crit filters.FilterCriteria) (begin, end uint6
 	if err != nil {
 		return 0, 0, err
 	}
-	begin, err = resolveLogBound(crit.FromBlock, 0, "FromBlock")
+	begin, err = resolveLogBound(crit.FromBlock, 0, latest, "FromBlock")
 	if err != nil {
 		return 0, 0, err
 	}
-	end, err = resolveLogBound(crit.ToBlock, latest, "ToBlock")
+	end, err = resolveLogBound(crit.ToBlock, latest, latest, "ToBlock")
 	if err != nil {
 		return 0, 0, err
 	}
 	return begin, end, nil
 }
 
-func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
+func resolveLogBound(bound *big.Int, def, latest uint64, name string) (uint64, error) {
 	switch {
 	case bound == nil:
 		return def, nil
 	case bound.Sign() >= 0:
 		return bound.Uint64(), nil
 	case bound.IsInt64() && bound.Int64() == int64(rpc.LatestBlockNumber):
-		return def, nil
+		return latest, nil
 	default:
 		return 0, &rpc.CustomError{Message: fmt.Sprintf("negative value for %s: %v", name, bound), Code: rpc.ErrCodeInvalidParams}
 	}
@@ -157,7 +158,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
 
@@ -208,15 +209,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		number, err := api.BaseAPI.resolveLogsBlockHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
 		}
-		if header == nil {
-			return nil, fmt.Errorf("block header not found %x", *crit.BlockHash)
-		}
-		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		begin = number
+		end = number
 	} else {
 		begin, end, err = logRangeLatestOnly(tx, crit)
 		if err != nil {
@@ -231,10 +229,27 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	// Searches the log indices and re-executes, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
-	if err != nil {
-		return nil, err
+	// A count-limited scan may finish before reaching the pruned part of its range.
+	// Keep that error for an incomplete scan: missing index entries can end it early.
+	rangeErr := api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
+	if rangeErr != nil && !errors.Is(rangeErr, state.ErrPruned) {
+		return nil, rangeErr
+	}
+	// Bounds below the retained range may have no txNum mapping. Clamp before
+	// resolving either end, so a missing end cannot fall back to the chain tip.
+	if rangeErr != nil {
+		head, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		firstAvailable, err := api.blocksAvailableFrom(ctx, tx, head)
+		if err != nil {
+			return nil, err
+		}
+		begin = max(begin, firstAvailable)
+		if begin > end {
+			return nil, rangeErr
+		}
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -260,7 +275,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			topicsMap[crit.Topics[i][j]] = struct{}{}
 		}
 	}
-	topicMap := types.BuildTopicMap(crit.Topics)
+	filter := types.NewLogFilter(crit.Addresses, crit.Topics)
 
 	// latest logs that match the filter crit
 	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Desc)
@@ -270,12 +285,18 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	var blockHash common.Hash
 	var header *types.Header
 	var logCount, blockCount, timestamp uint64
+	checkRange := api.checkPruneBlocksRange
+	// Block-count queries must not return a partial block when older
+	// log-index entries are missing.
+	if logOptions.BlockCount != 0 {
+		checkRange = api.checkBlockHistoryRangeAvailable
+	}
 
 	for it.HasNext() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -288,6 +309,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
 				return rpcLogs, nil
 			}
+			if rangeErr != nil {
+				if err := checkRange(ctx, tx, blockNum, end); err != nil {
+					return nil, err
+				}
+			}
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -299,6 +325,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			timestamp = header.Time
 			blockCount++
 		}
+		if isSystemTxn {
+			continue
+		}
 		var logIndex uint
 		var blockLogs types.Logs
 
@@ -307,9 +336,14 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, err
 		}
 		if !ok {
-			continue
+			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 		}
 
+		if rangeErr != nil && logOptions.LogCount != 0 {
+			if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
+				return nil, err
+			}
+		}
 		err = exec.ExecTxn(txNum, txIndex, txn, true)
 		if err != nil {
 			return nil, err
@@ -329,7 +363,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if logOptions.IgnoreTopicsOrder {
 			filtered = blockLogs.ContainingTopics(addrMap, topicsMap, maxLogCount)
 		} else {
-			filtered = blockLogs.FilterWithTopicMap(addrMap, topicMap, maxLogCount)
+			filtered = blockLogs.FilterWith(filter, maxLogCount)
 		}
 		if len(filtered) == 0 {
 			continue
@@ -369,6 +403,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
 			return rpcLogs, nil
 		}
+	}
+	if rangeErr != nil && (logOptions.BlockCount == 0 || blockCount < logOptions.BlockCount) {
+		return nil, rangeErr
 	}
 	return rpcLogs, nil
 }

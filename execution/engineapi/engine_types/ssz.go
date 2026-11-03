@@ -377,10 +377,12 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
-		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 	default: // GloasVersion+
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
-		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 		slotNumber := hexutil.Uint64(fields.slotNumber)
 		a.SlotNumber = &slotNumber
 		tgl := hexutil.Uint64(fields.targetGasLimit)

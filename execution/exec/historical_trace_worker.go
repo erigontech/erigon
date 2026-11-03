@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type HistoricalTraceWorker struct {
@@ -151,6 +152,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	rw.vmCfg.Tracer = nil
 
 	rw.ibs.Reset()
+	transactions.VersionedCallState(rw.ibs)
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
 
 	ibs.SetTrace(txTask.Trace)
@@ -196,7 +198,14 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			result.Err = ibs.FinalizeTx(rules, noop)
 		}
 	case txTask.IsBlockEnd():
-		// this is handled by the reducer in process results
+		if txTask.BlockNumber() == 0 {
+			break
+		}
+		result.TraceTos = map[accounts.Address]struct{}{}
+		result.TraceTos[accounts.InternAddress(header.Coinbase)] = struct{}{}
+		for _, uncle := range txTask.Uncles {
+			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
+		}
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
@@ -225,9 +234,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 				return err
 			}
 			txContext := protocol.NewEVMTxContext(msg)
-			if rw.vmCfg.TraceJumpDest {
-				txContext.TxHash = txn.Hash()
-			}
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
 			if hooks != nil && hooks.OnTxStart != nil {
 				hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
@@ -482,6 +488,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					reader := state.NewHistoryReaderV3(tx, outputTxNum)
 					ibs := state.New(reader)
 					defer ibs.Close()
+					transactions.VersionedCallState(ibs)
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})

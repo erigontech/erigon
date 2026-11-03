@@ -138,6 +138,14 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
 
+	ownerCheckFile := filepath.Join(tmpDir, ".owner-check")
+	if err := os.WriteFile(ownerCheckFile, nil, 0o600); err != nil {
+		return err
+	}
+	if err := restoreOwner(before, ownerCheckFile); err != nil {
+		return fmt.Errorf("ownership check before copying: %w", err)
+	}
+
 	start := time.Now()
 	src, err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger)
 	if err != nil {

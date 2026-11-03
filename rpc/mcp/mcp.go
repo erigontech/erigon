@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -59,6 +60,18 @@ func NewErigonMCPServer(client rpcCaller, logDir string, metricsEnabled bool) *E
 	e.registerResources()
 
 	return e
+}
+
+// KeepNamespaces drops the JSON-RPC tools outside the served namespaces: their
+// calls could only return "method not found".
+func (e *ErigonMCPServer) KeepNamespaces(served map[string]string) {
+	var drop []string
+	for _, c := range rpcToolCalls() {
+		if ns, _, _ := strings.Cut(c.name, "_"); served[ns] == "" {
+			drop = append(drop, c.name)
+		}
+	}
+	e.mcpServer.DeleteTools(drop...)
 }
 
 // Serve starts MCP server in stdio mode with its own signal handling.

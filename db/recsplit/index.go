@@ -17,13 +17,11 @@
 package recsplit
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -32,7 +30,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -536,47 +533,6 @@ func (idx *Index) ExtractOffsets() map[uint64]uint64 {
 		pos += idx.bytesPerRec
 	}
 	return m
-}
-
-func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error {
-	// New max offset
-	var maxOffset uint64
-	for _, offset := range m {
-		if offset > maxOffset {
-			maxOffset = offset
-		}
-	}
-	bytesPerRec := common.BitLenToByteLen(bits.Len64(maxOffset))
-	var numBuf [8]byte
-	// Write baseDataID
-	binary.BigEndian.PutUint64(numBuf[:], idx.baseDataID)
-	if _, err := w.Write(numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-
-	// Write number of keys
-	binary.BigEndian.PutUint64(numBuf[:], idx.keyCount)
-	if _, err := w.Write(numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-	// Write number of bytes per index record
-	if err := w.WriteByte(byte(bytesPerRec)); err != nil {
-		return fmt.Errorf("write bytes per record: %w", err)
-	}
-	pos := 1 + 8 + idx.bytesPerRec
-	for rec := uint64(0); rec < idx.keyCount; rec++ {
-		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-		pos += idx.bytesPerRec
-		binary.BigEndian.PutUint64(numBuf[:], m[offset])
-		if _, err := w.Write(numBuf[8-bytesPerRec:]); err != nil {
-			return err
-		}
-	}
-	// Write the rest as it is (TODO - wrong for indices with enums)
-	if _, err := w.Write(idx.data[16+1+int(idx.keyCount)*idx.bytesPerRec:]); err != nil {
-		return err
-	}
-	return nil
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.

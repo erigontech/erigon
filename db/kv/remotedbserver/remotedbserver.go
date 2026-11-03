@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -66,7 +67,9 @@ const MaxTxTTL = 60 * time.Second
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
 // 7.2.0 - Add MaxPrunableStepsBacklog
 // 7.3.0 - Remove HasPrefix from the remote KV service
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 0}
+// 7.3.1 - Include pinned history-file generations in transaction replies
+// 7.3.2 - Add IndexJoin
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 2}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -213,21 +216,42 @@ func (s *KvServer) with(id uint64, f func(kv.TemporalTx) error) error {
 	return f(tx.TemporalTx)
 }
 
+type txViewStream struct {
+	remoteproto.KV_TxServer
+	viewID                 uint64
+	historyFilesGeneration *uint64
+}
+
+func (s *txViewStream) setView(tx kv.TemporalTx) {
+	s.viewID = tx.ViewID()
+	s.historyFilesGeneration = nil
+	if files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 }); ok {
+		s.historyFilesGeneration = new(files.HistoryFilesGeneration())
+	}
+}
+
+func (s *txViewStream) Send(pair *remoteproto.Pair) error {
+	pair.ViewId = s.viewID
+	pair.HistoryFilesGeneration = s.historyFilesGeneration
+	return s.KV_TxServer.Send(pair)
+}
+
 func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
+	viewStream := &txViewStream{KV_TxServer: stream}
+	stream = viewStream
 	id, errBegin := s.begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
 	defer s.rollback(id)
 
-	var viewID uint64
 	if err := s.with(id, func(tx kv.TemporalTx) error {
-		viewID = tx.ViewID()
+		viewStream.setView(tx)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("kvserver: %w", err)
 	}
-	if err := stream.Send(&remoteproto.Pair{ViewId: viewID, TxId: id}); err != nil {
+	if err := stream.Send(&remoteproto.Pair{TxId: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -269,6 +293,7 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				return err
 			}
 			if err := s.with(id, func(tx kv.TemporalTx) error {
+				viewStream.setView(tx)
 				for _, c := range cursors { // restore all cursors position
 					var err error
 					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
@@ -625,7 +650,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 			limit--
 
 			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				next, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -637,6 +666,82 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 		return nil, err
 	}
 	return reply, nil
+}
+
+func (s *KvServer) IndexJoin(ctx context.Context, req *remoteproto.IndexJoinReq) (*remoteproto.IndexRangeReply, error) {
+	q := kv.IndexQuery{Clauses: make([][]kv.IndexKey, len(req.Clauses)), FromTs: int(req.FromTs), ToTs: int(req.ToTs), Asc: order.By(req.OrderAscend)}
+	for i, clause := range req.Clauses {
+		q.Clauses[i] = make([]kv.IndexKey, len(clause.Keys))
+		for j, k := range clause.Keys {
+			ii, err := kv.String2InvertedIdx(k.Table)
+			if err != nil {
+				return nil, err
+			}
+			q.Clauses[i][j] = kv.IndexKey{Idx: ii, Key: k.K}
+		}
+	}
+	if req.PageToken != "" {
+		var pagination remoteproto.IndexPagination
+		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
+			return nil, err
+		}
+		q.FromTs = int(pagination.NextTimeStamp)
+	}
+	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
+		req.PageSize = PageSizeLimit
+	}
+
+	reply := &remoteproto.IndexRangeReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		it, err := kv.JoinIndexRanges(q, func(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+			it, err := tx.IndexRange(name, k, fromTs, toTs, asc, limit)
+			return &ctxU64{U64: it, ctx: ctx}, err
+		})
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if len(reply.Timestamps) == int(req.PageSize) {
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v)})
+				return err
+			}
+			reply.Timestamps = append(reply.Timestamps, v)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+// ctxU64 stops a stream once ctx is done: a join can scan far more entries than it returns.
+type ctxU64 struct {
+	stream.U64
+	ctx context.Context
+}
+
+func (it *ctxU64) Next() (uint64, error) {
+	if err := it.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return it.U64.Next()
+}
+
+func (it *ctxU64) CanSeek() bool {
+	s, ok := it.U64.(stream.Seeker[uint64])
+	return ok && s.CanSeek()
+}
+
+func (it *ctxU64) Seek(v uint64) error {
+	if err := it.ctx.Err(); err != nil {
+		return err
+	}
+	return it.U64.(stream.Seeker[uint64]).Seek(v)
 }
 
 func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRangeReq) (*remoteproto.Pairs, error) {
@@ -705,7 +810,11 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			limit--
 
 			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: k, Limit: int64(limit)})
+				nextK, _, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -720,42 +829,20 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 }
 
 func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remoteproto.Pairs, error) {
-	from, limit := req.FromPrefix, int(req.Limit)
-	if req.PageToken != "" {
-		var pagination remoteproto.PairsPagination
-		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
-			return nil, err
-		}
-		from, limit = pagination.NextKey, int(pagination.Limit)
-	}
-	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
-		req.PageSize = PageSizeLimit
-	}
-
 	reply := &remoteproto.Pairs{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		it, err := tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
+		it, err := tx.Range(req.Table, req.FromPrefix, req.ToPrefix, order.FromBool(req.OrderAscend), int(req.Limit))
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
 				return err
 			}
-			reply.Keys = append(reply.Keys, k)
-			reply.Values = append(reply.Values, v)
-			limit--
-		}
-		if len(reply.Keys) == PageSizeLimit && it.HasNext() {
-			nextK, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-			if err != nil {
-				return err
-			}
+			reply.Keys = append(reply.Keys, bytes.Clone(k))
+			reply.Values = append(reply.Values, bytes.Clone(v))
 		}
 		return nil
 	}); err != nil {

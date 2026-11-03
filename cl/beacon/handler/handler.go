@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	commonlru "github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -58,16 +60,27 @@ import (
 )
 
 const (
-	maxBlobBundleCacheSize             = 48 // 8 blocks worth of blobs
+	minBlobBundleCacheSize             = 48
 	maxPendingBuilderPayloads          = 4
 	maxExecutionPayloadEnvelopeRetries = 1024
 )
 
-// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
+// BlobBundle holds a blob with its commitment and KZG proofs: one blob proof before Fulu, one proof
+// per cell from Fulu on.
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
 	KzgProofs  []common.Bytes48
+	Cells      []cltypes.Cell // the blob's cells, from Fulu on, when already computed
+}
+
+// blobBundleCacheSize fits two full blocks at the highest blob limit in the schedule, so the bundles
+// of one block are not evicted before that block is published.
+func blobBundleCacheSize(cfg *clparams.BeaconChainConfig) int {
+	if cfg == nil {
+		return minBlobBundleCacheSize
+	}
+	return max(minBlobBundleCacheSize, 2*int(cfg.MaxBlobsPerBlockUpperBound()))
 }
 
 type selfBuildPayload struct {
@@ -221,23 +234,28 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
-	preparedPayload        preparedPayload
-	payloadPreparationGate payloadPreparationGate
+	preparedPayload              preparedPayload
+	payloadPreparationGate       payloadPreparationGate
+	parentExecutionRequests      *commonlru.Cache[common.Hash, *cltypes.ExecutionRequests]
+	parentExecutionRequestsGroup singleflight.Group
 
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
-	// unregisteredProposers remembers which proposers have already been warned about, so the
-	// warning is once per proposer rather than once per proposal.
-	unregisteredProposers              *lru.Cache[uint64, struct{}]
-	blobBundles                        blobBundleCache // Keep recent bundled blobs from the execution layer.
-	engine                             execution_client.ExecutionEngine
-	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
-	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
-	syncMessagePool                    sync_contribution_pool.SyncContributionPool
-	committeeSub                       committee_subscription.CommitteeSubscribe
-	attestationProducer                attestation_producer.AttestationDataProducer
-	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
-	aggregatePool                      aggregation.AggregationPool
+	// Bounded cache for fee-recipient warnings; eviction permits a later warning for a proposer.
+	unregisteredProposers     *lru.Cache[uint64, struct{}]
+	blobBundles               blobBundleCache // Keep recent bundled blobs from the execution layer.
+	engine                    execution_client.ExecutionEngine
+	elClientVersion           atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
+	elClientVersionFetching   atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
+	justifiedDescent          atomic.Pointer[justifiedDescent]             // Last resolved descendsFromJustified answer.
+	elIdentificationLogOnce   sync.Once                                    // Logs the resolved default graffiti identification exactly once.
+	graffitiTruncatedWarnOnce sync.Once                                    // Warns that graffiti was truncated exactly once.
+	syncMessagePool           sync_contribution_pool.SyncContributionPool
+	committeeSub              committee_subscription.CommitteeSubscribe
+	attestationProducer       attestation_producer.AttestationDataProducer
+	attestationDataImportWait time.Duration
+	attestationDataWaitedSlot atomic.Uint64
+	aggregatePool             aggregation.AggregationPool
 
 	// services
 	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
@@ -313,7 +331,7 @@ func NewApiHandler(
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
 ) *ApiHandler {
-	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
+	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
 		panic(err)
 	}
@@ -323,10 +341,6 @@ func NewApiHandler(
 	}
 
 	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
-	if err != nil {
-		panic(err)
-	}
-	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
 	}
@@ -343,23 +357,23 @@ func NewApiHandler(
 		panic(err)
 	}
 	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
+	parentExecutionRequests := commonlru.NewCache[common.Hash, *cltypes.ExecutionRequests](maxCachedParentExecutionRequests)
 	return &ApiHandler{
-		logger:                             logger,
-		validatorParams:                    validatorParams,
-		o:                                  sync.Once{},
-		netConfig:                          netConfig,
-		ethClock:                           ethClock,
-		beaconChainCfg:                     beaconChainConfig,
-		indiciesDB:                         indiciesDB,
-		forkchoiceStore:                    forkchoiceStore,
-		operationsPool:                     operationsPool,
-		blockReader:                        rcsn,
-		syncedData:                         syncedData,
-		stateReader:                        stateReader,
-		caplinStateSnapshots:               caplinStateSnapshots,
-		peerDas:                            peerDas,
-		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
-		unregisteredProposers:              unregisteredProposers,
+		logger:                logger,
+		validatorParams:       validatorParams,
+		o:                     sync.Once{},
+		netConfig:             netConfig,
+		ethClock:              ethClock,
+		beaconChainCfg:        beaconChainConfig,
+		indiciesDB:            indiciesDB,
+		forkchoiceStore:       forkchoiceStore,
+		operationsPool:        operationsPool,
+		blockReader:           rcsn,
+		syncedData:            syncedData,
+		stateReader:           stateReader,
+		caplinStateSnapshots:  caplinStateSnapshots,
+		peerDas:               peerDas,
+		unregisteredProposers: unregisteredProposers,
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
@@ -371,6 +385,7 @@ func NewApiHandler(
 		columnStorage:                    columnStorage,
 		caplinSnapshots:                  blobSnapshots,
 		attestationProducer:              attestationProducer,
+		attestationDataImportWait:        defaultAttestationDataImportWait,
 		blobBundles:                      blobBundles,
 		engine:                           engine,
 		syncMessagePool:                  syncMessagePool,
@@ -396,6 +411,7 @@ func NewApiHandler(
 		selfBuildEnvelopes:               selfBuildEnvelopes,
 		executionPayloadEnvelopeRetries:  executionPayloadEnvelopeRetries,
 		builderRoutes:                    builderRoutes,
+		parentExecutionRequests:          parentExecutionRequests,
 	}
 }
 

@@ -17,9 +17,11 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -269,6 +271,12 @@ type BeaconBody struct {
 	// The version of the beacon chain
 	Version   clparams.StateVersion       `json:"-"`
 	beaconCfg *clparams.BeaconChainConfig `json:"-"`
+	rootCache *atomic.Pointer[beaconBodyRootCacheEntry]
+}
+
+type beaconBodyRootCacheEntry struct {
+	encoding []byte
+	root     [32]byte
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBody {
@@ -276,6 +284,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 
 	body := &BeaconBody{
 		beaconCfg:         beaconCfg,
+		rootCache:         new(atomic.Pointer[beaconBodyRootCacheEntry]),
 		Eth1Data:          &Eth1Data{},
 		ProposerSlashings: solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416),
 		AttesterSlashings: solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings),
@@ -614,7 +623,28 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	b.ensureNilFields()
 	if b.Version >= clparams.GloasVersion {
-		return b.hashSSZGloas()
+		if b.rootCache == nil {
+			return b.hashSSZGloas()
+		}
+		entry := b.rootCache.Load()
+		var encodingCapacity int
+		if entry == nil {
+			encodingCapacity = b.EncodingSizeSSZ()
+		} else {
+			encodingCapacity = len(entry.encoding)
+		}
+		encoding, err := b.EncodeSSZ(make([]byte, 0, encodingCapacity))
+		if err != nil {
+			return b.hashSSZGloas()
+		}
+		if entry != nil && bytes.Equal(entry.encoding, encoding) {
+			return entry.root, nil
+		}
+		root, err := b.hashSSZGloas()
+		if err == nil {
+			b.rootCache.Store(&beaconBodyRootCacheEntry{encoding: bytes.Clone(encoding), root: root})
+		}
+		return root, err
 	}
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }

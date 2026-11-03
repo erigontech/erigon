@@ -9,7 +9,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields BlobsBundle declares, in that order.
-func (x *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *BlobsBundle) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -23,7 +23,7 @@ func (x *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *BlobsBundle) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *BlobsBundle) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Datas(s, "commitments", x.Commitments)
 	ethjson.Datas(s, "proofs", x.Proofs)
 	ethjson.Datas(s, "blobs", x.Blobs)

@@ -28,6 +28,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -64,15 +66,16 @@ type DB struct {
 }
 
 type tx struct {
-	stream             remoteproto.KV_TxClient
-	ctx                context.Context
-	streamCancelFn     context.CancelFunc
-	db                 *DB
-	statelessCursors   map[string]kv.Cursor
-	cursors            []*remoteCursor
-	streams            []kv.Closer
-	viewID, id         uint64
-	streamingRequested bool
+	stream                 remoteproto.KV_TxClient
+	ctx                    context.Context
+	streamCancelFn         context.CancelFunc
+	db                     *DB
+	statelessCursors       map[string]kv.Cursor
+	cursors                []*remoteCursor
+	streams                []kv.Closer
+	viewID, id             uint64
+	historyFilesGeneration *uint64
+	streamingRequested     bool
 }
 
 type remoteCursor struct {
@@ -200,7 +203,24 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		streamCancelFn()
 		return nil, err
 	}
-	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
+	remoteTx := &tx{ctx: ctx, db: db, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId, historyFilesGeneration: msg.HistoryFilesGeneration}
+	remoteTx.stream = &txViewStream{KV_TxClient: stream, tx: remoteTx}
+	return remoteTx, nil
+}
+
+type txViewStream struct {
+	remoteproto.KV_TxClient
+	tx *tx
+}
+
+func (s *txViewStream) Recv() (*remoteproto.Pair, error) {
+	pair, err := s.KV_TxClient.Recv()
+	// Legacy replies omit both fields; do not replace their initial view ID with zero.
+	if err == nil && pair.ViewId != 0 {
+		s.tx.viewID = pair.ViewId
+		s.tx.historyFilesGeneration = pair.HistoryFilesGeneration
+	}
+	return pair, err
 }
 
 func (db *DB) Debug() kv.TemporalDebugDB {
@@ -302,7 +322,18 @@ func (tx *tx) AggTx() any {
 }
 
 func (tx *tx) Debug() kv.TemporalDebugTx {
+	// A missing generation is not generation zero: older servers cannot identify
+	// pinned history files, so their reads must not enter a shared cache.
+	if tx.historyFilesGeneration != nil {
+		return historyFilesDebugTx{tx}
+	}
 	return kv.TemporalDebugTx(tx)
+}
+
+type historyFilesDebugTx struct{ *tx }
+
+func (tx historyFilesDebugTx) HistoryFilesGeneration() uint64 {
+	return *tx.historyFilesGeneration
 }
 
 func (tx *tx) FreezeInfo() kv.FreezeInfo {
@@ -342,6 +373,14 @@ func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (s
 }
 
 func (tx *tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	panic("not implemented")
+}
+
+func (tx *tx) HistoryCoverageStart(name kv.Domain) uint64 {
+	panic("not implemented")
+}
+
+func (tx *tx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
 	panic("not implemented")
 }
 
@@ -943,6 +982,36 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
 		if err != nil {
 			return nil, "", err
+		}
+		return reply.Timestamps, reply.NextPageToken, nil
+	}), nil
+}
+
+func (tx *tx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	req := &remoteproto.IndexJoinReq{TxId: tx.id, Clauses: make([]*remoteproto.IndexJoinClause, len(q.Clauses)), FromTs: int64(q.FromTs), ToTs: int64(q.ToTs), OrderAscend: bool(q.Asc)}
+	for i, clause := range q.Clauses {
+		keys := make([]*remoteproto.IndexJoinKey, len(clause))
+		for j, k := range clause {
+			keys[j] = &remoteproto.IndexJoinKey{Table: k.Idx.String(), K: k.Key}
+		}
+		req.Clauses[i] = &remoteproto.IndexJoinClause{Keys: keys}
+	}
+	// The first page is fetched eagerly to detect servers older than IndexJoin before returning a stream.
+	first, err := tx.db.remoteKV.IndexJoin(tx.ctx, req)
+	if status.Code(err) == codes.Unimplemented {
+		return kv.JoinIndexRanges(q, tx.IndexRange)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return stream.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+		reply := first
+		first = nil
+		if reply == nil {
+			req.PageToken = pageToken
+			if reply, err = tx.db.remoteKV.IndexJoin(tx.ctx, req); err != nil {
+				return nil, "", err
+			}
 		}
 		return reply.Timestamps, reply.NextPageToken, nil
 	}), nil

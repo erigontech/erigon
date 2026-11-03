@@ -17,11 +17,15 @@
 package peerdasstate
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // fulu p2p-interface.md: cgc is a "Uint64 big endian integer with no leading zero
@@ -46,14 +50,89 @@ func TestEncodeCgcMatchesTheEnrSpec(t *testing.T) {
 }
 
 // fulu/validator.md requires a node whose custody requirement falls to keep advertising
-// the previous (highest) count. No test can reach SetCustodyGroupCount through peerdas -
-// the only production caller is on_block.go and every test route is a gomock stub - so
-// the ratchet is pinned here directly.
+// the previous (highest) count.
 func TestSetCustodyGroupCountKeepsTheHighestAdvertised(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 
-	require.True(t, s.SetCustodyGroupCount(8), "an increase must be advertised")
-	require.False(t, s.SetCustodyGroupCount(4), "a decrease must not be advertised")
+	require.True(t, s.SetCustodyGroupCount(8, func() uint64 { return 0 }), "an increase must be advertised")
+	require.False(t, s.SetCustodyGroupCount(4, func() uint64 { return 0 }), "a decrease must not be advertised")
 	require.Equal(t, uint64(8), s.GetAdvertisedCgc(), "the highest count must survive a decrease")
+}
+
+func TestSetCustodyGroupCountNeverLowersTheCustodyRaiseSlot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+
+	require.True(t, s.SetCustodyGroupCount(96, func() uint64 { return 2001 }))
+	require.True(t, s.SetCustodyGroupCount(128, func() uint64 { return 1001 }))
+	require.Equal(t, uint64(2001), s.GetCustodyRaiseSlot())
+}
+
+func TestSetCustodyRaiseSlotNeverLowersIt(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+
+	s.SetCustodyRaiseSlot(2001)
+	s.SetCustodyRaiseSlot(1001)
+	require.Equal(t, uint64(2001), s.GetCustodyRaiseSlot())
+}
+
+func TestRaiseAdvertisedCgcDoesNotChangeRealCgc(t *testing.T) {
+	beaconConfig := clparams.MainnetBeaconConfig
+	networkConfig := clparams.NetworkConfig{CgcKey: "cgc"}
+	s := NewPeerDasState(&beaconConfig, &networkConfig)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	localNode := enode.NewLocalNode(nodeDB, key)
+	s.SetLocalNodeID(localNode)
+
+	require.True(t, s.RaiseAdvertisedCgc(96))
+	require.Equal(t, beaconConfig.CustodyRequirement, s.GetRealCgc())
+	require.Equal(t, uint64(96), s.GetAdvertisedCgc())
+	var enrCgc []byte
+	require.NoError(t, localNode.Node().Load(enr.WithEntry(networkConfig.CgcKey, &enrCgc)))
+	require.Equal(t, EncodeCgc(96), enrCgc)
+
+	require.False(t, s.RaiseAdvertisedCgc(8))
+	require.Equal(t, uint64(96), s.GetAdvertisedCgc())
+	require.NoError(t, localNode.Node().Load(enr.WithEntry(networkConfig.CgcKey, &enrCgc)))
+	require.Equal(t, EncodeCgc(96), enrCgc)
+}
+
+func TestRaiseAdvertisedCgcIsNotLostToAConcurrentCustodyColumnsRead(t *testing.T) {
+	beaconConfig := clparams.MainnetBeaconConfig
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&beaconConfig)
+	}
+	networkConfig := clparams.NetworkConfig{CgcKey: "cgc"}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	localNode := enode.NewLocalNode(nodeDB, key)
+
+	for range 1000 {
+		s := NewPeerDasState(&beaconConfig, &networkConfig)
+		s.SetLocalNodeID(localNode)
+		var ready, readers sync.WaitGroup
+		ready.Add(4)
+		for range 4 {
+			readers.Go(func() {
+				ready.Done()
+				_, _ = s.GetMyCustodyColumns()
+			})
+		}
+		ready.Wait()
+		s.RaiseAdvertisedCgc(beaconConfig.NumberOfCustodyGroups)
+		readers.Wait()
+
+		columns, err := s.GetMyCustodyColumns()
+		require.NoError(t, err)
+		require.Len(t, columns, int(beaconConfig.NumberOfColumns))
+	}
 }

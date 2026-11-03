@@ -26,14 +26,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync/atomic"
 
-	"github.com/klauspost/compress/gzip"
 	"github.com/rs/cors"
 
 	"github.com/klauspost/compress/gzhttp"
-	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -44,16 +43,49 @@ import (
 // NewHTTPHandlerStack returns wrapped http-related handlers.
 // When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
 // (503 if inflight > limit) to prevent goroutine pile-up under load.
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression, compressLoopback bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
-		handler = newGzipHandler(handler)
+		if compressLoopback {
+			handler = newGzipHandler(handler)
+		} else {
+			handler = newSkipLoopbackCompressionHandler(handler, newGzipHandler(handler))
+		}
 	}
 	if tagAsRPC {
 		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
 	}
 	return handler
+}
+
+// newSkipLoopbackCompressionHandler decides per request, not per listener, so a
+// server bound to 0.0.0.0 still skips compression for local clients.
+func newSkipLoopbackCompressionHandler(plain, compressed http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLocalClient(r) {
+			plain.ServeHTTP(w, r)
+			return
+		}
+		compressed.ServeHTTP(w, r)
+	})
+}
+
+// isLocalClient treats a loopback request carrying a forwarding header as remote:
+// it comes from a reverse proxy on the same host. A faked header only turns
+// compression back on, so it needs no trust check.
+func isLocalClient(r *http.Request) bool {
+	return isLoopbackAddress(r.RemoteAddr) &&
+		r.Header.Get("X-Forwarded-For") == "" &&
+		r.Header.Get("Forwarded") == ""
+}
+
+func isLoopbackAddress(addr string) bool {
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		return false
+	}
+	return ap.Addr().Unmap().IsLoopback()
 }
 
 // rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
@@ -118,18 +150,56 @@ func (h *wsConnectionLimiter) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	h.next.ServeHTTP(w, r)
 }
 
-func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
-	// disable CORS support if user has not specified a custom CORS configuration
+// NewWSOriginHandler refuses WebSocket handshakes from browser origins that the HTTP CORS
+// configuration would not accept. Requests without an Origin header are not from a browser and
+// pass through. With no allowed origins, next is returned unwrapped.
+func NewWSOriginHandler(allowedOrigins []string, next http.Handler) http.Handler {
 	if len(allowedOrigins) == 0 {
-		return srv
+		return next
 	}
-	c := cors.New(cors.Options{
-		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{http.MethodPost, http.MethodGet},
-		AllowedHeaders: []string{"*"},
-		MaxAge:         600,
+	c := cors.New(cors.Options{AllowedOrigins: allowedOrigins})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") != "" && !c.OriginAllowed(r) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
-	return c.Handler(srv)
+}
+
+func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
+	var c *cors.Cors
+	next := srv
+	// CORS support stays disabled if the user has not specified a custom CORS configuration
+	if len(allowedOrigins) > 0 {
+		c = cors.New(cors.Options{
+			AllowedOrigins: allowedOrigins,
+			AllowedMethods: []string{http.MethodPost, http.MethodGet},
+			AllowedHeaders: []string{"*"},
+			MaxAge:         600,
+		})
+		next = c.Handler(srv)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && fromOtherSite(r) && !(c != nil && r.Header.Get("Origin") != "" && c.OriginAllowed(r)) {
+			http.Error(w, "cross-site GET requests are not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// fromOtherSite reports whether a browser sent r on behalf of another site's page. A GET needs no
+// CORS preflight, so such a page could otherwise call any method through the query.
+func fromOtherSite(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
+		return false
+	case "":
+		return r.Header.Get("Origin") != ""
+	default:
+		return true
+	}
 }
 
 // virtualHostHandler is a handler which validates the Host-header of incoming requests.
@@ -202,15 +272,22 @@ var (
 	zstdOutBytes = metrics.GetOrCreateCounter(`rpc_zstd_out_bytes_total{path="streaming"}`)
 )
 
+var (
+	gzipWritersInUse = metrics.GetOrCreateGauge(`rpc_gzip_writers_in_use`)
+	zstdWritersInUse = metrics.GetOrCreateGauge(`rpc_zstd_writers_in_use`)
+)
+
 // gzipWrapper compresses with klauspost's gzhttp middleware, which buffers only
 // minGzipBodySize -- enough to decide whether compressing pays -- then streams,
 // so no response is held whole.
 var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 	wrapper, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(minGzipBodySize),
-		gzhttp.CompressionLevel(gzip.BestSpeed), // gzip only
+		gzhttp.CompressionLevel(gzipLevel), // gzip only
 		gzhttp.EnableZstd(true),
-		gzhttp.ZstdCompressionLevel(int(zstd.SpeedFastest)), // zstd only
+		gzhttp.ZstdCompressionLevel(int(zstdLevel)), // zstd only
+		gzhttp.Implementation(gzipWriterFactory),
+		gzhttp.ZstdImplementation(zstdWriterFactory),
 	)
 	if err != nil {
 		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))

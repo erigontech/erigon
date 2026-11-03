@@ -195,7 +195,6 @@ func TableScanningPrune(
 	logEvery *time.Ticker,
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
-	asserts bool,
 	prevStat *Stat,
 	mode StorageMode,
 ) (stat *Stat, err error) {
@@ -265,6 +264,11 @@ func TableScanningPrune(
 	stat.KeyProgress = Done
 	stat.LastPrunedKey = nil
 
+	if valDelCursor == nil { // the caller prunes values and owns their progress
+		stat.ValueProgress, stat.LastPrunedValue = prevStat.ValueProgress, prevStat.LastPrunedValue
+		return stat, nil
+	}
+
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
@@ -286,7 +290,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +314,6 @@ func tableScanningPrune(
 	txNumGetter func(key, val []byte) uint64,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
-	asserts bool,
 	throttling *time.Duration,
 	logEvery *time.Ticker,
 	logger log.Logger,

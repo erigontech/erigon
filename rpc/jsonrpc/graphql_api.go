@@ -65,7 +65,7 @@ type GraphQLReceipt struct {
 }
 
 // MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop the transaction fields.
-func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	return writeReflected(s, r)
 }
 
@@ -186,7 +186,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, nil
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false)
+	getBlockRes, err := api.delegateGetBlockByNumber(block, blockNumber, false)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 		return nil, nil
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, rpc.BlockNumber(blockHeight), false)
+	getBlockRes, err := api.delegateGetBlockByNumber(block, rpc.BlockNumber(blockHeight), false)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +408,7 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 	return hexutil.Encode(res.PaddedBytes(32)), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
 	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
@@ -448,7 +448,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		args.Gas = (*hexutil.Uint64)(&api.gasCap)
 	}
 
-	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +464,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

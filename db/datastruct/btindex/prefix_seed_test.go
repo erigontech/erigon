@@ -30,7 +30,7 @@ func openFixture(t *testing.T, kvPath string, compress seg.FileCompression) (*Bt
 	t.Helper()
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 	buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
 	require.NoError(t, err)
 	require.NotNil(t, bt.bplus.prefixLo, "prefix seed table must be built")
 	require.NotNil(t, bt.bplus.nodeOfft, "node offset cache must be built")

@@ -334,7 +334,7 @@ func TestBuilderFreeFunctions(t *testing.T) {
 	b.Build()
 	raw := b.AppendBytes(nil)
 
-	require.Equal(t, uint64(3), Count(baseNum, raw))
+	require.Equal(t, uint64(3), Count(raw))
 
 	n, _, ok := Seek(baseNum, raw, 5006)
 	require.True(t, ok)
@@ -456,7 +456,7 @@ func requireRawDataChecks(t *testing.T, b []byte) {
 	t.Helper()
 
 	// check fast count
-	require.Equal(t, uint64(3), Count(1000, b))
+	require.Equal(t, uint64(3), Count(b))
 
 	// check search
 	n, _, found := Seek(1000, b, 1014)

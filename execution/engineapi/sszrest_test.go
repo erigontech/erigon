@@ -5,12 +5,14 @@ package engineapi
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -167,6 +169,25 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	require.Contains(t, resp, "engine_newPayloadV1")
 	require.Contains(t, resp, "POST /engine/v4/payloads")
 	require.NotContains(t, resp, "engine_exchangeCapabilities")
+}
+
+func TestSSZRESTGetInclusionListRoute(t *testing.T) {
+	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
+	srv := NewEngineServer(log.New(), &chain.Config{}, &stubExecutionModule{
+		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
+	}, nil, false, true, false, false, nil, nil, 0, 0)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/inclusion-list", nil)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	var resp solid.TransactionsSSZ
+	require.NoError(t, resp.DecodeSSZ(rec.Body.Bytes(), 0))
+	want, err := types.MarshalTransactionsBinary(txns)
+	require.NoError(t, err)
+	require.Equal(t, []hexutil.Bytes{want[0]}, transactionsBytes(&resp))
 }
 
 func TestSSZRESTAdvertisedRoutes(t *testing.T) {
@@ -368,7 +389,9 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")
 	require.Contains(t, caps, "engine_getBlobsV4")
+	require.Contains(t, caps, "engine_getInclusionListV1")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
+	require.Contains(t, caps, "GET /engine/v1/inclusion-list")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")
 }

@@ -99,12 +99,6 @@ func (f *SnapshotRepo) IntegrateDirtyFiles(files []*FilesItem) {
 	}
 }
 
-func (f *SnapshotRepo) IntegrateMergedFiles(dfs []*FilesItem, mergedFile *FilesItem) {
-	if mergedFile != nil {
-		f.dirtyFiles.Set(mergedFile)
-	}
-}
-
 // DeleteFilesAfterMerge files are removed from repo and marked for deletion
 // from file system.
 func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*FilesItem) {

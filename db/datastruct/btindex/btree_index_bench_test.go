@@ -35,7 +35,7 @@ func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
 	dataPath := generateKV(b, tmp, 20, 64*1024, 512, logger, compressFlags)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
-	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
 	require.NoError(b, err)
 	defer index.Close()
 	defer kvFile.Close()
@@ -84,7 +84,7 @@ func BenchmarkBtreeIndexGetValSizeCompressedCode(b *testing.B) {
 	comp.Close()
 	indexPath := filepath.Join(tmp, "code.bti")
 	buildBtreeIndex(b, dataPath, indexPath, seg.CompressVals, 1, logger, true)
-	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, seg.CompressVals, false)
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, seg.CompressVals)
 	require.NoError(b, err)
 	defer index.Close()
 	defer kvFile.Close()
@@ -115,7 +115,7 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 		buildBtreeIndexWithM(b, kvPath, indexPath, compress, M, log.New())
 
 		b.Run(fmt.Sprintf("M%d", M), func(b *testing.B) {
-			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
 			require.NoError(b, err)
 			defer bt.Close()
 			defer decomp.Close()

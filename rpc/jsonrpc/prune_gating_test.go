@@ -119,10 +119,10 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"eth_getBlockByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(ref.hash, false), false)
 	}},
-	{"eth_getBlockTransactionCountByNumber", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getBlockTransactionCountByNumber", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(ref.num))
 	}},
-	{"eth_getBlockTransactionCountByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getBlockTransactionCountByHash", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockTransactionCountByHash(ctx, ref.hash)
 	}},
 	{"eth_getTransactionByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
@@ -303,17 +303,17 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	// Replaying a block reads its transactions and starts from the state history
 	// preceding it.
 	{"debug_traceBlockByNumber", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceBlockByNumber(ctx, rpc.BlockNumber(ref.num), &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
 	{"debug_traceBlockByHash", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceBlockByHash(ctx, ref.hash, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
 	{"debug_traceTransaction", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceTransaction(ctx, ref.txHash, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
@@ -327,7 +327,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		return apis.trace.Get(ctx, ref.txHash, nil, new(bool), nil)
 	}},
 	{"trace_filter", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.trace.Filter(ctx, blockTraceFilter(ref.num), new(bool), nil, stream)
 		})
 	}},
@@ -345,7 +345,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	{"debug_traceCall", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceCall(ctx, ethapi.CallArgs{From: &testAddr, To: &common.Address{}}, &bnh, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
@@ -395,7 +395,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	{"debug_traceCallMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bundles, simulate := pruneGatingBundle(ref.num)
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceCallMany(ctx, bundles, simulate, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
@@ -446,14 +446,14 @@ func traceCallManyRequest() json.RawMessage {
 func blockTraceFilter(block uint64) TraceFilterRequest {
 	n := rpc.BlockNumber(block)
 	return TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 	}
 }
 
 // streamedResult runs an endpoint that writes its answer to a JSON stream and
 // returns the bytes it produced, so the table asserts on a real result.
-func streamedResult(call func(stream jsonstream.Stream) error) (any, error) {
+func streamedResult(call func(stream *jsonstream.Stream) error) (any, error) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
 	if err := call(stream); err != nil {
@@ -729,8 +729,7 @@ func requirePersistedReceipts(t *testing.T, m *execmoduletester.ExecModuleTester
 }
 
 const (
-	// One transaction plus two system transactions per block, so a step holds one block
-	// and the retirement cutoff can land inside the chain.
+	// With the default one user transaction per block, a step holds one block.
 	prunedHistoryStepSize      = 3
 	prunedHistoryMaxReorgDepth = 2
 	prunedHistoryChainLen      = 24
@@ -739,7 +738,9 @@ const (
 )
 
 type prunedHistoryConfig struct {
-	mode prune.Mode
+	mode                 prune.Mode
+	transactionsPerBlock int
+	generateBlock        func(*execmoduletester.ExecModuleTester, *blockgen.BlockGen)
 	// receiptCache runs the chain with the receipt cache enabled and persisted, the only
 	// source of receipts left once history is retired.
 	receiptCache bool
@@ -767,10 +768,16 @@ func setupPhysicallyPrunedHistory(t *testing.T, cfg prunedHistoryConfig) (pruneG
 
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	c, err := m.GenerateChain(prunedHistoryChainLen, func(_ int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), common.Address{1},
-			uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *signer, m.Key)
-		require.NoError(t, err)
-		block.AddTx(txn)
+		if cfg.generateBlock != nil {
+			cfg.generateBlock(m, block)
+			return
+		}
+		for range max(1, cfg.transactionsPerBlock) {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), common.Address{1},
+				uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *signer, m.Key)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
 	})
 	require.NoError(t, err)
 
@@ -878,9 +885,23 @@ func dropBodies(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
 	require.NoError(t, rwTx.Commit())
 }
 
+func writeHistoryStart(tx kv.RwTx, startTxNum uint64) error {
+	key := hexutil.EncodeTs(startTxNum)
+	for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
+		if err := tx.ClearTable(table); err != nil {
+			return err
+		}
+		if err := tx.Put(table, key, []byte{1}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type historyFloorDB struct {
 	kv.TemporalRoDB
 	startTxNum uint64
+	starts     map[kv.Domain]uint64
 }
 
 func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
@@ -888,12 +909,14 @@ func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, er
 	if err != nil {
 		return nil, err
 	}
-	return historyFloorTx{TemporalTx: tx, startTxNum: db.startTxNum}, nil
+	return historyFloorTx{TemporalTx: tx, startTxNum: db.startTxNum, starts: db.starts}, nil
 }
 
 type historyFloorTx struct {
 	kv.TemporalTx
 	startTxNum uint64
+	starts     map[kv.Domain]uint64
+	errs       map[kv.Domain]error
 }
 
 func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
@@ -901,16 +924,22 @@ func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
 }
 
 func (tx historyFloorTx) Debug() kv.TemporalDebugTx {
-	return historyFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), startTxNum: tx.startTxNum}
+	return historyFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), startTxNum: tx.startTxNum, starts: tx.starts, errs: tx.errs}
 }
 
 type historyFloorDebugTx struct {
 	kv.TemporalDebugTx
 	startTxNum uint64
+	starts     map[kv.Domain]uint64
+	errs       map[kv.Domain]error
 }
 
-func (tx historyFloorDebugTx) HistoryStartFrom(kv.Domain) (uint64, error) {
-	return tx.startTxNum, nil
+func (tx historyFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
+	start, ok := tx.starts[domain]
+	if !ok {
+		start = tx.startTxNum
+	}
+	return start, tx.errs[domain]
 }
 
 // TestGetBlockByTimestampGatesGenesisBranch pins the gate on the branch that answers
