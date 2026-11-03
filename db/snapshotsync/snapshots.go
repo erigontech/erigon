@@ -1635,8 +1635,17 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 	}
 
 	// wait for Downloader service to download all expected snapshots
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
+	if err := s.IndexMissed(ctx, logPrefix, dirs.Tmp, cc, logger); err != nil {
+		return err
+	}
+	if notifier != nil {
+		notifier.OnNewSnapshot()
+	}
+	return nil
+}
+
+func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, cc *chain.Config, logger log.Logger) error {
+	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, tmpDir, cc, estimate.IndexSnapshot.Workers(), logger)
 	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
@@ -1646,9 +1655,6 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 			return err
 		}
 		s.LogStat("missed-idx:open")
-	}
-	if notifier != nil {
-		notifier.OnNewSnapshot()
 	}
 	return nil
 }
@@ -1787,16 +1793,18 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
-func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
+func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, tmpDir string, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
 		return
 	}
 
-	if _, err = snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
-		return
+	if !slices.ContainsFunc(s.enums, snaptype.IsCaplinType) {
+		if _, err = snaptype.GetIndexSalt(s.dir, logger); err != nil {
+			return
+		}
 	}
 
-	dir, tmpDir := dirs.Snap, dirs.Tmp
+	dir := s.dir
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	ps := background.NewProgressSet()

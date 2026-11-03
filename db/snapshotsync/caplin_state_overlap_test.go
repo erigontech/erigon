@@ -206,6 +206,28 @@ func TestCaplinStateRemoveOverlapsUnindexedSuperset(t *testing.T) {
 	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table))
 }
 
+// A corrupt .idx fails the strict open and leaves its segment unindexed; the rebuild must
+// replace it rather than skip it because a file with that name exists.
+func TestCaplinStateBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	_, idxPath := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	require.NoError(t, os.WriteFile(idxPath, []byte("not an index"), 0o600))
+
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, SnapshotTypes{
+		KeyValueGetters: map[string]KeyValueGetter{table: nil},
+		Compression:     map[string]bool{},
+	}, logger)
+	t.Cleanup(s.Close)
+	require.Error(t, s.OpenFolder(), "a strict open must not accept a corrupt index")
+	require.Empty(t, s.visibleRangesForType(table))
+
+	require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+	require.Equal(t, []Range{{from: 0, to: 50_000}}, s.visibleRangesForType(table))
+}
+
 func TestCaplinStateRemoveOverlapsIgnoresUnknownType(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
