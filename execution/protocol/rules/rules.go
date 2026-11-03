@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
@@ -198,7 +198,7 @@ type EngineWriter interface {
 		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int
 
 	// APIs returns the RPC APIs this rules engine provides.
-	APIs(chain ChainHeaderReader) []rpc.API
+	APIs(chain ChainHeaderReader) []rpccfg.API
 }
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)

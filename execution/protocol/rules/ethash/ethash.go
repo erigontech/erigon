@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 const doNotStoreCachesOnDisk = ""
@@ -568,10 +568,10 @@ func (ethash *Ethash) Hashrate() float64 {
 }
 
 // APIs implements rules.Engine, returning the user facing RPC APIs.
-func (ethash *Ethash) APIs(chain rules.ChainHeaderReader) []rpc.API {
+func (ethash *Ethash) APIs(chain rules.ChainHeaderReader) []rpccfg.API {
 	// In order to ensure backward compatibility, we exposes ethash RPC APIs
 	// to both eth and ethash namespaces.
-	return []rpc.API{
+	return []rpccfg.API{
 		{
 			Namespace: "eth",
 			Version:   "1.0",

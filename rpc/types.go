@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -35,18 +34,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// API describes the set of methods offered over the RPC interface
-type API struct {
-	Namespace string // namespace under which the rpc methods of Service are exposed
-	Version   string // api version for DApp's
-	Service   any    // receiver instance which holds the methods
-	Public    bool   // indication if the methods must be considered safe for public use
-
-	// Iface, when set, keeps exported methods of Service that it does not declare off the wire.
-	Iface reflect.Type
-}
+type API = rpccfg.API
 
 // Error wraps RPC errors, which contain an error code in addition to the message.
 type Error interface {

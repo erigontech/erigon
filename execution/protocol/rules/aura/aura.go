@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 var DEBUG_LOG_FROM = uint64(dbg.EnvInt("AURA_DEBUG_FROM", 999_999_999))
@@ -1082,8 +1082,8 @@ func (c *AuRa) Close() error {
 
 // APIs implements rules.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
-func (c *AuRa) APIs(chain rules.ChainHeaderReader) []rpc.API {
-	return []rpc.API{}
+func (c *AuRa) APIs(chain rules.ChainHeaderReader) []rpccfg.API {
+	return []rpccfg.API{}
 }
 
 // nolint

@@ -20,6 +20,7 @@
 package rpccfg
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -123,4 +124,15 @@ var SlowLogBlackList = []string{
 	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_getHeaderByNumber", "eth_getHeaderByHash", "eth_blockNumber",
 	"erigon_blockNumber", "erigon_getHeaderByNumber", "erigon_getHeaderByHash", "erigon_getBlockByTimestamp",
 	"eth_call",
+}
+
+// API describes the set of methods offered over the RPC interface
+type API struct {
+	Namespace string // namespace under which the rpc methods of Service are exposed
+	Version   string // api version for DApp's
+	Service   any    // receiver instance which holds the methods
+	Public    bool   // indication if the methods must be considered safe for public use
+
+	// Iface, when set, keeps exported methods of Service that it does not declare off the wire.
+	Iface reflect.Type
 }

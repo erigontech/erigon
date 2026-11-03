@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
@@ -491,7 +491,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 	return nil
 }
 
-func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpc.API {
+func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpccfg.API {
 	return s.eth1Engine.APIs(chain)
 }
 
