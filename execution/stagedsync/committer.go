@@ -69,6 +69,8 @@ type commitmentCalculator struct {
 	probeTxs   int
 	probeFirst time.Time
 	probeLast  time.Time
+	probeCkpt  time.Duration
+	probeCkptN int
 	doms        *execctx.SharedDomains
 	db          kv.TemporalRoDB
 	chainConfig *chain.Config
@@ -394,7 +396,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			// Checkpoint commitment at a mid-block step edge without advancing
 			// lastComputedBlock; the next checkpoint folds only keys dirtied after it.
+			t0 := time.Now()
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
+			cc.probeCkpt += time.Since(t0)
+			cc.probeCkptN++
 		}
 
 	case *blockResult:
@@ -462,8 +467,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual, "applyWrites", cc.probeApply, "txs", cc.probeTxs,
-				"firstTx", cc.probeFirst.Sub(r.execStartedAt), "lastTx", cc.probeLast.Sub(r.execStartedAt))
-			cc.probeApply, cc.probeTxs, cc.probeFirst = 0, 0, time.Time{}
+				"firstTx", cc.probeFirst.Sub(r.execStartedAt), "lastTx", cc.probeLast.Sub(r.execStartedAt),
+				"ckpt", cc.probeCkpt, "ckptN", cc.probeCkptN)
+			cc.probeApply, cc.probeTxs, cc.probeFirst, cc.probeCkpt, cc.probeCkptN = 0, 0, time.Time{}, 0, 0
 		}
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
