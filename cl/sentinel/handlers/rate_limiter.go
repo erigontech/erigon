@@ -109,6 +109,8 @@ type protocolRateConfig struct {
 	refillRate float64 // tokens per second
 	// noPunishment is for messages peers send on every connection: an
 	// exhausted bucket must recover at refillRate, not lock the peer out.
+	// Envelope protocols also use it: a rebuild limit can cut a response
+	// short, and the retry for the rest must wait for refill, not be punished.
 	noPunishment bool
 }
 
@@ -167,6 +169,8 @@ func newPeerRateLimiter() *peerRateLimiter {
 	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 1, noPunishment: true}  // 5 burst, 1 per second
 	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}                  // 2 per 10s
 
+	envelopeRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8, noPunishment: true} // 128 per 10s
+
 	rl.protocolLimits[communication.BeaconBlocksByRangeProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByRootProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByHeadProtocolV1] = blockRate
@@ -174,8 +178,8 @@ func newPeerRateLimiter() *peerRateLimiter {
 	rl.protocolLimits[communication.BlobSidecarByRootProtocolV1] = blobRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRangeProtocolV1] = dataColRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRootProtocolV1] = dataColRate
-	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = blockRate
-	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = blockRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = envelopeRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = envelopeRate
 	rl.protocolLimits[communication.PingProtocolV1] = pingRate
 	rl.protocolLimits[communication.GoodbyeProtocolV1] = goodbyeRate
 	rl.protocolLimits[communication.StatusProtocolV1] = statusRate

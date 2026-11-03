@@ -1501,3 +1501,118 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 	_, err = stream.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "should get EOF for pre-GLOAS request")
 }
+
+func TestExecutionPayloadEnvelopesByRootServesStoredEnvelopesWithoutRebuildCredit(t *testing.T) {
+	c, cfg, roots, rebuilder := newRootHistoryHandler(t)
+	c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock).SetEnvelope(roots[1], rebuilder.envelopes[roots[1]])
+	c.rateLimiter.envelopeRebuildBucket(peer.ID("history-peer").String()).tokens = -1
+
+	require.Equal(t, []uint64{1}, readEnvelopeBuilderIndices(t, runRootHistoryRequest(t, c, cfg, roots[:2]), cfg))
+	require.Empty(t, rebuilder.called)
+}
+
+func TestExecutionPayloadEnvelopesByRangeServesStoredHistoryWithoutRebuildCredit(t *testing.T) {
+	c, cfg, roots, envelopes, rebuilder, stream := newRangeHistoryHandler(t, 3, 3)
+	fc := c.forkChoiceReader.(*mock_services.ForkChoiceStorageMock)
+	for i, root := range roots {
+		fc.Blocks[root] = c.beaconDB.(*tests.MockBlockReader).U[stream.startSlot+uint64(i)]
+		fc.SetEnvelope(root, envelopes[root])
+	}
+	fc.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	lowestAvailableSlot := stream.startSlot + 2
+	fc.LowestAvailableSlotVal = &lowestAvailableSlot
+	c.rateLimiter.envelopeRebuildBucket(peer.ID("history-peer").String()).tokens = -1
+
+	require.Equal(t, []uint64{0, 1, 2}, readEnvelopeBuilderIndices(t, stream.run(t, c), cfg))
+	require.Empty(t, rebuilder.called)
+}
+
+func newRootHistoryHandler(t *testing.T) (*ConsensusHandlers, *clparams.BeaconChainConfig, []common.Hash, *testEnvelopeRebuilder) {
+	t.Helper()
+	ctx := t.Context()
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+	ethClock, cfg := getGloasEthClockAndConfig(t)
+	requestCount := int(cfg.MaxRequestPayloads)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	roots, envelopes := populateGloasEnvelopeHistory(t, store, tx, cfg, ethClock.GetCurrentSlot()-uint64(requestCount)-1, requestCount, -1)
+	require.NoError(t, tx.Commit())
+	rebuilder := &testEnvelopeRebuilder{envelopes: envelopes}
+	fc := mock_services.NewForkChoiceStorageMock(t)
+	fc.FinalizedCheckpointVal = solid.Checkpoint{Epoch: ethClock.GetCurrentEpoch()}
+	c := NewConsensusHandlers(ctx, store, indiciesDB, nil, &clparams.NetworkConfig{}, nil, cfg, ethClock, nil, fc, nil, nil, nil, true, rebuilder)
+	return c, cfg, roots, rebuilder
+}
+
+func runRootHistoryRequest(t *testing.T, c *ConsensusHandlers, cfg *clparams.BeaconChainConfig, roots []common.Hash) []byte {
+	t.Helper()
+	requestRoots := solid.NewHashList(int(cfg.MaxRequestPayloads))
+	for _, root := range roots {
+		requestRoots.Append(root)
+	}
+	return newRootHandlerTestStream(requestRoots, peer.ID("history-peer")).run(t, c)
+}
+
+func rangeHistoryRetry(t *testing.T, c *ConsensusHandlers, stream *rangeHandlerTestStream) func(skip, count int) []byte {
+	return func(skip, count int) []byte {
+		retry := &rangeHandlerTestStream{
+			envelopeHandlerStream: &envelopeHandlerStream{conn: stream.conn, protocol: stream.protocol},
+			startSlot:             stream.startSlot + uint64(skip),
+			count:                 uint64(count),
+		}
+		return retry.run(t, c)
+	}
+}
+
+func TestExecutionPayloadEnvelopesByRangeRetryAfterRebuildLimit(t *testing.T) {
+	c, cfg, _, _, rebuilder, stream := newRangeHistoryHandler(t, 129, 128)
+	testRetryAfterRebuildLimit(t, c, cfg, rebuilder, string(stream.protocol), rangeHistoryRetry(t, c, stream))
+}
+
+func TestExecutionPayloadEnvelopesByRootRetryAfterRebuildLimit(t *testing.T) {
+	c, cfg, roots, rebuilder := newRootHistoryHandler(t)
+	testRetryAfterRebuildLimit(t, c, cfg, rebuilder, communication.ExecutionPayloadEnvelopesByRootProtocolV1, func(skip, count int) []byte {
+		return runRootHistoryRequest(t, c, cfg, roots[skip:skip+count])
+	})
+}
+
+// testRetryAfterRebuildLimit expects a retry for the envelopes that the
+// rebuild credit cut short to be refused without punishment until the item
+// quota refills, and served after that.
+func testRetryAfterRebuildLimit(t *testing.T, c *ConsensusHandlers, cfg *clparams.BeaconChainConfig, rebuilder *testEnvelopeRebuilder, protocolName string, run func(skip, count int) []byte) {
+	t.Helper()
+	now := time.Now()
+	c.rateLimiter.now = func() time.Time { return now }
+	rebuilder.onRebuild = func() { now = now.Add(250 * time.Millisecond) }
+	key := peerProtocolKey{peerID: peer.ID("history-peer").String(), protocol: protocolName}
+	advance := func(d time.Duration) {
+		now = now.Add(d)
+		bucketI, ok := c.rateLimiter.buckets.Load(key)
+		require.True(t, ok)
+		bucket := bucketI.(*tokenBucket)
+		bucket.mu.Lock()
+		bucket.lastRefill = bucket.lastRefill.Add(-d)
+		bucket.mu.Unlock()
+	}
+	request := func(skip, count int) []byte {
+		t.Helper()
+		require.True(t, c.rateLimiter.allowRequest(key.peerID, protocolName, 1))
+		data := run(skip, count)
+		_, punished := c.rateLimiter.punished.Load(key)
+		require.False(t, punished, "retry for the unserved envelopes punished the peer")
+		return data
+	}
+
+	requestCount := int(cfg.MaxRequestPayloads)
+	require.Equal(t, []uint64{0, 1, 2, 3, 4}, readEnvelopeBuilderIndices(t, request(0, requestCount), cfg))
+
+	advance(time.Second)
+	data := request(5, requestCount-5)
+	require.Equal(t, []byte{InvalidRequestPrefix}, data[:1])
+	require.Len(t, rebuilder.called, 5)
+
+	advance(10 * time.Second)
+	require.Equal(t, []uint64{5, 6, 7, 8, 9}, readEnvelopeBuilderIndices(t, request(5, requestCount-5), cfg))
+}
