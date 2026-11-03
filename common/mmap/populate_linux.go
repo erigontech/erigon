@@ -86,6 +86,25 @@ type Probe struct {
 	resident map[uintptr]struct{}
 }
 
+// dbg: prefetch working-set counters, reset per BAL block.
+var ProbeEntries, PagesMax atomic.Int64
+
+func (pr *Probe) Len() int {
+	if pr == nil {
+		return 0
+	}
+	return len(pr.resident)
+}
+
+func NoteMax(v *atomic.Int64, n int64) {
+	for {
+		cur := v.Load()
+		if n <= cur || v.CompareAndSwap(cur, n) {
+			return
+		}
+	}
+}
+
 // NewProbe returns nil when ReadPages cannot read pages, so callers fall back to ordinary reads.
 func NewProbe() *Probe {
 	if !BatchPrefetch {
@@ -156,6 +175,7 @@ func ReadPages(pages []uintptr) error {
 	if batchRings == nil {
 		return nil
 	}
+	NoteMax(&PagesMax, int64(len(pages)))
 	byFd := map[int][]int64{}
 	seen := make(map[uintptr]struct{}, len(pages))
 	for _, p := range pages {

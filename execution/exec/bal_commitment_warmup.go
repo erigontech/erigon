@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -340,8 +341,22 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
+// dbg: commitment prefix bytes held at once (flat set, then the largest trie wave).
+var probePrefixBytes, probeWaveBytes atomic.Int64
+
+func prefixesBytes(ps [][]byte) (n int64) {
+	for _, p := range ps {
+		n += int64(cap(p)) + 24 + 48 // slice + seen-map entry
+	}
+	return n
+}
+
 func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	started := time.Now()
+	mmap.ProbeEntries.Store(0)
+	mmap.PagesMax.Store(0)
+	probePrefixBytes.Store(0)
+	probeWaveBytes.Store(0)
 	accs := make([][]byte, 0, len(bal))
 	var slots [][]byte
 	for i := range bal {
@@ -359,8 +374,16 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	var g errgroup.Group
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
-	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
+	hashed := balCommitmentWarmupKeys(bal)
+	g.Go(func() error { return prefetchCommitment(ctx, db, hashed, &stats[2]) })
 	err := g.Wait()
+	keyBytes := int64(len(accs))*(20+24) + int64(len(slots))*(52+24) + int64(len(hashed))*(128+24)
+	probeBytes := mmap.ProbeEntries.Load() * 48
+	pagesBytes := mmap.PagesMax.Load() * (8 + 8 + 48)
+	set := keyBytes + probePrefixBytes.Load() + probeWaveBytes.Load() + probeBytes + pagesBytes
+	log.Info("[warmBAL] prefetch set", "keys", len(accs)+len(slots), "hashed", len(hashed), "keyMB", keyBytes>>20,
+		"prefixMB", probePrefixBytes.Load()>>20, "waveMB", probeWaveBytes.Load()>>20, "probeEntries", mmap.ProbeEntries.Load(),
+		"probeMB", probeBytes>>20, "pagesMax", mmap.PagesMax.Load(), "pagesMB", pagesBytes>>20, "setMB", set>>20)
 	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
@@ -412,6 +435,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 				}
 			}
 		}
+		probePrefixBytes.Store(prefixesBytes(prefixes))
 		if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
 			return err
 		}
@@ -452,6 +476,7 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, p late
 				prefixes = append(prefixes, []byte(pfx))
 			}
 		}
+		mmap.NoteMax(&probeWaveBytes, prefixesBytes(prefixes))
 		if depth > prefetchFlatDepth {
 			if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
 				return err

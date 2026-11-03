@@ -2749,6 +2749,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		return 0, 0, 0, 0
 	}
 	defer func() {
+		mmap.ProbeEntries.Add(int64(dt.probe.Len()))
 		dt.probe = nil
 		for _, r := range dt.dataReaders {
 			if r != nil {
