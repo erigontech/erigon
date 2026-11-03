@@ -428,13 +428,6 @@ func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
 		require.NoError(t, err)
 		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b5Canon.ExecutionPayload, txn.Hash())
 		require.NoError(t, err)
-		// change changer at b6
-		txn, err = changer.Change(transactOpts)
-		require.NoError(t, err)
-		b6Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b6Canon.ExecutionPayload, txn.Hash())
-		require.NoError(t, err)
 		// unwind back to b2 should return "Too deep reorg" error with code 38006
 		err = eat.MockCl.UpdateForkChoice(ctx, b2Canon)
 		require.Error(t, err)

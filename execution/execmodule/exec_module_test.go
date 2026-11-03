@@ -767,18 +767,9 @@ func TestUpdateForkChoiceResentHeadBelowCommitment(t *testing.T) {
 	}
 }
 
-// A fork choice back to a canonical ancestor keeps the ancestor, so like a fork
-// from it, it needs changesets only for the blocks above it.
-func TestUpdateForkChoiceBackToCanonicalAncestorAtRetentionEdge(t *testing.T) {
-	m, chainPack := newTransferChain(t, 5, execmoduletester.WithMaxReorgDepth(2))
-	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
-	res, err := m.UpdateForkChoice(t.Context(), chainPack.Blocks[1].Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
-}
-
-func newTransferChain(t *testing.T, n int, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
 	t.Helper()
+	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -788,9 +779,8 @@ func newTransferChain(t *testing.T, n int, opts ...execmoduletester.Option) (*ex
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	opts = append([]execmoduletester.Option{execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey)}, opts...)
-	m := execmoduletester.New(t, opts...)
-	chainPack, err := m.GenerateChain(n, func(i int, b *blockgen.BlockGen) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	chainPack, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -800,14 +790,7 @@ func newTransferChain(t *testing.T, n int, opts ...execmoduletester.Option) (*ex
 		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	require.Len(t, chainPack.Blocks, n)
-	return m, chainPack
-}
-
-func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
-	t.Helper()
-	ctx := t.Context()
-	m, chainPack := newTransferChain(t, 10)
+	require.Len(t, chainPack.Blocks, 10)
 
 	// Drive the full chain in (insert + validate + UFC). State commitBlock and
 	// TxNums.Last are now both at block 10.

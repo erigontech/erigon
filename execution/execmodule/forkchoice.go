@@ -286,9 +286,7 @@ func (e *ExecModule) unwindIfNeeded(
 		}
 	}
 	unwindTarget := currentParentNumber
-	if canonicalHash == blockHash {
-		unwindTarget = fcuHeader.Number.Uint64()
-	} else if unwindTarget < finalisedBlockNum {
+	if canonicalHash != blockHash && unwindTarget < finalisedBlockNum {
 		return &ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusInvalidForkchoice,
@@ -305,8 +303,9 @@ func (e *ExecModule) unwindIfNeeded(
 	if errLast != nil {
 		return nil, nil, errLast
 	}
+	headIsCanonicalTip := canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
 	var unwindPoint *uint64
-	if unwindTarget < lastCanonicalBlock {
+	if unwindTarget < lastCanonicalBlock && !headIsCanonicalTip {
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 		if err != nil {
 			return nil, nil, err
@@ -342,7 +341,7 @@ func (e *ExecModule) unwindIfNeeded(
 	// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
 	// the unwound txNum, so no whole-cache clear is needed here.
 	if fcuHeader.Number.Sign() > 0 {
-		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - currentParentNumber)
+		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 	}
 	if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
 		return nil, nil, err
