@@ -342,8 +342,8 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
 // dbg: BAL_TRIE_GATE_PERMILLE skips the trie prefetch when a sample of its flat prefixes has fewer cold pages
-// per prefix than that (in 1/1000); 0 disables the gate.
-var trieGatePermille = dbg.EnvInt("BAL_TRIE_GATE_PERMILLE", 0)
+// per prefix than that (in 1/1000, default 50); 0 disables the gate.
+var trieGatePermille = dbg.EnvInt("BAL_TRIE_GATE_PERMILLE", 50)
 
 const trieGateSample = 256
 
