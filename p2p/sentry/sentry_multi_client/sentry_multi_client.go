@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -72,11 +72,43 @@ func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	}
 }
 
+const maxConcurrentUploadRequests = 4
+
 func (cs *MultiClient) RecvUploadMessageLoop(
 	ctx context.Context,
 	sentry sentryproto.SentryClient,
 	wg *sync.WaitGroup,
 ) {
+	var handlers sync.WaitGroup
+	defer handlers.Wait()
+	handle := func(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+		peer := gointerfaces.ConvertH512ToHash(message.PeerId)
+		cs.uploadMu.Lock()
+		if cs.uploadPeers[peer] || len(cs.uploadPeers) >= maxConcurrentUploadRequests {
+			cs.uploadMu.Unlock()
+			if wg != nil {
+				wg.Done()
+			}
+			return nil
+		}
+		cs.uploadPeers[peer] = true
+		cs.uploadMu.Unlock()
+
+		handlers.Go(func() {
+			defer func() {
+				cs.uploadMu.Lock()
+				delete(cs.uploadPeers, peer)
+				cs.uploadMu.Unlock()
+				if wg != nil {
+					wg.Done()
+				}
+			}()
+			if err := cs.HandleInboundMessage(ctx, message, sentry); err != nil {
+				cs.logger.Debug("Handling incoming upload message", "err", err)
+			}
+		})
+		return nil
+	}
 	ids := []sentryproto.MessageId{
 		eth.ToProto[direct.ETH68][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
@@ -87,7 +119,7 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, handle, nil, cs.logger)
 }
 
 func (cs *MultiClient) RecvUploadBlockAccessListsMessageLoop(
@@ -167,12 +199,13 @@ type MultiClient struct {
 	statusDataProvider StatusGetter
 	logPeerInfo        bool
 
-	logger                           log.Logger
-	getReceiptsActiveGoroutineNumber *semaphore.Weighted
-	ethApiWrapper                    eth.ReceiptsGetter
-	balGenerator                     eth.BlockAccessListGetter
-	balReplayLimiter                 *rate.Limiter
-	balReplayMu                      sync.Mutex
+	logger           log.Logger
+	uploadMu         sync.Mutex
+	uploadPeers      map[[64]byte]bool
+	ethApiWrapper    eth.ReceiptsGetter
+	balGenerator     eth.BlockAccessListGetter
+	balReplayLimiter *rate.Limiter
+	balReplayMu      sync.Mutex
 }
 
 var (
@@ -192,18 +225,18 @@ func NewMultiClient(
 	logger log.Logger,
 ) (*MultiClient, error) {
 	cs := &MultiClient{
-		sentries:                         sentries,
-		ChainConfig:                      chainConfig,
-		db:                               db,
-		Engine:                           engine,
-		blockReader:                      blockReader,
-		statusDataProvider:               statusDataProvider,
-		logPeerInfo:                      logPeerInfo,
-		logger:                           logger,
-		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
-		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
-		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
-		balReplayLimiter:                 rate.NewLimiter(rate.Every(balReplayInterval), 1),
+		sentries:           sentries,
+		ChainConfig:        chainConfig,
+		db:                 db,
+		Engine:             engine,
+		blockReader:        blockReader,
+		statusDataProvider: statusDataProvider,
+		logPeerInfo:        logPeerInfo,
+		logger:             logger,
+		uploadPeers:        make(map[[64]byte]bool),
+		ethApiWrapper:      receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balGenerator:       bal.NewRegenerator(blockReader, engine, logger),
+		balReplayLimiter:   rate.NewLimiter(rate.Every(balReplayInterval), 1),
 	}
 
 	return cs, nil
@@ -452,12 +485,6 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 		lastBlockIncomplete = cached.LastBlockIncomplete
 	}
 	if needMore {
-		err = cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
-		if err != nil {
-			return err
-		}
-		defer cs.getReceiptsActiveGoroutineNumber.Release(1)
-
 		tx, err := cs.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
