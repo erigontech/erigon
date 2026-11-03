@@ -353,7 +353,7 @@ func TestMergeFailureClosesMergedSegments(t *testing.T) {
 			for _, r := range ranges {
 				merged := snaptype.BeaconBlocks.FileInfo(dir, r.From(), r.To()).Path
 				for _, f := range []string{merged, strings.TrimSuffix(merged, ".seg") + ".idx"} {
-					if err := os.Remove(f); !errors.Is(err, os.ErrNotExist) {
+					if err := dir2.RemoveFile(f); !errors.Is(err, os.ErrNotExist) {
 						require.NoError(err)
 					}
 				}
