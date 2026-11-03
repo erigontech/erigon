@@ -2145,3 +2145,18 @@ func TestBALReadAddressOfInBlockDeployIsDependency(t *testing.T) {
 	_, res, _ = vm.ReadAddress(addr, 5)
 	require.Equal(t, MVReadResultNone, res.Status(), "a sealed deployer is in the base state")
 }
+
+func TestBALReadAddressOfPrefundedInBlockDeployIsDependency(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x05})
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+	}})
+	vm.StoreOriginAccount(addr, &accounts.Account{Balance: *uint256.NewInt(1)})
+	_, res, _ := vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultDependency, res.Status(), "the pre-deploy account of a prefunded address is stale until the deployer flushes")
+	require.Equal(t, 2, res.DepIdx())
+
+	_, res, _ = vm.ReadAddress(addr, 2)
+	require.Equal(t, MVReadResultDone, res.Status(), "the deployer itself reads the pre-block account")
+}

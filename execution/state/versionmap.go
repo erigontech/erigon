@@ -758,11 +758,12 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 	// Origin fallback: the pre-block committed account lives in the lock-free origin layer at
 	// originIndex (immutable), not as a cell. Resolving it here keeps reads and ValidateVersion
 	// (which calls this via ReadStatus) consistent without taking the account's e.mu.
-	if oacc, seeded := vm.LoadOriginAccount(addr); seeded {
-		return oacc, ReadResult{depIdx: originIndex}, true
-	}
 	if k := vm.unflushedDeployer(addr, txIdx); k >= 0 {
 		res.depIdx = k
+		return val, res, false
+	}
+	if oacc, seeded := vm.LoadOriginAccount(addr); seeded {
+		return oacc, ReadResult{depIdx: originIndex}, true
 	}
 	return val, res, false
 }
