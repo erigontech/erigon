@@ -17,6 +17,8 @@
 package fork_graph
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -194,4 +196,235 @@ func TestAddChainSegmentReplaysParentThatIsNotCurrent(t *testing.T) {
 	require.Equal(t, blocks[1].Block.StateRoot, got.stateRoot)
 	require.True(t, got.isCurrent)
 	require.NotNil(t, got.header)
+}
+
+func beginStartedSegment(t *testing.T, g *forkGraphDisk, block *cltypes.SignedBeaconBlock) *ChainSegment {
+	t.Helper()
+	seg, result, err := g.BeginChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, Started, result)
+	require.NotNil(t, seg)
+	return seg
+}
+
+func TestChainSegmentPhasesMatchAddChainSegment(t *testing.T) {
+	for _, invalidSecond := range []bool{false, true} {
+		t.Run(fmt.Sprintf("invalidSecond=%v", invalidSecond), func(t *testing.T) {
+			inline, inlineBlocks := newLightClientGraph(t)
+			phased, phasedBlocks := newLightClientGraph(t)
+			if invalidSecond {
+				inlineBlocks[1].Block.StateRoot[0] ^= 0xff
+				phasedBlocks[1].Block.StateRoot[0] ^= 0xff
+			}
+			for i := range inlineBlocks {
+				post, result, err := inline.AddChainSegment(inlineBlocks[i], true)
+				want := readImportArtifacts(t, inline, inlineBlocks[i], post, result, err)
+
+				seg := beginStartedSegment(t, phased, phasedBlocks[i])
+				seg.Transition()
+				post, result, err = phased.CommitChainSegment(seg)
+				got := readImportArtifacts(t, phased, phasedBlocks[i], post, result, err)
+
+				require.Equal(t, want, got)
+			}
+		})
+	}
+}
+
+func TestChainSegmentSecondTransitionDoesNotRerun(t *testing.T) {
+	once, onceBlocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, once, onceBlocks[0])
+	seg.Transition()
+	post, result, err := once.CommitChainSegment(seg)
+	want := readImportArtifacts(t, once, onceBlocks[0], post, result, err)
+
+	twice, twiceBlocks := newLightClientGraph(t)
+	seg = beginStartedSegment(t, twice, twiceBlocks[0])
+	seg.Transition()
+	seg.Transition()
+	post, result, err = twice.CommitChainSegment(seg)
+	require.NoError(t, err)
+	got := readImportArtifacts(t, twice, twiceBlocks[0], post, result, err)
+
+	require.Equal(t, Success, got.result)
+	require.False(t, got.bad)
+	require.Equal(t, want, got)
+}
+
+func TestChainSegmentConcurrentTransitionsRunOnce(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(seg.Transition)
+	}
+	wg.Wait()
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	require.False(t, g.IsBlockInvalid(seg.blockRoot))
+	stateRoot, err := post.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, blocks[0].Block.StateRoot, common.Hash(stateRoot))
+}
+
+func TestCommitChainSegmentWhileTransitionRuns(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		seg.Transition()
+	}()
+
+	post, result, err := g.CommitChainSegment(seg)
+	<-done
+	if result == Success {
+		require.NoError(t, err)
+		return
+	}
+	require.ErrorContains(t, err, "before its transition")
+	require.Equal(t, importArtifacts{result: LogisticError, failed: true}, readImportArtifacts(t, g, blocks[0], post, result, err))
+	require.Nil(t, g.currentState)
+
+	post, result, err = g.CommitChainSegment(seg)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	require.Same(t, post, g.CurrentStateLocked(seg.blockRoot))
+}
+
+func TestDroppedChainSegmentStoresNothing(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	anchorRoot := g.anchorRoot
+	seg := beginStartedSegment(t, g, blocks[0])
+	seg.Transition()
+
+	require.Equal(t, importArtifacts{result: Success}, readImportArtifacts(t, g, blocks[0], nil, Success, nil))
+	require.Nil(t, g.currentState)
+	require.Nil(t, g.CurrentStateLocked(anchorRoot), "a dropped segment does not return its parent state")
+
+	post, result, err := g.AddChainSegment(blocks[0], true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	require.Same(t, post, g.CurrentStateLocked(common.Hash(mustBlockRoot(t, blocks[0]))))
+}
+
+func TestCommitChainSegmentReturnsPreValidatedWhenHeaderPublished(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	seg.Transition()
+	inlinePost, result, err := g.AddChainSegment(blocks[0], true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.NoError(t, err)
+	require.Equal(t, PreValidated, result)
+	require.Nil(t, post)
+	require.Same(t, inlinePost, g.CurrentStateLocked(common.Hash(mustBlockRoot(t, blocks[0]))))
+}
+
+func TestCommitChainSegmentRejectsBlockBelowPrunedBoundary(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	seg.Transition()
+	g.lowestAvailableBlock.Store(blocks[0].Block.Slot + 2)
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.NoError(t, err)
+	require.Equal(t, BelowAnchor, result)
+	require.Nil(t, post)
+	require.True(t, g.IsBlockInvalid(seg.blockRoot))
+	_, hasBlock := g.blocks.Load(seg.blockRoot)
+	require.False(t, hasBlock)
+}
+
+func TestCommitChainSegmentWithoutTransitionStoresNothing(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.Error(t, err)
+	require.Equal(t, LogisticError, result)
+	require.Nil(t, post)
+	got := readImportArtifacts(t, g, blocks[0], post, result, err)
+	require.Equal(t, importArtifacts{result: LogisticError, failed: true}, got)
+	require.Nil(t, g.currentState)
+}
+
+func TestCommitChainSegmentMarksInvalidBlockBad(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	blocks[0].Block.StateRoot[0] ^= 0xff
+	seg := beginStartedSegment(t, g, blocks[0])
+	seg.Transition()
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.Error(t, err)
+	require.Equal(t, InvalidBlock, result)
+	require.Nil(t, post)
+	got := readImportArtifacts(t, g, blocks[0], post, result, err)
+	require.Equal(t, importArtifacts{result: InvalidBlock, failed: true, bad: true}, got)
+}
+
+func TestChainSegmentTransitionPanicPropagates(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	body := blocks[0].Block.Body
+	blocks[0].Block.Body = nil
+	require.Panics(t, seg.Transition)
+	blocks[0].Block.Body = body
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.ErrorContains(t, err, "before its transition")
+	require.Equal(t, LogisticError, result)
+	require.Nil(t, post)
+	require.Equal(t, importArtifacts{result: LogisticError, failed: true}, readImportArtifacts(t, g, blocks[0], post, result, err))
+}
+
+func TestAddChainSegmentTransitionPanicPropagates(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	_, result, err := g.AddChainSegment(blocks[0], true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	parentRoot := common.Hash(mustBlockRoot(t, blocks[0]))
+	blockRoot := common.Hash(mustBlockRoot(t, blocks[1]))
+	// A nil body on the imported block would panic in Begin, which hashes it, so the
+	// parent block loses its body instead: the light-client update reads it in Transition.
+	g.blocks.Store(parentRoot, &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: blocks[0].Block.Slot}})
+
+	require.Panics(t, func() { _, _, _ = g.AddChainSegment(blocks[1], true) })
+
+	g.blocks.Store(parentRoot, blocks[0])
+	post, result, err := g.AddChainSegment(blocks[1], true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	require.Same(t, post, g.CurrentStateLocked(blockRoot))
+}
+
+func TestBeginChainSegmentWithoutReplayRequiresCurrentParent(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	current := g.currentState
+
+	seg, result, err := g.BeginChainSegment(blocks[1], true)
+	require.NoError(t, err)
+	require.Equal(t, ReplayRequired, result)
+	require.Nil(t, seg)
+	require.Same(t, current, g.CurrentStateLocked(g.anchorRoot))
+	require.Zero(t, g.highestTransitionSlot)
+	require.Equal(t, importArtifacts{result: ReplayRequired}, readImportArtifacts(t, g, blocks[1], nil, result, err))
+}
+
+func TestBeginChainSegmentMovesStatesIntoSegment(t *testing.T) {
+	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
+	advanced := precomputedEpochState(t, parent, block)
+	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
+	parentState := graph.CurrentStateLocked(block.Block.ParentRoot)
+	require.NotNil(t, parentState)
+
+	seg := beginStartedSegment(t, graph, block)
+	require.Same(t, parentState, seg.parentState)
+	require.Same(t, advanced, seg.precomputedState)
+	require.Nil(t, graph.currentState)
+	require.Nil(t, graph.nextEpochState)
 }
