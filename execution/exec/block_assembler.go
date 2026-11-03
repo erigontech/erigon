@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -307,8 +306,9 @@ func (ba *BlockAssembler) AddTransactions(
 
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
 			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
-		if err == nil {
-			err = protocol.PostProcessTx(ba.cfg.Engine, chainConfig, ibs, append(slices.Clip(current.Txns), txn), len(current.Txns))
+		if p, ok := ba.cfg.Engine.(rules.TxPostProcessor); ok && err == nil {
+			// txn takes the spare slot AddTxn fills next; Txns is the assembler's own.
+			err = p.PostProcessTx(chainConfig, ibs, append(current.Txns, txn), len(current.Txns))
 		}
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
