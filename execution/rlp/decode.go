@@ -650,7 +650,8 @@ type Stream struct {
 	// Inline storage for NewBytesStream so the slice header doesn't escape per call.
 	sliceRdr sliceReader
 	// Reads advance off instead of reslicing sliceRdr: Stream lives on the heap, so
-	// moving the slice pointer costs a GC write barrier on every read.
+	// moving the slice pointer costs a GC write barrier on every read. s.r stays at
+	// the slice start, so byte-backed reads must not go through s.r.
 	off int
 
 	remaining uint64   // number of bytes remaining to be read from r
