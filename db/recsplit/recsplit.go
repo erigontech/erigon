@@ -473,6 +473,11 @@ func (rs *RecSplit) ResetNextSalt() error {
 		_, _ = rs.offsetFile.Seek(0, 0)
 		rs.offsetWriter.Reset(rs.offsetFile)
 	}
+	if rs.indexF != nil {
+		_ = rs.indexF.Close()
+		_ = dir.RemoveFile(rs.indexF.Name())
+		rs.indexF = nil
+	}
 	rs.gr.Reset()
 	rs.ef = eliasfano16.DoubleEliasFano{}
 	rs.currentBucket = rs.currentBucket[:0]

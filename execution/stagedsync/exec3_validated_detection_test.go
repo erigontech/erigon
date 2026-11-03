@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -33,12 +34,13 @@ func newDetExecutor(t *testing.T, n int) *blockExecutor {
 		tasks:               tasks,
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(nil),
-		readerByAddr:        map[accounts.Address][]int{},
+		readerByAddr:        map[accounts.Address][]addrReader{},
 		finalizedResults:    map[int]*execResult{},
 		coinbaseFlushedUpTo: -1,
 		execFailed:          make([]int, n),
 		poolTasks:           poolTasks,
 		writeChangedPrev:    map[int]*state.WriteSet{},
+		revalidate:          map[int]bool{},
 	}
 }
 
@@ -204,7 +206,6 @@ func TestMarkReadersDirty(t *testing.T) {
 	}
 	newBE := func() *blockExecutor {
 		be := newDetExecutor(t, 4)
-		be.revalidate = map[int]bool{}
 		read(be, 0, 0, slot1)
 		read(be, 2, 0, slot1)
 		read(be, 3, 0, slot2)
@@ -228,4 +229,37 @@ func TestMarkReadersDirty(t *testing.T) {
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
 	})
+	writes := map[state.AccountPath]*state.WriteSet{
+		state.BalancePath:  newWS().bal(addr, writer, *uint256.NewInt(1)).build(),
+		state.NoncePath:    newWS().nonce(addr, writer, 1).build(),
+		state.CodePath:     newWS().code(addr, writer, accounts.Code{}).build(),
+		state.CodeHashPath: newWS().codeHash(addr, writer, accounts.CodeHash{}).build(),
+		state.CodeSizePath: newWS().codeSize(addr, writer, 1).build(),
+		state.StoragePath:  newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build(),
+	}
+	for written, ws := range writes {
+		for read := state.AddressPath; read <= state.CreateContractPath; read++ {
+			t.Run(fmt.Sprintf("write %d read %d", written, read), func(t *testing.T) {
+				be := newDetExecutor(t, 4)
+				rs := state.ReadSet{}
+				rs.SetHeader(addr, read, slot1, state.ReadHeader{Source: state.StorageRead})
+				be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+				be.indexReads(2, rs)
+				be.markReadersDirty(1, ws)
+				require.Equal(t, read == written, be.revalidate[2])
+			})
+		}
+	}
+	for _, written := range []state.AccountPath{state.BalancePath, state.NoncePath} {
+		t.Run(fmt.Sprintf("a reader of balance and nonce is flagged by a write %d", written), func(t *testing.T) {
+			be := newDetExecutor(t, 4)
+			rs := state.ReadSet{}
+			rs.SetHeader(addr, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			rs.SetHeader(addr, state.NoncePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
+			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+			be.indexReads(2, rs)
+			be.markReadersDirty(1, writes[written])
+			require.True(t, be.revalidate[2])
+		})
+	}
 }

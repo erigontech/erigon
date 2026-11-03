@@ -20,7 +20,10 @@
 package node
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
@@ -121,6 +124,28 @@ func TestNodeUsedDataDir(t *testing.T) {
 	if _, err := New(t.Context(), &nodecfg.Config{Dirs: datadir.New(dir)}, log.New()); !errors.Is(err, datadir.ErrDataDirLocked) {
 		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, datadir.ErrDataDirLocked)
 	}
+}
+
+func TestNodeRenamesOldVersionsOnlyUnderLock(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	oldPath := filepath.Join(dirs.Snap, "v1-000000-000500-headers.seg")
+	require.NoError(t, os.WriteFile(oldPath, nil, 0o644))
+
+	l, locked, err := datadir.TryFlock(dirs)
+	require.NoError(t, err)
+	require.True(t, locked)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = New(ctx, &nodecfg.Config{Dirs: dirs}, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	require.FileExists(t, oldPath)
+	require.NoError(t, l.Unlock())
+
+	stack, err := New(t.Context(), &nodecfg.Config{Dirs: dirs}, log.New())
+	require.NoError(t, err)
+	defer stack.Close()
+	require.NoFileExists(t, oldPath)
+	require.FileExists(t, filepath.Join(dirs.Snap, "v1.0-000000-000500-headers.seg"))
 }
 
 // Tests whether a Lifecycle can be registered.
