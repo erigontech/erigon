@@ -66,6 +66,9 @@ type DataError interface {
 type ServerCodec interface {
 	peerInfo() PeerInfo
 	ReadBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
+	// takeRelease hands over what releases the last frame read, nil when nothing holds it.
+	// The caller runs it once the frame's messages are no longer needed.
+	takeRelease() func()
 	Close()
 
 	jsonWriter

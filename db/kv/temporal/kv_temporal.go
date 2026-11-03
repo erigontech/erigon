@@ -493,11 +493,11 @@ func (tx *Tx) Debug() kv.TemporalDebugTx {
 }
 
 func (tx *RwTx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
 func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
 // ST1016 is reported here, not on AsyncClone: staticcheck aggregates the
@@ -677,6 +677,14 @@ func (tx *RwTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc 
 	return tx.indexRange(name, tx.RwTx, k, fromTs, toTs, asc, limit)
 }
 
+func (tx *Tx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return kv.JoinIndexRanges(q, tx.IndexRange)
+}
+
+func (tx *RwTx) IndexJoin(q kv.IndexQuery) (stream.U64, error) {
+	return kv.JoinIndexRanges(q, tx.IndexRange)
+}
+
 func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.aggtx.HistoryRange(name, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
@@ -847,16 +855,36 @@ func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
+func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) (uint64, error) {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
 
-func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.Tx)
 }
 
-func (tx *RwTx) HistoryStartFrom(name kv.Domain) uint64 {
+// HistoryFilesGeneration identifies pinned files, not the live aggregator view.
+// Combine it with ViewID when caching values that can also come from MDBX.
+func (tx *Tx) HistoryFilesGeneration() uint64 { return tx.aggtx.Generation() }
+
+func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.RwTx)
+}
+
+func (tx *tx) HistoryCoverageStart(name kv.Domain) uint64 {
+	return tx.aggtx.HistoryCoverageStart(name)
+}
+
+func (tx *tx) historyRecordedInDB(name kv.Domain, roTx kv.Tx, fromTxNum, toTxNum uint64) (bool, error) {
+	return tx.aggtx.HistoryRecordedInDB(name, fromTxNum, toTxNum, roTx)
+}
+
+func (tx *Tx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
+	return tx.historyRecordedInDB(name, tx.Tx, fromTxNum, toTxNum)
+}
+
+func (tx *RwTx) HistoryRecordedInDB(name kv.Domain, fromTxNum, toTxNum uint64) (bool, error) {
+	return tx.historyRecordedInDB(name, tx.RwTx, fromTxNum, toTxNum)
 }
 
 func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {

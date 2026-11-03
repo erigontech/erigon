@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 const MetadataApi = "rpc"
@@ -62,8 +63,10 @@ type Server struct {
 	traceRequests       bool // Whether to print requests at INFO level
 	debugSingleRequest  bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
+	subscriptionLimit   int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
+	ingress             ingressBudget
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -74,6 +77,8 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	server := &Server{
 		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
+		subscriptionLimit: rpccfg.DefaultSubscriptionLimit,
+		ingress:           ingressBudget{limit: defaultIngressBudget},
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -93,6 +98,11 @@ func (s *Server) SetAllowList(allowList AllowList) {
 // SetBatchLimit sets limit of number of requests in a batch
 func (s *Server) SetBatchLimit(limit int) {
 	s.batchLimit = limit
+}
+
+// SetSubscriptionLimit sets how many subscriptions one connection may hold at a time; 0 removes the limit.
+func (s *Server) SetSubscriptionLimit(limit int) {
+	s.subscriptionLimit = limit
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -141,10 +151,11 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 			h.close(err, nil)
 			return
 		}
+		release := codec.takeRelease()
 		if batch {
-			h.handleBatch(msgs)
+			h.handleBatch(msgs, release)
 		} else {
-			h.handleMsg(msgs[0], nil)
+			h.handleMsg(msgs[0], nil, release)
 		}
 	}
 }
@@ -152,7 +163,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
@@ -170,15 +181,19 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
-		if !errors.Is(err, io.EOF) {
-			return errorMessage(&invalidMessageError{"parse error"})
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case errors.Is(err, errServerOverloaded):
+			SetOverloadedFlag(ctx)
+			return errorMessage(err)
 		}
-		return nil
+		return errorMessage(&invalidMessageError{"parse error"})
 	}
 	if batch {
-		h.handleBatch(reqs)
+		h.handleBatch(reqs, nil)
 	} else {
-		h.handleMsg(reqs[0], stream)
+		h.handleMsg(reqs[0], stream, nil)
 	}
 	return nil
 }

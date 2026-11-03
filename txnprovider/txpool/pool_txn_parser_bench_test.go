@@ -17,14 +17,44 @@
 package txpool
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/testdata"
 )
+
+func BenchmarkParseSetCodeAuthorizations(b *testing.B) {
+	for _, count := range []int{1, 1200} {
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			txn, err := types.DecodeTransaction(hexutil.MustDecodeHex(testdata.ValidSetCodeTxn1))
+			require.NoError(b, err)
+			setCode := txn.(*types.SetCodeTransaction)
+			auth := setCode.Authorizations[0]
+			setCode.Authorizations = make([]types.Authorization, count)
+			for i := range setCode.Authorizations {
+				setCode.Authorizations[i] = auth
+			}
+			var encoded bytes.Buffer
+			require.NoError(b, setCode.MarshalBinary(&encoded))
+			ctx := NewTxnParseContext(*setCode.GetChainID())
+			ctx.ValidateRLP(ValidateSerializedTxn)
+			b.ReportAllocs()
+			b.SetBytes(int64(encoded.Len()))
+			for b.Loop() {
+				var slot TxnSlot
+				var sender [20]byte
+				_, err := ctx.ParseTransaction(encoded.Bytes(), 0, &slot, sender[:], false, false, nil)
+				require.NoError(b, err)
+			}
+		})
+	}
+}
 
 func BenchmarkParseTransaction(b *testing.B) {
 	type benchCase struct {

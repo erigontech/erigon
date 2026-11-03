@@ -111,24 +111,6 @@ func ReadBlock(root fs.FS, version clparams.StateVersion, index int) (*cltypes.S
 	return blk, nil
 }
 
-func ReadBlockByPath(root fs.FS, version clparams.StateVersion, path string) (*cltypes.SignedBeaconBlock, error) {
-	var blockBytes []byte
-	var err error
-	blockBytes, err = fs.ReadFile(root, path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	blk := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
-	if err := utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
-		return nil, err
-	}
-
-	return blk, nil
-}
-
 func ReadAnchorBlock(root fs.FS, version clparams.StateVersion, name string) (*cltypes.BeaconBlock, error) {
 	var blockBytes []byte
 	var err error

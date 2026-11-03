@@ -100,7 +100,7 @@ General advise: for deeper understanding read `mdbx.h`
 
 /*
 RoDB low-level interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
-Warning: can't move `tx` between goroutines. ReadOnly transactions do not lock goroutine to thread, RwTx does.
+See Tx and RwTx for transaction and cursor ownership rules.
 Lifetime: read data valid until end of transaction.
 Example:
 
@@ -143,19 +143,15 @@ type RwDB interface {
 	Update(ctx context.Context, f func(tx RwTx) error) error
 	UpdateNosync(ctx context.Context, f func(tx RwTx) error) error
 
-	// BeginRw - creates transaction
-	// A transaction and its cursors must only be used by a single
-	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happens automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
-	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
+	// BeginRw creates a write transaction. MDBX pins the creating goroutine to
+	// an OS thread; see RwTx for access and completion rules.
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
 
-// Tx
-// WARNING:
-//   - Tx is not threadsafe and may only be used in the goroutine that created it
-//   - ReadOnly transactions do not lock goroutine to thread, RwTx does
+// Tx and all of its cursors require serialized access. MDBX allows access
+// from different goroutines in turn (MDBX_NOSTICKYTHREADS); see RwTx for
+// write transaction ownership.
 type Tx interface {
 	Getter
 
@@ -204,12 +200,9 @@ type Tx interface {
 	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
-// RwTx
-//
-// WARNING:
-//   - RwTx is not threadsafe and may only be used in the goroutine that created it.
-//   - ReadOnly transactions do not lock goroutine to thread, RwTx does
-//   - User Can't call runtime.LockOSThread/runtime.UnlockOSThread in same goroutine until RwTx Commit/Rollback
+// RwTx follows Tx's serialization rules. For MDBX, BeginRw pins the creating
+// goroutine to its OS thread, and Commit or Rollback must run on that goroutine.
+// Do not change that goroutine's OS-thread lock while the transaction is open.
 type RwTx interface {
 	Tx
 	Putter
@@ -520,17 +513,43 @@ type TemporalGetter interface {
 	StepsInFiles(entitySet ...Domain) Step
 }
 
-type TemporalTx interface {
-	Tx
-	TemporalGetter
-	WithFreezeInfo
-	GetLatestValSize(name Domain, k []byte) (size int, found bool, err error)
+// UnderlyingTx peels table overlays off tx down to the transaction they are
+// layered on. An overlay owns its own sequence metadata, but snapshot identity
+// and temporal domain reads belong to the tx underneath it.
+func UnderlyingTx(tx TemporalTx) TemporalTx {
+	for tx != nil {
+		wrapper, ok := tx.(interface{ UnderlyingTx() TemporalTx })
+		if !ok {
+			return tx
+		}
+		tx = wrapper.UnderlyingTx()
+	}
+	return nil
+}
 
+// UnderlyingTxIsWritable checks the transaction returned by UnderlyingTx, not
+// the wrapper's method set.
+func UnderlyingTxIsWritable(tx TemporalTx) bool {
+	_, writable := UnderlyingTx(tx).(TemporalRwTx)
+	return writable
+}
+
+// AsOfGetter reads state as of a txNum.
+type AsOfGetter interface {
 	// GetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - returns account's value before `txNum` transaction changed it
 	// To re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
 	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
+}
+
+type TemporalTx interface {
+	Tx
+	TemporalGetter
+	AsOfGetter
+	WithFreezeInfo
+	GetLatestValSize(name Domain, k []byte) (size int, found bool, err error)
+
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
@@ -541,6 +560,9 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
+
+	// IndexJoin - return iterator over the timestamps that match query `q`, see IndexQuery
+	IndexJoin(q IndexQuery) (timestamps stream.U64, err error)
 
 	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
 	// `ok == true && v != nil && len(v) == 0` means key-creation even
@@ -581,8 +603,12 @@ type TemporalDebugTx interface {
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
 
-	// HistoryStartFrom return the earliest known txnum in history of a given domain
-	HistoryStartFrom(domainName Domain) uint64
+	// HistoryStartFrom returns the earliest known txNum in a domain's history.
+	HistoryStartFrom(domainName Domain) (uint64, error)
+	// HistoryCoverageStart returns the first txNum the history of a given domain covers: the later start of its values and index files, or the end of the domain's frozen files when history lives only in the DB
+	HistoryCoverageStart(domainName Domain) uint64
+	// HistoryRecordedInDB reports whether the DB (not the files) holds history records of a given domain for any txNum in [fromTxNum, toTxNum)
+	HistoryRecordedInDB(domainName Domain, fromTxNum, toTxNum uint64) (bool, error)
 
 	// DomainProgress is a best-effort progress number for reporting: it mixes
 	// an exclusive files end with an inclusive DB txNum (so it is ±1 depending

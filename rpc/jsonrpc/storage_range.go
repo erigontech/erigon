@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"container/heap"
+	"math"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -150,8 +151,8 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 	// time and O(k) memory, where k = maxResult+1 and n = total storage entries.
 	startHash := common.BytesToHash(start)
 	hasStart := len(start) > 0
-	limit := maxResult + 1 // +1 to determine nextKey
-	h := make(storageEntryMaxHeap, 0, limit+1)
+	limit := min(maxResult, math.MaxInt-1) + 1 // +1 to determine nextKey
+	var h storageEntryMaxHeap
 
 	for r.HasNext() {
 		k, v, err := r.Next()

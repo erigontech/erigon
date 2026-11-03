@@ -252,7 +252,7 @@ func newContextBlockingBeaconRPC(ctx context.Context, sentinel sentinelproto.Sen
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
-	return rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil), &cfg
+	return rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock), &cfg
 }
 
 func TestForwardRequestMoreCancelsOutstandingRequestsWhenBatchExpires(t *testing.T) {
@@ -397,7 +397,7 @@ func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
 	sentinel := &rotatingProbeSentinel{response: response.Bytes()}
 	// Outside the bubble: NewBeaconRpcP2P starts loops that outlive a request,
 	// and a bubble may not end while they are parked.
-	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock)
 
 	synctest.Test(t, func(t *testing.T) {
 		// synctest treats a receive as durably blocking only for a channel created
@@ -523,7 +523,7 @@ func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	sentinel := &switchableProbeSentinel{response: p2pResponse.Bytes()}
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
 	downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
 	downloader.SetHTTPFallbackURL(server.URL)
 	var firstProcessCalls atomic.Int32

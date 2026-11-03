@@ -72,7 +72,7 @@ func testMainnetConfig(t *testing.T) {
 		"REORG_HEAD_WEIGHT_THRESHOLD":    clparams.ReorgHeadWeightThreshold,
 		"REORG_PARENT_WEIGHT_THRESHOLD":  clparams.ReorgParentWeightThreshold,
 		"SLOT_DURATION_MS":               builtInBeacon.SecondsPerSlot * 1000,
-		"ATTESTATION_DUE_BPS":            clparams.BpsFactor / builtInBeacon.IntervalsPerSlot,
+		"ATTESTATION_DUE_BPS":            clparams.AttestationDueBps,
 		"EPOCHS_PER_SUBNET_SUBSCRIPTION": builtInBeacon.EpochsPerRandomSubnetSubscription,
 		"MAXIMUM_GOSSIP_CLOCK_DISPARITY": time.Duration(builtInNetwork.MaximumGossipClockDisparity).Milliseconds(),
 		"MESSAGE_DOMAIN_INVALID_SNAPPY":  binary.BigEndian.Uint32(builtInNetwork.MessageDomainInvalidSnappy[:]),
@@ -87,7 +87,6 @@ func testMainnetConfig(t *testing.T) {
 		"PROPOSER_REORG_CUTOFF_BPS":           {},
 		"REORG_MAX_EPOCHS_SINCE_FINALIZATION": {},
 		"CONFIRMATION_BYZANTINE_THRESHOLD":    {},
-		"MAX_PAYLOAD_SIZE":                    {}, // Caplin uses 15 MiB: https://github.com/erigontech/erigon/issues/24417
 		"ATTESTATION_SUBNET_EXTRA_BITS":       {},
 		"GAS_LIMIT_SCHEDULE":                  {},
 	}

@@ -8,7 +8,7 @@ sidebar_position: 2
 
 The transaction pool, also known as the mempool, is a dynamic storage area where pending transactions are held before being confirmed and added to the blockchain. Each node on the Ethereum network maintains its own local transaction pool, which is combined with others to form the global pool.
 
-In Erigon, the TxPool is a dedicated API namespace that stores pending and queued transactions in local memory. Its primary function is to manage transactions waiting to be processed by miners.
+In Erigon, the TxPool is a dedicated API namespace that stores pending and queued transactions in local memory. Its primary function is to manage transactions waiting to be included in a block.
 
 The TxPool component is typically run as an internal Erigon component, but it can also be operated as a separate process, providing flexibility in transaction management.
 
@@ -20,14 +20,14 @@ TxPool is run as an internal Erigon component by default.
 
 Running an external TxPool can provide a more secure, scalable, and flexible transaction management solution, which can be particularly beneficial in high-performance or high-availability Ethereum node deployments.
 
-1. Before TxPool can be using as a separate process the executable must be built:
+1. Before TxPool can be used as a separate process, the executable must be built:
 
 ```bash
 cd erigon
 make txpool
 ```
 
-2. Together with external TxPool also [Sentry](sentry) and [RPC Daemon](rpc-daemon) must be compiled and run separately.
+2. Together with the external TxPool, [Sentry](sentry) and the [RPC Daemon](rpc-daemon) must also be compiled and run separately.
 
 ```bash
 make sentry
@@ -62,6 +62,10 @@ On each of the other hosts, point the same flag at Erigon rather than at themsel
 ```sh
 ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --datadir=<your datadir> --txpool.api.addr=localhost:9094
 ```
+
+## Delegated (EIP-7702) senders
+
+An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce is still allowed, subject to the usual price bump (`--txpool.pricebump`, and `--txpool.blobpricebump` for blob transactions). When an account becomes delegated, its pooled transactions are cut back to at most one on the next block. No flag changes the one-transaction limit.
 
 ## Flags explanation
 

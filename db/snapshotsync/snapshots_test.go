@@ -730,6 +730,34 @@ func TestRemoveOverlapsLeavesAnotherCollectionsIdxAlone(t *testing.T) {
 	require.FileExists(t, foreignNewIdx)
 }
 
+func TestRemoveOverlapsReportsOnlyOwnTypes(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	headers, beacon := snaptype2.Enums.Headers, snaptype.BeaconBlocks.Enum()
+
+	createTestSegmentFile(t, 0, 500_000, headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 1_000_000, headers, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 500_000, beacon, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 0, 1_000_000, beacon, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, beacon, dir, version.V1_0, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, beacon, dir, version.V1_1, logger)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+
+	require.ElementsMatch(t, []string{
+		snaptype.SegmentFileName(version.V1_0, 0, 500_000, headers),
+		snaptype.IdxFileName(version.V1_0, 0, 500_000, headers.String()),
+	}, reported, "only overlaps of the collection's own types may reach the seeder")
+}
+
 func TestCanRetire(t *testing.T) {
 	cases := []struct {
 		inFrom, inTo, outFrom, outTo, retireStep uint64
@@ -1450,53 +1478,7 @@ func TestSetIndexBuilder(t *testing.T) {
 	require.Nil(s.IndexBuilder(snaptype2.Transactions))
 }
 
-// A producer writes the tip .seg before indexing it. DirtyBlocksAvailable stops at the
-// first unindexed segment, so it cannot answer "how far has data been dumped" —
-// DirtySegmentsMax must count that tail.
-func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
-	logger := testlog.Logger(t, log.LvlCrit)
-	dir, require := t.TempDir(), require.New(t)
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-
-	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
-	defer s.Close()
-	require.NoError(s.OpenFolder())
-	require.Equal(uint64(0), s.DirtySegmentsMax(snaptype2.Enums.Headers))
-
-	for i := range uint64(3) {
-		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	}
-	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
-	require.NoError(dir2.RemoveFile(missingIdx))
-	require.NoError(s.OpenFolder())
-
-	require.Equal(uint64(20_000-1), s.DirtyBlocksAvailable(snaptype2.Enums.Headers))
-	require.Equal(uint64(20_000-1), s.VisibleBlocksAvailable(snaptype2.Enums.Headers))
-	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
-}
-
-// DirtySegmentsMax is served from a cache, so every path that mutates the dirty set has to
-// refresh it — a stale max would let the archive backfill stop short of history it still needs.
-func TestDirtySegmentsMaxFollowsRetire(t *testing.T) {
-	logger := testlog.Logger(t, log.LvlCrit)
-	dir, require := t.TempDir(), require.New(t)
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-
-	for i := range uint64(3) {
-		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	}
-	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
-	defer s.Close()
-	require.NoError(s.OpenFolder())
-	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
-
-	tail := snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, snaptype2.Enums.Headers)
-	require.NoError(s.retireFiles(mvcc.RetireReasonMerged, tail))
-	require.Equal(uint64(20_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
-}
-
-// An index builder needs the dumped-but-unindexed segments, which the visible set hides
-// and DirtySegmentsMax only summarizes into one number.
+// An index builder needs the dumped-but-unindexed segments, which the visible set hides.
 func TestWalkDirtySegments(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir, require := t.TempDir(), require.New(t)
@@ -1654,42 +1636,4 @@ func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 		_, ok := v.Segment(snaptype.BeaconBlocks, 0)
 		require.False(ok)
 	})
-}
-
-func TestSegmentsMinReportsWhatTheVisibleTypesReach(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 5000, 6000, snaptype2.Enums.Bodies, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 6000, 7000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-	defer s.Close()
-	require.NoError(t, s.OpenFolder())
-
-	minBlock, ok := s.SegmentsMin()
-	require.False(t, ok, "no block is covered by every type")
-	require.Equal(t, uint64(5000), minBlock, "the segments still reach 5000, whatever the missing type costs")
-}
-
-func TestSegmentsMinNeedsEveryType(t *testing.T) {
-	logger := log.New()
-	dir := t.TempDir()
-	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dir, version.V1_0, logger)
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-
-	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-	defer s.Close()
-	require.NoError(t, s.OpenFolder())
-
-	_, ok := s.SegmentsMin()
-	require.False(t, ok, "alignment hides the transaction segment, so no block is covered by every type")
-
-	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
-	require.NoError(t, s.OpenFolder())
-
-	minBlock, ok := s.SegmentsMin()
-	require.True(t, ok)
-	require.Zero(t, minBlock)
 }

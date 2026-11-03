@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // TestSetCodeClearDelegationPurgesCodeDomain verifies the account/code invariant
@@ -139,6 +140,74 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 			require.Equal(t, uint64(2), acc.Nonce, "clear authorization must have been applied")
 			require.True(t, acc.IsEmptyCodeHash(), "account code hash must be empty after delegation clear")
 			require.Empty(t, code, "CodeDomain must not retain the delegation designator after clear")
+		})
+	}
+}
+
+// TestSetCodeDelegateAndClearInOneTx covers an authority absent before the tx
+// that is delegated and cleared by the same tx's authorization list: it must
+// exist with an empty code hash for the rest of the tx.
+func TestSetCodeDelegateAndClearInOneTx(t *testing.T) {
+	// This test changes dbg.Exec3Parallel and cannot run in parallel.
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+	}{
+		{"serial", false},
+		{"parallel", true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			prev := dbg.Exec3Parallel
+			dbg.Exec3Parallel = mode.parallel
+			t.Cleanup(func() { dbg.Exec3Parallel = prev })
+
+			senderKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			authorityKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(senderKey.PublicKey)
+			authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+			observer := common.HexToAddress("0xbeef")
+
+			// SSTORE(0, EXTCODEHASH(authority))
+			observerCode := append(append([]byte{byte(vm.PUSH20)}, authority[:]...),
+				byte(vm.EXTCODEHASH), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP))
+
+			config := chain.TestChainOsakaConfig
+			setAuth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.HexToAddress("0xcafe"), 0)
+			require.NoError(t, err)
+			clearAuth, err := types.SignAuthorization(authorityKey, *config.ChainID, common.Address{}, 1)
+			require.NoError(t, err)
+			gspec := &types.Genesis{
+				Config: config,
+				Alloc: types.GenesisAlloc{
+					sender:   {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					observer: {Code: observerCode},
+				},
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(senderKey))
+
+			txn := &types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{GasLimit: 500_000, To: &observer},
+					ChainID:  *config.ChainID,
+					FeeCap:   *uint256.NewInt(10_000_000_000),
+				},
+				Authorizations: []types.Authorization{setAuth, clearAuth},
+			}
+			signed, err := types.SignTx(txn, *types.LatestSignerForChainID(config.ChainID), senderKey)
+			require.NoError(t, err)
+
+			chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) { b.AddTx(signed) })
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(chainPack))
+
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				slot0, _, err := tx.GetLatest(kv.StorageDomain, append(observer[:], make([]byte, 32)...), kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, accounts.EmptyCodeHash.Value(), common.BytesToHash(slot0))
+				return nil
+			}))
 		})
 	}
 }
