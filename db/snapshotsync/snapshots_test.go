@@ -310,6 +310,33 @@ func openFds(t *testing.T) int {
 	return len(names)
 }
 
+func TestMergeFailureKeepsSamePathInput(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "salt-blocks.txt"), []byte{0, 0, 0, 0}, 0o644))
+	headerInfo := snaptype2.Headers.FileInfo(dir, 0, 100_000)
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Headers.Enum(), dir, headerInfo.Version, logger)
+	for i := range uint64(10) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Transactions.Enum(), dir, snaptype2.Transactions.Versions().Current, logger)
+	}
+
+	types := []snaptype.Type{snaptype2.Headers, snaptype2.Transactions}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	injected := errors.New("injected")
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	err := merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func([]string) error {
+		return injected
+	}, nil)
+	require.ErrorIs(t, err, injected)
+	require.FileExists(t, headerInfo.Path)
+	headerIndex := filepath.Join(dir, snaptype.IdxFileName(headerInfo.Version, 0, 100_000, snaptype2.Headers.Name()))
+	require.FileExists(t, headerIndex)
+}
+
 func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
 	dir := t.TempDir()
 	info := snaptype2.Transactions.FileInfo(dir, 0, 500_000)

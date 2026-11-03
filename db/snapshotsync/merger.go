@@ -229,8 +229,14 @@ func (m *Merger) Merge(
 
 		built := make([]*DirtySegment, 0, len(snapTypes))
 		outputs := make([]snaptype.FileInfo, 0, len(snapTypes))
+		samePathTypes := make(map[snaptype.Enum]struct{})
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
+			if len(toMerge[t.Enum()]) == 1 && toMerge[t.Enum()][0].FilePath() == output.Path {
+				samePathTypes[t.Enum()] = struct{}{}
+				out[t.Enum()] = nil
+				continue
+			}
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
 				output,
@@ -269,7 +275,10 @@ func (m *Merger) Merge(
 		}
 
 		toMergeFileNames := make([]string, 0, 16)
-		for _, segments := range toMerge {
+		for enum, segments := range toMerge {
+			if _, ok := samePathTypes[enum]; ok {
+				continue
+			}
 			for _, segment := range segments {
 				toMergeFileNames = append(toMergeFileNames, segment.FilePaths(snapDir)...)
 			}
