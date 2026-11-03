@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -92,8 +94,10 @@ func TestGetReceiptsAnswersAnEmptyBlockWithoutAnExecSlot(t *testing.T) {
 	const blockNum = uint64(1)
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, blockNum))
 	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(blockNum)}, nil)
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, block.Hash(), blockNum))
 
 	g := newTestGenerator(t)
+	g.blockReader = freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 	g.blockExecMutex = &loaderMutex[common.Hash]{}
 	g.execSem = make(chan struct{}, 1)
 	g.execSem <- struct{}{}
