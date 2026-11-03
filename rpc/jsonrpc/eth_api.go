@@ -495,26 +495,31 @@ func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
 	return nil
 }
 
+func (api *BaseAPI) readBlockTxNumBounds(ctx context.Context, tx kv.Tx, blockNum uint64) (minTxNum, maxTxNum uint64, ok bool, err error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	defer c.Close()
+	minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, blockNum)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, blockNum)
+	return minTxNum, maxTxNum, hasMin && hasMax && maxTxNum > minTxNum, err
+}
+
 // checkTxIndexInBlock validates an index and returns the txNum of the block's
 // initial system transaction. User transaction zero has pre-state at minTxNum+1.
 func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
 	if txIndex < -1 {
 		return 0, checkTxIndex(blockNum, txIndex, 0)
 	}
-	c, err := tx.Cursor(kv.MaxTxNum)
+	minTxNum, maxTxNum, ok, err := api.readBlockTxNumBounds(ctx, tx, blockNum)
 	if err != nil {
 		return 0, err
 	}
-	defer c.Close()
-	minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, blockNum)
-	if err != nil {
-		return 0, err
-	}
-	maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, blockNum)
-	if err != nil {
-		return 0, err
-	}
-	if !hasMin || !hasMax || maxTxNum <= minTxNum {
+	if !ok {
 		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
 	}
 	txCount := int(maxTxNum-minTxNum) - 1
@@ -561,28 +566,19 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 			indexedKey, hasIndexedKey = historyFloorCacheKey(tx.(kv.TemporalTx), head)
 			// The block-level replay floor may reject an indexed read whose pre-state
 			// survives. Check its exact txNum only when that floor would reject it.
-			c, err := tx.Cursor(kv.MaxTxNum)
-			if err != nil {
-				return 0, err
-			}
-			defer c.Close()
-			minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, block)
-			if err != nil {
-				return 0, err
-			}
-			maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, block)
+			minTxNum, maxTxNum, ok, err := api.readBlockTxNumBounds(ctx, tx, block)
 			if err != nil {
 				return 0, err
 			}
 			// Only a position in this block can bypass its replay floor. Max names the
 			// final system transaction, whose pre-state follows all user transactions.
-			if hasMin && hasMax && maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
+			if ok && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
 				return block, nil
 			}
 			return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
 		})
-		// Closing a remote cursor can also renew its view. Check after the deferred
-		// Close completes, so the history floor and indexed bounds describe one view.
+		// Closing the bounds cursor can renew the remote view. Recheck after the
+		// bounds lookup so the history floor and indexed bounds describe one view.
 		if hasIndexedKey {
 			if current, ok := historyFloorCacheKey(tx.(kv.TemporalTx), indexedKey.head); !ok || current != indexedKey {
 				continue
