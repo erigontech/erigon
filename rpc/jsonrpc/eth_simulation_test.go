@@ -1456,3 +1456,93 @@ func TestSimulateV1HistoricalBaseStateOverrideClearsBaseStorage(t *testing.T) {
 	require.Len(t, ret, 32)
 	require.Zero(t, new(big.Int).SetBytes(ret).Sign(), "the overridden storage has no base slot")
 }
+
+// A storage-replacing override repeated in every block of a historical simulation keeps the
+// touched keys of the overridden account bounded by its base storage, and the state roots
+// follow a chain that clears the same storage.
+func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	cleared := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	// SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0)
+	clearCode := []byte{0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x00}
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	const simulatedBlocks = 8
+	newChain := func(recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+			bank: {Balance: funds},
+			cleared: {Code: clearCode, Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{
+				common.BigToHash(big.NewInt(0)): common.BigToHash(big.NewInt(7)),
+				common.BigToHash(big.NewInt(1)): common.BigToHash(big.NewInt(8)),
+				common.BigToHash(big.NewInt(2)): common.BigToHash(big.NewInt(9)),
+			}},
+		}}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		cp, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 100_000, uint256.NewInt(0), nil), *signer, bankKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return m, cp
+	}
+	m, cp := newChain(beneficiary, beneficiary)
+	require.NoError(t, m.InsertChain(cp))
+	oracleRecipients := []common.Address{beneficiary}
+	for range simulatedBlocks {
+		oracleRecipients = append(oracleRecipients, cleared)
+	}
+	_, oracle := newChain(oracleRecipients...)
+	wants := oracle.Blocks[1:]
+
+	overrides := ethapi.StateOverrides{accounts.InternAddress(cleared): {State: &map[common.Hash]common.Hash{}}}
+	req := SimulationRequest{Validation: true}
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		txn := want.Transactions()[0]
+		gas := hexutil.Uint64(txn.GetGasLimit())
+		nonce := hexutil.Uint64(txn.GetNonce())
+		req.BlockStateCalls = append(req.BlockStateCalls, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{Time: (*hexutil.Uint64)(&header.Time), GasLimit: &gasLimit, FeeRecipient: &header.Coinbase, PrevRandao: &header.MixDigest},
+			StateOverrides: &overrides,
+			Calls:          []ethapi.CallArgs{{From: &bank, To: &cleared, Gas: &gas, Nonce: &nonce, GasPrice: (*hexutil.U256)(txn.GetFeeCap())}},
+		})
+	}
+
+	ctx := context.Background()
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sim := newSimulator(&req, cp.Blocks[0].Header(), m.ChainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, false)
+	blocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
+	require.NoError(t, err)
+	headers, err := sim.makeHeaders(blocks)
+	require.NoError(t, err)
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
+	require.NoError(t, err)
+	defer sharedDomains.Close()
+	sharedDomains.SetDeferCommitmentUpdates(false)
+
+	parent := sim.base
+	blockHashOverrides := ethapi.BlockHashOverrides{}
+	firstTouched := 0
+	for i := range blocks {
+		result, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &blocks[i], headers[i], parent, headers[:i], false, blockHashOverrides)
+		require.NoError(t, err)
+		require.Equal(t, wants[i].Root(), result.StateRoot, "block %d", wants[i].NumberU64())
+		touched := len(sim.touchedKeys[accounts.InternAddress(cleared)])
+		if i == 0 {
+			require.Positive(t, touched)
+			firstTouched = touched
+		}
+		require.Equal(t, firstTouched, touched, "touched keys after block %d", wants[i].NumberU64())
+		blockHashOverrides[current.NumberU64()] = current.Hash()
+		headers[i] = current.Header()
+		parent = current.Header()
+	}
+}
