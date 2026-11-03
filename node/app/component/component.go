@@ -1087,10 +1087,10 @@ func (c *component) deactivateDependencies(ctx context.Context, onActivity onAct
 
 	c.RLock()
 DEPENDENCIES:
-	for _, dependency := range c.dependencies {
-		dependency := asComponent(dependency)
-		for _, dependent := range dependency.dependents {
-			dependent := asComponent(dependent)
+	for _, d := range c.dependencies {
+		dependency := asComponent(d)
+		for _, d := range dependency.dependents {
+			dependent := asComponent(d)
 			// Skip domain components — they manage membership, not
 			// explicit dependencies. A domain shouldn't block its
 			// children from deactivating their dependencies.
@@ -1335,8 +1335,8 @@ func (c *component) doOnComponentStateChanged(event *ComponentStateChanged) {
 					if state != Deactivated {
 						allDependenciesDeactivated = true
 					DEPENDENCIES:
-						for _, dependency := range c.dependencies {
-							dependency := asComponent(dependency)
+						for _, d := range c.dependencies {
+							dependency := asComponent(d)
 							for _, dependent := range dependency.dependents {
 								if !asComponent(dependent).State().IsDeactivated() {
 									continue DEPENDENCIES
