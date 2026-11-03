@@ -1544,14 +1544,19 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		var fromTxNum uint64
 		if startTxNum >= 0 {
 			fromTxNum = uint64(startTxNum)
+		} else if !asc {
+			fromTxNum = math.MaxUint64
 		}
 		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
 		to := bytes.Clone(from)
-		toTxNum := uint64(math.MaxUint64)
-		if endTxNum >= 0 {
-			toTxNum = uint64(endTxNum)
+		switch {
+		case endTxNum >= 0:
+			binary.BigEndian.PutUint64(to[len(key):], uint64(endTxNum))
+		case asc == order.Asc:
+			binary.BigEndian.PutUint64(to[len(key):], math.MaxUint64)
+		default:
+			to = to[:len(key)]
 		}
-		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
 		it, err := roTx.Range(ht.h.ValuesTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
@@ -1570,8 +1575,13 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		binary.BigEndian.PutUint64(from, uint64(startTxNum))
 	}
 	if endTxNum >= 0 {
+		toTxNum := uint64(endTxNum)
+		if !asc {
+			// dup values are txNum followed by the previous value, so endTxNum's own entries sort above an 8-byte endTxNum bound
+			toTxNum++
+		}
 		to = make([]byte, 8)
-		binary.BigEndian.PutUint64(to, uint64(endTxNum))
+		binary.BigEndian.PutUint64(to, toTxNum)
 	}
 	it, err := roTx.RangeDupSort(ht.h.ValuesTable, key, from, to, asc, limit)
 	if err != nil {
