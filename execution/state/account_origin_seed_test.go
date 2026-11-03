@@ -40,13 +40,13 @@ func TestAccountOriginSeedsOnce(t *testing.T) {
 	preBlock.Nonce = 7
 	preBlock.Balance = *uint256.NewInt(100)
 
-	SeedOrigin(vm, addr, &preBlock)
+	SeedOrigin(vm, addr, &preBlock, 0)
 
 	// A later finalized tx re-seeds from a floor-composed read carrying accumulated
 	// tips — the origin must NOT move.
 	midBlock := preBlock
 	midBlock.Balance = *uint256.NewInt(150)
-	SeedOrigin(vm, addr, &midBlock)
+	SeedOrigin(vm, addr, &midBlock, 1)
 
 	got, res, ok := vm.ReadAddress(addr, 0)
 	require.True(t, ok, "origin must be seeded")

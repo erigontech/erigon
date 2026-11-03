@@ -1695,6 +1695,7 @@ type txResult struct {
 	// so its indexing skips the receipt cache; its logs are the block-end syscall
 	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
 	isFinalize bool
+	origins    *state.VersionMap
 }
 
 type balTx struct {
@@ -1966,7 +1967,7 @@ func (result *execResult) calcFees(
 	// The tip credits only Balance, so seed the coinbase's whole-account origin into
 	// the versionMap — else the apply compose has no base and wipes its committed
 	// nonce/code/balance.
-	state.SeedOrigin(vm, result.Coinbase, coinbaseAcc)
+	state.SeedOrigin(vm, result.Coinbase, coinbaseAcc, txIndex)
 	var newCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
@@ -1988,7 +1989,7 @@ func (result *execResult) calcFees(
 		if err != nil {
 			return nil, err
 		}
-		state.SeedOrigin(vm, burntAddr, burntAcc)
+		state.SeedOrigin(vm, burntAddr, burntAcc, txIndex)
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
@@ -2323,7 +2324,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		return nil, nil, nil
 	}
 	// The charge writes only Balance and Nonce; the origin keeps the rest of the account.
-	state.SeedOrigin(vm, sender, acc)
+	state.SeedOrigin(vm, sender, acc, version.TxIndex)
 	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
 	if !overflow {
 		limit, overflow = u256.AddOverflow(limit, *msg.Value())
@@ -2362,7 +2363,7 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			if overflow {
 				return nil, nil, nil
 			}
-			state.SeedOrigin(vm, to, recipient)
+			state.SeedOrigin(vm, to, recipient, version.TxIndex)
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
 				Val:         credit,
@@ -3301,6 +3302,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			result := be.finalizedResults[tx]
 
 			applyResult := txResult{
+				origins:               be.versionMap,
 				blockNum:              be.blockNum,
 				blockHash:             be.blockHash,
 				traceFroms:            map[accounts.Address]struct{}{},
