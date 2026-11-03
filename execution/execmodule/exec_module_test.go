@@ -728,7 +728,7 @@ func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testin
 func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
 	t.Helper()
 	ctx := t.Context()
-	m, chainPack, commitBlock := newStateAheadOfTxNums(t, invalidExecutionProgress)
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, invalidExecutionProgress, false)
 
 	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
 	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
@@ -754,10 +754,11 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 	}))
 }
 
-// A re-sent fork choice for a canonical head below the commitment block keeps
-// that head, so it needs no unwind and must not be rejected as ReorgTooDeep.
+// Without changesets, a re-sent fork choice for the canonical tip below the
+// commitment block cannot unwind the state; nothing above the head needs it, so
+// it must not be rejected as ReorgTooDeep.
 func TestUpdateForkChoiceResentHeadBelowCommitment(t *testing.T) {
-	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false)
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false, false)
 	head := chainPack.Blocks[6].Header()
 	require.Less(t, head.Number.Uint64(), commitBlock)
 	for i := range 2 {
@@ -767,7 +768,22 @@ func TestUpdateForkChoiceResentHeadBelowCommitment(t *testing.T) {
 	}
 }
 
-func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
+// With changesets, the re-sent fork choice still unwinds the state down to the
+// head, so a later one validates it.
+func TestUpdateForkChoiceResentHeadBelowCommitmentWithChangesets(t *testing.T) {
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false, true)
+	head := chainPack.Blocks[6].Header()
+	require.Less(t, head.Number.Uint64(), commitBlock)
+	var res execmodule.ForkChoiceResult
+	for range 3 {
+		var err error
+		res, err = m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+	}
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
+}
+
+func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangesets bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
 	t.Helper()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -812,7 +828,9 @@ func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) (*execmo
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
-		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		if !keepChangesets {
+			require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		}
 		if invalidExecutionProgress {
 			require.NoError(t, tx.Put(kv.SyncStageProgress, []byte(stages.Execution), []byte{1}))
 		}

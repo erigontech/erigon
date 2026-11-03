@@ -303,20 +303,24 @@ func (e *ExecModule) unwindIfNeeded(
 	if errLast != nil {
 		return nil, nil, errLast
 	}
-	headIsCanonicalTip := canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
-	var unwindPoint *uint64
-	if unwindTarget < lastCanonicalBlock && !headIsCanonicalTip {
+	needsUnwind := unwindTarget < lastCanonicalBlock
+	if needsUnwind {
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 		if err != nil {
 			return nil, nil, err
 		}
-		if unwindTarget < minUnwindableBlock {
+		headIsCanonicalTip := canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
+		if unwindTarget < minUnwindableBlock && !headIsCanonicalTip {
 			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil, nil
 		}
+		needsUnwind = unwindTarget >= minUnwindableBlock
+	}
+	var unwindPoint *uint64
+	if needsUnwind {
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, nil, err
 		}
