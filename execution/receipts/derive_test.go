@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // DeriveFields must fill Bloom: finalize-produced and cache-read receipts
@@ -74,22 +75,44 @@ func TestDeriveFieldsPreservesExistingBloom(t *testing.T) {
 	assert.Equal(t, preset, withPresetBloom.Bloom)
 }
 
+// counterCode increments storage slot 0 and logs the new value as the topic.
+var counterCode = []byte{
+	byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.DUP1),
+	byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP),
+}
+
 type fundedReader struct {
 	*state.NoopReader
-	funded accounts.Address
+	funded, counter accounts.Address
 }
 
 func (r fundedReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
-	if addr != r.funded {
+	acc := accounts.NewAccount()
+	switch addr {
+	case r.funded:
+		acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
+	case r.counter:
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(counterCode))
+	default:
 		return nil, nil
 	}
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(1_000_000_000_000_000_000)
 	return &acc, nil
 }
 
+func (r fundedReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	if addr == r.counter {
+		return counterCode, nil
+	}
+	return nil, nil
+}
+
+func (r fundedReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	code, _ := r.ReadAccountCode(addr)
+	return len(code), nil
+}
+
 // A later tx must see the earlier ones on a versioned state, whether they produce receipts or
-// only warm the state up: the second transfer needs the first one's nonce.
+// only warm the state up: the second call needs the first one's nonce and storage write.
 func TestDeriveForRangeVersionedMatchesMaterialized(t *testing.T) {
 	t.Parallel()
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -97,10 +120,10 @@ func TestDeriveForRangeVersionedMatchesMaterialized(t *testing.T) {
 	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	cfg := chain.TestChainBerlinConfig
 	signer := types.LatestSignerForChainID(cfg.ChainID)
-	to := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	counter := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
 	var txns types.Transactions
 	for nonce := range uint64(2) {
-		txn, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(7), 21_000, uint256.NewInt(1), nil), *signer, key)
+		txn, err := types.SignTx(types.NewTransaction(nonce, counter, uint256.NewInt(7), 100_000, uint256.NewInt(1), nil), *signer, key)
 		require.NoError(t, err)
 		txns = append(txns, txn)
 	}
@@ -112,11 +135,16 @@ func TestDeriveForRangeVersionedMatchesMaterialized(t *testing.T) {
 		require.NoError(t, err)
 		return receipts
 	}
-	reader := fundedReader{NoopReader: state.NewNoopReader(), funded: sender}
+	reader := fundedReader{NoopReader: state.NewNoopReader(), funded: sender, counter: accounts.InternAddress(counter)}
 	for _, fromIdx := range []int{0, 1} {
 		want := derive(state.New(reader), fromIdx)
 		got := derive(state.NewWithVersionMap(reader, state.NewVersionMap(nil)), fromIdx)
 		require.Len(t, got, len(txns)-fromIdx)
 		require.Equal(t, want, got, "fromIdx=%d", fromIdx)
+		for i, receipt := range got {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+			require.Len(t, receipt.Logs, 1)
+			require.Equal(t, common.Hash{31: byte(fromIdx + i + 1)}, receipt.Logs[0].Topics[0], "fromIdx=%d tx=%d", fromIdx, i)
+		}
 	}
 }
