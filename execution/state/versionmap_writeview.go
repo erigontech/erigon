@@ -198,7 +198,7 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 }
 
 func (v *versionMapWriteView) AccountChanges() iter.Seq[accounts.Address] {
-	return accountChangeAddrs(v, v.keys)
+	return v.keys.AccountChanges()
 }
 
 var _ WriteSetView = (*versionMapWriteView)(nil)

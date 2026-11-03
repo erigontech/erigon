@@ -32,40 +32,39 @@ type WriteSetView interface {
 
 var _ WriteSetView = (*WriteSet)(nil)
 
-// accountChangeAddrs is the shared AccountChanges implementation over any view.
-func accountChangeAddrs(v, structural WriteSetView) iter.Seq[accounts.Address] {
+func accountChangeAddrs(ws WriteSetView) iter.Seq[accounts.Address] {
 	return func(yield func(accounts.Address) bool) {
-		for a := range v.Balances() {
+		for a := range ws.Balances() {
 			if !yield(a) {
 				return
 			}
 		}
-		for a := range v.Nonces() {
+		for a := range ws.Nonces() {
 			if !yield(a) {
 				return
 			}
 		}
-		for a := range v.CodeHashes() {
+		for a := range ws.CodeHashes() {
 			if !yield(a) {
 				return
 			}
 		}
-		for a := range structural.Incarnations() {
+		for a := range ws.Incarnations() {
 			if !yield(a) {
 				return
 			}
 		}
-		for a := range structural.Codes() {
+		for a := range ws.Codes() {
 			if !yield(a) {
 				return
 			}
 		}
-		for a := range structural.CreateContracts() {
+		for a := range ws.CreateContracts() {
 			if !yield(a) {
 				return
 			}
 		}
-		for a := range structural.SelfDestructs() {
+		for a := range ws.SelfDestructs() {
 			if !yield(a) {
 				return
 			}

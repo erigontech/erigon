@@ -1687,7 +1687,7 @@ func (ws *WriteSet) StorageChanges() iter.Seq2[accounts.Address, map[accounts.St
 	return ws.Storages()
 }
 
-func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws, ws) }
+func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws) }
 
 func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if ws == nil {
