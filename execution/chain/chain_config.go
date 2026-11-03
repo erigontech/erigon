@@ -434,6 +434,15 @@ func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	return accounts.InternAddress(addr)
 }
 
+// GetBaseFeeChangeDenominator returns the EIP-1559 base fee change
+// denominator: BaseFeeChangeDenominator, or the standard 8.
+func (c *Config) GetBaseFeeChangeDenominator() uint64 {
+	if c.BaseFeeChangeDenominator == nil {
+		return params.BaseFeeChangeDenominator
+	}
+	return *c.BaseFeeChangeDenominator
+}
+
 func (c *Config) GetFeeCollector() accounts.Address {
 	if c.FeeCollector == nil {
 		return accounts.NilAddress
@@ -743,6 +752,9 @@ func (c *Config) checkCompatibleBlocks(newcfg *Config, head uint64) *ConfigCompa
 	}
 	if c.IsSpuriousDragon(head) && !uint256Equal(c.ChainID, newcfg.ChainID) {
 		return newCompatError("EIP155 chain ID", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
+	}
+	if c.IsLondon(head) && c.GetBaseFeeChangeDenominator() != newcfg.GetBaseFeeChangeDenominator() {
+		return newCompatError("EIP-1559 base fee change denominator", c.LondonBlock, newcfg.LondonBlock)
 	}
 	if incompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
 		return newCompatError("Byzantium fork block", c.ByzantiumBlock, newcfg.ByzantiumBlock)
