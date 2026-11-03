@@ -492,6 +492,21 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 	}
 }
 
+// SetStateChangesetAccumulator is SetChangesetAccumulator that leaves the commitment writer's diff alone.
+func (sd *TemporalMemBatch) SetStateChangesetAccumulator(acc *changeset.StateChangeSet) {
+	sd.currentChangesAccumulator = acc
+	for idx := range sd.domainWriters {
+		if kv.Domain(idx) == kv.CommitmentDomain {
+			continue
+		}
+		if acc == nil {
+			sd.domainWriters[idx].SetDiff(nil)
+		} else {
+			sd.domainWriters[idx].SetDiff(&acc.Diffs[idx])
+		}
+	}
+}
+
 // SetCommitmentDiff redirects only the commitment writer's diff, leaving every
 // other domain writer pointed at the live accumulator.
 func (sd *TemporalMemBatch) SetCommitmentDiff(acc *changeset.StateChangeSet) {
