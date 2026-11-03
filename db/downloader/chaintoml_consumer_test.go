@@ -3,7 +3,6 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -187,10 +186,29 @@ func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
 		err         string
 	}{
 		{name: "unchanged"},
-		{name: "rewritten", replacement: BuildTomlFromMap(map[string]string{"snapshot.seg": "def456"}), err: "chain.toml does not match torrent"},
-		{name: "shorter", replacement: []byte{}, err: "chain.toml does not match torrent"},
-		{name: "longer", replacement: BuildTomlFromMap(map[string]string{"snapshot.seg": "abc123", "extra.seg": "def456"}), err: "chain.toml does not match torrent"},
-		{name: "oversized", replacement: make([]byte, maxChainTomlSize+1), err: "chain.toml exceeds size limit"},
+		{
+			name:        "rewritten",
+			replacement: BuildTomlFromMap(map[string]string{"snapshot.seg": "def456"}),
+			err:         "chain.toml does not match torrent",
+		},
+		{
+			name:        "shorter",
+			replacement: []byte{},
+			err:         "chain.toml does not match torrent",
+		},
+		{
+			name: "longer",
+			replacement: BuildTomlFromMap(map[string]string{
+				"snapshot.seg": "abc123",
+				"extra.seg":    "def456",
+			}),
+			err: "chain.toml does not match torrent",
+		},
+		{
+			name:        "oversized",
+			replacement: make([]byte, maxChainTomlSize+1),
+			err:         "chain.toml exceeds size limit",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapDir := t.TempDir()
@@ -246,14 +264,24 @@ func TestDownloadChainTomlByInfoHashRejectsZeroPieceLength(t *testing.T) {
 }
 
 func TestDownloadChainTomlByInfoHashLimitsMetadataLength(t *testing.T) {
-	for _, length := range []int64{maxChainTomlSize - 1, maxChainTomlSize, maxChainTomlSize + 1} {
-		t.Run(fmt.Sprint(length), func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		length int64
+	}{
+		{name: "below_limit", length: maxChainTomlSize - 1},
+		{name: "at_limit", length: maxChainTomlSize},
+		{name: "above_limit", length: maxChainTomlSize + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			snapDir, tmpDir := t.TempDir(), t.TempDir()
 			client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
 			require.NoError(t, err)
 			defer client.Close()
 			infoBytes, err := bencode.Marshal(metainfo.Info{
-				Name: ChainTomlFileName, Length: length, PieceLength: length, Pieces: make([]byte, 20),
+				Name:        ChainTomlFileName,
+				Length:      tc.length,
+				PieceLength: tc.length,
+				Pieces:      make([]byte, 20),
 			})
 			require.NoError(t, err)
 			infoHash := (&metainfo.MetaInfo{InfoBytes: infoBytes}).HashInfoBytes()
@@ -275,11 +303,11 @@ func TestDownloadChainTomlByInfoHashLimitsMetadataLength(t *testing.T) {
 				return ok
 			}, 5*time.Second, time.Millisecond)
 			metadataErr := manifest.SetInfoBytes(infoBytes)
-			if length <= maxChainTomlSize || metadataErr == nil {
+			if tc.length <= maxChainTomlSize || metadataErr == nil {
 				cancel()
 			}
 			<-done
-			if length <= maxChainTomlSize {
+			if tc.length <= maxChainTomlSize {
 				require.NoError(t, metadataErr)
 			} else {
 				require.ErrorContains(t, metadataErr, "chain.toml exceeds size limit")
@@ -300,13 +328,39 @@ func TestChainTomlStorageRejectsInvalidMetadataBeforeOpeningFiles(t *testing.T) 
 		info metainfo.Info
 		err  string
 	}{
-		{name: "wrong_name", info: metainfo.Info{Name: "erigondb.toml"}, err: "torrent names"},
-		{name: "utf8_name", info: metainfo.Info{NameUtf8: "erigondb.toml"}, err: "torrent names"},
-		{name: "multiple_files", info: metainfo.Info{Files: []metainfo.FileInfo{{Path: []string{"part"}}}}, err: "multi-file"},
-		{name: "v2_length", info: metainfo.Info{MetaVersion: 2, FileTree: metainfo.FileTree{
-			File: metainfo.FileTreeFile{Length: maxChainTomlSize + 1, PiecesRoot: string(make([]byte, 32))},
-		}}, err: "expected v1"},
-		{name: "negative_length", info: metainfo.Info{Length: -1}, err: "invalid chain.toml torrent length"},
+		{
+			name: "wrong_name",
+			info: metainfo.Info{Name: "erigondb.toml"},
+			err:  "torrent names",
+		},
+		{
+			name: "utf8_name",
+			info: metainfo.Info{NameUtf8: "erigondb.toml"},
+			err:  "torrent names",
+		},
+		{
+			name: "multiple_files",
+			info: metainfo.Info{Files: []metainfo.FileInfo{{Path: []string{"part"}}}},
+			err:  "multi-file",
+		},
+		{
+			name: "v2_length",
+			info: metainfo.Info{
+				MetaVersion: 2,
+				FileTree: metainfo.FileTree{
+					File: metainfo.FileTreeFile{
+						Length:     maxChainTomlSize + 1,
+						PiecesRoot: string(make([]byte, 32)),
+					},
+				},
+			},
+			err: "expected v1",
+		},
+		{
+			name: "negative_length",
+			info: metainfo.Info{Length: -1},
+			err:  "invalid chain.toml torrent length",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.info.Name == "" {
@@ -332,13 +386,21 @@ func TestChainTomlStorageRejectsInvalidMetadataBeforeOpeningFiles(t *testing.T) 
 }
 
 func TestReadChainTomlLimitsSize(t *testing.T) {
-	for _, size := range []int{0, maxChainTomlSize - 1, maxChainTomlSize, maxChainTomlSize + 2} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			r := bytes.NewReader(make([]byte, size))
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{name: "empty", size: 0},
+		{name: "below_limit", size: maxChainTomlSize - 1},
+		{name: "at_limit", size: maxChainTomlSize},
+		{name: "above_limit", size: maxChainTomlSize + 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bytes.NewReader(make([]byte, tc.size))
 			data, err := readChainToml(r)
-			if size <= maxChainTomlSize {
+			if tc.size <= maxChainTomlSize {
 				require.NoError(t, err)
-				assert.Len(t, data, size)
+				assert.Len(t, data, tc.size)
 			} else {
 				assert.ErrorContains(t, err, "chain.toml exceeds size limit")
 				assert.Zero(t, len(data))
