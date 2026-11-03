@@ -166,11 +166,18 @@ func (tx *NativeTransaction) GetTo() *common.Address {
 	return &to
 }
 
-// AsMessage returns the call to EEZL2 with the encoded gas limit, which
-// block validation requires to be the gas the block has left at the
-// transaction's position, at most protocol.NativeTxGasCap.
+// AsMessage returns the call to EEZL2, which takes its gas from the block,
+// at most the encoded gas limit. Block validation requires that limit to be
+// the gas the block has left at the transaction's position, at most
+// protocol.NativeTxGasCap; derivation first assembles with the cap, before
+// receipts give the position's gas.
 func (tx *NativeTransaction) AsMessage(s types.Signer, _ *uint256.Int, rules *chain.Rules) (*types.Message, error) {
-	return tx.message(protocol.NativeTxType, s, rules, tx.body.To, &tx.body.Value, tx.body.GasLimit, tx.body.Input)
+	msg, err := tx.message(protocol.NativeTxType, s, rules, tx.body.To, &tx.body.Value, tx.body.GasLimit, tx.body.Input)
+	if err != nil {
+		return nil, err
+	}
+	msg.SetGasFromBlock(true)
+	return msg, nil
 }
 
 // DecodeRLP decodes the payload list that follows the type byte.

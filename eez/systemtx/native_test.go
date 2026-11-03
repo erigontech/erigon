@@ -150,7 +150,7 @@ func TestNativeAsMessage(t *testing.T) {
 	require.Equal(t, accounts.InternAddress(protocol.NativeSystemAddress), msg.From())
 	require.Equal(t, accounts.InternAddress(protocol.RollupXEEZL2Address), msg.To())
 	require.Equal(t, uint64(1_000_000), msg.Gas())
-	require.False(t, msg.GasFromBlock())
+	require.True(t, msg.GasFromBlock())
 	require.Equal(t, uint256.NewInt(7), msg.Value())
 	require.Equal(t, []byte{1}, msg.Data())
 	require.True(t, msg.IsFree())
