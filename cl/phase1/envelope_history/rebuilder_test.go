@@ -110,6 +110,11 @@ func TestRebuildRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantSSZ, gotSSZ)
 
+	cloned := rebuilt.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	clonedSSZ, err := cloned.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, wantSSZ, clonedSSZ)
+
 	fixture.bal[0] = 99
 	require.Equal(t, byte(12), rebuilt.Message.Payload.BlockAccessList.Bytes()[0])
 }

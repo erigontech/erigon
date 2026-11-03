@@ -206,16 +206,13 @@ func (r *Rebuilder) rebuild(ctx context.Context, prepared *PreparedRebuild) (*cl
 		r.unavailable(prepared.blockRoot, "block access list is invalid")
 		return nil, nil
 	}
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: &cltypes.ExecutionPayloadEnvelope{
-			Payload:               payload,
-			ExecutionRequests:     prepared.executionRequests,
-			BuilderIndex:          prepared.bid.BuilderIndex,
-			BeaconBlockRoot:       prepared.blockRoot,
-			ParentBeaconBlockRoot: prepared.parentRoot,
-		},
-		Signature: prepared.signature,
-	}
+	message := cltypes.NewExecutionPayloadEnvelope(r.beaconCfg)
+	message.Payload = payload
+	message.ExecutionRequests = prepared.executionRequests
+	message.BuilderIndex = prepared.bid.BuilderIndex
+	message.BeaconBlockRoot = prepared.blockRoot
+	message.ParentBeaconBlockRoot = prepared.parentRoot
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: message, Signature: prepared.signature}
 	if err := cltypes.ValidateGloasEnvelopeAgainstBid(r.beaconCfg, prepared.blockRoot, prepared.bid, envelope); err != nil {
 		log.Warn("rebuilt execution payload envelope failed verification", "blockRoot", prepared.blockRoot, "err", err)
 		return nil, nil
