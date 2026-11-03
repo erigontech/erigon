@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
@@ -302,6 +303,56 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	return err
 }
 
+type traceCallState struct {
+	header *types.Header
+	reader state.StateReader
+}
+
+// Resolve and validate again if setup renews the remote view. Only setup may be
+// retried: tracing writes to the response stream and cannot be safely replayed.
+func (api *DebugAPIImpl) prepareTraceCallState(ctx context.Context, tx kv.TemporalTx, block rpc.BlockNumberOrHash, txIndex *int) (traceCallState, error) {
+	return readWithStableTxView(ctx, tx, func() (traceCallState, error) {
+		var result traceCallState
+		blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, block, tx, canonicalViewReader{api._blockReader})
+		if err != nil {
+			return result, err
+		}
+		if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+			return result, err
+		}
+		var minTxNum uint64
+		if txIndex != nil {
+			minTxNum, err = api.checkTxIndexInBlock(ctx, tx, blockNumber, *txIndex)
+			if err != nil {
+				return result, err
+			}
+		}
+		postState := txIndex == nil || *txIndex == -1 || isLatest
+		if postState {
+			err = api.checkPruneState(ctx, tx, blockNumber)
+		} else {
+			err = api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, uint64(*txIndex))
+		}
+		if err != nil {
+			return result, err
+		}
+		if postState {
+			result.reader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, isLatest, -1, api._txNumReader)
+		} else {
+			// User transaction zero reads just after the initial system transaction.
+			result.reader = state.NewHistoryReaderV3(tx, minTxNum+uint64(*txIndex)+1)
+		}
+		if err != nil {
+			return result, err
+		}
+		result.header, err = api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
+		if err == nil && result.header == nil {
+			err = fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+		}
+		return result, err
+	})
+}
+
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	blockNrOrHash := blockOrLatest(requestedBlock)
@@ -323,51 +374,16 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
-	if err != nil {
-		return fmt.Errorf("get block number: %w", err)
-	}
-
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
-	if err != nil {
-		return err
-	}
-
-	var txIndex int
+	var txIndex *int
 	if config != nil && config.TxIndex != nil {
-		txIndex = int(min(*config.TxIndex, math.MaxInt))
-		if _, err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
-			return err
-		}
+		txIndex = new(int(min(*config.TxIndex, math.MaxInt)))
 	}
-
-	postState := config == nil || config.TxIndex == nil || isLatest
-	if postState {
-		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
-	} else {
-		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, dbtx, blockNumber, uint64(*config.TxIndex))
-	}
+	prepared, err := api.prepareTraceCallState(ctx, dbtx, blockNrOrHash, txIndex)
 	if err != nil {
 		return err
 	}
-
-	var stateReader state.StateReader
-	if postState {
-		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
-	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, txIndex, api._txNumReader)
-	}
-	if err != nil {
-		return fmt.Errorf("create state reader: %w", err)
-	}
-	header, err := api.headerByHashAndNumber(ctx, dbtx, hash, blockNumber)
-	if err != nil {
-		return fmt.Errorf("could not fetch header %d(%x): %w", blockNumber, hash, err)
-	}
-	if header == nil {
-		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
-	ibs := state.New(stateReader)
+	header := prepared.header
+	ibs := state.New(prepared.reader)
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 
@@ -421,7 +437,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 	var (
-		hash              common.Hash
 		evm               *vm.EVM
 		blockCtx          evmtypes.BlockContext
 		txCtx             evmtypes.TxContext
@@ -448,52 +463,12 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
+	prepared, err := api.prepareTraceCallState(ctx, tx, simulateContext.BlockNumber, simulateContext.TransactionIndex)
 	if err != nil {
 		return err
 	}
-
-	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
-		return err
-	}
-	if simulateContext.TransactionIndex != nil {
-		if _, err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
-			return err
-		}
-	}
-
-	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
-	if postState {
-		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
-	} else {
-		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(*simulateContext.TransactionIndex))
-	}
-	if err != nil {
-		return err
-	}
-
-	var header *types.Header
-	header, err = api.headerByHashAndNumber(ctx, tx, hash, blockNum)
-	if err != nil {
-		return err
-	}
-	if header == nil {
-		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
-	}
-
-	var stateReader state.StateReader
-
-	if postState {
-		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
-	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	ibs := state.New(stateReader)
+	header := prepared.header
+	ibs := state.New(prepared.reader)
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
 

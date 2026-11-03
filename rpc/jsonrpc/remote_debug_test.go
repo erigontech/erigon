@@ -17,6 +17,8 @@
 package jsonrpc
 
 import (
+	"bytes"
+	"context"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -32,12 +34,16 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
-	for _, endpoint := range []string{"account", "storage"} {
+	for _, endpoint := range []string{"account", "storage", "traceCall", "traceCallMany"} {
 		for _, requested := range []string{"original", "replacement", "missing_canonical_mapping"} {
 			t.Run(endpoint+"/"+requested, func(t *testing.T) {
 				m, blocks, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -50,10 +56,21 @@ func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 				api._blockReader = reader
 				api._txNumReader = reader.TxnumReader()
 				read := func(hash common.Hash) (any, error) {
-					if endpoint == "account" {
+					switch endpoint {
+					case "account":
 						return api.AccountAt(ctx, hash, 0, m.Address)
+					case "storage":
+						return api.StorageRangeAt(ctx, hash, 0, m.Address, nil, 10)
 					}
-					return api.StorageRangeAt(ctx, hash, 0, m.Address, nil, 10)
+					block := rpc.BlockNumberOrHashWithHash(hash, true)
+					args := ethapi.CallArgs{From: &m.Address, To: &common.Address{1}, Gas: new(hexutil.Uint64(21000))}
+					config := &tracersConfig.TraceConfig{Tracer: new("callTracer"), TxIndex: new(hexutil.Uint(0))}
+					return streamedResult(func(stream *jsonstream.Stream) error {
+						if endpoint == "traceCall" {
+							return api.TraceCall(ctx, args, &block, config, stream)
+						}
+						return api.TraceCallMany(ctx, []Bundle{{Transactions: []ethapi.CallArgs{args}}}, StateContext{BlockNumber: block, TransactionIndex: new(0)}, config, stream)
+					})
 				}
 				want, err := read(block.Hash())
 				require.NoError(t, err)
@@ -111,13 +128,95 @@ func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 	}
 }
 
+func TestIndexedTraceRevalidatesAfterRemoteRenewal(t *testing.T) {
+	for _, endpoint := range []string{"traceCall", "traceCallMany"} {
+		t.Run(endpoint, func(t *testing.T) {
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+			apis.debug._txNumReader = rawdbv3.TxNums
+			ref := chainInfo.old
+			trace := func(stream *jsonstream.Stream) error {
+				bundles, simulate := pruneGatingBundle(ref.num)
+				config := &tracersConfig.TraceConfig{Tracer: new("callTracer"), TxIndex: new(hexutil.Uint(1))}
+				if endpoint == "traceCall" {
+					return apis.debug.TraceCall(t.Context(), bundles[0].Transactions[0], &simulate.BlockNumber, config, stream)
+				}
+				simulate.TransactionIndex = new(1)
+				return apis.debug.TraceCallMany(t.Context(), bundles, simulate, config, stream)
+			}
+			require.NoError(t, trace(jsonstream.New(new(bytes.Buffer))))
+
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				db, _ := remoteHistoryDB(t, apis.debug.db)
+				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // The endpoint takes ownership below.
+				require.NoError(t, err)
+				handedOff := false
+				defer func() {
+					if !handedOff {
+						tx.Rollback()
+					}
+				}()
+				viewID := tx.ViewID()
+				minTxNum, err := rawdbv3.TxNums.Min(ctx, tx, ref.num)
+				require.NoError(t, err)
+				header := rawdb.ReadHeader(tx, ref.hash, ref.num)
+				require.NotNil(t, header)
+				header.Extra = []byte("replacement")
+				view := &renewingStateReadTx{TemporalTx: tx, phase: "pruning", renew: func() {
+					require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+						if err := rawdb.WriteHeader(tx, header); err != nil {
+							return err
+						}
+						if err := rawdb.WriteCanonicalHash(tx, header.Hash(), ref.num); err != nil {
+							return err
+						}
+						// The replacement has no user transactions, so index 1 is no longer valid.
+						return tx.Put(kv.MaxTxNum, hexutil.EncodeTs(ref.num), hexutil.EncodeTs(minTxNum+1))
+					}))
+					time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
+				}}
+				apis.debug.db = historyViewDB{TemporalRoDB: db, tx: view}
+				var output bytes.Buffer
+				stream := jsonstream.New(&output)
+				handedOff = true
+				err = trace(stream)
+				require.Nil(t, view.renew, "the pruning check must reach the renewal point")
+				require.NotEqual(t, viewID, tx.ViewID())
+				var invalidParams *rpc.InvalidParamsError
+				require.ErrorAs(t, err, &invalidParams)
+				require.Empty(t, output.Bytes(), "validation must finish before any trace output")
+				require.Empty(t, stream.Buffer())
+			})
+		})
+	}
+}
+
 func TestIndexedStateReadFollowsRemoteRenewal(t *testing.T) {
-	for _, endpoint := range []string{"account", "storage"} {
+	for _, endpoint := range []string{"account", "storage", "traceCall", "traceCallMany"} {
 		for _, phase := range []string{"bounds", "close", "pruning", "bounds_error"} {
 			t.Run(endpoint+"/"+phase, func(t *testing.T) {
 				apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
 				apis.debug._txNumReader = rawdbv3.TxNums
 				ref := chainInfo.old
+				read := func(ctx context.Context) (any, error) {
+					switch endpoint {
+					case "account":
+						return apis.debug.AccountAt(ctx, ref.hash, 0, testAddr)
+					case "storage":
+						return apis.debug.StorageRangeAt(ctx, ref.hash, 0, testAddr, nil, 10)
+					}
+					bundles, simulate := pruneGatingBundle(ref.num)
+					simulate.BlockNumber = rpc.BlockNumberOrHashWithHash(ref.hash, true)
+					simulate.TransactionIndex = new(0)
+					return streamedResult(func(stream *jsonstream.Stream) error {
+						if endpoint == "traceCall" {
+							return apis.debug.TraceCall(ctx, bundles[0].Transactions[0], &simulate.BlockNumber, &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(0))}, stream)
+						}
+						return apis.debug.TraceCallMany(ctx, bundles, simulate, nil, stream)
+					})
+				}
+				_, err := read(t.Context())
+				require.NoError(t, err)
 
 				synctest.Test(t, func(t *testing.T) {
 					ctx := t.Context()
@@ -152,12 +251,7 @@ func TestIndexedStateReadFollowsRemoteRenewal(t *testing.T) {
 					}}
 					apis.debug.db = historyViewDB{TemporalRoDB: db, tx: view}
 					handedOff = true
-					switch endpoint {
-					case "account":
-						_, err = apis.debug.AccountAt(ctx, ref.hash, 0, testAddr)
-					case "storage":
-						_, err = apis.debug.StorageRangeAt(ctx, ref.hash, 0, testAddr, nil, 10)
-					}
+					_, err = read(ctx)
 					require.Nil(t, view.renew, "the requested renewal point must be reached")
 					require.NotEqual(t, oldViewID, tx.ViewID())
 					require.ErrorContains(t, err, "canonical", "a renewed read must recheck the requested block hash")
