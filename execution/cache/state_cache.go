@@ -179,6 +179,17 @@ func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
 	return cc.GetByCodeHash(codeHash)
 }
 
+// GetCodeByHash serves code by its codeHash to readers outside block execution.
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) { return c.getCodeByHash(codeHash) }
+
+// PutCodeByHash fills only the content-addressed layers: the address binding is left
+// alone, so a code read at a past txNum never answers a latest read of its address.
+func (c *StateCache) PutCodeByHash(codeHash, code []byte, txNum uint64) {
+	if cc, ok := c.caches[kv.CodeDomain].(*CodeCache); ok && !c.disableFills {
+		cc.PutWithCodeHash(nil, code, codeHash, txNum)
+	}
+}
+
 // getCodeSizeByHash returns the size of code by its Ethereum codeHash
 // without loading the bytes. Returns (0, false) when the size-only layer
 // is not populated for this hash.

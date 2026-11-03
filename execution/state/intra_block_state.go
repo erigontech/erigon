@@ -215,6 +215,7 @@ type IntraBlockState struct {
 	// still commit via FinalizeTx→so.data.
 	noMaterialize       bool
 	noConflictDetection bool
+	codeByHash          CodeByHash
 
 	revisions revisions
 
@@ -361,6 +362,7 @@ func (ibs *IntraBlockState) Reset() {
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
 	ibs.noConflictDetection = false
+	ibs.codeByHash = nil
 	clear(ibs.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -451,6 +453,8 @@ func (ibs *IntraBlockState) resetForPool() bool {
 // balance read serves both, so skipping it needs both to be absent. Reset
 // clears it.
 func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection = true }
+
+func (ibs *IntraBlockState) SetCodeByHash(c CodeByHash) { ibs.codeByHash = c }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }

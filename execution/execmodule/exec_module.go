@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -156,6 +157,14 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 		return &CacheView{context: sd, getter: sd.AsGetter(tx)}, nil
 	}
 	return &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}, nil
+}
+
+// CodeByHash is the execution's code store for RPC replays.
+func (c *Cache) CodeByHash() state.CodeByHash {
+	if c.execModule == nil || c.execModule.stateCache == nil || !dbg.UseStateCache {
+		return nil
+	}
+	return c.execModule.stateCache
 }
 
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
