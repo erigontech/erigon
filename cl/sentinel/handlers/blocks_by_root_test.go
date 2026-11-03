@@ -163,3 +163,65 @@ func TestBlocksByRangeHandler(t *testing.T) {
 
 	indiciesDB.Close()
 }
+
+func TestBlocksByRootHandlerRequestLimit(t *testing.T) {
+	ctx := context.Background()
+
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
+
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
+
+	require.NoError(t, host.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
+
+	_, indiciesDB := setupStore(t)
+	t.Cleanup(indiciesDB.Close)
+	store := tests.NewMockBlockReader()
+
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store, tx, 100, 1)
+	require.NoError(t, tx.Commit())
+	root, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+	c := NewConsensusHandlers(ctx, store, indiciesDB, host, &clparams.NetworkConfig{}, nil, beaconCfg, ethClock,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true)
+	c.Start()
+
+	request := func(n int) []byte {
+		c.rateLimiter.buckets.Clear()
+		req := solid.NewHashList(n)
+		for range n {
+			req.Append(root)
+		}
+		var reqBuf bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
+		stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
+		require.NoError(t, err)
+		_, err = stream.Write(reqBuf.Bytes())
+		require.NoError(t, err)
+		require.NoError(t, stream.CloseWrite())
+		resp, err := io.ReadAll(stream)
+		require.NoError(t, err)
+		return resp
+	}
+
+	single := request(1)
+	require.NotEmpty(t, single)
+	require.Equal(t, byte(SuccessfulResponsePrefix), single[0])
+
+	resp := request(int(beaconCfg.MaxRequestBlocksDeneb))
+	require.Zero(t, len(resp)%len(single))
+	require.Equal(t, MaxRequestsBlocks, len(resp)/len(single))
+
+	resp = request(int(beaconCfg.MaxRequestBlocksDeneb) + 1)
+	require.NotEmpty(t, resp)
+	require.Equal(t, byte(InvalidRequestPrefix), resp[0])
+}

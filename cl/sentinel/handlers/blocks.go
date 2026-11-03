@@ -96,9 +96,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	var req solid.HashListSSZ = solid.NewHashList(100)
+	maxRoots := int(c.beaconConfig.MaxRequestBlocksDeneb)
+	var req solid.HashListSSZ = solid.NewHashList(maxRoots)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
+	}
+	if req.Length() > maxRoots {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
 	blockRoots := []common.Hash{}
@@ -128,6 +132,9 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 
 	var block *cltypes.SignedBeaconBlock
 	req.Range(func(index int, blockRoot common.Hash, length int) bool {
+		if index >= len(blockRoots) {
+			return false
+		}
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
 		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
 			block, err = nil, nil
