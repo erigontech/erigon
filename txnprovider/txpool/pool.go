@@ -779,7 +779,7 @@ func (p *TxPool) nonceGapRetryLocked(gap *nonceGapState, seenRevision uint64, vi
 
 func (p *TxPool) recordPrecheck(hash [32]byte, reason txpoolcfg.DiscardReason) {
 	switch reason {
-	case txpoolcfg.NotSet, txpoolcfg.Success, txpoolcfg.ErrGetSenderInfo, txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnequalBlobTxExt:
+	case txpoolcfg.NotSet, txpoolcfg.Success, txpoolcfg.ErrGetSenderInfo, txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail:
 		return
 	}
 	key := string(hash[:])

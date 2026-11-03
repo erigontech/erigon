@@ -1372,19 +1372,19 @@ func newFetchBlobRetryFixture(t *testing.T, nonce uint64) (*TxPool, *types.BlobT
 }
 
 func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
-	for _, wrongVersion := range []bool{false, true} {
-		name := "corrupted blob"
-		if wrongVersion {
-			name = "wrong wrapper version"
-		}
-		t.Run(name, func(t *testing.T) {
-			expectedReason := txpoolcfg.UnmatchedBlobTxExt
-			if wrongVersion {
-				expectedReason = txpoolcfg.UnequalBlobTxExt
-			}
+	for _, tc := range []struct {
+		name                  string
+		queuedFailure         txpoolcfg.DiscardReason
+		rejectLocalCommitment bool
+	}{
+		{"corrupted blob", txpoolcfg.UnmatchedBlobTxExt, false},
+		{"wrong wrapper version", txpoolcfg.UnequalBlobTxExt, false},
+		{"local commitment mismatch", txpoolcfg.UnmatchedBlobTxExt, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			pool, good, badWire, goodWire, _ := newFetchBlobRetryFixture(t, 0)
-			if wrongVersion {
+			if tc.queuedFailure == txpoolcfg.UnequalBlobTxExt {
 				var err error
 				badWire, err = good.ConvertToV1()
 				require.NoError(t, err)
@@ -1420,13 +1420,26 @@ func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
 					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
 					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 					require.NoError(t, err)
-					require.Equal(t, []txpoolcfg.DiscardReason{expectedReason}, reasons)
+					require.Equal(t, []txpoolcfg.DiscardReason{tc.queuedFailure}, reasons)
 					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
 					require.Empty(t, pool.byHash)
 					return badReply
 				},
 				func() *sentryproto.InboundMessage {
 					require.Empty(t, pool.unprocessedRemoteTxns.Txns, "the invalid sidecar must stay suppressed")
+					if tc.rejectLocalCommitment {
+						var slot TxnSlot
+						var sender common.Address
+						_, err := parse.ParseTransaction(goodWire, 0, &slot, sender[:], false, true, nil)
+						require.NoError(t, err)
+						require.Equal(t, [32]byte(hash), slot.IDHash)
+						slot.BlobBundles[0].Commitment[0] ^= 1
+						var local TxnSlots
+						local.Append(&slot, sender[:], true)
+						reasons, err := pool.AddLocalTxns(ctx, local)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.BlobHashCheckFail}, reasons)
+					}
 					return goodReply
 				},
 				func() *sentryproto.InboundMessage {
