@@ -131,7 +131,11 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 	if rpc != nil {
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
 		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-			return requestEnvelopesFranticallyWithValidator(ctx, rpc, roots, newEnvelopeValidator(blocks, b.validateGloasEnvelope), rpc.BanPeerForInvalidData, blocks...)
+			blockByRoot := blockLookup(blocks)
+			return RequestEnvelopesFrantically(ctx, rpc, roots, func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+				block, _ := blockByRoot(envelope.Message.BeaconBlockRoot)
+				return b.validateGloasEnvelope(block, envelope)
+			}, rpc.BanPeerForInvalidData, blocks...)
 		}
 	}
 	return b
@@ -343,6 +347,11 @@ func (b *BackwardBeaconDownloader) SetGloasEnvelopeSignatureValidator(anchorStat
 		}
 		return validateBackfilledGloasEnvelopeSignature(b.gloasSignatureState, block, envelope)
 	}
+}
+
+func (b *BackwardBeaconDownloader) GloasEnvelopeSignatureVerifiable(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	_, known, err := backfilledGloasEnvelopeSigningKey(b.gloasSignatureState, block, envelope)
+	return err == nil && known
 }
 
 // SetOnInitialGloasBlock persists the trusted anchor without classifying its payload before traversing its ancestors.

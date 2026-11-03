@@ -1504,7 +1504,29 @@ func TestHistoryRange1(t *testing.T) {
 		}
 		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
-		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
+		require.Equal([]string{"", ""}, vals)
+
+		collect := func(from, to int) (keys, vals []string) {
+			it, err := ic.HistoryRange(from, to, order.Asc, -1, tx)
+			require.NoError(err)
+			defer it.Close()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
+				keys = append(keys, fmt.Sprintf("%x", k))
+				vals = append(vals, fmt.Sprintf("%x", v))
+			}
+			return keys, vals
+		}
+		unboundedKeys, unboundedVals := collect(-1, 1000)
+		boundedKeys, boundedVals := collect(0, 1000)
+		require.Equal(boundedKeys, unboundedKeys)
+		require.Equal(boundedVals, unboundedVals)
+
+		unboundedKeys, unboundedVals = collect(500, -1)
+		boundedKeys, boundedVals = collect(500, int(txs)+1)
+		require.Equal(boundedKeys, unboundedKeys)
+		require.Equal(boundedVals, unboundedVals)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
