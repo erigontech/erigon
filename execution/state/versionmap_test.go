@@ -2197,3 +2197,33 @@ func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
 	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
 	require.Equal(t, MVReadResultDone, res.Status())
 }
+
+// A created account carries only SelfDestruct=false markers, which no reader combines with other
+// flags, so marking it must not wait for its readers.
+func TestMarkWritesCompleteRunsUnderReadersOfACreatedEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(53)
+	vm := NewVersionMap(nil)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: false},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: *uint256.NewInt(5)},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		e.mu.RUnlock()
+		<-done
+		t.Fatal("MarkWritesComplete waited for a reader of a created entry")
+	}
+	e.mu.RUnlock()
+}
