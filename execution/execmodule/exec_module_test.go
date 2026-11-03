@@ -783,9 +783,45 @@ func TestUpdateForkChoiceResentHeadBelowCommitmentWithChangesets(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
 }
 
+// Outside the domain-ahead state an impossible unwind is still rejected: nothing
+// ties the committed state to the canonical head, which here is a fork the
+// domain-ahead path made canonical over the other branch's state.
+func TestUpdateForkChoiceResentForkTipOverOtherBranchStateIsNotValid(t *testing.T) {
+	m, chainPack := newExecutedTransferChain(t)
+	fork, err := m.GenerateChainFrom(chainPack.Blocks[4], 5, func(_ int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(b.TxNonce(m.Address), common.Address{0xfe}, uint256.NewInt(2_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			m.Key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, chainPack.TopBlock.Root(), fork.TopBlock.Root())
+	status, err := m.InsertBlocks(t.Context(), fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	require.Equal(t, fork.TopBlock.NumberU64(), truncateTxNumsBelowCommitment(t, m, false, false))
+	require.NoError(t, m.DB.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+		return stages.SaveStageProgress(tx, stages.Finish, 5)
+	}))
+	res, err := m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status)
+	res, err = m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusSuccess, res.Status)
+}
+
 func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangesets bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
 	t.Helper()
-	ctx := t.Context()
+	m, chainPack := newExecutedTransferChain(t)
+	return m, chainPack, truncateTxNumsBelowCommitment(t, m, invalidExecutionProgress, keepChangesets)
+}
+
+func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -810,8 +846,13 @@ func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangeset
 
 	// Drive the full chain in (insert + validate + UFC). State commitBlock and
 	// TxNums.Last are now both at block 10.
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+	return m, chainPack
+}
 
+func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
+	t.Helper()
+	ctx := t.Context()
 	const truncateTo uint64 = 5
 	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
 	// extend to a frozen tip but the snapshot/state files commit to a later
@@ -843,7 +884,7 @@ func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangeset
 		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
 		return nil
 	}))
-	return m, chainPack, commitBlock
+	return commitBlock
 }
 
 // Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also

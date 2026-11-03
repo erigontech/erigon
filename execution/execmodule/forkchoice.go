@@ -230,6 +230,7 @@ func (e *ExecModule) unwindIfNeeded(
 	canonicalHash common.Hash,
 	finalisedBlockNum uint64,
 	isSynced bool,
+	isDomainAheadOfBlocks bool,
 ) (*ForkChoiceResult, *uint64, error) {
 	if fcuHeader.Number.Sign() == 0 && canonicalHash != blockHash {
 		return &ForkChoiceResult{
@@ -309,8 +310,8 @@ func (e *ExecModule) unwindIfNeeded(
 		if err != nil {
 			return nil, nil, err
 		}
-		headIsCanonicalTip := canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
-		if unwindTarget < minUnwindableBlock && !headIsCanonicalTip {
+		resentTipAheadOfState := isDomainAheadOfBlocks && canonicalHash == blockHash && fcuHeader.Number.Uint64() == lastCanonicalBlock
+		if unwindTarget < minUnwindableBlock && !resentTipAheadOfState {
 			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
@@ -568,7 +569,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			restoreRecentReceipts()
 		}
 	}()
-	result, fcuUnwindPoint, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, *finalisedBlockNum, isSynced)
+	result, fcuUnwindPoint, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, *finalisedBlockNum, isSynced, isDomainAheadOfBlocks)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
