@@ -208,9 +208,16 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.
 	return c.executionModule.IsCanonicalHash(ctx, hash)
 }
 
+func (c ChainReaderWriterEth1) IsValidated(hash common.Hash) bool {
+	return c.executionModule.IsValidated(hash)
+}
+
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		panic(err)
 	}
 	return frozen, hasGap

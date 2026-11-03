@@ -229,13 +229,6 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
-// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
-//
-// Deprecated: use BuildEthConfig instead.
-func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
-	applyRemainingEthFlags(ctx, cfg, logger)
-}
-
 func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
@@ -538,7 +531,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		} else {
 			c.HttpCompression = true
 		}
-		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression)
+		c.HttpCompressionLoopback = ctx.Bool(utils.HttpCompressionLoopbackFlag.Name)
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression, "http.compression.loopback", c.HttpCompressionLoopback)
 	} else {
 		c.HttpCompression = false
 	}

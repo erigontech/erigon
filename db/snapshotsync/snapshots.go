@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,59 +52,6 @@ import (
 type SortedRange interface {
 	GetRange() (from, to uint64)
 	GetGrouping() string
-}
-
-// NoOverlaps - keep largest ranges and avoid overlap
-func NoOverlaps[T SortedRange](in []T) (res []T) {
-	if len(in) == 1 {
-		return in
-	}
-
-	for i := 0; i < len(in); i++ {
-		r := in[i]
-		iFrom, iTo := r.GetRange()
-		if iFrom == iTo {
-			continue
-		}
-		for j := i + 1; j < len(in); j++ {
-			r2 := in[j]
-			jFrom, jTo := r2.GetRange()
-			if jFrom == jTo {
-				continue
-			}
-			if jFrom > iFrom {
-				break
-			}
-			r = r2
-			i++
-		}
-		res = append(res, r)
-	}
-	return res
-}
-
-func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	if len(in) == 1 {
-		return in, nil
-	}
-
-	prevTo, _ := in[0].GetRange()
-	for _, f := range in {
-		from, to := f.GetRange()
-		if to <= prevTo {
-			continue
-		}
-		if from != prevTo { // no gaps
-			missingRanges = append(missingRanges, Range{prevTo, from})
-			continue
-		}
-		prevTo = to
-		out = append(out, f)
-	}
-	return out, missingRanges
 }
 
 func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
@@ -510,14 +456,12 @@ type BaseRoSnapshots struct {
 	// deleting a generation's retired files once its refcnt hits 0. Mutated under dirtyLock.
 	oldestVisible *snapshotVisible
 
-	dir               string
-	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
-	dirtyMaxByType    map[snaptype.Enum]*atomic.Uint64 // max height per segment type, indexed or not
-	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
-	cfg               ethconfig.BlocksFreezing
-	snCfg             *snapcfg.Cfg
-	logger            log.Logger
-	removeFile        func(string) error
+	dir        string
+	idxMax     atomic.Uint64 // all types of .idx files are available - up to this number
+	cfg        ethconfig.BlocksFreezing
+	snCfg      *snapcfg.Cfg
+	logger     log.Logger
+	removeFile func(string) error
 
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
@@ -525,6 +469,7 @@ type BaseRoSnapshots struct {
 	// keepUnindexedlyCovered opts RemoveOverlaps into refusing to unlink a subset whose only
 	// covering superset has no index. EL relies on the plain behaviour; caplin state does not.
 	keepUnindexedlyCovered bool
+	anchoredAtLowestDirty  []snaptype.Enum
 
 	// (type, from, to) of files a producer is currently building — a merge
 	// output, a dump, or a missed-index rebuild. The data file can be on disk
@@ -562,6 +507,7 @@ func (s *BaseRoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool
 type snapshotVisible struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
+	generation  uint64            // identity of this published immutable view
 
 	refcnt  atomic.Int32     // live readers pinning this generation
 	retired retiredSegments  // segments this generation is the last to reference; unlinked on head-drain
@@ -595,26 +541,17 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	s := &BaseRoSnapshots{
 		dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums, baseSegType: baseSegType,
-		removeFile:        dir.RemoveFile,
-		dirty:             make(DirtyFiles, snaptype.MaxEnum),
-		alignMin:          alignMin,
-		operators:         map[snaptype.Enum]*retireOperators{},
-		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
-		dirtyMaxByType:    make(map[snaptype.Enum]*atomic.Uint64),
+		removeFile: dir.RemoveFile,
+		dirty:      make(DirtyFiles, snaptype.MaxEnum),
+		alignMin:   alignMin,
+		operators:  map[snaptype.Enum]*retireOperators{},
 	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	empty := &snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)}
+	empty := &snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum), generation: 1}
 	s.visible.Store(empty)
 	s.oldestVisible = empty
-
-	for _, t := range s.enums {
-		u := &atomic.Uint64{}
-		u.Store(math.MaxUint64)
-		s.segmentsMinByType[t] = u
-		s.dirtyMaxByType[t] = &atomic.Uint64{}
-	}
 
 	s.dirtyLock.Lock()
 	s.recalcVisibleFiles(s.alignMin, nil)
@@ -629,80 +566,12 @@ func (s *BaseRoSnapshots) SegmentsReady() bool           { return s.segmentsRead
 func (s *BaseRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *BaseRoSnapshots) SegmentsMax() uint64           { return s.visible.Load().segmentsMax }
 
-// SegmentsMin is the lowest block the visible segments reach, and whether every type
-// covers it: a type with no visible segment leaves no block complete, however low the
-// others reach, but the blocks the others do hold still start where min says.
-func (s *BaseRoSnapshots) SegmentsMin() (min uint64, complete bool) {
-	if s == nil {
-		return 0, false
-	}
-
-	complete = true
-	for _, minStore := range s.segmentsMinByType {
-		typeMin := minStore.Load()
-		if typeMin == math.MaxUint64 {
-			complete = false
-			continue
-		}
-		if typeMin > min {
-			min = typeMin
-		}
-	}
-
-	return min, complete
-}
-
 func (s *BaseRoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
 	}
 
 	return s.idxMax.Load()
-}
-
-func (s *BaseRoSnapshots) DirtyBlocksAvailable(t snaptype.Enum) uint64 {
-	return s.dirtyIdxAvailability(t)
-}
-
-func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
-	return s.visibleIdxAvailability(t)
-}
-
-// DirtySegmentsMax is the tip of the data on disk, index or no index: unlike
-// DirtyBlocksAvailable it does not stop at the first unindexed segment, so a producer
-// can see a range it has dumped but not yet indexed.
-// DirtySegmentsMax is read per downloaded block, so it serves a value cached by
-// storeDirtyMax rather than walking the dirty set under a lock.
-func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
-	u, ok := s.dirtyMaxByType[t]
-	if !ok {
-		return 0
-	}
-	return u.Load()
-}
-
-// storeDirtyMax refreshes the cache for t. Must be called with dirtyLock held, from the
-// single publish point every dirty mutation funnels through.
-func (s *BaseRoSnapshots) storeDirtyMax(t snaptype.Enum) {
-	u, ok := s.dirtyMaxByType[t]
-	if !ok {
-		return
-	}
-	dirty := s.dirty[t]
-	if dirty == nil {
-		u.Store(0)
-		return
-	}
-	var _max uint64
-	dirty.Walk(func(segments []*DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.to > 0 && sn.to-1 > _max {
-				_max = sn.to - 1
-			}
-		}
-		return true
-	})
-	u.Store(_max)
 }
 
 func (s *BaseRoSnapshots) DownloadComplete() {
@@ -871,6 +740,25 @@ func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSeg
 	return newVisibleSegments
 }
 
+func dirtyReachesWithoutHole(dirtySegments *btree.BTreeG[*DirtySegment], slot uint64) bool {
+	var end uint64
+	started, reached := false, false
+	dirtySegments.Walk(func(segments []*DirtySegment) bool {
+		for _, sn := range segments {
+			if started && sn.from > end {
+				return false
+			}
+			started, end = true, max(end, sn.to)
+			if end >= slot {
+				reached = true
+				return false
+			}
+		}
+		return true
+	})
+	return reached
+}
+
 func truncateAtGap(segments VisibleSegments) VisibleSegments {
 	// protect from gaps
 	if len(segments) > 0 {
@@ -907,8 +795,10 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
 	for _, t := range s.enums {
-		s.storeDirtyMax(t)
 		newVisibleSegments := RecalcVisibleSegments(s.dirty[t])
+		if len(newVisibleSegments) > 0 && slices.Contains(s.anchoredAtLowestDirty, t) && !dirtyReachesWithoutHole(s.dirty[t], newVisibleSegments[0].from) {
+			newVisibleSegments = nil
+		}
 		visible[t] = newVisibleSegments
 		var to uint64
 		if len(newVisibleSegments) > 0 {
@@ -940,20 +830,15 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	var segmentsMax uint64
 	for _, t := range s.enums {
 		segs := visible[t]
-		minBlock := uint64(math.MaxUint64)
 		if len(segs) > 0 {
-			minBlock = segs[0].from
 			if to := segs[len(segs)-1].to; to > 0 && to-1 > segmentsMax {
 				segmentsMax = to - 1
 			}
 		}
-		if u, ok := s.segmentsMinByType[t]; ok {
-			u.Store(minBlock)
-		}
 	}
 
-	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
 	old := s.visible.Load()
+	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax, generation: old.generation + 1}
 	old.retired = retired
 	old.next = next
 	s.visible.Store(next)
@@ -1095,33 +980,6 @@ func (s *BaseRoSnapshots) idxAvailabilityOf(visible *snapshotVisible) uint64 {
 	return maxIdx
 }
 
-func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
-	s.dirtyLock.RLock()
-	defer s.dirtyLock.RUnlock()
-
-	dirty := s.dirty[segtype]
-
-	if dirty == nil {
-		return 0
-	}
-
-	var _max uint64
-
-	dirty.Walk(func(segments []*DirtySegment) bool {
-		for _, seg := range segments {
-			if !seg.IsIndexed() {
-				break
-			}
-
-			_max = seg.to - 1
-		}
-
-		return true
-	})
-
-	return _max
-}
-
 // WalkDirtySegments calls f for every dirty segment of segtype, lowest range first,
 // stopping when f returns false. dirtyLock is held for the walk, so f must not open,
 // close or republish files.
@@ -1144,13 +1002,8 @@ func (s *BaseRoSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*Dirty
 	})
 }
 
-func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
-	visibleFiles := s.visible.Load().segments[segtype]
-	if len(visibleFiles) > 0 {
-		maxVisibleIdx = visibleFiles[len(visibleFiles)-1].to - 1
-	}
-
-	return
+func (s *BaseRoSnapshots) AnchorVisibleAtLowestDirty(segtype snaptype.Enum) {
+	s.anchoredAtLowestDirty = append(s.anchoredAtLowestDirty, segtype)
 }
 
 // VisibleSegmentsMaxTo is the exclusive upper bound of the last visible segment of segtype.
@@ -2097,6 +1950,14 @@ func (v *View) BlocksAvailable() uint64 {
 	return v.s.idxAvailabilityOf(v.snapshotVisible)
 }
 
+// Generation identifies the immutable view pinned by v within its snapshot manager.
+func (v *View) Generation() uint64 {
+	if v == nil || v.snapshotVisible == nil {
+		return 0
+	}
+	return v.generation
+}
+
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
 	for _, seg := range v.segments[t.Enum()] {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
@@ -2184,36 +2045,4 @@ func removeOldFiles(toDel []string) {
 		_ = dir.RemoveFile(f)
 		_ = dir.RemoveFile(f + ".torrent")
 	}
-}
-
-func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-
-	{
-		var l, lSidecars []snaptype.FileInfo
-		var m []Range
-		for i := range list {
-			f := &list[i]
-			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-				continue
-			}
-			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
-				lSidecars = append(lSidecars, *f) // blobs are an exception
-				continue
-			}
-			l = append(l, *f)
-		}
-		l, m = NoGaps(NoOverlaps(l))
-		if len(m) > 0 {
-			lst := m[len(m)-1]
-			log.Debug("[snapshots] see gap", "type", snaptype.CaplinEnums.BeaconBlocks, "from", lst.From())
-		}
-		res = append(res, l...)
-		res = append(res, lSidecars...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	return res, missingSnapshots, nil
 }

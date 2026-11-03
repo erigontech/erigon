@@ -53,6 +53,7 @@ func (e ErrTxNumsAppendWithGap) Is(err error) bool {
 }
 
 type TxBlockIndex interface {
+	// MaxTxNum accepts a nil cursor; otherwise c must read kv.MaxTxNum.
 	MaxTxNum(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error)
 	BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error)
 }
@@ -179,11 +180,30 @@ func (TxNumsReader) WithCustomReadTxNumFunc(f TxBlockIndex) TxNumsReader {
 	return TxNumsReader{index: f}
 }
 
+// MinExact reports a missing preceding mapping instead of falling back to latest.
+// The cursor may be nil; genesis always starts at zero.
+func (t TxNumsReader) MinExact(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	if blockNum == 0 {
+		return 0, true, nil
+	}
+	maxTxNum, ok, err := t.MaxExact(ctx, tx, c, blockNum-1)
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	return maxTxNum + 1, true, nil
+}
+
+// MaxExact reports a missing mapping instead of falling back to latest.
+// The cursor may be nil.
+func (t TxNumsReader) MaxExact(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	return t.index.MaxTxNum(ctx, tx, c, blockNum)
+}
+
 // MaxWithCursor - returns maxTxNum in given block using a caller-provided cursor.
 // If block not found - return last available value (`latest`/`pending` state).
 // Use this when iterating many blocks to avoid repeated cursor open/close overhead.
 func (t TxNumsReader) MaxWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, err error) {
-	maxTxNum, ok, err := t.index.MaxTxNum(ctx, tx, c, blockNum)
+	maxTxNum, ok, err := t.MaxExact(ctx, tx, c, blockNum)
 	if err != nil {
 		return 0, err
 	}
@@ -214,10 +234,7 @@ func (t TxNumsReader) Max(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTx
 // Min = `max(blockNum-1)+1`. If block not found - return last available value (`latest`/`pending` state).
 // Use this when iterating many blocks to avoid repeated cursor open/close overhead.
 func (t TxNumsReader) MinWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (minTxNum uint64, err error) {
-	if blockNum == 0 {
-		return 0, nil
-	}
-	minTxNum, ok, err := t.index.MaxTxNum(ctx, tx, c, blockNum-1)
+	minTxNum, ok, err := t.MinExact(ctx, tx, c, blockNum)
 	if err != nil {
 		return 0, err
 	}
@@ -231,7 +248,7 @@ func (t TxNumsReader) MinWithCursor(ctx context.Context, tx kv.Tx, c kv.Cursor, 
 		}
 		return binary.BigEndian.Uint64(v) + 1, nil
 	}
-	return minTxNum + 1, nil
+	return minTxNum, nil
 }
 
 // Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
@@ -383,6 +400,7 @@ func SecondKeyC(c kv.Cursor) ([]byte, error) {
 //   - blockNum
 //   - txIndex in block: -1 means first system tx
 //   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
+//   - isSystemTxn: first or last system-txn, independent of the order
 //   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
 //
 // Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
@@ -416,10 +434,10 @@ func (i *MapTxNum2BlockNumIter) Close() {
 	}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
-func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, isSystemTxn, blockNumChanged bool, err error) {
 	txNum, err = i.it.Next()
 	if err != nil {
-		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
+		return txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err
 	}
 
 	if i.maxTxNumInBlock == 0 || txNum > i.maxTxNumInBlock || txNum < i.minTxNumInBlock {
@@ -449,6 +467,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 	} else {
 		isFinalTxn = txNum == i.minTxNumInBlock
 	}
+	isSystemTxn = txNum == i.minTxNumInBlock || txNum == i.maxTxNumInBlock
 	return
 }
 

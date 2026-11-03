@@ -45,6 +45,19 @@ type MockState struct {
 	numBuf [binary.MaxVarintLen64]byte
 
 	putBranches int
+
+	recordPuts atomic.Bool
+	putLog     []recordedBranchPut
+
+	// reuseBranchBuf makes Branch return a single reused buffer, mirroring the
+	// production TrieContext.Branch, so a caller that keeps a branch across a later
+	// Branch read sees it overwritten.
+	reuseBranchBuf atomic.Bool
+	branchBuf      []byte
+}
+
+type recordedBranchPut struct {
+	prefix, data, prev []byte
 }
 
 func NewMockState(t testing.TB) *MockState {
@@ -73,6 +86,9 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
 	ms.cm[string(prefix)] = bytes.Clone(data)
 	ms.putBranches++
+	if ms.recordPuts.Load() {
+		ms.putLog = append(ms.putLog, recordedBranchPut{bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prevData)})
+	}
 	return nil
 }
 
@@ -82,6 +98,10 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		defer ms.mu.RUnlock()
 	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
+		if ms.reuseBranchBuf.Load() {
+			ms.branchBuf = append(ms.branchBuf[:0], exBytes...)
+			return ms.branchBuf, 0, nil
+		}
 		return exBytes, 0, nil
 	}
 	return nil, 0, nil
@@ -189,20 +209,6 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 		}
 	}
 	return nil
-}
-
-func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
-	for key, update := range updates {
-		if pre, ok := ms.cm[key]; ok {
-			merged, err := pre.MergeHexBranches(update, nil)
-			if err != nil {
-				panic(err)
-			}
-			ms.cm[key] = merged
-		} else {
-			ms.cm[key] = update
-		}
-	}
 }
 
 func decodeHex(in string) []byte {

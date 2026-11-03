@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -100,4 +101,17 @@ func TestForwardSyncFlushesBlockCollectorAfterInsertion(t *testing.T) {
 			require.Equal(t, test.wantFlushes, collector.flushCalls)
 		})
 	}
+}
+
+// Forward sync imports blocks without their columns, so it asks for a backfill of the range it
+// imported; nothing is asked when it imported nothing.
+func TestRequestCustodyBackfillAsksForTheImportedRange(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().BackfillCustodyColumns(uint64(100), uint64(164)).Times(1)
+	cfg := &Cfg{peerDas: peerDas}
+
+	requestCustodyBackfill(cfg, 100, 164)
+	requestCustodyBackfill(cfg, 100, 100)
+	requestCustodyBackfill(&Cfg{}, 100, 164)
 }

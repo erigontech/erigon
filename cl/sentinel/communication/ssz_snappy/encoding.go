@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -106,19 +106,13 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	if expectedSize != nil && encodedLn != *expectedSize {
 		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
 	}
-	if encodedLn > uint64(16*datasize.MB) {
+	if encodedLn > clparams.MaxPayloadSize {
 		return errors.New("payload too big")
 	}
 
-	compressedInput := r
-	var compressedReader *compressedPayloadReader
-	var maxCompressedSize uint64
-	if expectedSize != nil {
-		maxCompressedSize = 32 + encodedLn + encodedLn/6
-		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize}
-		compressedInput = compressedReader
-	}
-	sr := snappypool.Reader(compressedInput)
+	maxCompressedSize := uint64(snappy.MaxEncodedLen(int(encodedLn)))
+	compressedReader := &compressedPayloadReader{r: r, remaining: maxCompressedSize}
+	sr := snappypool.Reader(compressedReader)
 	defer snappypool.PutReader(sr)
 	raw, err := io.ReadAll(io.LimitReader(sr, int64(encodedLn)))
 	if err == nil && uint64(len(raw)) != encodedLn {

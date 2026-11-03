@@ -108,17 +108,18 @@ func (s *syncContributionPoolImpl) GetSyncContribution(slot, subcommitteeIndex u
 	return contribution.Copy()
 }
 
-// cleanupOldContributions keeps the contributions for the head's slot and the next one: messages for
-// the next slot can arrive before its block is imported, and a stalled head must not let later slots
-// pile up.
+// cleanupOldContributions keeps the contributions from the head's slot to one epoch after it: after
+// empty slots the next proposer and aggregators read slots past the head, and a stalled head must
+// not let later slots pile up.
 func (s *syncContributionPoolImpl) cleanupOldContributions(headState *state.CachingBeaconState) {
+	first, last := headState.Slot(), headState.Slot()+s.beaconCfg.SlotsPerEpoch
 	for key := range s.syncContributionPoolForAggregates {
-		if key.slot < headState.Slot() || key.slot > headState.Slot()+1 {
+		if key.slot < first || key.slot > last {
 			delete(s.syncContributionPoolForAggregates, key)
 		}
 	}
 	for key := range s.syncContributionPoolForBlocks {
-		if key.slot < headState.Slot() || key.slot > headState.Slot()+1 {
+		if key.slot < first || key.slot > last {
 			delete(s.syncContributionPoolForBlocks, key)
 		}
 	}

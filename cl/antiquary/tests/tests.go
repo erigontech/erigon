@@ -19,6 +19,9 @@ package tests
 import (
 	"context"
 	"embed"
+	"errors"
+	"fmt"
+	"io/fs"
 	"strconv"
 	"testing"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -74,6 +78,57 @@ var phase0_post_state_ssz_snappy []byte
 
 //go:embed test_data/bellatrix
 var bellatrixFS embed.FS
+
+//go:embed test_data/gloas
+var gloasFS embed.FS
+
+type GloasFixture struct {
+	Config    *clparams.BeaconChainConfig
+	Blocks    []*cltypes.SignedBeaconBlock
+	PreState  *state.CachingBeaconState
+	PostState *state.CachingBeaconState
+}
+
+func GetGloasFixture(name string, transitionFixture bool, forkEpoch uint64) GloasFixture {
+	root, err := fs.Sub(gloasFS, "test_data/gloas/"+name)
+	if err != nil {
+		panic(err)
+	}
+	preVersion := clparams.GloasVersion
+	if transitionFixture {
+		preVersion = clparams.FuluVersion
+	}
+	preState, err := spectest.ReadBeaconState(root, preVersion, spectest.PreSsz)
+	if err != nil {
+		panic(err)
+	}
+	cfg := preState.BeaconConfig()
+	cfg.GloasForkEpoch = forkEpoch
+	postState, err := spectest.ReadBeaconState(root, clparams.GloasVersion, spectest.PostSsz)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		panic(err)
+	}
+	blocks := make([]*cltypes.SignedBeaconBlock, 0)
+	for index := 0; ; index++ {
+		slot, err := spectest.ReadBlockSlot(root, index)
+		if err != nil {
+			panic(err)
+		}
+		version := clparams.GloasVersion
+		if transitionFixture && slot < forkEpoch*cfg.SlotsPerEpoch {
+			version = clparams.FuluVersion
+		}
+		block, err := spectest.ReadBlock(root, version, index)
+		if err != nil {
+			panic(fmt.Errorf("read %s block %d: %w", name, index, err))
+		}
+		if block == nil {
+			break
+		}
+		blocks = append(blocks, block)
+	}
+	return GloasFixture{Config: cfg, Blocks: blocks, PreState: preState, PostState: postState}
+}
 
 type MockBlockReader struct {
 	U                map[uint64]*cltypes.SignedBeaconBlock

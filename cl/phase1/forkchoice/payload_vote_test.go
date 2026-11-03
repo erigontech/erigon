@@ -199,6 +199,32 @@ func TestPtcBoolToVote(t *testing.T) {
 	require.Equal(t, int8(-1), boolToVote(false))
 }
 
+func TestPayloadAttestationVotesReportsPresence(t *testing.T) {
+	root := common.HexToHash("0x01")
+	f := &ForkChoiceStore{}
+
+	timeliness, dataAvailability, timelinessPresent, dataAvailabilityPresent := f.PayloadAttestationVotes(root)
+	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
+	require.Equal(t, [clparams.PtcSize]int8{}, dataAvailability)
+	require.False(t, timelinessPresent)
+	require.False(t, dataAvailabilityPresent)
+
+	f.payloadTimelinessVote.Store(root, [clparams.PtcSize]int8{})
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.True(t, timelinessPresent)
+	require.False(t, dataAvailabilityPresent)
+
+	f.payloadDataAvailabilityVote.Store(root, [clparams.PtcSize]int8{})
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.True(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
+
+	f.payloadTimelinessVote.Delete(root)
+	_, _, timelinessPresent, dataAvailabilityPresent = f.PayloadAttestationVotes(root)
+	require.False(t, timelinessPresent)
+	require.True(t, dataAvailabilityPresent)
+}
+
 func TestPtcPayloadTimelinessVoteCounting(t *testing.T) {
 	root := common.HexToHash("0x01")
 	f := newPtcVoteTestStore(root)
@@ -975,7 +1001,7 @@ func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 	return f
 }
 
-func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verified bool) *ForkChoiceStore {
+func newPayloadVoteTestStore(t testing.TB, root common.Hash, hasEnvelope, verified bool) *ForkChoiceStore {
 	t.Helper()
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)

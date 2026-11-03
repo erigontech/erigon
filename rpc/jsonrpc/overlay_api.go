@@ -50,7 +50,7 @@ import (
 
 type OverlayAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error)
-	CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error)
+	CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error)
 }
 
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
@@ -90,7 +90,7 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 	}
 }
 
-func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error) {
+func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
 		evm                *vm.EVM
@@ -170,6 +170,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb := state.New(stateReader)
 	defer statedb.Close()
+	transactions.VersionedBlockState(statedb)
 
 	header := block.HeaderNoCopy()
 
@@ -202,8 +203,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
-		_ = statedb.FinalizeTx(rules, state.NewNoopWriter())
-
+		if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
+			return nil, err
+		}
 	}
 
 	creationTx := block.Transactions()[transactionIndex]
@@ -218,12 +220,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.GetTo() == nil && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), *code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	} else {
 		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
@@ -254,7 +256,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 	}
 
-	_ = statedb.FinalizeTx(rules, state.NewNoopWriter())
+	_ = ethapi.FinalizeCallTx(statedb, rules)
 
 	return nil, nil
 }
@@ -291,7 +293,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	}
 
 	// Re-executes with overridden code, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +314,9 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		pend.Go(func() {
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
-				log.Error("Error", "error", err)
+				for task := range jobs {
+					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
+				}
 				return
 			}
 			defer tx.Rollback()
@@ -330,6 +334,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					continue
 				}
 				statedb := state.New(stateReader)
+				transactions.VersionedBlockState(statedb)
 				func() {
 					defer statedb.Close()
 					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, stateOverride)
@@ -402,6 +407,9 @@ blockLoop:
 		if res == nil {
 			continue
 		}
+		if res.Error != "" {
+			return nil, fmt.Errorf("block %d: %s", res.BlockNumber, res.Error)
+		}
 		for _, l := range res.Logs {
 			if api.getLogsMaxResults != 0 && len(logs) >= api.getLogsMaxResults {
 				return nil, fmt.Errorf("%s: %d", errExceedLogResults, api.getLogsMaxResults)
@@ -413,11 +421,7 @@ blockLoop:
 }
 
 func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.Hash) []*types.Log {
-	addrMap := make(map[common.Address]struct{}, len(addresses))
-	for _, v := range addresses {
-		addrMap[v] = struct{}{}
-	}
-	return logs.Filter(addrMap, topics, 0)
+	return logs.Filter(addresses, topics, 0)
 }
 
 func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, stateOverride *ethapi.StateOverrides) ([]*types.Log, error) {
@@ -484,6 +488,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return nil, err
 	}
 
+	// On the versioned state the overrides took tx index 0; the block's txs follow them.
+	firstTxIndex := statedb.TxnIndex()
 	// try to replay all transactions in this block
 	for idx, txn := range replayTransactions {
 		log.Debug("[replayBlock] replaying transaction", "idx", idx, "transactionHash", txn.Hash())
@@ -504,6 +510,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
+				statedb.SetTxContext(blockNum, firstTxIndex+idx)
 				nonce, err := statedb.GetNonce(sender.Address())
 				if err != nil {
 					log.Error(err.Error())
@@ -514,11 +521,14 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 					log.Error(err.Error())
 					return nil, err
 				}
+				if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
+					return nil, err
+				}
 				continue
 			}
 		}
 
-		statedb.SetTxContext(blockNum, idx)
+		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
@@ -529,7 +539,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, err
 		}
 
-		err = statedb.FinalizeTx(rules, state.NewNoopWriter())
+		err = ethapi.FinalizeCallTx(statedb, rules)
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
@@ -546,6 +556,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		} else {
 			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
+			for _, l := range txLogs {
+				l.TxIndex = hexutil.Uint(idx)
+			}
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
 		}

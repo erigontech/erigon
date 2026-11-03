@@ -18,12 +18,14 @@ package cache
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func BenchmarkCodeCache_GetByCodeHash_Hit(b *testing.B) {
@@ -147,4 +149,32 @@ func BenchmarkAddrCodeHashHotKey(b *testing.B) {
 			}
 		})
 	})
+}
+
+// BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode is the EVM read path's fill
+// for a cold max-size contract: the cache restarts, untimed, before a codeHash repeats.
+func BenchmarkCodeCache_PutWithCodeHashIfAbsent_MaxCode(b *testing.B) {
+	codes := make([][]byte, 4096)
+	hashes := make([][]byte, len(codes))
+	for i := range codes {
+		codes[i] = bytes.Repeat([]byte{0x5b}, 24*1024)
+		binary.BigEndian.PutUint64(codes[i], uint64(i))
+		hashes[i] = crypto.Keccak256(codes[i])
+	}
+	addr := make([]byte, 20)
+	b.SetBytes(24 * 1024)
+	var c *CodeCache
+	defer func() { c.Close() }()
+	for i := 0; b.Loop(); i++ {
+		if i%len(codes) == 0 {
+			b.StopTimer()
+			if c != nil {
+				c.Close()
+			}
+			c = NewCodeCache(64*datasize.MB, 16*datasize.MB)
+			b.StartTimer()
+		}
+		binary.BigEndian.PutUint64(addr[len(addr)-8:], uint64(i))
+		c.PutWithCodeHashIfAbsent(addr, codes[i%len(codes)], hashes[i%len(codes)], uint64(i))
+	}
 }

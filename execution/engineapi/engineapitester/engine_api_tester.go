@@ -25,6 +25,7 @@ import (
 	"net"
 	"path"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester/txpoolwait"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -364,7 +366,17 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}
-	err = ethBackend.Init(ethNode, &ethConfig, genesis.Config)
+	var stateAgg *state.Aggregator
+	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
+		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
+	}
+	if args.MaintenanceObserver != nil {
+		if stateAgg == nil {
+			return EngineApiTester{}, fmt.Errorf("maintenance observer requires a state aggregator")
+		}
+		stateAgg.SetMaintenanceObserver(args.MaintenanceObserver)
+	}
+	err = ethBackend.Init(ethNode, &ethConfig)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
 	}
@@ -391,7 +403,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if args.EngineApiClientTimeout != nil {
 		engineApiClientOpts = append(engineApiClientOpts, engineapi.WithJsonRpcClientTimeout(*args.EngineApiClientTimeout))
 	}
-	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
+	engineApiUrl := "http://" + net.JoinHostPort(httpConfig.AuthRpcHTTPListenAddress, strconv.Itoa(httpConfig.AuthRpcPort))
 	engineApiClient, err := engineapi.DialJsonRpcClient(
 		engineApiUrl,
 		jwtSecret,
@@ -407,6 +419,12 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	} else {
 		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config)
 	}
+	if pool := ethBackend.TxPool(); pool != nil {
+		blockReader, _ := ethBackend.BlockIO()
+		mockCl.waitForTxPool = func(ctx context.Context, parentHash common.Hash) error {
+			return txpoolwait.WaitForParent(ctx, ethBackend.ChainDB(), blockReader, pool, parentHash)
+		}
+	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
 		_, err = mockCl.BuildCanonicalBlock(ctx)
@@ -418,10 +436,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// must be appended last) — that way ctx-watching background goroutines
 	// see Done before downstream resources (DB, node) are torn down.
 	addCleanup(func() error { cancel(); return nil })
-	var stateAgg *state.Aggregator
-	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
-		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
-	}
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -458,6 +472,7 @@ type EngineApiTesterInitArgs struct {
 	DisableSentry           bool
 	MdbxDBSizeLimit         datasize.ByteSize
 	StateTransitionObserver execmodule.StateTransitionObserver
+	MaintenanceObserver     state.MaintenanceObserver
 	EnableTestingAPI        bool
 }
 
@@ -478,7 +493,7 @@ type EngineApiTester struct {
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
 	ChainDB              kv.TemporalRoDB
-	ExecutionModule      execmodule.ExecutionModule
+	ExecutionModule      *execmodule.ExecModule
 	cleanup              *cleanupHandle
 }
 

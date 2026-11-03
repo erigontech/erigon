@@ -42,12 +42,11 @@ type BbdHeaderReader interface {
 }
 
 type BackwardBlockDownloader struct {
-	logger        log.Logger
-	fetcher       Fetcher
-	balFetcher    BALFetcher
-	peerPenalizer *PeerPenalizer
-	peerTracker   *PeerTracker
-	tmpDir        string
+	logger      log.Logger
+	fetcher     Fetcher
+	balFetcher  BALFetcher
+	peerTracker *PeerTracker
+	tmpDir      string
 }
 
 type BackwardBlockDownloaderOption func(*BackwardBlockDownloader)
@@ -61,17 +60,15 @@ func WithBALFetcher(balFetcher BALFetcher) BackwardBlockDownloaderOption {
 func NewBackwardBlockDownloader(
 	logger log.Logger,
 	fetcher Fetcher,
-	peerPenalizer *PeerPenalizer,
 	peerTracker *PeerTracker,
 	tmpDir string,
 	opts ...BackwardBlockDownloaderOption,
 ) *BackwardBlockDownloader {
 	bbd := &BackwardBlockDownloader{
-		logger:        logger,
-		fetcher:       fetcher,
-		peerPenalizer: peerPenalizer,
-		peerTracker:   peerTracker,
-		tmpDir:        tmpDir,
+		logger:      logger,
+		fetcher:     fetcher,
+		peerTracker: peerTracker,
+		tmpDir:      tmpDir,
 	}
 	for _, opt := range opts {
 		opt(bbd)
@@ -263,6 +260,22 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 	chainLen := uint64(1)
+	var peersRefreshedAt uint64
+	rangeOpts := []FetcherOption{
+		WithResponseTimeout(config.headerChainBatchFetchTimeout),
+		WithMaxRetries(0),
+		WithoutFailureTracking(),
+	}
+	fetchCtx, cancelFetches := context.WithCancel(ctx)
+	defer cancelFetches()
+	inFlight := make(map[uint64]chan headerBatchResult)
+	rangeFailed := make(map[PeerId]bool)
+	var window int
+	initialNum := initialHeader.Number.Uint64()
+	var nextRangeTop uint64
+	if initialNum > 0 {
+		nextRangeTop = initialNum - 1
+	}
 	lastHeader := initialHeader
 	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
 	var connectionPoint *types.Header
@@ -302,16 +315,6 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			break
 		}
 
-		peerId, err := peers.nextAvailablePeer()
-		if err != nil {
-			return nil, fmt.Errorf(
-				"no peers available before reaching connection point num=%d, hash=%s: %w",
-				parentNum,
-				parentHash,
-				err,
-			)
-		}
-
 		select {
 		case <-logProgressTicker.C:
 			progressLogArgs := []any{
@@ -331,23 +334,90 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			}
 		}
 
-		peerIndex := peers.peerIdToIndex[peerId]
-		resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId, fetcherOpts...)
-		if err != nil {
-			bbd.logger.Debug(
-				"[backward-block-downloader] could not fetch headers batch from peer",
-				"num", parentNum,
-				"hash", parentHash,
-				"amount", amount,
-				"peerId", peerId.String(),
-				"err", err,
-			)
-			peers.exhaustedPeers[peerIndex] = true
-			continue
+		if nextRangeTop > parentNum {
+			nextRangeTop = parentNum
+		}
+		for len(inFlight) < window && nextRangeTop > 0 && initialNum-nextRangeTop <= config.chainLengthLimit {
+			rangePeer, ok := peers.nextAvailablePeerNotIn(rangeFailed)
+			if !ok {
+				break
+			}
+			top := nextRangeTop
+			n := min(top, maxHeadersBatchLen)
+			launchedAt := peersRefreshedAt
+			result := make(chan headerBatchResult, 1)
+			inFlight[top] = result
+			nextRangeTop -= n
+			go func() {
+				rangeCtx, cancel := context.WithTimeout(fetchCtx, config.headerChainBatchFetchTimeout)
+				defer cancel()
+				resp, err := bbd.fetcher.FetchHeaders(rangeCtx, top-n+1, top+1, &rangePeer, rangeOpts...)
+				result <- headerBatchResult{headers: resp.Data, peerId: rangePeer, err: err, peersRefreshedAt: launchedAt}
+			}()
 		}
 
+		var headers []*types.Header
+		if result, ok := inFlight[parentNum]; ok {
+			delete(inFlight, parentNum)
+			var res headerBatchResult
+			select {
+			case res = <-result:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			if res.err == nil && len(res.headers) > 0 && res.headers[len(res.headers)-1].Hash() == parentHash {
+				headers = res.headers
+			} else {
+				bbd.logger.Debug(
+					"[backward-block-downloader] headers range by number does not link to the walk",
+					"num", parentNum,
+					"hash", parentHash,
+					"peerId", res.peerId.String(),
+					"err", res.err,
+				)
+				if res.peersRefreshedAt == peersRefreshedAt {
+					rangeFailed[res.peerId] = true
+				}
+			}
+		}
+		if headers == nil {
+			peerId, err := peers.nextAvailablePeer()
+			if err != nil && config.peerId == nil && chainLen > peersRefreshedAt {
+				if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
+					peersRefreshedAt = chainLen
+					peers = newPeersContext(connected)
+					clear(rangeFailed)
+					peerId, err = peers.nextAvailablePeer()
+				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf(
+					"no peers available before reaching connection point num=%d, hash=%s: %w",
+					parentNum,
+					parentHash,
+					err,
+				)
+			}
+
+			peerIndex := peers.peerIdToIndex[peerId]
+			resp, err := bbd.fetcher.FetchHeadersBackwards(ctx, parentHash, amount, &peerId, fetcherOpts...)
+			if err != nil {
+				bbd.logger.Debug(
+					"[backward-block-downloader] could not fetch headers batch from peer",
+					"num", parentNum,
+					"hash", parentHash,
+					"amount", amount,
+					"peerId", peerId.String(),
+					"err", err,
+				)
+				peers.exhaustedPeers[peerIndex] = true
+				continue
+			}
+			headers = resp.Data
+		}
+		window = min(max(2*window, 1), config.maxParallelHeaderDownloads)
+
 		// collect the headers batch into the etl and check for a connecting point
-		headers := resp.Data
 		for _, header := range slices.Backward(headers) {
 			headerNum := header.Number.Uint64()
 			if headerNum == 0 {
@@ -437,6 +507,9 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	if config.peerId == nil {
 		current := bbd.peerTracker.ListPeersMayHaveBlockNum(headers[len(headers)-1].Number.Uint64())
 		if len(current) == 0 {
+			current = bbd.peerTracker.ListPeers()
+		}
+		if len(current) == 0 {
 			return errors.New("no peers available")
 		}
 		peers = newPeersContext(current)
@@ -474,10 +547,6 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	// download from available peers until all batches are downloaded
-	fetcherOpts := []FetcherOption{
-		WithResponseTimeout(config.bodiesBatchFetchTimeout),
-		WithMaxRetries(config.bodiesBatchFetchRetries),
-	}
 	type batchAssignment struct {
 		peerId     PeerId
 		batchIndex int
@@ -487,6 +556,8 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	balBatches := make([]map[common.Hash]*types.BlockAccessListSidecar, len(availablePeers))
 	pendingBatches := true
 	attempts := 1
+	var maxRetries uint64
+	lastResort := false
 	for pendingBatches {
 		// assign remaining batches to available peers
 		var peerIndex int
@@ -529,7 +600,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				batchEg, batchCtx := errgroup.WithContext(ctx)
 				batchEg.Go(func() error {
 					var err error
-					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, fetcherOpts...)
+					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, WithResponseTimeout(config.bodiesBatchFetchTimeout), WithMaxRetries(maxRetries))
 					return err
 				})
 				if bbd.balFetcher != nil {
@@ -562,57 +633,30 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					return nil
 				}
 
-				bodies := bodiesResponse.Data
-				bodyBatch := make([]*types.Body, 0, len(headerBatch))
-				for i, header := range headerBatch {
-					body := bodies[i]
-					err := body.MatchesHeader(header)
-					if err != nil {
+				if bbd.balFetcher != nil {
+					if want := len(balReqs); len(balsResponse) < want {
 						bbd.logger.Debug(
-							"[backward-block-downloader] body does not match header, penalizing peer",
-							"num", header.Number.Uint64(),
-							"hash", header.Hash(),
-							"peerId", peerId.String(),
-							"err", err,
-						)
-						err = bbd.peerPenalizer.Penalize(ctx, &peerId)
-						if err != nil {
-							bbd.logger.Debug(
-								"[backward-block-downloader] could not penalize peer",
-								"peerId", peerId.String(),
-								"err", err,
-							)
-						}
-						break
-					}
-					bodyBatch = append(bodyBatch, body)
-				}
-				if len(bodyBatch) == len(headerBatch) {
-					if bbd.balFetcher != nil {
-						if want := len(balReqs); len(balsResponse) < want {
-							bbd.logger.Debug(
-								"[backward-block-downloader] BALs download miss for batch",
-								"fromNum", headerBatch[0].Number.Uint64(),
-								"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
-								"got", len(balsResponse),
-								"want", want,
-								"bodyPeerId", peerId.String(),
-								"balLeadPeerId", balPrimary.String(),
-							)
-						}
-					}
-					bodyBatches[batchIndex] = bodyBatch
-					if len(balsResponse) > 0 {
-						balBatches[batchIndex] = balsResponse
-						bbd.logger.Trace(
-							"[backward-block-downloader] fetched BALs for batch",
+							"[backward-block-downloader] BALs download miss for batch",
 							"fromNum", headerBatch[0].Number.Uint64(),
-							"fromHash", headerBatch[0].Hash(),
 							"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
-							"toHash", headerBatch[len(headerBatch)-1].Hash(),
 							"got", len(balsResponse),
+							"want", want,
+							"bodyPeerId", peerId.String(),
+							"balLeadPeerId", balPrimary.String(),
 						)
 					}
+				}
+				bodyBatches[batchIndex] = bodiesResponse.Data
+				if len(balsResponse) > 0 {
+					balBatches[batchIndex] = balsResponse
+					bbd.logger.Trace(
+						"[backward-block-downloader] fetched BALs for batch",
+						"fromNum", headerBatch[0].Number.Uint64(),
+						"fromHash", headerBatch[0].Hash(),
+						"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
+						"toHash", headerBatch[len(headerBatch)-1].Hash(),
+						"got", len(balsResponse),
+					)
 				}
 				return nil
 			})
@@ -622,10 +666,14 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			panic(err) // workers do not return errs
 		}
 		// mark peers as exhausted for those that had unsuccessful fetches
-		var incompleteBatches int
 		for _, assignment := range batchAssignments {
 			if bodyBatches[assignment.batchIndex] == nil {
 				peers.exhaustedPeers[peers.peerIdToIndex[assignment.peerId]] = true
+			}
+		}
+		var incompleteBatches int
+		for batchIndex := range headerBatches {
+			if bodyBatches[batchIndex] == nil {
 				incompleteBatches++
 			}
 		}
@@ -633,6 +681,17 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			attempts++
 			// recalculate the available peers as some have become exhausted
 			availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
+			if err != nil && !lastResort {
+				lastResort = true
+				clear(peers.exhaustedPeers)
+				if config.peerId == nil {
+					if connected := bbd.peerTracker.ListPeers(); len(connected) > 0 {
+						peers = newPeersContext(connected)
+					}
+				}
+				maxRetries = config.bodiesBatchFetchRetries
+				availablePeers, err = peers.nextAvailablePeers(incompleteBatches)
+			}
 			if err != nil {
 				return err
 			}
@@ -693,6 +752,13 @@ func newPeersContext(peers []*PeerId) peersContext {
 	}
 }
 
+type headerBatchResult struct {
+	headers          []*types.Header
+	peerId           PeerId
+	err              error
+	peersRefreshedAt uint64
+}
+
 type peersContext struct {
 	all              []*PeerId
 	peerIdToIndex    map[PeerId]int
@@ -713,6 +779,19 @@ func (pc *peersContext) nextAvailablePeer() (PeerId, error) {
 	peer := pc.peerIndexToId[pc.currentPeerIndex]
 	pc.incrementCurrentPeerIndex()
 	return peer, nil
+}
+
+func (pc *peersContext) nextAvailablePeerNotIn(skip map[PeerId]bool) (PeerId, bool) {
+	for range pc.all {
+		peer, err := pc.nextAvailablePeer()
+		if err != nil {
+			return PeerId{}, false
+		}
+		if !skip[peer] {
+			return peer, true
+		}
+	}
+	return PeerId{}, false
 }
 
 func (pc *peersContext) nextAvailablePeers(n int) ([]PeerId, error) {

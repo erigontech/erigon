@@ -123,6 +123,8 @@ func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 		return setText(&args.Input, f)
 	case "chainId":
 		return setText(&args.ChainID, f)
+	case "accessList":
+		return setAccessList(&args.AccessList, f)
 	}
 	for _, name := range callArgsJSONNames {
 		if bytes.EqualFold(key, []byte(name)) {
@@ -158,6 +160,70 @@ func setText[T any, PT interface {
 		return false
 	}
 	*dst = (*T)(v)
+	return true
+}
+
+// setAccessList decodes an access list; a repeated "accessList" member goes to encoding/json,
+// which reuses the earlier slice.
+func setAccessList(dst **types.AccessList, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	arr, err := f.Array()
+	if err != nil || *dst != nil {
+		return false
+	}
+	al := make(types.AccessList, len(arr))
+	for i, e := range arr {
+		if !setAccessTuple(&al[i], e) {
+			return false
+		}
+	}
+	*dst = &al
+	return true
+}
+
+func setAccessTuple(dst *types.AccessTuple, f *fastjson.Value) bool {
+	o, err := f.Object()
+	if err != nil {
+		return false
+	}
+	ok := true
+	o.Visit(func(key []byte, v *fastjson.Value) {
+		if !ok {
+			return
+		}
+		switch string(key) {
+		case "address":
+			s, err := v.StringBytes()
+			ok = err == nil && dst.Address.UnmarshalText(s) == nil
+		case "storageKeys":
+			ok = setStorageKeys(&dst.StorageKeys, v)
+		default:
+			ok = !bytes.EqualFold(key, []byte("address")) && !bytes.EqualFold(key, []byte("storageKeys"))
+		}
+	})
+	return ok
+}
+
+func setStorageKeys(dst *[]common.Hash, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	arr, err := f.Array()
+	if err != nil {
+		return false
+	}
+	keys := make([]common.Hash, len(arr))
+	for i, e := range arr {
+		s, err := e.StringBytes()
+		if err != nil || keys[i].UnmarshalText(s) != nil {
+			return false
+		}
+	}
+	*dst = keys
 	return true
 }
 
@@ -521,11 +587,6 @@ type ExecutionResult struct {
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
 type StructLogRes = logger.StructLogRes
-
-// FormatLogs formats EVM returned structured logs for json output
-func FormatLogs(logs []logger.StructLog) []StructLogRes {
-	return logger.FormatLogs(logs)
-}
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go
 

@@ -25,9 +25,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
@@ -44,6 +46,50 @@ func writeRootSeg(t *testing.T, dirs datadir.Dirs, table string, from, to uint64
 		require.NoError(t, c.AddWord(w))
 	}
 	require.NoError(t, c.Compress())
+}
+
+func TestCheckPtcWindowEpoch(t *testing.T) {
+	setup := func(t *testing.T, wordCount int, forkRow []byte) (datadir.Dirs, *clparams.BeaconChainConfig) {
+		t.Helper()
+		dirs := datadir.New(t.TempDir())
+		require.NoError(t, os.MkdirAll(dirs.SnapCaplin, 0o755))
+		require.NoError(t, os.MkdirAll(dirs.Tmp, 0o755))
+		words := make([][]byte, wordCount)
+		for slot := 4; slot < wordCount; slot += 4 {
+			words[slot] = forkRow
+		}
+		writeRootSeg(t, dirs, kv.PtcWindowEpochTable, 0, 8, words)
+		cfg := clparams.MainnetBeaconConfig
+		cfg.SlotsPerEpoch = 4
+		cfg.GloasForkEpoch = 1
+		return dirs, &cfg
+	}
+
+	t.Run("complete", func(t *testing.T) {
+		dirs, cfg := setup(t, 8, []byte("compressed-window"))
+		require.NoError(t, CheckPtcWindowEpoch(context.Background(), dirs, cfg))
+	})
+
+	t.Run("missing post-fork epoch", func(t *testing.T) {
+		dirs, cfg := setup(t, 8, nil)
+		err := CheckPtcWindowEpoch(context.Background(), dirs, cfg)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "slot 4")
+	})
+
+	t.Run("truncated segment range", func(t *testing.T) {
+		dirs, cfg := setup(t, 5, []byte("compressed-window"))
+		err := CheckPtcWindowEpoch(context.Background(), dirs, cfg)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "word count 5, expected 8")
+	})
+
+	t.Run("overlong segment range", func(t *testing.T) {
+		dirs, cfg := setup(t, 9, []byte("compressed-window"))
+		err := CheckPtcWindowEpoch(context.Background(), dirs, cfg)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "word count 9, expected 8")
+	})
 }
 
 func TestCheckCaplinStateRoots(t *testing.T) {

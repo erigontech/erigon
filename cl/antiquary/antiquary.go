@@ -163,6 +163,7 @@ func (s *Antiquary) Loop() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
@@ -427,6 +428,13 @@ func (s *Antiquary) antiquate() error {
 	from = (from / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	to = min(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
+	s.sn.WalkDirtySegments(snaptype.CaplinEnums.BeaconBlocks, func(sn *snapshotsync.DirtySegment) bool {
+		if segFrom, _ := sn.GetRange(); segFrom >= from && sn.IsIndexed() {
+			to = min(to, segFrom)
+			return false
+		}
+		return true
+	})
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
 		return nil
@@ -451,6 +459,7 @@ func (s *Antiquary) antiquate() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(from, to)
 	if s.downloader != nil {
@@ -461,6 +470,16 @@ func (s *Antiquary) antiquate() error {
 	}
 
 	return nil
+}
+
+func (s *Antiquary) removeBlockOverlaps() {
+	var onDelete func(l []string) error
+	if s.downloader != nil {
+		onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
+	}
+	if err := s.sn.RemoveOverlaps(onDelete); err != nil {
+		s.logger.Warn("[Antiquary] Failed to remove block overlaps", "err", err)
+	}
 }
 
 func (s *Antiquary) NotifyBackfilled() {
@@ -549,28 +568,13 @@ func (s *Antiquary) antiquateBlobs() error {
 	}
 	roTx.Rollback()
 	s.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to, "backlogTo", backlogTo)
-	blobCountFn := func(slot uint64) (uint64, error) {
-		block, err := s.snReader.ReadBeaconBlockBodyBySlot(s.ctx, nil, slot)
-		if err != nil {
-			return 0, err
-		}
-		if block == nil {
-			return 0, nil
-		}
-		commitments := block.Block.Body.GetBlobKzgCommitments()
-		if commitments == nil {
-			return 0, nil
-		}
-		return uint64(commitments.Len()), nil
-	}
-
 	// now, we need to retire the blobs
 	// The build slot is held for the compression only: opening the folder, seeding and pruning
 	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
 	if err := func() error {
 		compressWorkers, releaseBuildSlot := s.blobCompressWorkers(currentBlobsProgress, backlogTo)
 		defer releaseBuildSlot()
-		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, blobCountFn, log.LvlDebug, s.logger)
+		return freezeblocks.DumpBlobsSidecar(s.ctx, s.blobStorage, s.mainDB, currentBlobsProgress, to, s.sn.Salt, s.dirs, compressWorkers, freezeblocks.BlobCountFromBlocks(s.ctx, s.sn, s.snReader), log.LvlDebug, s.logger)
 	}(); err != nil {
 		return err
 	}
@@ -579,6 +583,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	if err := s.sn.OpenFolder(); err != nil {
 		return err
 	}
+	s.removeBlockOverlaps()
 
 	paths := s.sn.SegFileNames(currentBlobsProgress, to)
 	if s.downloader != nil {

@@ -320,7 +320,6 @@ func BenchmarkCreatedContractSetCode(b *testing.B) {
 	for b.Loop() {
 		ibs := NewPooled(reader)
 		ibs.SetVersionMap(NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(1, 0)
 		for _, a := range addrs {
 			if err := ibs.CreateAccount(a, true); err != nil {

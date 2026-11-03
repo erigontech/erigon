@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -43,6 +44,72 @@ func TestUpgradeAndExpectedWithdrawals(t *testing.T) {
 	w, err := GetExpectedWithdrawals(s, Epoch(s))
 	require.NoError(t, err)
 	assert.Empty(t, w.Withdrawals)
+}
+
+func TestUpgradeToAltairClearsPhase0ValidatorData(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+
+	hasPhase0Data := false
+	for i := range s.ValidatorLength() {
+		current, err := s.ValidatorMinCurrentInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		previous, err := s.ValidatorMinPreviousInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		hasPhase0Data = hasPhase0Data || current != nil || previous != nil
+	}
+	require.True(t, hasPhase0Data)
+
+	require.NoError(t, s.UpgradeToAltair())
+	requireNoPhase0ValidatorData(t, s)
+}
+
+func TestReinitCachesInitializesValidatorPhase0DataOnlyAtPhase0(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+	s.ValidatorSet().ClearPhase0Data()
+	s.SetVersion(clparams.AltairVersion)
+
+	require.NoError(t, s.reinitCaches())
+	requireNoPhase0ValidatorData(t, s)
+}
+
+func requireNoPhase0ValidatorData(t *testing.T, s *CachingBeaconState) {
+	t.Helper()
+	for i := range s.ValidatorLength() {
+		current, err := s.ValidatorMinCurrentInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		require.Nil(t, current)
+		previous, err := s.ValidatorMinPreviousInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		require.Nil(t, previous)
+	}
+}
+
+func TestUpgradeToGloasStateRootMatchesDecodedState(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+	require.NoError(t, s.UpgradeToAltair())
+	require.NoError(t, s.UpgradeToBellatrix())
+	require.NoError(t, s.UpgradeToCapella())
+	require.NoError(t, s.UpgradeToDeneb())
+	require.NoError(t, s.UpgradeToElectra())
+	require.NoError(t, s.UpgradeToFulu())
+	s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{ValidatorIndex: 1, Amount: 2, WithdrawableEpoch: 3})
+	s.AppendPendingConsolidation(&solid.PendingConsolidation{SourceIndex: 4, TargetIndex: 5})
+	_, err := s.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, s.UpgradeToGloas())
+	actual, err := s.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := s.EncodeSSZ(nil)
+	require.NoError(t, err)
+	fresh := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, fresh.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	expected, err := fresh.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
 }
 
 // TestUpgradeToElectraPropagatesQueueExcessActiveBalanceError pins that a

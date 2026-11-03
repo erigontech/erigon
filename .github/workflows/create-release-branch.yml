@@ -94,10 +94,14 @@ jobs:
             exit 1
           }
 
-          # Refuse to overwrite an existing release branch.
-          if gh api "repos/$REPO/branches/$RELEASE_BRANCH" >/dev/null 2>&1; then
-            fail "Branch '$RELEASE_BRANCH' already exists — refusing to recreate."
-          fi
+          # Refuse to overwrite an existing release branch. Only a 404 means it is absent;
+          # any other error (token, API outage) stops the run with its own message.
+          status=$(gh api -i "repos/$REPO/branches/$RELEASE_BRANCH" 2>/dev/null | head -1 | awk '{print $2}' || true)
+          case "$status" in
+            200) fail "Branch '$RELEASE_BRANCH' already exists — refusing to recreate." ;;
+            404) ;;
+            *) fail "Could not check whether '$RELEASE_BRANCH' exists (HTTP ${status:-no response})." ;;
+          esac
 
           # Resolve FROM_REF to a commit SHA. The commits/{ref} endpoint accepts
           # a branch, tag, or SHA uniformly, so any past commit (on any branch)
@@ -130,13 +134,16 @@ jobs:
             echo "### Release branch \`$RELEASE_BRANCH\` created"
             echo ""
             echo "- Base: \`$FROM_REF\` → \`$base_sha\`"
-            echo "- **Manual step required:** add the branch-protection rule in **Settings → Branches**."
+            echo "- **Manual steps required:**"
+            echo "  1. Add the branch-protection rule in **Settings → Branches** (mirror the existing release branch)."
+            echo "  2. Complete the org-level Actions setup for this branch (see the internal release checklist)."
           } >> "$GITHUB_STEP_SUMMARY"
 
   notify:
     needs: [create-release-branch]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Notify Discord
         env:
@@ -164,7 +171,10 @@ jobs:
           mention="@here"
           if [ "$JOB_RESULT" = "success" ] && [ "$OUTCOME" = "success" ]; then
             title=":white_check_mark: Release branch created"; color=3066993
-            desc=":warning: **Manual step required:** add the branch-protection rule for this branch in **Settings → Branches** (mirror the existing release branch)."
+            desc=$(printf '%s\n%s\n%s' \
+              ":warning: **Manual steps required:**" \
+              "1. Add the branch-protection rule in **Settings → Branches** (mirror the existing release branch)." \
+              "2. Complete the org-level Actions setup for this branch (see the internal release checklist).")
           elif [ "$OUTCOME" = "dry-run" ]; then
             # A dry-run is the operator's own check — don't ping the channel.
             title=":mag: Release branch dry-run"; color=3447003; mention=""

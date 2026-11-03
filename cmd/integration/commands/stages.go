@@ -102,7 +102,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
+			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, logger)
 			if err != nil {
 				return fmt.Errorf("opening DB: %w", err)
 			}
@@ -158,7 +158,7 @@ var cmdPrintTableSizes = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -277,6 +277,9 @@ var cmdRunMigrations = &cobra.Command{
 func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
 	logger.Info("Opening DB", "label", label, "path", path)
 	cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
+	if err := checkExistingDB(cfg); err != nil {
+		return err
+	}
 	db, err := openRawDB(cfg, true, logger)
 	if err != nil {
 		return err
@@ -737,6 +740,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
 
 	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			minUnwindableBlockNum, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
@@ -1298,14 +1304,13 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		cfg.Builder = *builderConfig
 	}
 	cfg.Dirs = dirs
-	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	blockReader, blockWriter, allSn, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
+	blockReader, blockWriter, allSn, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, logger, blockSnapBuildSema)
 	if err != nil {
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
+	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1353,7 +1358,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, stage stages.SyncStage) *stagedsync.St
 	return res
 }
 
-func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader dbservices.FullBlockReader, logger log.Logger) rules.Engine {
+func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, logger log.Logger) rules.Engine {
 	config := ethconfig.Defaults
 	var rulesConfig any
 	switch {
@@ -1363,7 +1368,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 		rulesConfig = &config.Ethash
 	}
 	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig,
-		false /* noVerify */, blockReader, db.ReadOnly(), logger)
+		false /* noVerify */, db.ReadOnly(), logger)
 }
 
 func readGenesis(chain string) *types.Genesis {

@@ -46,7 +46,7 @@ func TestGetState_InfiniteLoopOnMissingStateFile(t *testing.T) {
 	go func() {
 		defer close(done)
 		// getState should return (nil, nil), not loop forever.
-		gotState, gotErr = graph.getState(fakeRoot, false, false)
+		gotState, gotErr = graph.ReplayState(fakeRoot)
 	}()
 
 	select {
@@ -107,7 +107,7 @@ func TestGetState_AnchorOffDumpSlot(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, Success, status)
 
-			got, err := graph.GetState(graph.anchorRoot, true)
+			got, err := graph.ReplayState(graph.anchorRoot)
 			require.NoError(t, err)
 			require.NotNil(t, got)
 			require.Equal(t, wantSlot, got.Slot())
@@ -119,7 +119,7 @@ func TestGetState_AnchorOffDumpSlot(t *testing.T) {
 			bRoot, err := blockB.Block.HashSSZ()
 			require.NoError(t, err)
 			graph.currentState = nil
-			desc, err := graph.GetState(bRoot, true)
+			desc, err := graph.ReplayState(bRoot)
 			require.NoError(t, err)
 			require.NotNil(t, desc)
 			descRoot, err := desc.HashSSZ()
