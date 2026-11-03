@@ -116,10 +116,14 @@ func TestNewPayloadWithBadHeaderWhileLaggingIsInvalidWithNullLatestValidHash(t *
 	badHeader.Time = chainPack.Blocks[2].Time()
 	bad := tip.WithSeal(badHeader)
 
-	for range 2 {
-		status, err := srv.HandleNewPayload(t.Context(), "test", bad)
-		require.NoError(t, err)
-		require.Equal(t, engine_types.InvalidStatus, status.Status)
-		require.Nil(t, status.LatestValidHash)
-	}
+	status, err := srv.HandleNewPayload(t.Context(), "test", bad)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
+
+	cached, err := srv.getQuickPayloadStatusIfPossible(t.Context(), bad.Hash(), bad.NumberU64(), bad.ParentHash(), nil, true, defaultReadinessWait)
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+	require.Equal(t, engine_types.InvalidStatus, cached.Status)
+	require.Nil(t, cached.LatestValidHash)
 }
