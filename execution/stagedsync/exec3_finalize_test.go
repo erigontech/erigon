@@ -1788,6 +1788,53 @@ func TestCalcFees_RevivedCoinbaseShadowsStaleNonce(t *testing.T) {
 	require.Equal(t, uint64(0), nonce.Val)
 }
 
+// The burnt-fee twin of TestCalcFees_RevivedCoinbaseShadowsStaleNonce.
+func TestCalcFees_RevivedBurntRecipientShadowsStaleNonce(t *testing.T) {
+	t.Parallel()
+	burnt := fAddr("burnt")
+	result, task := coinbaseTipResult(fAddr("coinbase"), 0)
+	result.ExecutionResult.BurntContractAddress = burnt
+	result.ExecutionResult.FeeBurnt = *uint256.NewInt(1_000)
+	result.TxOut = &state.WriteSet{}
+
+	vm := state.NewVersionMap(nil)
+	destroyed := state.Version{TxIndex: 0}
+	vm.WriteNonce(burnt, destroyed, 3, true)
+	vm.WriteSelfDestruct(burnt, destroyed, true, true)
+	vm.WriteBalance(burnt, destroyed, uint256.Int{}, true)
+
+	writes, err := result.calcFees(task, vm, newMapStateReader(), &chain.Rules{IsSpuriousDragon: true, IsLondon: true})
+	require.NoError(t, err)
+	nonce, ok := writes.GetNonce(burnt)
+	require.True(t, ok, "the revival shadows the stale nonce")
+	require.Equal(t, uint64(0), nonce.Val)
+}
+
+// A burnt-fee recipient destroyed earlier in the block and redeployed by this tx keeps
+// the nonce the redeploy wrote.
+func TestCalcFees_RedeployedBurntRecipientKeepsItsNonce(t *testing.T) {
+	t.Parallel()
+	burnt := fAddr("burnt")
+	result, task := coinbaseTipResult(fAddr("coinbase"), 0)
+	result.ExecutionResult.BurntContractAddress = burnt
+	result.ExecutionResult.FeeBurnt = *uint256.NewInt(1_000)
+	result.TxOut = &state.WriteSet{}
+	result.TxOut.SetNonce(burnt, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: burnt, Path: state.NoncePath, Version: task.Version()}, Val: 1})
+	result.TxOut.SetCreateContract(burnt, &state.VersionedWrite[bool]{WriteHeader: state.WriteHeader{Address: burnt, Path: state.CreateContractPath, Version: task.Version()}, Val: true})
+
+	vm := state.NewVersionMap(nil)
+	destroyed := state.Version{TxIndex: 0}
+	vm.WriteNonce(burnt, destroyed, 1, true)
+	vm.WriteSelfDestruct(burnt, destroyed, true, true)
+	vm.WriteBalance(burnt, destroyed, uint256.Int{}, true)
+
+	writes, err := result.calcFees(task, vm, newMapStateReader(), &chain.Rules{IsSpuriousDragon: true, IsLondon: true})
+	require.NoError(t, err)
+	nonce, ok := result.TxOut.Merge(writes).GetNonce(burnt)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), nonce.Val)
+}
+
 // A tip that revives a coinbase the worker removed as touched-empty keeps its storage
 // visible to later txs.
 func TestCalcFees_RevivedCoinbaseKeepsStorageForLaterTxs(t *testing.T) {
