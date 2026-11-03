@@ -1118,6 +1118,18 @@ func (a *Aggregator) nextCollationBatch(ctx context.Context, db kv.TemporalRoDB,
 	return nil, false, nil
 }
 
+func (a *Aggregator) buildFilesWithBatch(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, batch *collationBatch, batching bool) (*collationBatch, bool, error) {
+	err := a.buildFiles(ctx, db, step, finalityCtx, filesDone, batch)
+	if err == nil || batch == nil || errors.Is(err, errStepNotReady) || errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+		return batch, batching, err
+	}
+	a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
+	batch.Close()
+	batch, batching = nil, false
+	err = a.buildFiles(ctx, db, step, finalityCtx, filesDone, nil)
+	return batch, batching, err
+}
+
 func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, batch *collationBatch) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
@@ -1332,13 +1344,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 			if batch, batching, err = a.nextCollationBatch(ctx, db, step, toStep, finalityCtx, batch, batching); err != nil {
 				panic(err)
 			}
-			err = a.buildFiles(ctx, db, step, finalityCtx, nil, batch)
-			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-				a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
-				batch.Close()
-				batch, batching = nil, false
-				err = a.buildFiles(ctx, db, step, finalityCtx, nil, nil)
-			}
+			batch, batching, err = a.buildFilesWithBatch(ctx, db, step, finalityCtx, nil, batch, batching)
 			if err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
@@ -2462,13 +2468,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 				close(fin)
 				return
 			}
-			err = a.buildFiles(a.ctx, db, step, finalityCtx, fin, batch)
-			if err != nil && batch != nil && !errors.Is(err, errStepNotReady) && !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-				a.logger.Warn("[snapshots] batched build failed, retrying step without batch", "step", step, "err", err)
-				batch.Close()
-				batch, batching = nil, false
-				err = a.buildFiles(a.ctx, db, step, finalityCtx, fin, nil)
-			}
+			batch, batching, err = a.buildFilesWithBatch(a.ctx, db, step, finalityCtx, fin, batch, batching)
 			if err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
