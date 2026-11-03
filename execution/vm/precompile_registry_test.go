@@ -37,7 +37,7 @@ func (s stubPrecompile) Name() string                     { return s.name }
 func registerPrecompiles(t *testing.T, chainID uint64, overlay PrecompiledContracts) {
 	t.Helper()
 	RegisterPrecompiles(uint256.NewInt(chainID), overlay)
-	t.Cleanup(func() { unregisterPrecompiles(uint256.NewInt(chainID)) })
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
 }
 
 func rulesForChain(chainID uint64) *chain.Rules {
@@ -139,7 +139,7 @@ func TestRegisterNilContractPanics(t *testing.T) {
 func TestRegisterAfterResolvePanics(t *testing.T) {
 	const chainID = 900506
 	_ = Precompiles(rulesForChain(chainID))
-	t.Cleanup(func() { unregisterPrecompiles(uint256.NewInt(chainID)) })
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	require.PanicsWithValue(t,
 		fmt.Sprintf("vm: RegisterPrecompiles: chain ID %d precompiles already resolved", chainID),

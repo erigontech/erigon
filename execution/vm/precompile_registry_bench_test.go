@@ -39,7 +39,7 @@ func BenchmarkActivePrecompilesParallel(b *testing.B) {
 
 	chainID := uint256.NewInt(900904)
 	RegisterPrecompiles(chainID, PrecompiledContracts{})
-	defer unregisterPrecompiles(chainID)
+	defer UnregisterPrecompiles(chainID)
 
 	b.Run("registered_chain", func(b *testing.B) {
 		resolve(b, &chain.Rules{ChainID: chainID, IsOsaka: true})

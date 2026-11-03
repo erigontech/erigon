@@ -26,9 +26,7 @@ func MemoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) 
 	return memoryGasCost(callContext, newMemSize)
 }
 
-var UnregisterPrecompiles = unregisterPrecompiles
-
-func unregisterPrecompiles(chainID *uint256.Int) {
+func UnregisterPrecompiles(chainID *uint256.Int) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, exists := chainSetsSnapshot()[*chainID]; exists {
