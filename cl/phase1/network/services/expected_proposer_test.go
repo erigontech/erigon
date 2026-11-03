@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -35,6 +36,23 @@ import (
 )
 
 var testParentRootForProposer = common.Hash{1}
+
+// fakeHead serves state as the head state of root, or reports not synced without a state. It implements only what the
+// expected-proposer reader uses.
+type fakeHead struct {
+	synced_data.SyncedData
+	root  common.Hash
+	state *state.CachingBeaconState
+	views atomic.Int32
+}
+
+func (h *fakeHead) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	h.views.Add(1)
+	if h.state == nil {
+		return synced_data.ErrNotSynced
+	}
+	return fn(h.state, h.root, h.state.Slot())
+}
 
 // proposerAfterAdvancing is the proposer of slot as the spec computes it: from a copy of the parent advanced to slot.
 func proposerAfterAdvancing(t *testing.T, parentState *state.CachingBeaconState, slot uint64) uint64 {
@@ -47,7 +65,7 @@ func proposerAfterAdvancing(t *testing.T, parentState *state.CachingBeaconState,
 	return proposer
 }
 
-// The parent state fork choice holds is read in place, and the answer is reused for every sidecar of the block.
+// A parent that is the head is read from the head state in place, and the answer is reused for every sidecar of the block.
 func TestExpectedProposerIsReadFromTheHeldParentStateOnce(t *testing.T) {
 	_, _, parentState := tests.GetCapellaRandom()
 	cfg := parentState.BeaconConfig()
@@ -55,23 +73,19 @@ func TestExpectedProposerIsReadFromTheHeldParentStateOnce(t *testing.T) {
 	want, err := parentState.GetBeaconProposerIndexForSlot(slot)
 	require.NoError(t, err)
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-	var views atomic.Int32
-	fc.ViewCurrentStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
-		views.Add(1)
-		return fn(parentState)
-	}
+	head := &fakeHead{root: testParentRootForProposer, state: parentState}
 	fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
-		t.Error("parent state rebuilt although fork choice holds it")
+		t.Error("parent state rebuilt although it is the head state")
 		return nil, nil
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, head)
 
 	for range 2 {
 		got, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}
-	require.Equal(t, int32(1), views.Load())
+	require.Equal(t, int32(1), head.views.Load())
 }
 
 // From Fulu on, a parent in the previous epoch holds the proposers of the next one in its lookahead, so they are read
@@ -90,13 +104,13 @@ func TestExpectedProposerOfTheNextEpochIsReadFromTheFuluLookahead(t *testing.T) 
 	}
 	parentState.SetProposerLookahead(lookahead)
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-	fc.StateAtBlockRootVal[testParentRootForProposer] = parentState
+	head := &fakeHead{root: testParentRootForProposer, state: parentState}
 	fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		t.Error("parent state rebuilt although its lookahead holds the proposer")
 		return nil, nil
 	}
 
-	got, err := newExpectedProposers(t.Context(), &cfg, fc).get(t.Context(), testParentRootForProposer, parentSlot, parentSlot+3)
+	got, err := newExpectedProposers(t.Context(), &cfg, fc, head).get(t.Context(), testParentRootForProposer, parentSlot, parentSlot+3)
 
 	require.NoError(t, err)
 	require.Equal(t, uint64(1000+cfg.SlotsPerEpoch+2), got)
@@ -114,11 +128,11 @@ func TestExpectedProposerOfALaterEpochIsComputedFromTheAdvancedParent(t *testing
 	fc.StateAtBlockRootVal[testParentRootForProposer] = parentState
 	parentSlot := parentState.Slot()
 
-	got, err := newExpectedProposers(t.Context(), cfg, fc).get(t.Context(), testParentRootForProposer, parentSlot, slot)
+	got, err := newExpectedProposers(t.Context(), cfg, fc, &fakeHead{}).get(t.Context(), testParentRootForProposer, parentSlot, slot)
 
 	require.NoError(t, err)
 	require.Equal(t, want, got)
-	require.Equal(t, parentSlot, parentState.Slot(), "the held parent state was advanced")
+	require.Equal(t, parentSlot, parentState.Slot(), "the parent state was advanced")
 }
 
 // The first Fulu block has an Electra parent: its proposer comes from the parent advanced across the Fulu upgrade.
@@ -143,7 +157,7 @@ func TestExpectedProposerAcrossTheElectraFuluBoundary(t *testing.T) {
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
 	fc.StateAtBlockRootVal[testParentRootForProposer] = parentState
 
-	got, err := newExpectedProposers(t.Context(), &cfg, fc).get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+	got, err := newExpectedProposers(t.Context(), &cfg, fc, &fakeHead{}).get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
 
 	require.NoError(t, err)
 	require.Equal(t, want, got)
@@ -157,7 +171,7 @@ func TestExpectedProposerWithoutAParentStateIsIgnoredAndNotCached(t *testing.T) 
 	fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		return nil, errors.New("state not found")
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, &fakeHead{})
 
 	_, err := proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
 	require.ErrorIs(t, err, ErrIgnore)
@@ -169,8 +183,8 @@ func TestExpectedProposerWithoutAParentStateIsIgnoredAndNotCached(t *testing.T) 
 }
 
 // Rebuilds of parent states fork choice does not hold are bounded across parents and slots. A read over the budget
-// waits for a rebuild to finish instead of dropping the sidecar, and gives up after a slot. A parent fork choice holds
-// is read meanwhile.
+// waits for a rebuild to finish instead of dropping the sidecar, and gives up after a slot. A parent that is the head is
+// read meanwhile.
 func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 	_, _, parentState := tests.GetCapellaRandom()
 	cfg := *parentState.BeaconConfig()
@@ -182,19 +196,14 @@ func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 	var rebuilds atomic.Int32
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
 	held := common.Hash{0xfe}
-	fc.ViewCurrentStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
-		if root == held {
-			return fn(parentState)
-		}
-		return nil
-	}
+	head := &fakeHead{root: held, state: parentState}
 	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
 		rebuilds.Add(1)
 		started <- struct{}{}
 		<-release
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), &cfg, fc)
+	proposers := newExpectedProposers(t.Context(), &cfg, fc, head)
 	get := func(root common.Hash) <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -210,7 +219,7 @@ func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 		<-started
 	}
 	_, err := proposers.get(t.Context(), held, parentState.Slot(), firstSlot)
-	require.NoError(t, err, "a held parent state was not read while the rebuild budget was used up")
+	require.NoError(t, err, "the head parent was not read while the rebuild budget was used up")
 
 	start := time.Now()
 	select {
@@ -255,7 +264,7 @@ func TestExpectedProposerWaitersFollowTheirOwnContext(t *testing.T) {
 		<-release
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, &fakeHead{})
 	get := func(ctx context.Context) <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -317,7 +326,7 @@ func TestExpectedProposerSharedReadOutlivesTheFirstWaitersCancellation(t *testin
 		}
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, &fakeHead{})
 	get := func(ctx context.Context, root common.Hash) <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -372,7 +381,7 @@ func TestExpectedProposerReadPanicIsIgnoredNotFatal(t *testing.T) {
 		}
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, &fakeHead{})
 	get := func() <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -412,18 +421,13 @@ func TestExpectedProposerReadsBeyondTheRebuildQueueAreIgnoredAtOnce(t *testing.T
 	t.Cleanup(releaseRebuilds)
 	held := common.Hash{0xfe}
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-	fc.ViewCurrentStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
-		if root == held {
-			return fn(parentState)
-		}
-		return nil
-	}
+	head := &fakeHead{root: held, state: parentState}
 	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
 		started <- struct{}{}
 		<-release
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, head)
 	get := func(root common.Hash) <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -453,7 +457,7 @@ func TestExpectedProposerReadsBeyondTheRebuildQueueAreIgnoredAtOnce(t *testing.T
 	}
 	require.Len(t, started, 0, "a read beyond the queue started a rebuild")
 	_, err := proposers.get(t.Context(), held, parentState.Slot(), firstSlot)
-	require.NoError(t, err, "a parent state fork choice holds was not read while the rebuild queue was full")
+	require.NoError(t, err, "the head parent was not read while the rebuild queue was full")
 
 	releaseRebuilds()
 	for _, done := range admitted {
@@ -481,7 +485,7 @@ func TestExpectedProposerWaitersOfASharedReadAreBounded(t *testing.T) {
 		<-release
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, &fakeHead{})
 	get := func() <-chan error {
 		done := make(chan error, 1)
 		go func() {
@@ -513,7 +517,7 @@ func TestExpectedProposerWaitersOfASharedReadAreBounded(t *testing.T) {
 }
 
 // The waiter limit bounds callers waiting for rebuilds only: with it filled by followers of a slow rebuild, a sidecar
-// whose parent state fork choice holds still gets its proposer.
+// whose parent is the head still gets its proposer.
 func TestExpectedProposerHeldParentIsReadWhileWaitersAreFull(t *testing.T) {
 	_, _, parentState := tests.GetCapellaRandom()
 	cfg := parentState.BeaconConfig()
@@ -525,18 +529,13 @@ func TestExpectedProposerHeldParentIsReadWhileWaitersAreFull(t *testing.T) {
 	t.Cleanup(releaseRead)
 	held := common.Hash{0xfe}
 	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-	fc.ViewCurrentStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
-		if root == held {
-			return fn(parentState)
-		}
-		return nil
-	}
+	head := &fakeHead{root: held, state: parentState}
 	fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
 		close(started)
 		<-release
 		return fn(parentState)
 	}
-	proposers := newExpectedProposers(t.Context(), cfg, fc)
+	proposers := newExpectedProposers(t.Context(), cfg, fc, head)
 	waiters := make([]<-chan error, 0, proposers.maxWaiting)
 	for range proposers.maxWaiting {
 		done := make(chan error, 1)
@@ -550,11 +549,51 @@ func TestExpectedProposerHeldParentIsReadWhileWaitersAreFull(t *testing.T) {
 	require.Eventually(t, func() bool { return proposers.waiting.Load() == proposers.maxWaiting }, 5*time.Second, time.Millisecond)
 
 	got, err := proposers.get(t.Context(), held, parentState.Slot(), slot)
-	require.NoError(t, err, "a sidecar with a held parent was ignored while the waiter limit was full")
+	require.NoError(t, err, "a sidecar whose parent is the head was ignored while the waiter limit was full")
 	require.Equal(t, want, got)
 
 	releaseRead()
 	for _, done := range waiters {
 		require.NoError(t, <-done)
+	}
+}
+
+// OnBlock holds the fork-choice lock for a whole state transition. A sidecar whose parent is the head is read from the
+// head state, which needs no fork-choice lock, so it does not wait for an import.
+func TestExpectedProposerHeadParentIsReadWithoutTheForkChoiceLock(t *testing.T) {
+	_, _, parentState := tests.GetCapellaRandom()
+	cfg := parentState.BeaconConfig()
+	slot := (state.Epoch(parentState)+1)*cfg.SlotsPerEpoch - 1
+	want, err := parentState.GetBeaconProposerIndexForSlot(slot)
+	require.NoError(t, err)
+	importing := make(chan struct{})
+	t.Cleanup(func() { close(importing) })
+	fc := forkchoice_mock.NewForkChoiceStorageMock(t)
+	// Every fork-choice state access waits, as it would behind OnBlock's write lock.
+	fc.ViewCurrentStateAtBlockRootFn = func(common.Hash, func(*state.CachingBeaconState) error) error {
+		<-importing
+		return nil
+	}
+	fc.ViewStateAtBlockRootFn = fc.ViewCurrentStateAtBlockRootFn
+	fc.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		<-importing
+		return nil, nil
+	}
+	head := &fakeHead{root: testParentRootForProposer, state: parentState}
+	proposers := newExpectedProposers(t.Context(), cfg, fc, head)
+
+	done := make(chan error, 1)
+	var got uint64
+	go func() {
+		var err error
+		got, err = proposers.get(t.Context(), testParentRootForProposer, parentState.Slot(), slot)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a sidecar whose parent is the head waited for the fork-choice lock")
 	}
 }

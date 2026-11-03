@@ -105,7 +105,7 @@ func NewDataColumnSidecarService(
 		emitters:             emitters,
 		gossipManager:        gossipManager,
 	}
-	s.expectedProposer = newExpectedProposers(ctx, cfg, forkChoice).get
+	s.expectedProposer = newExpectedProposers(ctx, cfg, forkChoice, syncDataManager).get
 	s.pendingGloasSidecars = s.newPendingGloasSidecarQueue(ctx)
 	return s
 }

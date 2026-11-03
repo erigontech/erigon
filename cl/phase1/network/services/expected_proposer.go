@@ -18,11 +18,13 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -54,6 +56,7 @@ type expectedProposers struct {
 	ctx        context.Context
 	cfg        *clparams.BeaconChainConfig
 	forkChoice forkchoice.ForkChoiceStorage
+	head       synced_data.SyncedData
 	results    *lru.Cache[expectedProposerKey, uint64]
 	reads      singleflight.Group
 	// admitted holds a slot for every read that rebuilds a parent state or waits to, and rebuilds one for every read
@@ -66,7 +69,7 @@ type expectedProposers struct {
 	maxWaiting int64
 }
 
-func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, forkChoice forkchoice.ForkChoiceStorage) *expectedProposers {
+func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, forkChoice forkchoice.ForkChoiceStorage, head synced_data.SyncedData) *expectedProposers {
 	results, err := lru.New[expectedProposerKey, uint64]("sidecarExpectedProposers", 64)
 	if err != nil {
 		panic(err)
@@ -75,6 +78,7 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 		ctx:        ctx,
 		cfg:        cfg,
 		forkChoice: forkChoice,
+		head:       head,
 		results:    results,
 		admitted:   make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds+maxQueuedSidecarProposerStateRebuilds),
 		rebuilds:   make(chan struct{}, maxConcurrentSidecarProposerStateRebuilds),
@@ -84,8 +88,8 @@ func newExpectedProposers(ctx context.Context, cfg *clparams.BeaconChainConfig, 
 }
 
 // get returns the expected proposer of slot on the branch of parentRoot, as the spec computes it: from the parent
-// state advanced to slot. Each caller first reads the parent state fork choice holds, in place, when it gives the
-// proposer; that read neither rebuilds nor waits. Any other parent state is rebuilt, a bounded number at a time, a
+// state advanced to slot. Each caller whose parent is the head first reads the head state, in place, when it gives the
+// proposer; that read takes no fork-choice lock and neither rebuilds nor waits. Any other parent state is rebuilt, a bounded number at a time, a
 // bounded number of reads wait for their turn, and a bounded number of callers wait for those reads: a caller beyond
 // either bound, a read that waits longer than a slot, or one whose parent state is gone ignores the sidecar.
 //
@@ -98,7 +102,7 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 	if proposer, ok := e.results.Get(key); ok {
 		return proposer, nil
 	}
-	// The parent state fork choice holds neither rebuilds nor waits, so each caller reads it before the waiter limit.
+	// The head state neither rebuilds nor waits, so each caller whose parent is the head reads it before the waiter limit.
 	if proposer, found, err := e.readHeld(parentRoot, parentSlot, slot); err != nil {
 		return 0, err
 	} else if found {
@@ -138,20 +142,29 @@ func (e *expectedProposers) get(ctx context.Context, parentRoot common.Hash, par
 	}
 }
 
-// readHeld reads the proposer of slot from the parent state fork choice holds, when that state gives it in place.
+// readHeld reads the proposer of slot from the head state when the parent is the head and its state gives the proposer
+// in place. The head state is read without the fork-choice lock, which OnBlock holds for a whole state transition, so
+// this read neither waits for an import nor rebuilds anything.
 func (e *expectedProposers) readHeld(parentRoot common.Hash, parentSlot, slot uint64) (uint64, bool, error) {
 	epoch := slot / e.cfg.SlotsPerEpoch
-	if !parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch) {
+	if e.head == nil || !parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch) {
 		return 0, false, nil
 	}
 	var proposer uint64
 	found := false
-	if err := e.forkChoice.ViewCurrentStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
+	err := e.head.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+		if headRoot != parentRoot {
+			return nil
+		}
 		var err error
-		proposer, found, err = e.proposerInPlace(parentState, epoch, slot)
+		proposer, found, err = e.proposerInPlace(headState, epoch, slot)
 		return err
-	}); err != nil {
-		return 0, false, fmt.Errorf("%w: view parent state for the expected proposer: %w", ErrIgnore, err)
+	})
+	if errors.Is(err, synced_data.ErrNotSynced) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("%w: view head state for the expected proposer: %w", ErrIgnore, err)
 	}
 	return proposer, found, nil
 }
@@ -170,7 +183,7 @@ func (e *expectedProposers) proposerInPlace(parentState *state.CachingBeaconStat
 	return 0, false, nil
 }
 
-// read rebuilds the parent state to find the proposer of slot, once the parent state fork choice holds did not give it.
+// read rebuilds the parent state to find the proposer of slot, once the head state did not give it.
 func (e *expectedProposers) read(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error) {
 	epoch := slot / e.cfg.SlotsPerEpoch
 	inPlace := parentStateReadableInPlace(e.cfg, parentSlot/e.cfg.SlotsPerEpoch, epoch)
