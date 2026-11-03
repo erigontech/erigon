@@ -157,6 +157,28 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	defer tx.Rollback()
 
+	return readWithStableTxView(ctx, tx, func() (StorageRangeResult, error) {
+		return api.storageRangeAt(ctx, tx, blockHash, txIndex, contractAddress, keyStart, maxResult)
+	})
+}
+
+// Remote cursor operations can renew the database view, even on Close.
+// Discard results and errors from reads that crossed a renewal.
+func readWithStableTxView[T any](ctx context.Context, tx kv.Tx, read func() (T, error)) (T, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			var zero T
+			return zero, err
+		}
+		viewID := tx.ViewID()
+		result, err := read()
+		if tx.ViewID() == viewID {
+			return result, err
+		}
+	}
+}
+
+func (api *DebugAPIImpl) storageRangeAt(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	if maxResult < 0 {
 		maxResult = 0
 	}
@@ -582,6 +604,12 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
+	return readWithStableTxView(ctx, tx, func() (*AccountResult, error) {
+		return api.accountAt(ctx, tx, blockHash, txIndex, address)
+	})
+}
+
+func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
 	// Committed view: the canonical-hash check and the GetAsOf reads below all
 	// go through this plain tx.
 	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
