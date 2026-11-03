@@ -90,6 +90,11 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
+	// mulmodModulus is the last full-width MULMOD modulus and mulmodReciprocal its
+	// reciprocal: a contract reduces many products by one modulus.
+	mulmodModulus    uint256.Int
+	mulmodReciprocal [5]uint64
+
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
