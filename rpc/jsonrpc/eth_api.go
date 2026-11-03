@@ -498,6 +498,9 @@ func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
 // checkTxIndexInBlock validates an index and returns the txNum of the block's
 // initial system transaction. User transaction zero has pre-state at minTxNum+1.
 func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
+	if txIndex < -1 {
+		return 0, checkTxIndex(blockNum, txIndex, 0)
+	}
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
 		return 0, err

@@ -432,24 +432,31 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 	require.Contains(t, err.Error(), fmt.Sprintf("history is available from txNum %d", view.startTxNum))
 	api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: view.startTxNum}
 
+	t.Run("gate_index_bounds", func(t *testing.T) {
+		lastPosition := uint64(len(block.Transactions()))
+		require.NoError(t, api.checkPruneTransactionHistoryAtIndex(ctx, view, block.NumberU64(), lastPosition))
+		require.ErrorIs(t, api.checkPruneTransactionHistoryAtIndex(ctx, view, block.NumberU64(), lastPosition+1), state.ErrPruned)
+	})
+
 	for _, tc := range []struct {
-		name string
-		call func(*DebugAPIImpl, uint64) (any, error)
+		name       string
+		largeIndex uint64
+		call       func(*DebugAPIImpl, uint64) (any, error)
 	}{
-		{"accountAt", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"accountAt", math.MaxUint64 - 1, func(api *DebugAPIImpl, index uint64) (any, error) {
 			return api.AccountAt(ctx, block.Hash(), index, testAddr)
 		}},
-		{"storageRangeAt", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"storageRangeAt", math.MaxUint64 - 1, func(api *DebugAPIImpl, index uint64) (any, error) {
 			return api.StorageRangeAt(ctx, block.Hash(), index, storageAddr, nil, 1)
 		}},
-		{"traceCall", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"traceCall", math.MaxUint64 - 1, func(api *DebugAPIImpl, index uint64) (any, error) {
 			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
 			txIndex := hexutil.Uint(index)
 			return streamedResult(func(stream *jsonstream.Stream) error {
 				return api.TraceCall(ctx, pruneGatingCallArgs(), &ref, &tracersConfig.TraceConfig{TxIndex: &txIndex}, stream)
 			})
 		}},
-		{"traceCallMany", func(api *DebugAPIImpl, index uint64) (any, error) {
+		{"traceCallMany", math.MaxInt, func(api *DebugAPIImpl, index uint64) (any, error) {
 			bundles, simulate := pruneGatingBundle(block.NumberU64())
 			txIndex := int(index)
 			simulate.TransactionIndex = &txIndex
@@ -468,7 +475,7 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			require.ErrorIs(t, err, state.ErrPruned, "the preceding transaction's pre-state is pruned")
 			_, err = tc.call(api, uint64(len(block.Transactions())))
 			require.NoError(t, err, "the position after the last user transaction is valid")
-			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, math.MaxUint64 - 1} {
+			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, tc.largeIndex} {
 				for _, variant := range []struct {
 					name string
 					api  *DebugAPIImpl
