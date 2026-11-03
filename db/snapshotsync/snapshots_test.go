@@ -328,13 +328,27 @@ func TestMergeFailureKeepsSamePathInput(t *testing.T) {
 	injected := errors.New("injected")
 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 	merger.DisableFsync()
+	var deletedOnFailure []string
 	err := merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func([]string) error {
 		return injected
-	}, nil)
+	}, func(_ context.Context, files []string) error {
+		deletedOnFailure = append(deletedOnFailure, files...)
+		return nil
+	})
 	require.ErrorIs(t, err, injected)
 	require.FileExists(t, headerInfo.Path)
 	headerIndex := filepath.Join(dir, snaptype.IdxFileName(headerInfo.Version, 0, 100_000, snaptype2.Headers.Name()))
 	require.FileExists(t, headerIndex)
+	require.NotContains(t, deletedOnFailure, headerInfo.Path)
+
+	require.NoError(t, s.OpenFolder())
+	var seeded []string
+	err = merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func(files []string) error {
+		seeded = append(seeded, files...)
+		return nil
+	}, nil)
+	require.NoError(t, err)
+	require.Contains(t, seeded, headerInfo.Path)
 }
 
 func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
