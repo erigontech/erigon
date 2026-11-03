@@ -777,3 +777,64 @@ func TestSyncCommitteesMessageStaleAfterWaitingForThePoolIsIgnored(t *testing.T)
 	}
 	require.Equal(t, int32(1), poolAdds.Load(), "a stale message was added to the pool")
 }
+
+// A slot whose records were evicted stays evicted when the head rolls back: otherwise a different message from a
+// validator whose record was removed could claim the freed key and be accepted as well.
+func TestSyncCommitteesEvictedSlotStaysEvictedAfterHeadRollback(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	slot := msg.SyncCommitteeMessage.Slot
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), msg))
+
+	headAt := func(headSlot uint64) {
+		t.Helper()
+		head, err := headState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, head.SetSlot(headSlot))
+		require.NoError(t, synced.OnHeadState(head))
+	}
+	// The head moves two slots ahead and another message runs the cleanup, which evicts the first record.
+	headAt(slot + 2)
+	evicting := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot + 2,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), evicting))
+	key := seenSyncCommitteeMessage{slot: slot, validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex}
+	_, kept := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
+	require.False(t, kept, "the first record was not evicted")
+
+	// The head rolls back one slot, where the evicted slot would count as fresh again, and a message from a third
+	// validator runs the cleanup at that head.
+	headAt(slot + 1)
+	third := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot + 1,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex: otherValidatorOnSubnet(t, headState, slot, 0,
+				msg.SyncCommitteeMessage.ValidatorIndex, evicting.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), third))
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            slot,
+			BeaconBlockRoot: common.Hash{0xff},
+			ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
+		},
+		ImmediateVerification: true,
+	}
+	require.ErrorIs(t, s.ProcessMessage(t.Context(), new(uint64), other), ErrIgnore)
+	_, recorded := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
+	require.False(t, recorded, "a different message claimed an evicted slot after the head rolled back")
+}
