@@ -1970,6 +1970,38 @@ func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
 	require.NotEqual(t, state.LifecycleLive, lc)
 }
 
+// An account created in a finished but uncommitted block, drained in the next block
+// while keeping its nonce, stays present: the seed reads the prev-block layers.
+func TestStartBlockSeedsAgainstUncommittedPrevBlock(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a7"))
+	created := accounts.NewAccount()
+	created.Nonce = 1
+	created.Balance = *uint256.NewInt(5)
+	prev := state.NewVersionMap(nil)
+	prev.WriteAddressExists(addr, state.Version{TxIndex: 0}, &created)
+	prev.WriteNonce(addr, state.Version{TxIndex: 0}, created.Nonce, true)
+	prev.WriteBalance(addr, state.Version{TxIndex: 0}, created.Balance, true)
+	prev.SealUpTo(0)
+	pe.prevBlocks = state.NewPrevBlockList()
+	pe.prevBlocks.PushHead(1, 3, prev)
+	acc, err := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(roTx)), 2).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, acc, "precondition: the prev-block layer holds the account")
+	require.Equal(t, uint64(1), acc.Nonce)
+
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(2)}
+	task := &exec.TxTask{Header: header, Config: config, TxNum: 4}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	lc, _, _, _ := pe.blockExecutors[2].versionMap.AccountLifecycleAt(addr, 1)
+	require.Equal(t, state.LifecycleLive, lc)
+}
+
 // processRequest must map a mid-block step edge to the right TxIndex: a view at the edge excludes the later write.
 func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	config := chain.AllProtocolChanges
