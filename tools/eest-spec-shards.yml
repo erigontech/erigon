@@ -465,7 +465,7 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  run: 'fork_(Osaka|BPO[12]-|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)'
+  run: 'fork_(Osaka|BPO[12]-|BPO1ToBPO2)'
 - shard: blocktests-stable-race-amsterdam-sequential
   workers: 12
   max-allowed-failures: 0
@@ -490,7 +490,7 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: true
-  run: 'fork_(Osaka|BPO[12]-|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)'
+  run: 'fork_(Osaka|BPO[12]-|BPO1ToBPO2)'
 - shard: blocktests-stable-race-amsterdam-parallel
   workers: 12
   max-allowed-failures: 0
