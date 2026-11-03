@@ -65,16 +65,6 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 	return false
 }
 
-func (tb *tokenBucket) refund(n int) {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	// A future lastRefill marks a punishment drain that may not be in the punished map yet.
-	if tb.lastRefill.After(time.Now()) {
-		return
-	}
-	tb.tokens = min(tb.tokens+float64(n), tb.maxTokens)
-}
-
 func (tb *tokenBucket) refill(now time.Time) {
 	elapsed := now.Sub(tb.lastRefill).Seconds()
 	if elapsed > 0 {
@@ -92,25 +82,15 @@ func (tb *tokenBucket) refill(now time.Time) {
 func (tb *tokenBucket) tryStartRebuild(now time.Time) bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	if !tb.rebuildReadyLocked(now) {
-		return false
-	}
-	tb.inUse = true
-	return true
-}
-
-func (tb *tokenBucket) rebuildReady(now time.Time) bool {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-	return tb.rebuildReadyLocked(now)
-}
-
-func (tb *tokenBucket) rebuildReadyLocked(now time.Time) bool {
 	if tb.inUse {
 		return false
 	}
 	tb.refill(now)
-	return tb.tokens >= 0
+	if tb.tokens < 0 {
+		return false
+	}
+	tb.inUse = true
+	return true
 }
 
 func (tb *tokenBucket) finishRebuild(now time.Time, held float64, charge bool) {
@@ -229,10 +209,6 @@ func (rl *peerRateLimiter) tryStartEnvelopeRebuild(peerID string) *tokenBucket {
 	return bucket
 }
 
-func (rl *peerRateLimiter) envelopeRebuildReady(peerID string) bool {
-	return rl.envelopeRebuildBucket(peerID).rebuildReady(rl.now())
-}
-
 func (rl *peerRateLimiter) finishEnvelopeRebuild(bucket *tokenBucket, elapsed time.Duration, charge bool) {
 	bucket.finishRebuild(rl.now(), elapsed.Seconds(), charge)
 }
@@ -291,16 +267,6 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 		return false
 	}
 	return true
-}
-
-func (rl *peerRateLimiter) refundTokens(peerID string, protocol string, n int) {
-	key := peerProtocolKey{peerID: peerID, protocol: protocol}
-	if _, punished := rl.punished.Load(key); punished || n <= 0 {
-		return
-	}
-	if bucket, ok := rl.buckets.Load(key); ok {
-		bucket.(*tokenBucket).refund(n)
-	}
 }
 
 // acquireConcurrency tries to increment the in-flight count for a peer.

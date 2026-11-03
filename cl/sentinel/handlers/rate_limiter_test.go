@@ -283,44 +283,6 @@ func TestRateLimiter_PunishmentDrainsBucket(t *testing.T) {
 	require.False(t, rl.consumeTokens(peer, proto, 95)) // not enough for a full batch
 }
 
-func TestRateLimiter_RefundKeepsPunishmentDrain(t *testing.T) {
-	rl := newPeerRateLimiter()
-	peer := "16Uiu2peer1"
-	proto := communication.ExecutionPayloadEnvelopesByRangeProtocolV1
-
-	require.True(t, rl.allowRequest(peer, proto, 128))
-	require.False(t, rl.consumeTokens(peer, proto, 1))
-	rl.refundTokens(peer, proto, 127)
-
-	bucketI, ok := rl.buckets.Load(peerProtocolKey{peerID: peer, protocol: proto})
-	require.True(t, ok)
-	bucket := bucketI.(*tokenBucket)
-	bucket.mu.Lock()
-	defer bucket.mu.Unlock()
-	require.Zero(t, bucket.tokens)
-}
-
-func TestRateLimiter_RefundDuringPunishmentDrain(t *testing.T) {
-	rl := newPeerRateLimiter()
-	peer := "16Uiu2peer1"
-	proto := communication.ExecutionPayloadEnvelopesByRangeProtocolV1
-	require.True(t, rl.allowRequest(peer, proto, 128))
-
-	bucketI, ok := rl.buckets.Load(peerProtocolKey{peerID: peer, protocol: proto})
-	require.True(t, ok)
-	bucket := bucketI.(*tokenBucket)
-	bucket.mu.Lock()
-	bucket.lastRefill = time.Now().Add(punishmentDuration)
-	bucket.mu.Unlock()
-
-	// The drain is visible before the punished entry is stored.
-	rl.refundTokens(peer, proto, 127)
-
-	bucket.mu.Lock()
-	defer bucket.mu.Unlock()
-	require.Zero(t, bucket.tokens)
-}
-
 func TestRateLimiter_Cleanup(t *testing.T) {
 	rl := newPeerRateLimiter()
 	peer := "16Uiu2peer1"
