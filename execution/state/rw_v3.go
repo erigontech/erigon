@@ -181,32 +181,44 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// survives only when a non-zero balance is left to preserve.
 				sdPreservedBalance := d.balance.Ok && !d.balance.Value.IsZero()
 				pureDelete := !sdPreservedBalance && !d.nonce.Ok && !d.incarnation.Ok && !d.codeHash.Ok
-				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
-					return err
-				}
-				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
-					return err
-				}
-				if pureDelete {
-					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
-					}
-					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
-						return err
-					}
-					continue
-				}
-				// Otherwise: cleanup code+storage before recreating account
-				// (originalIncarnation > account.Incarnation case).
-			}
-
-			// Contract creation: clear stale storage before writing new account.
-			if d.createContract {
-				hasAcc, err := hasCommittedAccount(domains, roTx, address[:])
+				committed, err := committedAccount(domains, roTx, address[:])
 				if err != nil {
 					return err
 				}
-				if !hasAcc {
+				if len(committed) == 0 {
+					// A system-contract predeploy can have code without an account record.
+					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+						return err
+					}
+					if err := assertNoCommittedStorage(domains, roTx, address[:], "selfDestruct"); err != nil {
+						return err
+					}
+					if pureDelete {
+						continue
+					}
+				} else if pureDelete {
+					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
+						fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
+					}
+					// Deleting the account also deletes its code and storage prefix.
+					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, committed); err != nil {
+						return err
+					}
+					continue
+				} else if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+					return err
+				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+					return err
+				}
+			}
+
+			// Contract creation: clear stale storage before writing new account.
+			if d.createContract && !d.selfDestruct {
+				committed, err := committedAccount(domains, roTx, address[:])
+				if err != nil {
+					return err
+				}
+				if len(committed) == 0 {
 					if err := assertNoCommittedStorage(domains, roTx, address[:], "createContract"); err != nil {
 						return err
 					}
@@ -704,20 +716,17 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 	return nil, nil, nil, nil
 }
 
-// hasCommittedAccount probes the account domain for addr. An address with no
+// committedAccount returns the encoded account of addr. An address with no
 // committed account holds no committed storage (storage is only written for an
 // existing account, and deleting one wipes its storage prefix), so this cheap
 // existence probe stands in for a full storage-prefix walk.
-func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
+func committedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) ([]byte, error) {
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
-	if err != nil {
-		return false, err
-	}
-	return len(enc) > 0, nil
+	return enc, err
 }
 
 // assertNoCommittedStorage panics when addr has committed storage but no
-// committed account, surfacing a violation of the hasCommittedAccount invariant.
+// committed account, surfacing a violation of the committedAccount invariant.
 // No-op unless asserts are enabled.
 func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {

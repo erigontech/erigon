@@ -146,6 +146,10 @@ var (
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
+	OverrideGenesisFlag = cli.StringFlag{
+		Name:  "override.genesis",
+		Usage: "Load the genesis block and chain config from this JSON file instead of the --chain network's; written on first start like `erigon init`, and must match a genesis already in the datadir",
+	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
 		Usage: "Avoid overriding chain config already stored in the DB",
@@ -2167,6 +2171,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		setDevnetEthConfig(ctx, cfg, logger)
 	}
 
+	if err := setOverrideGenesis(ctx, cfg); err != nil {
+		Fatalf("%v", err)
+	}
+
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
 		v := ctx.Uint64(OverrideOsakaFlag.Name)
 		cfg.OverrideOsakaTime = &v
@@ -2408,6 +2416,40 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 		return g.Some(ctx.Bool(flag.Name))
 	}
 	return g.None[bool]()
+}
+
+// setOverrideGenesis must run after chain defaults so they cannot replace
+// the supplied genesis or network ID, or restore default DNS discovery.
+func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
+	// An explicitly empty path must fail instead of selecting the default chain.
+	if !ctx.IsSet(OverrideGenesisFlag.Name) {
+		return nil
+	}
+	if ctx.IsSet(ChainFlag.Name) {
+		return fmt.Errorf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
+	}
+	genesis, err := ReadGenesisFile(ctx.String(OverrideGenesisFlag.Name))
+	if err != nil {
+		return err
+	}
+	if !ctx.IsSet(NetworkIdFlag.Name) {
+		if !genesis.Config.ChainID.IsUint64() {
+			return fmt.Errorf("--%s: genesis chain id %v exceeds 64 bits, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
+		networkID := genesis.Config.ChainID.Uint64()
+		// Sentry treats local status with network ID 0 as incomplete,
+		// so it cannot proceed with peer handshakes.
+		if networkID == 0 {
+			return fmt.Errorf("--%s: genesis chain id %v maps to network id 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
+		cfg.NetworkID = networkID
+	}
+	cfg.Genesis = genesis
+	cfg.GenesisFromFile = true
+	if !ctx.IsSet(DNSDiscoveryFlag.Name) {
+		cfg.EthDiscoveryURLs = nil
+	}
+	return nil
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

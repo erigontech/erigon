@@ -261,13 +261,17 @@ MainLoop:
 func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
 	// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 	envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks)
-	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 	parentBlockByRoot := func(root common.Hash) *cltypes.SignedBeaconBlock {
 		if parentBlock, ok := cfg.forkChoice.GetBlock(root); ok {
 			return parentBlock
 		}
 		return batchBlockByRoot[root]
 	}
+	validateEnvelope := network.NewEnvelopeBlockValidator(cfg.beaconCfg, func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block := parentBlockByRoot(root)
+		return block, block != nil
+	})
+	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots, validateEnvelope)
 	storedReplayRoots := storedParentReplayRoots(
 		blocks,
 		args.targetSlot,
@@ -391,7 +395,7 @@ func (s *importedSlots) requestCustodyBackfill(cfg *Cfg) {
 
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
 func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
-	envelopes, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, roots)
+	envelopes, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, roots, network.NewEnvelopeBlockValidator(cfg.beaconCfg, cfg.forkChoice.GetBlock), nil)
 	if err != nil {
 		log.Debug("[chainTipSync] failed to request GLOAS envelopes", "err", err)
 		return
@@ -473,7 +477,7 @@ func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, store
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
 // It retries until all envelopes are obtained or the context is cancelled.
-func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
+func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte, validate network.EnvelopeValidator) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
 	envelopes, storedRoots := storedParentEnvelopes(roots, cfg.forkChoice.HasEnvelope, cfg.forkChoice.ReadEnvelopeFromDisk)
 	if len(roots) == 0 {
 		return envelopes, storedRoots
@@ -494,15 +498,14 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) (map[
 		if ctx.Err() != nil {
 			return envelopes, storedRoots
 		}
-		result, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, remaining)
-		if err != nil {
-			log.Debug("[chainTipSync] envelope fetch attempt failed", "err", err, "attempt", attempt+1, "remaining", len(remaining))
-			continue
-		}
+		result, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, remaining, validate, nil)
 		for root, envelope := range result {
 			if _, stored := envelopes[root]; !stored {
 				envelopes[root] = envelope
 			}
+		}
+		if err != nil {
+			log.Debug("[chainTipSync] envelope fetch attempt failed", "err", err, "attempt", attempt+1, "remaining", len(remaining))
 		}
 		// Recalculate remaining
 		var stillMissing [][32]byte
@@ -1575,7 +1578,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			observeSelectedHeadEnvelopeRequest(cfg, headRoot)
 			if headRoot != (common.Hash{}) && blockSupportsExecutionPayloadEnvelope(headBlock) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				waitForClaimedSelectedHeadEnvelope(ctx, cfg, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
+					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots, network.NewEnvelopeBlockValidator(cfg.beaconCfg, cfg.forkChoice.GetBlock), nil)
 				}, headRoot, 2*time.Second, canValidateGloasPayloads(cfg))
 			}
 			if canValidateGloasPayloads(cfg) {

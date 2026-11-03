@@ -51,6 +51,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		OverrideOsakaTime               *uint64 `toml:",omitempty"`
 		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig           bool
+		GenesisFromFile                 bool
 		FcuTimeout                      time.Duration
 		FcuBackgroundPrune              bool
 		MCPAddress                      string
@@ -87,6 +88,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
 	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
+	enc.GenesisFromFile = c.GenesisFromFile
 	enc.FcuTimeout = c.FcuTimeout
 	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
 	enc.MCPAddress = c.MCPAddress
@@ -127,6 +129,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		OverrideOsakaTime               *uint64 `toml:",omitempty"`
 		OverrideAmsterdamTime           *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig           *bool
+		GenesisFromFile                 *bool
 		FcuTimeout                      *time.Duration
 		FcuBackgroundPrune              *bool
 		MCPAddress                      *string
@@ -221,6 +224,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.KeepStoredChainConfig != nil {
 		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig
+	}
+	if dec.GenesisFromFile != nil {
+		c.GenesisFromFile = *dec.GenesisFromFile
 	}
 	if dec.FcuTimeout != nil {
 		c.FcuTimeout = *dec.FcuTimeout
