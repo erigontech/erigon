@@ -255,3 +255,34 @@ func TestValidationCreditsOnlyCodelessRecipient(t *testing.T) {
 		require.Nil(t, ws, "a credit that wraps the balance skipped the empty-account cleanup of a full run")
 	})
 }
+
+// The origin layer holds the committed pre-block account; the commitment calculator loads a
+// first-touched account from it, so a charge after an in-block credit must not seed the credited balance.
+func TestValidationChargeSeedsCommittedOrigin(t *testing.T) {
+	sender := accounts.InternAddress(common.HexToAddress("0xa1"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xd4"))
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	task := &exec.TxTask{
+		Header:  &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000},
+		Config:  chainSpec.Config,
+		Txs:     valueTransfers([]accounts.Address{sender, sender}, []accounts.Address{recipient, recipient}),
+		TxIndex: 1,
+	}
+	reader := newMapStateReader()
+	committed := accounts.NewAccount()
+	committed.Balance = *uint256.NewInt(1_000_000)
+	reader.accounts[sender] = &committed
+	to := accounts.NewAccount()
+	reader.accounts[recipient] = &to
+
+	vm := state.NewVersionMap(nil)
+	vm.WriteBalance(sender, state.Version{TxIndex: 0}, *uint256.NewInt(2_000_000), true)
+	result := &execResult{TxResult: &exec.TxResult{TxOut: &state.WriteSet{}}}
+	ws, _, err := chargeSenderAtValidation(task, result, state.Version{TxIndex: 1}, vm, reader)
+	require.NoError(t, err)
+	require.NotNil(t, ws)
+
+	origin, ok := vm.LoadOriginAccount(sender)
+	require.True(t, ok)
+	require.Equal(t, uint64(1_000_000), origin.Balance.Uint64(), "the origin is the committed account, not the balance after tx 0")
+}

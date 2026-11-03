@@ -1967,7 +1967,9 @@ func (result *execResult) calcFees(
 	// The tip credits only Balance, so seed the coinbase's whole-account origin into
 	// the versionMap — else the apply compose has no base and wipes its committed
 	// nonce/code/balance.
-	state.SeedOrigin(vm, result.Coinbase, coinbaseAcc)
+	if err := state.SeedOrigin(vm, stateReader, result.Coinbase); err != nil {
+		return nil, err
+	}
 	var newCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
@@ -1989,7 +1991,9 @@ func (result *execResult) calcFees(
 		if err != nil {
 			return nil, err
 		}
-		state.SeedOrigin(vm, burntAddr, burntAcc)
+		if err := state.SeedOrigin(vm, stateReader, burntAddr); err != nil {
+			return nil, err
+		}
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
@@ -2324,7 +2328,9 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 		return nil, nil, nil
 	}
 	// The charge writes only Balance and Nonce; the origin keeps the rest of the account.
-	state.SeedOrigin(vm, sender, acc)
+	if err := state.SeedOrigin(vm, stateReader, sender); err != nil {
+		return nil, nil, err
+	}
 	limit, overflow := u256.MulOverflow(u256.U64(msg.Gas()), *msg.FeeCap())
 	if !overflow {
 		limit, overflow = u256.AddOverflow(limit, *msg.Value())
@@ -2363,7 +2369,9 @@ func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version s
 			if overflow {
 				return nil, nil, nil
 			}
-			state.SeedOrigin(vm, to, recipient)
+			if err := state.SeedOrigin(vm, stateReader, to); err != nil {
+				return nil, nil, err
+			}
 			ws.SetBalance(to, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: to, Path: state.BalancePath, Version: version, Reason: tracing.BalanceChangeTransfer},
 				Val:         credit,

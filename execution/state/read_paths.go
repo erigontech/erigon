@@ -869,12 +869,21 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 // write path that obtains a committed account outside the read path: calcFees credits
 // the fee recipients' Balance via a versionedStateReader with no seeding read, so
 // without this their whole-account base is absent and the apply compose wipes it.
-func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
-	if vm == nil || acc == nil {
-		return
+// The origin is read from base, the pre-block reader: an account read at a tx index carries
+// earlier txs' writes, and the commitment calculator loads first-touched accounts from origins.
+func SeedOrigin(vm *VersionMap, base StateReader, addr accounts.Address) error {
+	if vm == nil {
+		return nil
 	}
-	origin := *acc
-	vm.StoreOriginAccount(addr, &origin) // write-once lock-free origin layer
+	if _, seeded := vm.LoadOriginAccount(addr); seeded {
+		return nil
+	}
+	acc, err := base.ReadAccountData(addr)
+	if err != nil || acc == nil {
+		return err
+	}
+	vm.StoreOriginAccount(addr, acc) // write-once lock-free origin layer
+	return nil
 }
 
 // seedStorageOrigin records a cold slot's committed value as its versionMap origin

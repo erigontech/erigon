@@ -40,13 +40,15 @@ func TestAccountOriginSeedsOnce(t *testing.T) {
 	preBlock.Nonce = 7
 	preBlock.Balance = *uint256.NewInt(100)
 
-	SeedOrigin(vm, addr, &preBlock)
+	base := &oneAccountReader{acc: &preBlock}
+	require.NoError(t, SeedOrigin(vm, base, addr))
 
-	// A later finalized tx re-seeds from a floor-composed read carrying accumulated
-	// tips — the origin must NOT move.
+	// A later finalized tx re-seeds while the reader returns a tip-inflated balance:
+	// the origin must NOT move.
 	midBlock := preBlock
 	midBlock.Balance = *uint256.NewInt(150)
-	SeedOrigin(vm, addr, &midBlock)
+	base.acc = &midBlock
+	require.NoError(t, SeedOrigin(vm, base, addr))
 
 	got, res, ok := vm.ReadAddress(addr, 0)
 	require.True(t, ok, "origin must be seeded")
@@ -55,4 +57,13 @@ func TestAccountOriginSeedsOnce(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(100), got.Balance,
 		"origin must retain the pre-block balance, not the mid-block re-seed")
 	require.Equal(t, uint64(7), got.Nonce)
+}
+
+type oneAccountReader struct {
+	NoopReader
+	acc *accounts.Account
+}
+
+func (r *oneAccountReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return r.acc, nil
 }
