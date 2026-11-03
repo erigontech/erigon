@@ -25,7 +25,6 @@ type WriteSetView interface {
 	// as it was. Only the domain and commitment paths may use it.
 	StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]]
 	// AccountChanges yields each address whose account leaf this write set changes.
-	// The commitment folds exactly these, so a bare touch that changes nothing produces no leaf.
 	AccountChanges() iter.Seq[accounts.Address]
 	IsEmpty() bool
 	Count() int

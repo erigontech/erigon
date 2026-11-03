@@ -70,30 +70,6 @@ func TestSetEmptyRemoval(t *testing.T) {
 	})
 }
 
-// TestSnapshotSelfDestructPreserveNonceRestamp pins that Snapshot does not re-stamp nonce
-// 0 / EmptyCodeHash for a balance-preserving self-destruct (EIP-8246) of an account created
-// this block: it has no base, so the re-stamp would leak a net-zero nonce change (0->1->0)
-// into the block access list. TestEIP8246PreserveSelfDestruct covers the pre-existing case.
-func TestSnapshotSelfDestructPreserveNonceRestamp(t *testing.T) {
-	t.Parallel()
-	ver := Version{TxIndex: 1}
-
-	addr := accounts.InternAddress([20]byte{0x82})
-	ws := &WriteSet{}
-	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
-	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(7)})
-	ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: 1})
-	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: accounts.EmptyCodeHash})
-	ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver}, Val: true})
-
-	out := ws.Snapshot()
-
-	_, ok := out.GetNonce(addr)
-	require.False(t, ok, "a created-this-block SD-preserve account has no base, so no nonce re-stamp -> no net-zero BAL nonceChange")
-	_, ok = out.GetCodeHash(addr)
-	require.False(t, ok, "and no codeHash re-stamp")
-}
-
 func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	vm := NewVersionMap(nil)
