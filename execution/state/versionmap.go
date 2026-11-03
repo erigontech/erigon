@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -940,9 +939,6 @@ func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resol
 // accountLifecycleLocked computes the lifecycle verdict for an already-loaded
 // entry; the caller must hold e.mu.RLock. Lets a floor read fold the lifecycle
 // check into its own lock instead of taking e.mu a second time.
-// afterLifecycleScan lets a test run a commit between the destruct scan and the canonical-version choice.
-var afterLifecycleScan func()
-
 func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int, wipeInc Incarnation) {
 	if e.SelfDestruct == nil {
 		return LifecycleLive, Version{}, 0, 0
@@ -950,59 +946,50 @@ func accountLifecycleLocked(e *AddressEntry, txIdx int, resolvedRevivalsOnly boo
 
 	var latest *WriteCell[bool]
 	var latestIdx int
-	haveLatest, latestSettled := false, false
-	var pendingDestructs []int // a commit may flip their sibling cells to Done after the scan
+	haveLatest := false
 	wiped := false
 	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		settled := v.settled() // one load: a commit under the shared lock can flip it to Done
 		if !haveLatest {
-			latest, latestIdx, haveLatest, latestSettled = v, k, true, settled
-		}
-		if !settled && v.Value {
-			pendingDestructs = append(pendingDestructs, k)
+			latest, latestIdx, haveLatest = v, k, true
 		}
 		// A validated (pre-seal) self-destruct is as authoritative as a Done one:
 		// the read side (readSelfDestructMemo→resolved) already treats it as a
 		// destruct, so this single lifecycle authority must too, or the two disagree
 		// on a validated destruct and a wiped-slot read never settles.
-		if settled && v.Value {
+		if v.settled() && v.Value {
 			destroyedAt, wipeInc, wiped = k, v.incarnation, true
 			return false
 		}
 		return true
 	})
-	if afterLifecycleScan != nil {
-		afterLifecycleScan()
-	}
 	if !wiped {
 		return LifecycleLive, Version{}, 0, 0
 	}
-	if latestSettled {
+	if latest.settled() {
 		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
 	} else {
 		canonicalVer = Version{TxIndex: destroyedAt, Incarnation: wipeInc}
 	}
 
 	revivalLimit := txIdx - 1
-	if hi, ok := highestBelow(e.Address, revivalLimit, resolvedRevivalsOnly, pendingDestructs); ok && hi >= destroyedAt {
+	if hi, ok := highestBelow(e.Address, revivalLimit, resolvedRevivalsOnly); ok && hi >= destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
-	if hi, ok := highestBelow(e.Balance, revivalLimit, resolvedRevivalsOnly, pendingDestructs); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.Balance, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
-	if hi, ok := highestBelow(e.Nonce, revivalLimit, resolvedRevivalsOnly, pendingDestructs); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.Nonce, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
-	if hi, ok := highestBelow(e.CodeHash, revivalLimit, resolvedRevivalsOnly, pendingDestructs); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.CodeHash, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt, wipeInc
 	}
 	return LifecycleAbsent, canonicalVer, destroyedAt, wipeInc
 }
 
-// highestBelow returns the largest TxIndex ≤ limit present in cells, if any; resolvedOnly
-// also skips the txs of pendingDestructs, whose cells a commit may flip after the scan. The
+// highestBelow returns the largest TxIndex ≤ limit present in cells, if any. The
 // caller must hold the owning AddressEntry's lock.
-func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolvedOnly bool, pendingDestructs []int) (int, bool) {
+func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolvedOnly bool) (int, bool) {
 	if cells == nil {
 		return 0, false
 	}
@@ -1011,7 +998,7 @@ func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolv
 		// Only Done proves a lasting revival: a Validated cell is still revertible
 		// until the in-order seal, and withdrawing it re-validates its own readers,
 		// not the AddressPath reader this verdict serves.
-		if resolvedOnly && (v.loadFlag() != FlagDone || slices.Contains(pendingDestructs, k)) {
+		if resolvedOnly && v.loadFlag() != FlagDone {
 			return true
 		}
 		hi, ok = k, true

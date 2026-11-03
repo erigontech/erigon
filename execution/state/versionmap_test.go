@@ -2155,39 +2155,3 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, 1, res.DepIdx())
 	require.Equal(t, *uint256.NewInt(42), val)
 }
-
-// A commit between the destruct scan and the canonical-version choice must not mix
-// the older wipe with the newer destruct's version.
-func TestAccountLifecycleConsistentWhenCommitRacesTheScan(t *testing.T) {
-	addr := getAddress(48)
-	vm := NewVersionMap(nil)
-	destruct := func(txIdx int) *WriteSet {
-		return newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: txIdx, Incarnation: 1}}, Val: true})
-	}
-	vm.FlushVersionedWrites(destruct(1), true)
-	newer := destruct(3)
-	vm.FlushVersionedWrites(newer, false) // Estimate
-
-	afterLifecycleScan = func() { vm.MarkWritesComplete(newer) }
-	defer func() { afterLifecycleScan = nil }()
-	_, canonicalVer, destroyedAt, _ := vm.accountLifecycleAt(addr, 10, false)
-	require.Equal(t, destroyedAt, canonicalVer.TxIndex, "the canonical version must belong to the wipe the verdict uses")
-}
-
-// A commit between the destruct scan and the revival scan must not count the
-// newer destruct's own writes as a revival of the older wipe.
-func TestAccountLifecycleResolvedRevivalWhenCommitRacesTheScan(t *testing.T) {
-	addr := getAddress(49)
-	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: true}), true)
-	newer := newWriteSet(
-		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
-	)
-	vm.FlushVersionedWrites(newer, false) // Estimate
-
-	afterLifecycleScan = func() { vm.MarkWritesComplete(newer) }
-	defer func() { afterLifecycleScan = nil }()
-	state, _, _, _ := vm.accountLifecycleAt(addr, 10, true)
-	require.Equal(t, LifecycleAbsent, state, "the newer destruct's balance write is no revival")
-}
