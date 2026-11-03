@@ -217,7 +217,7 @@ func ExecV3(ctx context.Context,
 		defer doms.SetDeferCommitmentUpdates(false)
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForWarmup(ctx)
+		cfg.readAheader.WaitForRunningWarmup(ctx)
 	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -353,7 +353,7 @@ func execV3Serial(ctx context.Context,
 		defer doms.SetDeferCommitmentUpdates(false)
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForWarmup(ctx)
+		cfg.readAheader.WaitForRunningWarmup(ctx)
 	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
@@ -767,7 +767,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case readAhead <- blockNum:
 			default:
 			}
-			go warmTxsHashes(b)
+			go warmTxsHashes(b, te.cfg.chainConfig.ChainID)
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -363,7 +364,11 @@ func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.Tempo
 	}
 
 	if err := stageloop.StateStep(chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
-		pe.logger.Warn("Could not validate block", "err", err)
+		if errors.Is(err, stageloop.ErrStateStepHasMoreWork) {
+			pe.logger.Debug("Could not validate block", "err", err)
+		} else {
+			pe.logger.Warn("Could not validate block", "err", err)
+		}
 		return err
 	}
 

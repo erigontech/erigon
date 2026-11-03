@@ -270,6 +270,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 			readTxNum = visibleEnd - 1
 		}
 	}
+	value = bytes.Clone(value)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if c.publishing ||
@@ -277,7 +278,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
-	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
+	cache.PutIfAbsent(key, value, readTxNum)
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry

@@ -366,8 +366,6 @@ func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
 	require.Equal(t, hexutil.Bytes{1, 2, 3}, retained.Data)
 }
 
-var sinkLog *types.Log
-
 // TestAddLogOnLogHookCopyContract pins the OnLog contract on the AddLog path:
 // the hook sees the emitted contents during the callback, and a copy taken then
 // stays intact after the buffer entry is reused by later blocks.
