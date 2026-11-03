@@ -148,34 +148,56 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 }
 
 // storeVerifiedMessage records a verified message as the one valid message for its validator and slot, and ignores it
-// if another message for them was verified at the same time and recorded first.
+// if another message for them was verified at the same time and recorded first, or if this content was already
+// published.
 func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *cltypes.SyncCommitteeMessage) error {
-	// A verification that ended after the head moved two slots past the message is outside the slot window the gossip
-	// checks admitted it for. Recording it would add an entry this head slot's cleanup has already passed, and the
-	// cleanup may have removed the record of an earlier message from the validator for that slot.
-	if isStaleSyncCommitteeMessageSlot(msg.Slot, s.syncedDataManager.HeadSlot()) {
-		return ErrIgnore
-	}
 	key := seenSyncCommitteeMessage{subnet: subnet, slot: msg.Slot, validatorIndex: msg.ValidatorIndex}
-	verified, loaded := s.seenSyncCommitteeMessages.LoadOrStore(key, verifiedSyncCommitteeMessage{
-		beaconBlockRoot: msg.BeaconBlockRoot,
-		signature:       msg.Signature,
-	})
-	if loaded {
-		if !verified.(verifiedSyncCommitteeMessage).matches(msg.BeaconBlockRoot, msg.Signature) {
-			return ErrIgnore
+	recorded := false
+	var ignored error
+	// The head cannot move inside a head-state view, so the freshness check and the claim happen at one head slot: a
+	// message fresh at the check is fresh when it claims the key, and no cleanup at a later head removes a record in
+	// between. A verification that ended after the head moved two slots past the message is outside the slot window
+	// the gossip checks admitted it for.
+	if err := s.syncedDataManager.ViewHeadState(func(*state.CachingBeaconState) error {
+		if isStaleSyncCommitteeMessageSlot(msg.Slot, s.syncedDataManager.HeadSlot()) {
+			ignored = ErrIgnore
+			return nil
 		}
+		verified, loaded := s.seenSyncCommitteeMessages.LoadOrStore(key, verifiedSyncCommitteeMessage{
+			beaconBlockRoot: msg.BeaconBlockRoot,
+			signature:       msg.Signature,
+		})
+		if loaded {
+			if v := verified.(verifiedSyncCommitteeMessage); !v.matches(msg.BeaconBlockRoot, msg.Signature) || v.published {
+				ignored = ErrIgnore
+			}
+			return nil
+		}
+		recorded = true
 		return nil
+	}); err != nil {
+		return fmt.Errorf("%w: record verified sync committee message: %w", ErrIgnore, err)
+	}
+	if !recorded {
+		return ignored
 	}
 	// One addition at a time holds a head-state view: an addition waiting for the pool inside a view would keep a
 	// head-state write, and every reader queued behind it, waiting.
 	s.poolMu.Lock()
 	defer s.poolMu.Unlock()
 	s.cleanupOldSyncCommitteeMessages()
+	stale := false
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// The head may have moved past the message while it waited for the pool.
+		if stale = isStaleSyncCommitteeMessageSlot(msg.Slot, headState.Slot()); stale {
+			return nil
+		}
 		return s.syncContributionPool.AddSyncCommitteeMessage(headState, subnet, msg)
 	}); err != nil {
 		log.Debug("failed to add sync committee message to pool", "err", err)
+	}
+	if stale {
+		return ErrIgnore
 	}
 	return nil
 }

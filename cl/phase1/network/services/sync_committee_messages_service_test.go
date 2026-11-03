@@ -689,3 +689,91 @@ func TestSyncCommitteesIgnoresMessageVerifiedAfterTheHeadMovedPastIt(t *testing.
 	_, recorded := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
 	require.False(t, recorded)
 }
+
+// Of two identical API submissions verified at the same time, the one that finishes after the first was published is
+// ignored, as checkMessage ignores a published duplicate, so the message is not queued for publishing twice.
+func TestSyncCommitteesIgnoresDuplicateVerifiedAfterTheFirstWasPublished(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	entered := make(chan chan struct{}, 2)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		release := make(chan struct{})
+		entered <- release
+		<-release
+		return true, nil
+	}
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	duplicate := *msg
+
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	releaseFirst := <-entered
+	go func() { second <- s.ProcessMessage(t.Context(), new(uint64), &duplicate) }()
+	releaseSecond := <-entered
+	close(releaseFirst)
+	require.NoError(t, <-first)
+	m := msg.SyncCommitteeMessage
+	s.MarkPublished(0, m.Slot, m.ValidatorIndex, m.BeaconBlockRoot, m.Signature)
+	close(releaseSecond)
+
+	require.ErrorIs(t, <-second, ErrIgnore)
+}
+
+// A message that goes stale while it waits for the pool, because the head moved two slots past it, is not added to the
+// pool and not forwarded.
+func TestSyncCommitteesMessageStaleAfterWaitingForThePoolIsIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	releasePool := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePool)
+	var poolAdds atomic.Int32
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			poolAdds.Add(1)
+			entered <- struct{}{}
+			<-release
+			return nil
+		}).AnyTimes()
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	other := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+			ValidatorIndex:  otherValidatorOnSubnet(t, headState, msg.SyncCommitteeMessage.Slot, 0, msg.SyncCommitteeMessage.ValidatorIndex),
+		},
+		ImmediateVerification: true,
+	}
+
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { first <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	<-entered
+	go func() { second <- s.ProcessMessage(t.Context(), new(uint64), other) }()
+	waitForBlockedGoroutine(t, "sync.Mutex.Lock", "(*syncCommitteeMessagesService).storeVerifiedMessage")
+	nextHead, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, nextHead.SetSlot(msg.SyncCommitteeMessage.Slot+2))
+	published := make(chan error, 1)
+	go func() { published <- synced.OnHeadState(nextHead) }()
+	waitForBlockedGoroutine(t, "sync.RWMutex.Lock", "(*SyncedDataManager).publishHeadStateLocked")
+	releasePool()
+
+	require.NoError(t, <-first)
+	require.NoError(t, <-published)
+	select {
+	case err := <-second:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second message did not finish")
+	}
+	require.Equal(t, int32(1), poolAdds.Load(), "a stale message was added to the pool")
+}
