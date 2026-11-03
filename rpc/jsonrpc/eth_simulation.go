@@ -604,17 +604,6 @@ func (w diffTrackingWriter) CreateContract(address accounts.Address) error {
 	return nil
 }
 
-func (w diffTrackingWriter) trackWrites(writes *state.WriteSet) {
-	for h := range writes.AllHeaders() {
-		if _, ok := w.touchedKeys[h.Address]; !ok {
-			w.touchedKeys[h.Address] = storageKeys{}
-		}
-		if h.Path == state.StoragePath {
-			w.touchedKeys[h.Address] = append(w.touchedKeys[h.Address], h.Key)
-		}
-	}
-}
-
 // simOverrideReader serves overridden accounts from a separate state that holds the
 // overrides, so a versioned state sees them as pre-state: the version map cannot hold
 // writes below the system-call index, and versioned reads skip cached state objects.
@@ -761,60 +750,38 @@ func (s *simulator) simulateBlock(
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
 
 	// Override the state before block execution.
-	stateOverrides := bsc.StateOverrides
-	var overrideDirtyAccounts map[accounts.Address]struct{}
-	var intraBlockState *state.IntraBlockState
-	if balMode {
-		if stateOverrides != nil {
-			overrideReader, err := commitSimOverrides(stateOverrides, stateReader, activePrecompiles, rules, stateWriter)
-			if err != nil {
-				return nil, nil, err
-			}
-			defer overrideReader.Close()
-			stateReader = overrideReader
+	if bsc.StateOverrides != nil {
+		overrideReader, err := commitSimOverrides(bsc.StateOverrides, stateReader, activePrecompiles, rules, stateWriter)
+		if err != nil {
+			return nil, nil, err
 		}
-		intraBlockState = state.New(stateReader)
-		intraBlockState.SetVersionMap(state.NewVersionMap(nil))
-		intraBlockState.SetTxContext(blockNumber, -1)
-	} else {
-		intraBlockState = state.New(stateReader)
-		if stateOverrides != nil {
-			if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
-				intraBlockState.Close()
-				return nil, nil, err
-			}
-			// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
-			// override-only accounts (they were not "touched" by any transaction).
-			overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
-			for addr, account := range *stateOverrides {
-				// An empty storage replacement journals nothing, but must still clear the stored slots.
-				if account.State != nil {
-					overrideDirtyAccounts[addr] = struct{}{}
-				}
-			}
-		}
+		defer overrideReader.Close()
+		stateReader = overrideReader
 	}
+	intraBlockState := state.New(stateReader)
 	defer intraBlockState.Close()
+	intraBlockState.SetVersionMap(state.NewVersionMap(nil))
+	intraBlockState.SetTxContext(blockNumber, -1)
 
 	var balIO *state.VersionedIO
-	recordPhase := func() error { return nil }
 	if balMode {
 		balIO = &state.VersionedIO{}
-		recordPhase = func() error {
-			// The finalized writes carry the EIP-161 removals, so the next call reads them from the version map.
-			writes, err := intraBlockState.FinalizedWrites(rules)
-			if err != nil {
-				return err
-			}
-			intraBlockState.MergeTxIOInto(balIO, writes)
-			intraBlockState.FlushWritesToVersionMap(writes)
-			stateWriter.trackWrites(writes)
-			if err := state.ApplyWrites(writes, sharedDomains, tx, blockNumber, minTxNum, nil, rules, false); err != nil {
-				return fmt.Errorf("apply simulated writes: %w", err)
-			}
-			intraBlockState.ResetVersionedIO()
-			return nil
+	}
+	recordPhase := func() error {
+		// The finalized writes carry the EIP-161 removals, so the next call reads them from the version map.
+		writes, err := intraBlockState.FinalizedWrites(rules)
+		if err != nil {
+			return err
 		}
+		if balMode {
+			intraBlockState.MergeTxIOInto(balIO, writes)
+		}
+		intraBlockState.FlushWritesToVersionMap(writes)
+		if err := intraBlockState.WriteFlushedTo(writes, stateWriter); err != nil {
+			return fmt.Errorf("apply simulated writes: %w", err)
+		}
+		intraBlockState.ResetVersionedIO()
+		return nil
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -845,10 +812,6 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	callWriter := state.StateWriter(stateWriter)
-	if balMode {
-		callWriter = state.NewNoopWriter()
-	}
 	callResults := make([]ethapi.CallResult, 0, len(bsc.Calls))
 	for callIndex := range bsc.Calls {
 		call := &bsc.Calls[callIndex]
@@ -860,7 +823,7 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(rules, callWriter)
+		err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -883,9 +846,9 @@ func (s *simulator) simulateBlock(
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
+	intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
+	intraBlockState.ResetVersionedIO()
 	if balMode {
-		intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
-		intraBlockState.ResetVersionedIO()
 		// Withdrawal recipients left absent still belong in the BAL as accessed.
 		intraBlockState.StartAccessRecording()
 	}
@@ -895,23 +858,13 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
+	if err := recordPhase(); err != nil {
+		return nil, nil, err
+	}
 	if balMode {
-		if err := recordPhase(); err != nil {
-			return nil, nil, err
-		}
 		// FinalizeAndAssemble copied the header, so the hash must go on the block's own header.
 		balHash := balIO.AsBlockAccessList().Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &balHash
-	} else {
-		if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
-			return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
-		}
-		// Write override-only accounts that CommitBlock skipped (EIP-161 disabled for these).
-		if len(overrideDirtyAccounts) > 0 {
-			if err := intraBlockState.CommitOverrideDirtyAccounts(rules, stateWriter, overrideDirtyAccounts); err != nil {
-				return nil, nil, fmt.Errorf("committing override accounts: %w", err)
-			}
-		}
 	}
 
 	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
