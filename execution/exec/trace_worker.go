@@ -102,7 +102,7 @@ func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint
 	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) error {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) error {
 	e.stateReader.SetTxNum(txNum)
 	e.ibs.Reset()
 	transactions.VersionedCallState(e.ibs)
@@ -120,7 +120,8 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
-	result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, e.engine)
+	// Historical replay must preserve fee debits because contract code can observe the payer's balance.
+	result, err := protocol.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */, e.engine)
 	if err != nil {
 		if result == nil {
 			return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)
