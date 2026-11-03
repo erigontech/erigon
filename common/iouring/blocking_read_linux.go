@@ -86,9 +86,33 @@ func BlockingRead(fd int, off int64, length int) {
 		length = MaxReadSize
 	}
 	pr := <-ringPool
+	if pr.r == nil {
+		ringPool <- pr
+		return
+	}
 	pr.offs[0], pr.lens[0], pr.bufs[0] = off, length, pr.buf
-	_ = pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:])
+	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil {
+		pr = replaceBroken(pr)
+	}
 	ringPool <- pr
+}
+
+// brokenRings keeps failed rings and their buffers alive: the kernel may still write into them.
+var (
+	brokenMu    sync.Mutex
+	brokenRings []*pooledRing
+)
+
+// replaceBroken parks a failed ring and returns a fresh one; without one the slot stops reading.
+func replaceBroken(pr *pooledRing) *pooledRing {
+	brokenMu.Lock()
+	brokenRings = append(brokenRings, pr)
+	brokenMu.Unlock()
+	r, err := New(8)
+	if err != nil {
+		return &pooledRing{}
+	}
+	return &pooledRing{r: r, buf: make([]byte, MaxReadSize)}
 }
 
 // Available reports whether io_uring can be set up in this process (kernel support,

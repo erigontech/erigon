@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package mmap
 
 import (
@@ -9,11 +25,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/iouring"
 )
 
 // BatchPrefetch enables probed reads (Probe) and io_uring page batches (ReadPages).
-var BatchPrefetch = os.Getenv("BAL_BATCH_PREFETCH") == "true"
+var BatchPrefetch = dbg.EnvBool("BAL_BATCH_PREFETCH", false)
 
 type mapping struct {
 	start, end uintptr
@@ -134,16 +151,42 @@ func initBatchRings() {
 		}
 	}()
 	for range cap(rings) {
-		r, err := iouring.New(batchRingEntries)
-		if err != nil {
+		br, ok := newBatchRing()
+		if !ok {
 			return
-		}
-		br := &batchRing{r: r, bufs: make([][]byte, batchRingEntries)}
-		for i := range br.bufs {
-			br.bufs[i] = make([]byte, osPageSize)
 		}
 		rings <- br
 	}
+}
+
+func newBatchRing() (*batchRing, bool) {
+	r, err := iouring.New(batchRingEntries)
+	if err != nil {
+		return nil, false
+	}
+	br := &batchRing{r: r, bufs: make([][]byte, batchRingEntries)}
+	for i := range br.bufs {
+		br.bufs[i] = make([]byte, osPageSize)
+	}
+	return br, true
+}
+
+// brokenBatchRings keeps failed rings and their buffers alive: the kernel may still write into them.
+var (
+	brokenMu         sync.Mutex
+	brokenBatchRings []*batchRing
+)
+
+// replaceBrokenBatchRing parks a failed ring and returns a fresh one; without one the slot stops reading.
+func replaceBrokenBatchRing(br *batchRing) *batchRing {
+	brokenMu.Lock()
+	brokenBatchRings = append(brokenBatchRings, br)
+	brokenMu.Unlock()
+	fresh, ok := newBatchRing()
+	if !ok {
+		return &batchRing{}
+	}
+	return fresh
 }
 
 // ReadPages reads the given mapped pages into the page cache with io_uring, up to 8 rings of 256 reads in flight; a
@@ -178,12 +221,16 @@ func ReadPages(pages []uintptr) error {
 			wg.Go(func() {
 				br := <-batchRings
 				defer func() { batchRings <- br }()
+				if br.r == nil {
+					return
+				}
 				lens := make([]int, len(chunk))
 				for i := range lens {
 					lens[i] = int(osPageSize)
 				}
 				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
 					errOnce.Do(func() { firstErr = err })
+					br = replaceBrokenBatchRing(br)
 				}
 			})
 		}

@@ -243,7 +243,7 @@ var (
 
 // keysWithChild keeps the keys whose branch at depth has their next nibble, checked by prefetchPar goroutines.
 // A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
-func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) ([][]byte, error) {
+func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) [][]byte {
 	keep := make([]bool, len(keys))
 	check := func(tx kv.TemporalTx, from, to int) {
 		compact := make([]byte, 0, 128)
@@ -268,61 +268,58 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	}
 	par := max(1, min(prefetchPar, len(keys)/256))
 	chunk := (len(keys) + par - 1) / par
-	var g errgroup.Group
+	var wg sync.WaitGroup
 	for from := chunk; from < len(keys); from += chunk {
-		g.Go(func() error {
+		wg.Go(func() {
 			// Best effort: without a free read-tx permit the chunk is skipped, since the parent holds one.
 			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
 			if err != nil {
-				return nil
+				return
 			}
 			defer tx.Rollback()
 			if ttx, ok := tx.(kv.TemporalTx); ok {
 				check(ttx, from, min(from+chunk, len(keys)))
 			}
-			return nil
 		})
 	}
 	check(ttx, 0, min(chunk, len(keys)))
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
+	wg.Wait()
 	next := keys[:0:0]
 	for i, k := range keys {
 		if keep[i] {
 			next = append(next, k)
 		}
 	}
-	return next, nil
+	return next
 }
 
 // prefetchKeys splits keys over prefetchPar planners, each with its own tx; stats keep the slowest planner's times.
-func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
+func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv.Domain, keys [][]byte, stats *prefetchStats) {
 	if prefetchPar <= 1 || len(keys) < 2*prefetchPar {
 		stats.add(p.PrefetchLatest(ctx, domain, keys))
-		return nil
+		return
 	}
 	var mu sync.Mutex
 	var part prefetchStats
-	var g errgroup.Group
+	var wg sync.WaitGroup
 	chunk := (len(keys) + prefetchPar - 1) / prefetchPar
 	for i := 0; i < len(keys); i += chunk {
 		keys := keys[i:min(i+chunk, len(keys))]
 		first := i == 0
-		g.Go(func() error {
+		wg.Go(func() {
 			pp := p
 			if !first {
 				tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
 				if err != nil {
-					return nil
+					return
 				}
 				defer tx.Rollback()
 				ttx, ok := tx.(kv.TemporalTx)
 				if !ok {
-					return nil
+					return
 				}
 				if pp, ok = ttx.AggTx().(latestPrefetcher); !ok {
-					return nil
+					return
 				}
 			}
 			waves, pages, plan, io := pp.PrefetchLatest(ctx, domain, keys)
@@ -330,12 +327,10 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 			defer mu.Unlock()
 			part.waves, part.pages = max(part.waves, waves), part.pages+pages
 			part.plan, part.io = max(part.plan, plan), max(part.io, io)
-			return nil
 		})
 	}
-	err := g.Wait()
+	wg.Wait()
 	stats.add(part.waves, part.pages, part.plan, part.io)
-	return err
 }
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
@@ -382,7 +377,8 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	if !ok {
 		return nil
 	}
-	return prefetchKeys(ctx, db, p, domain, keys, stats)
+	prefetchKeys(ctx, db, p, domain, keys, stats)
+	return nil
 }
 
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *prefetchStats) error {
@@ -412,9 +408,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 				}
 			}
 		}
-		if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
-			return err
-		}
+		prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats)
 	}
 	var storageKeys [][]byte
 	for _, k := range hashedKeys {
@@ -453,17 +447,12 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, p late
 			}
 		}
 		if depth > prefetchFlatDepth {
-			if err := prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); err != nil {
-				return err
-			}
+			prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats)
 		}
 		t0 := time.Now()
 		next := active
 		if depth >= prefetchFlatDepth {
-			var err error
-			if next, err = keysWithChild(ctx, db, ttx, active, depth); err != nil {
-				return err
-			}
+			next = keysWithChild(ctx, db, ttx, active, depth)
 		}
 		stats.branchChk += time.Since(t0)
 		active = next

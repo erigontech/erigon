@@ -499,7 +499,8 @@ func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64
 	return ef.Get3Probe(i, nil)
 }
 
-// Get3Probe is Get3 with pr touching the pages it reads.
+// Get3Probe is Get3 with pr touching the first word of each structure it reads; a read that
+// crosses into the next page faults that page in as usual.
 func (ef *DoubleEliasFano) Get3Probe(i uint64, pr *mmap.Probe) (cumKeys, cumKeysNext, position uint64) {
 	var (
 		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
