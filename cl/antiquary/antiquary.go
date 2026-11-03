@@ -214,6 +214,10 @@ func (s *Antiquary) retirementLoop() error {
 		run:     s.antiquate,
 		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
 	}
+	merges := &retirementStep{
+		run:     s.mergeBlocks,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to merge beacon blocks", "err", err) },
+	}
 	blobs := &retirementStep{
 		run:     s.antiquateBlobs,
 		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
@@ -224,18 +228,19 @@ func (s *Antiquary) retirementLoop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
-			s.retirementTick(blocks, blobs)
+			s.retirementTick(blocks, merges, blobs)
 		case <-s.ctx.Done():
 			return nil
 		}
 	}
 }
 
-func (s *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+func (s *Antiquary) retirementTick(blocks, merges, blobs *retirementStep) {
 	if !s.backfilled.Load() {
 		return
 	}
 	blocks.attempt(s.shuttingDown)
+	merges.attempt(s.shuttingDown)
 
 	if s.cfg.DenebForkEpoch == math.MaxUint64 {
 		return
@@ -438,7 +443,7 @@ func (s *Antiquary) antiquate() error {
 	})
 
 	if from >= to || to-from < snaptype.CaplinMergeLimit {
-		return s.mergeBlocks()
+		return nil
 	}
 	// if s.snBuildSema != nil {
 	// 	if !s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
@@ -470,10 +475,13 @@ func (s *Antiquary) antiquate() error {
 		}
 	}
 
-	return s.mergeBlocks()
+	return nil
 }
 
 func (s *Antiquary) mergeBlocks() error {
+	if !s.snapgen {
+		return nil
+	}
 	merger := snapshotsync.NewMerger(s.dirs.Tmp, 1, log.LvlDebug, nil, &chain.Config{}, s.logger)
 	ranges := merger.FindMergeRanges(s.sn.Ranges(false), snaptype.CaplinEnums.BeaconBlocks)
 	if len(ranges) == 0 {

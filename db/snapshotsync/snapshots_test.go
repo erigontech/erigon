@@ -22,9 +22,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"testing/fstest"
 
@@ -162,6 +162,15 @@ func TestFindMergeRange(t *testing.T) {
 		require.Equal(t, expect.String(), Ranges(found).String())
 	})
 
+	t.Run("lowest range above a span start", func(t *testing.T) {
+		var ranges Ranges
+		for from := uint64(610_000); from < 1_000_000; from += 10_000 {
+			ranges = append(ranges, NewRange(from, from+10_000))
+		}
+		expect := Ranges{NewRange(700_000, 800_000), NewRange(800_000, 900_000), NewRange(900_000, 1_000_000)}
+		require.Equal(t, expect.String(), Ranges(merger.FindMergeRanges(ranges, snaptype.Unknown)).String())
+	})
+
 	t.Run("caplin", func(t *testing.T) {
 		var ranges Ranges
 		start := uint64(9_500_000)
@@ -288,27 +297,17 @@ func TestMergeSnapshots(t *testing.T) {
 	// require.Equal(10, a)
 }
 
-func openBeaconBlocksFds(t *testing.T) int {
+func openFds(t *testing.T) int {
 	t.Helper()
-	const fdDir = "/dev/fd"
-	d, err := os.Open(fdDir)
-	if err != nil {
-		t.Skip("no /dev/fd on this platform")
+	if runtime.GOOS == "windows" {
+		return 0
 	}
+	d, err := os.Open("/dev/fd")
+	require.NoError(t, err)
 	defer d.Close()
 	names, err := d.Readdirnames(-1)
 	require.NoError(t, err)
-	count := 0
-	for _, name := range names {
-		link, err := os.Readlink(filepath.Join(fdDir, name))
-		if errors.Is(err, syscall.EINVAL) {
-			t.Skip("fd entries are not links on this platform")
-		}
-		if strings.Contains(link, "beaconblocks") {
-			count++
-		}
-	}
-	return count
+	return len(names)
 }
 
 func TestMergeFailureClosesMergedSegments(t *testing.T) {
@@ -346,12 +345,19 @@ func TestMergeFailureClosesMergedSegments(t *testing.T) {
 			merger.DisableFsync()
 			ranges := []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}
 
-			before := openBeaconBlocksFds(t)
-			require.Positive(before)
+			before := openFds(t)
 			for range 3 {
 				require.ErrorIs(merger.Merge(t.Context(), s, types, ranges, dir, true, tc.onMerge, tc.onDelete), injected)
 			}
-			require.LessOrEqual(openBeaconBlocksFds(t), before)
+			require.LessOrEqual(openFds(t), before)
+			for _, r := range ranges {
+				merged := snaptype.BeaconBlocks.FileInfo(dir, r.From(), r.To()).Path
+				for _, f := range []string{merged, strings.TrimSuffix(merged, ".seg") + ".idx"} {
+					if err := os.Remove(f); !errors.Is(err, os.ErrNotExist) {
+						require.NoError(err)
+					}
+				}
+			}
 		})
 	}
 }
