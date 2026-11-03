@@ -361,42 +361,21 @@ jobs:
             fi
           fi
           retry 3 go build . >> buildlogs.log
-      # Provide EEST fixtures locally so the eels sim build doesn't re-download
-      # them every run. Restore the base-branch cache warmed by
-      # cache-warming-eest-fixtures.yml (restore-only — never saved here); on a
-      # miss, fetch via the hardened tools/test-fixtures.sh. Then stage the
-      # tarball into the sim build context, where the eels image keeps it
-      # compressed until startup and runs `consume --input /fixtures`.
-      - name: Restore EEST fixtures cache
-        id: eest-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            test-fixtures-cache/eest_stable.tar.gz
-            test-fixtures-cache/eest_devnet.tar.gz
-            test-fixtures-cache/eest_benchmark.tar.gz
-            test-fixtures-cache/eest_zkevm.tar.gz
-          key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('erigon-full/test-fixtures.json') }}
-          restore-keys: |
-            test-fixtures-eest-${{ runner.os }}-
-
-      - name: Download EEST fixtures on cache miss
-        if: steps.eest-cache.outputs.cache-hit != 'true'
-        run: bash erigon-full/tools/test-fixtures.sh --download-only erigon-full/test-fixtures.json test-fixtures-cache ${{ matrix.fixtures-tarball }}
-
-      - name: Stage fixtures into hive eels sim build context
-        run: cp "test-fixtures-cache/${{ matrix.fixtures-tarball }}.tar.gz" "hive/simulators/ethereum/eels/${{ matrix.sim }}/fixtures.tar.gz"
-
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
+          # The eels simulators run the image published for the fixtures release:
+          # tests@v21.0.1 is tag v21.0.1 and tests-<name>@vX.Y.Z is tag <name>-vX.Y.Z.
           eels_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].ref // empty' erigon-full/test-fixtures.json)
-          eels_ref_arg=""
-          if [ -n "$eels_ref" ]; then
-            eels_ref_arg="--sim.buildarg branch=$eels_ref"
+          if [ -z "$eels_ref" ]; then
+            echo "ERROR: no release ref for ${{ matrix.fixtures-tarball }} in test-fixtures.json" >&2
+            exit 1
           fi
+          eels_tag=${eels_ref#tests@}
+          eels_tag=${eels_tag#tests-}
+          eels_tag=${eels_tag/@/-}
           cd hive
           docker ps
           run_suite() {
@@ -407,7 +386,7 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${eels_ref_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg tag="$eels_tag" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then
