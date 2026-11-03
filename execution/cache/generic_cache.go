@@ -159,8 +159,9 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 }
 
 // Put stores data for the given key. In ModeEvictLRU the byte-bounded layer
-// admits and evicts by W-TinyLFU. In ModeNoOp inserts that would overflow the
-// byte budget are dropped (and counted via the dropped metric).
+// admits and evicts by W-TinyLFU. In ModeNoOp a write that would overflow the
+// byte budget is dropped (and counted via the dropped metric); for a present
+// key the old value is removed too.
 func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 	c.put(key, value, txNum, true)
 }
@@ -183,13 +184,13 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 			return existing, otter.CancelOp
 		}
 		e := entry[T]{val: value, size: uint32(min(newSize, math.MaxUint32)), txNum: txNum, epoch: c.coh.Epoch()}
-		// "Drop new keys when full": the lock-free layer would admit and evict.
+		// Drop the write when full, as the lock-free layer would admit and evict; a dropped update also removes the old value.
 		if c.mode == ModeNoOp {
 			grow := weighEntry(h, e)
 			if sameKey {
 				grow -= weighEntry(h, existing)
 			}
-			if c.data.SizeBytes()+grow > int64(c.capacityB) {
+			if c.data.SizeBytes()+grow > c.data.ceiling.Load() { // the ceiling drops to the limit once the envelope refuses growth
 				c.dropped.Add(1)
 				if sameKey {
 					return existing, otter.InvalidateOp // the old value is superseded

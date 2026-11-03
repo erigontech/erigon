@@ -18,6 +18,7 @@ package cache
 
 import (
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -351,4 +352,52 @@ func TestByteLRUCloseRacingWritersReturnsBudget(t *testing.T) {
 	wg.Wait()
 	b.c.CleanUp()
 	require.Equal(t, base, cachebudget.Global.Used())
+}
+
+// After the envelope refuses growth, a NoOp cache must drop a new key instead of letting otter evict others.
+func TestGenericCacheNoOpDropsNewKeyAfterRefusedEnvelope(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(byteLRUFloorBytes) // room for the floor only
+
+	val := make([]byte, 64*1024)
+	c := NewGenericCache[[]byte](256*datasize.MB, func(v []byte) int { return len(v) }, ModeNoOp)
+	defer c.Close()
+	k := make([]byte, 8)
+	for i := range uint64(64) { // 4 MB: past the floor, so growth asks the envelope
+		k[0] = byte(i)
+		c.Put(k, val, 1)
+	}
+	c.data.c.CleanUp()
+	require.Equal(t, byteLRUFloorBytes, c.data.ceiling.Load(), "the refused chunk must pin the ceiling")
+	var resident [][]byte
+	for i := range uint64(64) {
+		k[0] = byte(i)
+		if _, ok := c.Get(k); ok {
+			resident = append(resident, slices.Clone(k))
+		}
+	}
+	require.NotEmpty(t, resident)
+
+	dropped := c.dropped.Load()
+	k[0] = 200
+	c.Put(k, val, 1)
+	c.data.c.CleanUp()
+	require.Equal(t, dropped+1, c.dropped.Load(), "NoOp must drop the write, not hand it to otter")
+	_, ok := c.Get(k)
+	require.False(t, ok, "a new key must be dropped at the pinned bound")
+	for _, key := range resident {
+		_, ok := c.Get(key)
+		require.True(t, ok, "a new key must not evict a resident one")
+	}
+}
+
+// A cache kept after Close holds nothing a later write adds.
+func TestByteLRUWriteAfterCloseIsNotResident(t *testing.T) {
+	b := newByteLRU(8*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	b.Close()
+	b.Add(1, make([]byte, 1024))
+	b.c.CleanUp()
+	require.Zero(t, b.Len())
+	require.Zero(t, b.SizeBytes())
 }

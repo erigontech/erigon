@@ -64,13 +64,13 @@ type byteLRUEvictions[V any] struct {
 	// change and otter's deletion handler refunds each removal, so it needs no
 	// reset on Purge.
 	resident atomic.Int64
-	// Indirect so Close can clear it: a callback capturing the owner would keep
-	// the owner alive as long as the cache.
+	// Atomic so Close can clear it while deletions run: a cache kept after Close
+	// calls no owner hook.
 	onEvict atomic.Pointer[func(uint64, V)]
 }
 
-// otterEntryOverheadBytes is otter's own per-entry cost beyond the key and the
-// value. Omitting it undercounts a cache of small entries ~1.6x.
+// otterEntryOverheadBytes is the size of otter's node for one entry, with the
+// uint64 key and the value struct inline; bytes the value points to come on top.
 const otterEntryOverheadBytes = 96
 
 // ByteLRUEntryOverheadBytes is what an entry costs beyond its value's own bytes:

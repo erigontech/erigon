@@ -71,11 +71,9 @@ const (
 )
 
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
-// toward a byte-budget ceiling as it fills, funding each step from the shared
-// cachebudget envelope. It exists so a cache with a small working set never
-// pre-commits its full configured capacity — the same demand-growth the state
-// caches use. The CodeCache's content layers moved to ByteLRU; its size layer
-// still uses this.
+// toward an entry ceiling as it fills, funding each step from the shared
+// cachebudget envelope, so a cache with a small working set never pre-commits
+// its full capacity. Only the CodeCache size layer uses it.
 //
 // Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
 // only for content-addressed layers, where a key's payload never changes: a
