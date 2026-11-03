@@ -2009,11 +2009,8 @@ type WriteCell[T any] struct {
 	flag        statusFlag
 	valStatus   valueStatus
 	incarnation Incarnation
-	// accSource marks where an AddressPath cell's record came from. AccountFromBAL is an
-	// existence-only record the BAL seed wrote — its Value is not authoritative, so value
-	// reads fall back to the committed base. Independent of valStatus.
-	accSource AccountSource
-	Value     T
+	accSource   AccountSource
+	Value       T
 }
 
 // Per-T pools for *WriteCell[T], spanning VersionMap lifetimes: a cell freed by
@@ -2113,9 +2110,6 @@ type ReadResult struct {
 	// continues on it like Done but the dep is not yet final.
 	validated bool
 	valStatus valueStatus
-	// accSource mirrors the floor cell's AccountSource: AccountFromBAL means the read
-	// resolved an existence-only marker, so the account exists but its value comes from
-	// the committed base.
 	accSource AccountSource
 }
 

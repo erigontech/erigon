@@ -69,11 +69,9 @@ const (
 // that produced the value and the tier it came from.  Shared by every
 // per-path read via embedding in VersionedRead.
 type ReadHeader struct {
-	Source   ReadSource
-	Version  Version
-	internal bool // conflict-detection only; excluded from the block access list
-	// accSource AccountFromBAL: the read resolved an existence-only AddressPath marker (BAL
-	// seed), so the account exists but its value must come from the committed base.
+	Source    ReadSource
+	Version   Version
+	internal  bool // conflict-detection only; excluded from the block access list
 	accSource AccountSource
 }
 
@@ -1881,9 +1879,6 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int, deleted bool) {
 	if vw, ok := ws.balance[addr]; ok {
 		vw.Val = val
-		// Reverting restores a live prior balance, so clear any ValueDeleted stamp a
-		// self-destruct left on the cell — otherwise GetAccount still reads the
-		// account as removed after its destruct was rolled back.
 		vw.valStatus = ValueChanged
 		if deleted {
 			vw.valStatus = ValueDeleted
@@ -2074,9 +2069,6 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
-		// An existence-only AddressPath marks that the account is present but its value
-		// lives in the field cells / committed base, not here. Report no account so the
-		// caller composes over the base instead of this cell.
 		if res.accSource == AccountFromBAL {
 			return nil, false
 		}

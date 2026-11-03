@@ -111,7 +111,7 @@ type commitmentCalculator struct {
 	blockBaseVM     *state.VersionMap
 	baseAccounts    map[accounts.Address]*accounts.Account
 	baseErr         error
-	// curVersionMap is the block currently being folded; emitTouched reads it.
+	// curVersionMap is the block currently being folded; compute reads it.
 	curVersionMap *state.VersionMap
 
 	// asOfReader serves emitTouched's committed-base reads and the compute methods'
