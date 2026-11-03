@@ -473,11 +473,13 @@ func TestCommitGenesisBlockAcceptsHoodiShadowForkConfig(t *testing.T) {
 	shadowFork.GrayGlacierBlock = nil
 	shadowFork.MergeNetsplitBlock = common.NewUint64(0)
 	shadowFork.AmsterdamTime = common.NewUint64(4_000_000_000)
+	const shadowAmsterdam = `Glamsterdam: 2096-10-02 07:06:40 \+0000 UTC`
 
 	t.Run("init over a bundled datadir", func(t *testing.T) {
 		logs := requireConfigAccepted(t, dbAtHeightOne(t, bundled), shadowFork)
 		require.Contains(t, logs, `toleratedForkChanges="daoForkBlock 0->nil, arrowGlacierBlock 0->nil, grayGlacierBlock 0->nil, mergeNetsplitBlock nil->0, muirGlacierBlock 0->nil"`)
-		require.Regexp(t, `newConfig="[^"]*Glamsterdam`, logs)
+		require.Regexp(t, `newConfig="[^"]*`+shadowAmsterdam, logs)
+		require.NotRegexp(t, `storedConfig="[^"]*`+shadowAmsterdam, logs)
 	})
 	t.Run("bundled over an init datadir", func(t *testing.T) {
 		requireConfigAccepted(t, dbAtHeightOne(t, shadowFork), bundled)
@@ -490,7 +492,8 @@ func TestCommitGenesisBlockAcceptsHoodiShadowForkConfig(t *testing.T) {
 		logs, err := commitGenesis(t, db, nil, networkname.Hoodi)
 		require.NoError(t, err)
 		require.Contains(t, logs, "toleratedForkChanges=")
-		require.Regexp(t, `storedConfig="[^"]*Glamsterdam`, logs)
+		require.Regexp(t, `storedConfig="[^"]*`+shadowAmsterdam, logs)
+		require.NotRegexp(t, `newConfig="[^"]*`+shadowAmsterdam, logs)
 		require.Equal(t, bundled, readStoredChainConfig(t, db))
 	})
 }
