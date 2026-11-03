@@ -231,3 +231,7 @@ func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
 	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, 0),
 		"core types must still resolve through the preverified scan")
 }
+
+func TestSetTomlRejectsMalformedToml(t *testing.T) {
+	require.Error(t, SetToml("mainnet", []byte("<html>not toml</html>"), false))
+}
