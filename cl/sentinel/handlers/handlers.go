@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -75,7 +74,6 @@ func NewConsensusHandlers(
 	db freezeblocks.BeaconSnapshotReader,
 	indiciesDB kv.RoDB,
 	host host.Host,
-	peers *peers.Pool,
 	netCfg *clparams.NetworkConfig,
 	me *enode.LocalNode,
 	beaconConfig *clparams.BeaconChainConfig,
@@ -214,7 +212,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			if !(strings.Contains(name, "goodbye") &&
 				(strings.Contains(err.Error(), "session shut down") ||
 					strings.Contains(err.Error(), "stream reset"))) {
-				log.Trace("[pubsubhandler] close stream", l)
+				log.Trace("[pubsubhandler] close stream", l) //nolint:loggercheck // a single log.Ctx is expanded into pairs
 			}
 		}
 	}

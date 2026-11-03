@@ -1,9 +1,12 @@
 package gossip
 
 import (
+	"errors"
+	"math"
 	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 const (
@@ -17,6 +20,8 @@ const (
 	syncCommitteeMessageSize = 8 + 32 + 8 + blsSignatureSize
 )
 
+var errCompressedTooLarge = errors.New("gossip: compressed data exceeds max_compressed_len")
+
 // ExtractTopicName returns the name segment of a "/eth2/<fork_digest>/<name>/<codec>" topic, or "" for any other shape.
 func ExtractTopicName(topic string) string {
 	tokens := strings.Split(topic, "/")
@@ -26,10 +31,23 @@ func ExtractTopicName(topic string) string {
 	return tokens[3]
 }
 
-// MaxUncompressedSize returns the largest SSZ encoding a message on topicName can have,
-// which the spec requires peers to enforce next to the network payload limit. Types
-// without a cheap bound fall back to that limit.
+// MaxUncompressedSize returns the lower of the network payload limit and the largest SSZ
+// encoding a message on topicName can have, as the spec requires. Topics without a bound
+// here use the network limit alone.
 func MaxUncompressedSize(topicName string, beacon *clparams.BeaconChainConfig, network *clparams.NetworkConfig) uint64 {
+	return min(maxSSZSize(topicName, beacon), network.GossipMaxSize)
+}
+
+// DecompressMessage decodes the snappy data of a gossip message on topicName, rejecting
+// it before any allocation when it exceeds the spec's compressed or uncompressed limit.
+func DecompressMessage(topicName string, data []byte, beacon *clparams.BeaconChainConfig, network *clparams.NetworkConfig) ([]byte, error) {
+	if uint64(len(data)) > network.MaxCompressedPayloadSize() {
+		return nil, errCompressedTooLarge
+	}
+	return utils.DecompressSnappyWithLimit(data, MaxUncompressedSize(topicName, beacon, network))
+}
+
+func maxSSZSize(topicName string, beacon *clparams.BeaconChainConfig) uint64 {
 	committees, validators := beacon.MaxCommitteesPerSlot, beacon.MaxValidatorsPerCommittee
 	switch {
 	case topicName == TopicNameBeaconAggregateAndProof:
@@ -52,7 +70,7 @@ func MaxUncompressedSize(topicName string, beacon *clparams.BeaconChainConfig, n
 		contribution := 8 + 32 + 8 + uint64(beacon.SyncCommitteeAggregationBitsSize()) + blsSignatureSize
 		return blsSignatureSize + 8 + blsSignatureSize + contribution
 	default:
-		return network.GossipMaxSize
+		return math.MaxUint64
 	}
 }
 

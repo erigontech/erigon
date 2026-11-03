@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -310,6 +311,8 @@ type getPayloadStubModule struct {
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 }
 
+func (s *getPayloadStubModule) AddSendersRecovery(common.Hash, *exec.SendersRecovery) {}
+
 func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
 	return s.getAssembledBlockFunc(ctx, payloadID)
 }
@@ -331,6 +334,10 @@ func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.Fork
 }
 
 func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+	panic("not implemented")
+}
+
+func (s *getPayloadStubModule) InclusionList(_ context.Context) (types.Transactions, error) {
 	panic("not implemented")
 }
 
@@ -364,6 +371,10 @@ func (s *getPayloadStubModule) GetPayloadBodiesByHash(_ context.Context, _ []com
 
 func (s *getPayloadStubModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
+}
+
+func (s *getPayloadStubModule) IsValidated(_ common.Hash) bool {
+	return false
 }
 
 func (s *getPayloadStubModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {

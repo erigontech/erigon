@@ -19,6 +19,7 @@ package state
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -58,6 +59,15 @@ func (cr *CachedReader) ReadAccountData(address accounts.Address) (*accounts.Acc
 		cr.cache.SetAccountRead(addrValue[:], a)
 	}
 	return a, nil
+}
+
+func (cr *CachedReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (cr *CachedReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := cr.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 // ReadAccountDataForDebug is called when an account needs to be fetched from the state

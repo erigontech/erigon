@@ -287,3 +287,11 @@ func encodeGetBlobsV3Response(blobs []*engine_types.BlobAndProofV2) ([]byte, err
 	}
 	return ssz2.MarshalSSZ(nil, list)
 }
+
+func encodeGetInclusionListResponse(txs []hexutil.Bytes) ([]byte, error) {
+	raw := make([][]byte, len(txs))
+	for i, tx := range txs {
+		raw[i] = tx
+	}
+	return solid.NewTransactionsSSZFromTransactions(raw).EncodeSSZ(nil)
+}

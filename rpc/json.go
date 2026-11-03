@@ -110,23 +110,30 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream *jsonstream.Stream, result any) error {
 	return writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
-		if isNilPointer(result) {
-			return json.NewEncoder(encoderWriter{s}).Encode(result)
+		if err := encodeResult(s, result); err != nil {
+			return &CustomError{Code: ErrCodeInternalError, Message: err.Error()}
 		}
-		if fm, ok := result.(jsonstream.Marshaler); ok {
-			if err := fm.MarshalFastJSONTo(s); err != nil {
-				return err
-			}
-			return s.Err() // a latched write error left a placeholder in the stream
-		}
-		// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
-		// reflection encoder and must not catch a type whose json.Marshaler writes something else.
-		if ta, ok := result.(encoding.TextAppender); ok {
-			s.WriteQuotedText(ta)
-			return s.Err()
-		}
-		return json.NewEncoder(encoderWriter{s}).Encode(result)
+		return nil
 	})
+}
+
+func encodeResult(s *jsonstream.Stream, result any) error {
+	if isNilPointer(result) {
+		return json.NewEncoder(encoderWriter{s}).Encode(result)
+	}
+	if fm, ok := result.(jsonstream.Marshaler); ok {
+		if err := fm.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+		return s.Err() // a latched write error left a placeholder in the stream
+	}
+	// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
+	// reflection encoder and must not catch a type whose json.Marshaler writes something else.
+	if ta, ok := result.(encoding.TextAppender); ok {
+		s.WriteQuotedText(ta)
+		return s.Err()
+	}
+	return json.NewEncoder(encoderWriter{s}).Encode(result)
 }
 
 // writeResultResponse writes the response envelope with write filling "result". An error from write
@@ -247,8 +254,10 @@ type jsonCodec struct {
 	decode  func(v any) error // decoder to allow multiple transports
 	// readFrame is set only by transports that delimit messages themselves. Each
 	// call must return bytes it does not reuse: parsed messages point into them
-	// and are handled asynchronously, so they outlive the call that read them.
-	readFrame    func() ([]byte, error)
+	// and are handled asynchronously, so they outlive the call that read them. A
+	// frame that holds resources comes with what releases them, nil otherwise.
+	readFrame    func() ([]byte, func(), error)
+	release      func()            // releases the last frame read, until taken
 	encMu        sync.Mutex        // guards the encoder
 	encode       func(v any) error // encoder to allow multiple transports
 	conn         deadlineCloser
@@ -260,7 +269,7 @@ type jsonCodec struct {
 // implements ConnRemoteAddr, log messages include the remote address. decode must reject
 // invalid JSON, reading a message relies on it. A transport with a frame reader never calls
 // decode, so it may be nil.
-func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
+func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, func(), error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:      make(chan any),
 		encode:       encode,
@@ -337,6 +346,7 @@ func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err err
 	}
 	messages, batch, err = parseMessage(rawmsg)
 	if err != nil {
+		c.releaseFrame()
 		return nil, false, err
 	}
 	for i, msg := range messages {
@@ -361,13 +371,15 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	}
 	// The transport delimits the message, so one read and one check will do.
 	// Decoding into a json.RawMessage would scan twice and copy.
-	frame, err := c.readFrame()
+	frame, release, err := c.readFrame()
 	if err != nil {
 		return nil, err
 	}
-	if !json.Valid(frame) {
-		// Decode the broken message to report where it went wrong. Unmarshal
-		// checks syntax the same way Valid does, so it fails here too. The
+	c.release = release
+	if !validJSON(frame) {
+		c.releaseFrame()
+		// Decode the broken message to report where it went wrong. validJSON
+		// only ever accepts more than Unmarshal, so it fails here too. The
 		// fallback only guards against the two ever disagreeing.
 		var rawmsg json.RawMessage
 		if err := json.Unmarshal(frame, &rawmsg); err != nil {
@@ -376,6 +388,18 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 		return nil, errors.New("invalid JSON request")
 	}
 	return frame, nil
+}
+
+func (c *jsonCodec) takeRelease() func() {
+	release := c.release
+	c.release = nil
+	return release
+}
+
+func (c *jsonCodec) releaseFrame() {
+	if release := c.takeRelease(); release != nil {
+		release()
+	}
 }
 
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {

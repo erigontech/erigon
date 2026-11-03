@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -27,6 +28,15 @@ func (r *fieldReader) ReadAccountData(addr accounts.Address) (*accounts.Account,
 		return a, nil
 	}
 	return nil, nil
+}
+
+func (r *fieldReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
+func (r *fieldReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
+	return acc != nil, err
 }
 
 func (r *fieldReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
@@ -74,7 +84,6 @@ func TestTransientStale_FieldGettersPreferCells(t *testing.T) {
 	vm.WriteIncarnation(addr, v1, uint64(3), true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 
@@ -133,7 +142,6 @@ func TestTransientStale_GetDelegatedDesignation(t *testing.T) {
 	vm.WriteCodeSize(authority, v1, len(delegationCode), true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 
@@ -162,7 +170,6 @@ func TestCrossTxSelfDestruct_CodeReadsEmpty(t *testing.T) {
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1, Incarnation: 0}, true, true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 
@@ -201,7 +208,6 @@ func TestCrossTxIncarnationBump_CodeReadsEmpty(t *testing.T) {
 	vm.WriteCodeHash(addr, v1, accounts.EmptyCodeHash, true)
 
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 2)
 	ibs.SetVersion(0)
 

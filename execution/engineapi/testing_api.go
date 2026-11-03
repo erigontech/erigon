@@ -324,8 +324,7 @@ func (t *testingImpl) assembleTestingBlock(
 		return nil, 0, &rpc.InvalidParamsError{Message: fmt.Sprintf("extraData longer than %d bytes (%d)", params.MaximumExtraDataSize, len(*extraData))}
 	}
 
-	// Validate withdrawals presence.
-	if err := t.server.checkWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
+	if err := t.server.checkWithdrawals(timestamp, payloadAttributes.Withdrawals); err != nil {
 		return nil, 0, err
 	}
 

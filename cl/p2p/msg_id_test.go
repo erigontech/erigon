@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -92,4 +93,14 @@ func TestMsgIDUsesInvalidDomainAbovePayloadBounds(t *testing.T) {
 	require.Equal(t, expectedID(n.MessageDomainValidSnappy, aggregateTopic, fitting), s.msgId(msg))
 	msg = &pubsubpb.Message{Data: snappy.Encode(nil, make([]byte, bound+1)), Topic: &aggregateTopic}
 	require.Equal(t, expectedID(n.MessageDomainInvalidSnappy, aggregateTopic, msg.Data), s.msgId(msg))
+
+	small := n
+	small.GossipMaxSize = 1024
+	s.cfg.NetworkConfig = &small
+	inefficient := binary.AppendUvarint(nil, 1000)
+	for range 1000 {
+		inefficient = append(inefficient, 0x00, 0x00)
+	}
+	msg = &pubsubpb.Message{Data: inefficient, Topic: &blockTopic}
+	require.Equal(t, expectedID(n.MessageDomainInvalidSnappy, blockTopic, inefficient), s.msgId(msg), "data above max_compressed_len")
 }

@@ -49,11 +49,15 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	syncingCode := http.StatusOK
+	syncingCode := http.StatusPartialContent
 	if syncingStatus != nil {
+		if *syncingStatus < 100 || *syncingStatus > 599 {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("syncing_status must be between 100 and 599, got %d", *syncingStatus)).WriteTo(w)
+			return
+		}
 		syncingCode = int(*syncingStatus)
 	}
-	if a.syncedData.Syncing() {
+	if a.headLagsBehind() {
 		w.WriteHeader(syncingCode)
 		return
 	}
@@ -154,16 +158,20 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
+	metadata := map[string]any{
+		"seq_number": strconv.FormatUint(id.Metadata.Seq, 10),
+		"attnets":    "0x" + id.Metadata.Attnets,
+		"syncnets":   "0x" + id.Metadata.Syncnets,
+	}
+	if a.ethClock.GetCurrentEpoch() >= a.beaconChainCfg.FuluForkEpoch {
+		metadata["custody_group_count"] = strconv.FormatUint(a.peerDas.StateReader().GetAdvertisedCgc(), 10)
+	}
 	return newBeaconResponse(map[string]any{
 		"peer_id":             id.Pid,
 		"enr":                 id.Enr,
 		"p2p_addresses":       id.P2PAddresses,
 		"discovery_addresses": id.DiscoveryAddresses,
-		"metadata": map[string]any{
-			"seq":      strconv.FormatUint(id.Metadata.Seq, 10),
-			"attnets":  id.Metadata.Attnets,
-			"syncnets": id.Metadata.Syncnets,
-		},
+		"metadata":            metadata,
 	}), nil
 }
 
@@ -174,7 +182,7 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 		map[string]any{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
 			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
-			"is_syncing":    a.syncedData.Syncing(),
+			"is_syncing":    a.headLagsBehind(),
 			"is_optimistic": false, // needs to change
 			"el_offline":    false,
 		},

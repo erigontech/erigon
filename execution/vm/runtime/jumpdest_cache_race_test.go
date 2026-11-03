@@ -60,7 +60,6 @@ func deployVersioned(vmap *state.VersionMap, addr accounts.Address, code account
 func callWhilePublishing(t *testing.T, cfg *chain.Config, vmap *state.VersionMap, addr accounts.Address, publish func()) {
 	t.Helper()
 	ibs := state.NewWithVersionMap(state.NewNoopReader(), vmap)
-	ibs.SetNoMaterialize(true)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
 	onEnter := func(depth int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {

@@ -57,10 +57,20 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
-// CallContext contains the things that are per-call, such as stack and memory,
-// but not transients like pc and gas
+type addressWordIndex uint8
+
+const (
+	addressWordSelf addressWordIndex = iota
+	addressWordOrigin
+	addressWordCaller
+	addressWordCoinbase
+	addressWordCount
+)
+
+// CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
+	savedPC           uint64 // run's pc across an out-of-line call
 	stateGas          uint64
 	stateGasSpill     uint64
 	newAccountCharged bool
@@ -80,13 +90,20 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
+	// mulmodModulus is the last full-width MULMOD modulus and mulmodReciprocal its
+	// reciprocal: a contract reduces many products by one modulus.
+	mulmodModulus    uint256.Int
+	mulmodReciprocal [5]uint64
+
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
-	Contract Contract
-	create   createGasPreparation
-	slots    frameSlots
-	Stack    Stack
+	Contract        Contract
+	create          createGasPreparation
+	slots           frameSlots
+	Stack           Stack
+	addressWords    [addressWordCount]uint256.Int
+	addressWordsSet [addressWordCount]bool
 }
 
 // maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
@@ -161,7 +178,7 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 // peekAddress, to keep the two peek functions inside the inlining budget.
 // Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
-	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
+	ctx.cachedKey = evm.intraBlockState.InternStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
@@ -176,7 +193,7 @@ func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 }
 
 func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
-	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
+	ctx.cachedAddr = evm.intraBlockState.InternAddress(ctx.Stack.peek())
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }
@@ -201,6 +218,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
+	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -585,6 +603,7 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		callContext.savedPC = pc
 		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
@@ -690,7 +709,7 @@ run:
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
 		gasLeft = callContext.gas
 		if err != nil {
 			break run

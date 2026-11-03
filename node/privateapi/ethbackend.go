@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -292,7 +293,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.Pro
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
-	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
+	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionWithCommit(version.GitCommit))}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remoteproto.TxnLookupRequest) (*remoteproto.TxnLookupReply, error) {
@@ -515,6 +516,8 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	}
 
 	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
+	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
 

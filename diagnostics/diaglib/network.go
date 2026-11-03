@@ -149,13 +149,13 @@ func (p *PeerStats) getPeers() map[string]PeerStatistics {
 	p.peersInfo.Range(func(key, value any) bool {
 		loadedKey, ok := key.(string)
 		if !ok {
-			log.Debug("Failed to cast key to string", key)
+			log.Debug("Failed to cast key to string", "key", key)
 			return true
 		}
 
 		loadedValue, ok := value.(PeerStatistics)
 		if !ok {
-			log.Debug("Failed to cast value to PeerStatistics struct", value)
+			log.Debug("Failed to cast value to PeerStatistics struct", "value", value)
 			return true
 		}
 

@@ -22,9 +22,8 @@ import (
 // the topic byte string, and the raw message data: i.e. SHA256(MESSAGE_DOMAIN_INVALID_SNAPPY + uint_to_bytes(uint64(len(message.topic))) + message.topic + message.data)[:20].
 func (p *p2pManager) msgId(pmsg *pubsubpb.Message) string {
 	topic := *pmsg.Topic
-	limit := gossip.MaxUncompressedSize(gossip.ExtractTopicName(topic), p.cfg.BeaconConfig, p.cfg.NetworkConfig)
 	domain, payload := p.cfg.NetworkConfig.MessageDomainValidSnappy, pmsg.Data
-	if decoded, err := utils.DecompressSnappyWithLimit(pmsg.Data, limit); err != nil {
+	if decoded, err := gossip.DecompressMessage(gossip.ExtractTopicName(topic), pmsg.Data, p.cfg.BeaconConfig, p.cfg.NetworkConfig); err != nil {
 		domain = p.cfg.NetworkConfig.MessageDomainInvalidSnappy
 	} else {
 		payload = decoded
