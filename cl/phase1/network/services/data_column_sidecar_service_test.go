@@ -709,7 +709,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidSidecarOutsid
 }
 
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenNotFromExpectedProposer_ReturnsError() {
-	t.expectValidFuluSidecarOutsideCustody(true)
+	t.expectFuluSidecarOutsideCustody(true)
 	t.setExpectedProposer(2, nil)
 	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
 
@@ -725,7 +725,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenNotFromExpectedPropo
 // The proposer check comes after the proof checks, as in the spec: a sidecar with invalid proofs is rejected even when
 // the proposer read would ignore it.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidProofsAndExpectedProposerUnknown_ReturnsError() {
-	t.expectValidFuluSidecarOutsideCustody(false)
+	t.expectFuluSidecarOutsideCustody(false)
 	t.setExpectedProposer(0, fmt.Errorf("%w: expected proposer is not in the parent state", ErrIgnore))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion))
@@ -736,7 +736,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidProofsAndExpe
 
 // While the proposers of the sidecar's branch are not known, the sidecar is ignored instead of rejected.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenExpectedProposerUnknown_ReturnsErrIgnore() {
-	t.expectValidFuluSidecarOutsideCustody(true)
+	t.expectFuluSidecarOutsideCustody(true)
 	t.setExpectedProposer(0, fmt.Errorf("%w: expected proposer is not in the parent state", ErrIgnore))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion))
@@ -746,7 +746,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenExpectedProposerUnkn
 
 // A block in fork choice had its proposer checked by the state transition, so its sidecars need no shuffling read.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenBlockInForkChoice_SkipsExpectedProposerRead() {
-	t.expectValidFuluSidecarOutsideCustody(true)
+	t.expectFuluSidecarOutsideCustody(true)
 	t.dataColumnSidecarService.(*dataColumnSidecarService).expectedProposer = func(context.Context, common.Hash, uint64, uint64) (uint64, error) {
 		t.Fail("expected proposer read for a block in fork choice")
 		return 0, nil
