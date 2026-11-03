@@ -2088,7 +2088,7 @@ func (at *AggregatorRoTx) CommitmentStopper() func(kv.Domain) {
 	a := at.a
 	return func(domain kv.Domain) {
 		a.StopCommitmentDomain(domain)
-		if err := a.writeCommitmentStopFile(domain); err != nil {
+		if err := a.WriteCommitmentStopFile(domain); err != nil {
 			a.logger.Error("failed to write commitment stop marker", "domain", domain, "err", err)
 		}
 	}

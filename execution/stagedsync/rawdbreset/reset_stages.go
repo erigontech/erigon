@@ -164,6 +164,30 @@ func ResetSenders(ctx context.Context, db kv.RwDB) error {
 }
 
 func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
+	if hasAgg, ok := db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			var stopped [kv.DomainLen]bool
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+					var err error
+					stopped[domain], err = rawdb.ReadCommitmentDomainStopped(tx, domain)
+					if err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+				if stopped[domain] {
+					if err := agg.WriteCommitmentStopFile(domain); err != nil {
+						return fmt.Errorf("persist commitment stop marker: %w", err)
+					}
+				}
+			}
+		}
+	}
 	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain, kv.ReceiptDomain, kv.RCacheDomain))
 	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
 	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)

@@ -48,7 +48,7 @@ func writeCommitmentStopFile(dirs datadir.Dirs, domains map[string]bool) error {
 	return writePBTMarker(path, domains)
 }
 
-func (a *Aggregator) writeCommitmentStopFile(domain kv.Domain) error {
+func (a *Aggregator) WriteCommitmentStopFile(domain kv.Domain) error {
 	a.commitmentStopFileMu.Lock()
 	defer a.commitmentStopFileMu.Unlock()
 	if a.commitmentStopFileWritten[domain] {

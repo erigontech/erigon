@@ -173,6 +173,25 @@ func TestHexStopFileSurvivesResetExec(t *testing.T) {
 	require.True(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
 }
 
+func TestHexStopDBKeySurvivesResetExecWithoutStopFile(t *testing.T) {
+	f := newHexStopFixture(t, kv.CommitmentDomain)
+	rawDB := f.freshChaindata(t)
+	db, agg := f.openAgg(t, rawDB)
+	require.NoFileExists(t, f.stopFilePath())
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
+	}))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+
+	rawDB = dbCfg(dbcfg.ChainDB, f.dirs.Chaindata).MustOpen()
+	t.Cleanup(rawDB.Close)
+	_, agg = f.openAgg(t, rawDB)
+	require.Equal(t, kv.CommitmentBinDomain, agg.CanonicalCommitmentDomain())
+}
+
 func TestHexStopFileDroppedWhenDomainsInLockstep(t *testing.T) {
 	f := newHexStopFixture(t)
 	f.writeStopFile(t)
