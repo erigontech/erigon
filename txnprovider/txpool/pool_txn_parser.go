@@ -481,7 +481,9 @@ type TxnSlot struct {
 	// Invalid tuples and authorizations for other chains are omitted.
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
-	AuthAndNonces   []AuthAndNonce
+	AuthAndNonces []AuthAndNonce
+	// A pooled frame without a validation result is restored and parked. It has
+	// no payer reservation until its first successful validation.
 	frameValidation *protocol.FrameValidation
 }
 

@@ -59,14 +59,12 @@ type frameValidationBatch struct {
 	results    map[*TxnSlot]frameValidationResult
 }
 
-// frameBlockUpdate is the validation work left after applying a block update
-// under the pool lock. The backend work runs only after that lock is released.
-type frameBlockUpdate struct {
+// frameRevalidationBatch ties parked entries to the pool's state view while
+// their backend validation runs outside the pool lock.
+type frameRevalidationBatch struct {
 	generation uint64
 	blockHash  common.Hash
 	parked     []*metaTxn
-	unwound    TxnSlots
-	restoring  []common.Address
 }
 
 var errFrameStateChanged = errors.New("frame validation state changed")
@@ -75,7 +73,7 @@ var errFrameStateChanged = errors.New("frame validation state changed")
 // the simulation gate or a newer pool head, so the limit does not grow with the batch size.
 // The remote worker admits one transaction per batch; waiting in its queue
 // does not consume that transaction's deadline. Startup restoration uses one
-// sender's nonce chain per batch so earlier frames cannot exhaust later budgets.
+// frame per batch so earlier frames cannot exhaust later budgets.
 const frameValidationTimeout = 5 * time.Second
 
 func (tx *TxnSlot) hasKeyedNonce() bool {
@@ -83,66 +81,54 @@ func (tx *TxnSlot) hasKeyedNonce() bool {
 	return ok && !frame.UsesLegacyNonce()
 }
 
-// Restored frames need fresh validation outside the pool lock. Defer them together
-// with ordinary transactions in the same account-nonce chain so nonce-gap checks
-// see every predecessor. Other ordinary transactions can be restored immediately.
+// Restore frames before ordinary transactions so their parked entries protect
+// nonce successors until validation finishes outside the pool lock.
 // The caller must hold the pool lock to read the local transaction history.
-func (p *TxPool) splitRestoredTxns(txns TxnSlots) (immediate, deferred TxnSlots) {
-	legacyFrameSenders := make(map[common.Address]struct{})
-	for i, txn := range txns.Txns {
-		if txn.TxType() == FrameTxnType && !txn.hasKeyedNonce() {
-			legacyFrameSenders[txns.Senders.AddressAt(i)] = struct{}{}
-		}
-	}
+func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 	for i, txn := range txns.Txns {
 		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
-		_, sharesNonceChain := legacyFrameSenders[txns.Senders.AddressAt(i)]
-		if txn.TxType() == FrameTxnType || sharesNonceChain {
-			deferred.Append(txn, txns.Senders.At(i), isLocal)
+		if txn.TxType() == FrameTxnType {
+			frames.Append(txn, txns.Senders.At(i), isLocal)
 		} else {
-			immediate.Append(txn, txns.Senders.At(i), isLocal)
+			ordinary.Append(txn, txns.Senders.At(i), isLocal)
 		}
 	}
-	return immediate, deferred
+	return ordinary, frames
 }
 
-// The caller holds the pool lock. Counts keep overlapping restores from
-// releasing the same sender's nonce-chain guard too early.
-func (p *TxPool) beginFrameRestoration(txns TxnSlots) []common.Address {
-	var senders []common.Address
-	for _, txn := range txns.Txns {
-		frame, ok := txn.Txn.(*types.FrameTransaction)
-		if !ok || !frame.UsesLegacyNonce() {
+// Restored frames have no current validation or payer reservation. Keep them
+// indexed but unselectable until revalidation succeeds; a backend failure must
+// not lose transactions we already held. The caller holds the pool lock.
+func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*metaTxn) {
+	var announcements Announcements
+	for i, txn := range txns.Txns {
+		if p.byHash[string(txn.IDHash[:])] != nil {
 			continue
 		}
-		sender := frame.SenderAddress
-		p.frameRestorations[sender]++
-		p.frameAccountsToRefresh[sender] = struct{}{}
-		senders = append(senders, sender)
+		sender, isLocal := txns.Senders.AddressAt(i), txns.IsLocal[i]
+		txn.SenderID, txn.Traced = p.senders.getOrCreateID(sender, p.logger)
+		reason := p.validateFrame(txn, isLocal)
+		if reason == txpoolcfg.Success && txn.HasBlobs() {
+			reason = p.validateBlobTxn(txn, isLocal)
+		}
+		if reason == txpoolcfg.Success {
+			txn.frameValidation = nil
+			mt := newMetaTxn(txn, isLocal, blockNum)
+			if reason = p.addLocked(mt, &announcements); reason == txpoolcfg.NotSet {
+				p.senderLastActivity[txn.SenderID] = blockNum
+				p.frameAccountsToRefresh[sender] = struct{}{}
+				parked = append(parked, mt)
+				continue
+			}
+		}
+		p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
 	}
-	return senders
+	return parked
 }
 
-func (p *TxPool) finishFrameRestoration(ctx context.Context, senders []common.Address) error {
-	// Release guards even if cancellation prevents opening a fresh state view.
-	p.lock.Lock()
-	for _, sender := range senders {
-		p.frameRestorations[sender]--
-		if p.frameRestorations[sender] == 0 {
-			delete(p.frameRestorations, sender)
-			p.frameAccountsToRefresh[sender] = struct{}{}
-		}
-	}
-	p.lock.Unlock()
-	return p.withLockedState(ctx, nil, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
-		var announcements Announcements
-		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger); err != nil {
-			return err
-		}
-		p.pending.EnforceBestInvariants()
-		p.notifyPendingTxns(announcements)
-		return nil
-	})
+func (p *TxPool) hasParkedLegacyFrame(senderID uint64) bool {
+	frame := p.all.senderIDFrameTxn[senderID]
+	return frame != nil && !frame.keyedNonce && frame.currentSubPool == 0
 }
 
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
@@ -350,13 +336,20 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	return v, nil
 }
 
-// checkFrameAdmission checks sender exclusivity and payer reservations under the
-// pool lock, after simulation has established the transaction's payer and cost.
+// checkFrameAdmission checks sender exclusivity and any payer reservation under
+// the pool lock. Restored frames remain parked without a validation result.
 func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
 	v := txn.frameValidation
 	pooledFrame := p.all.senderIDFrameTxn[txn.SenderID]
-	if v == nil || pooledFrame != nil && pooledFrame != found {
+	if pooledFrame != nil && pooledFrame != found {
 		return txpoolcfg.InvalidFrame
+	}
+	if v == nil {
+		// A restored candidate cannot displace an admitted transaction before validation.
+		if found != nil {
+			return txpoolcfg.NotReplaced
+		}
+		return txpoolcfg.NotSet
 	}
 	return p.checkFrameReservation(v, found)
 }
@@ -401,7 +394,7 @@ func (p *TxPool) checkFrameReservation(v *protocol.FrameValidation, previous *me
 	return txpoolcfg.NotSet
 }
 
-// Restoring nonce chains may exceed the queued limit, and parked frames are
+// Blocked nonce chains may exceed the queued limit, and parked frames are
 // outside the sub-pools. Both still count toward total capacity.
 func (p *TxPool) enforceTotalCapacity(pendingBaseFee uint64) {
 	excess := len(p.byHash) - p.pending.limit - p.baseFee.limit - p.queued.limit
@@ -416,19 +409,12 @@ func (p *TxPool) enforceTotalCapacity(pendingBaseFee uint64) {
 	}
 	fee := *uint256.NewInt(pendingBaseFee)
 	sort.Slice(parked, func(i, j int) bool { return parked[i].worse(parked[j], fee) })
-	for excess > 0 && (len(parked) > 0 || len(p.frameRestorations) > 0) {
-		var worst *metaTxn
-		if len(parked) > 0 {
-			worst = parked[0]
-		}
+	for excess > 0 && len(parked) > 0 {
+		worst := parked[0]
 		for _, candidate := range []*metaTxn{p.pending.Worst(), p.baseFee.Worst(), p.queued.Worst()} {
-			if candidate != nil && (worst == nil || candidate.worse(worst, fee)) {
+			if candidate != nil && candidate.worse(worst, fee) {
 				worst = candidate
 			}
-		}
-		// Ordinary transactions can also remain indexed outside the sub-pools.
-		if worst == nil {
-			break
 		}
 		reason := txpoolcfg.QueuedPoolOverflow
 		switch worst.currentSubPool {
@@ -534,6 +520,10 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	var parked []*metaTxn
 	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
+		if previous == nil {
+			parked = append(parked, mt)
+			continue
+		}
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.

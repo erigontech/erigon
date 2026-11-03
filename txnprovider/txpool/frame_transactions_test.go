@@ -1191,8 +1191,32 @@ func TestFramePoolUnwindRestoresNonceChain(t *testing.T) {
 	}
 }
 
+func TestFramePoolUnwindDoesNotReplaceBeforeValidation(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	ordinary.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(ordinary, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.err = context.DeadlineExceeded
+	frame := framePoolSlot(t, sender, 2, 4)
+	var unwind TxnSlots
+	unwind.Append(frame, sender[:], false)
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+	require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
+	require.Equal(t, PendingSubPool, pool.byHash[string(ordinary.IDHash[:])].currentSubPool)
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Empty(t, backend.calls, "restoration cannot replace an admitted transaction without validation")
+}
+
 func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
-	for _, outcome := range []string{"valid", "invalid", "unavailable", "delegated", "nonce gap limit"} {
+	for _, outcome := range []string{"valid", "invalid", "unavailable", "head mismatch", "backend error", "delegated", "nonce gap limit"} {
 		t.Run(outcome, func(t *testing.T) {
 			codeHash := accounts.EmptyCodeHash
 			if outcome == "delegated" {
@@ -1271,13 +1295,31 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 				backend.valid = false
 			case "unavailable":
 				backend.err = context.DeadlineExceeded
+			case "head mismatch":
+				backend.err = status.Error(codes.Aborted, "frame validation head changed")
+			case "backend error":
+				backend.err = errors.New("validation backend unavailable")
 			}
 			change := blockChange(common.Hash{2}, 0)
 			change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
 			require.NoError(t, pool.OnNewBlock(ctx, change, frameTxns, TxnSlots{}, TxnSlots{}))
-			if outcome == "invalid" || outcome == "unavailable" {
+			if outcome == "invalid" {
 				require.Empty(t, pool.byHash, "failed restoration must recheck the remaining nonce gap")
 				return
+			}
+			if backend.err != nil {
+				restored := pool.byHash[string(frame.IDHash[:])]
+				require.NotNil(t, restored, "retryable validation failures must retain unwound frames")
+				require.Zero(t, restored.currentSubPool)
+				require.Nil(t, restored.TxnSlot.frameValidation)
+				require.Empty(t, pool.frameReservations)
+				for _, txn := range successors.Txns {
+					mt := pool.byHash[string(txn.IDHash[:])]
+					require.NotNil(t, mt)
+					require.Equal(t, QueuedSubPool, mt.currentSubPool)
+				}
+				backend.err = nil
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{3}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			}
 			restored := pool.byHash[string(frame.IDHash[:])]
 			require.NotNil(t, restored)
@@ -1334,7 +1376,6 @@ func TestFramePoolUnwindKeepsUnrelatedQueueLimit(t *testing.T) {
 	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
 	require.NoError(t, pool.OnNewBlock(ctx, change, unwound, TxnSlots{}, TxnSlots{}))
-	require.Empty(t, pool.frameRestorations)
 	require.Equal(t, 2, pool.pending.Len())
 	require.Equal(t, 1, pool.queued.Len())
 }
@@ -1369,12 +1410,11 @@ func TestFramePoolUnwindKeepsTotalCapacity(t *testing.T) {
 		reasons, err := pool.AddLocalTxns(ctx, later)
 		require.NoError(t, err)
 		require.Len(t, pool.byHash, 2, "restoring chains still count toward total capacity")
-		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.QueuedPoolOverflow}, reasons)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.QueuedPoolOverflow, txpoolcfg.QueuedPoolOverflow}, reasons)
 	}
 	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
 	require.NoError(t, pool.OnNewBlock(ctx, change, frameTxns, TxnSlots{}, TxnSlots{}))
-	require.Empty(t, pool.frameRestorations)
 	require.Equal(t, 2, pool.pending.Len())
 	require.Zero(t, pool.queued.Len())
 	for _, txn := range []*TxnSlot{frame, successor} {
@@ -1422,6 +1462,7 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 		require.Equal(t, PendingSubPool, mt.currentSubPool)
 		require.NotZero(t, mt.subPool&IsLocal)
 		require.Equal(t, txn.BlobBundles, mt.TxnSlot.BlobBundles)
+		require.Contains(t, restored.senderLastActivity, mt.TxnSlot.SenderID)
 	}
 }
 
@@ -1540,7 +1581,9 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 	}{
 		{name: "accepted", valid: true, wantKept: true},
 		{name: "rejected by simulation"},
-		{name: "backend unavailable", backendErr: errors.New("validation backend unavailable")},
+		{name: "backend unavailable", backendErr: errors.New("validation backend unavailable"), wantKept: true},
+		{name: "head mismatch", backendErr: status.Error(codes.Aborted, "frame validation head changed"), wantKept: true},
+		{name: "deadline", backendErr: context.DeadlineExceeded, wantKept: true},
 		{name: "duplicate", valid: true, alreadyPooled: true, wantKept: true},
 		{name: "rejected but already pooled", alreadyPooled: true, wantKept: true},
 	} {
@@ -1566,8 +1609,21 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 			backend.calls = nil
 
 			require.NoError(t, pool.start(ctx))
-			require.Len(t, backend.calls, 1)
+			if tc.alreadyPooled {
+				require.Empty(t, backend.calls)
+			} else {
+				require.Len(t, backend.calls, 1)
+			}
 			require.Equal(t, tc.wantKept, pool.byHash[string(frame.IDHash[:])] != nil)
+			if tc.wantKept && !tc.alreadyPooled {
+				require.Contains(t, pool.senderLastActivity, pool.byHash[string(frame.IDHash[:])].TxnSlot.SenderID)
+			}
+			if tc.backendErr != nil {
+				mt := pool.byHash[string(frame.IDHash[:])]
+				require.Zero(t, mt.currentSubPool)
+				require.Nil(t, mt.TxnSlot.frameValidation)
+				require.Empty(t, pool.frameReservations)
+			}
 			_, err := pool.flushNoFsync(ctx)
 			require.NoError(t, err)
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
@@ -1576,6 +1632,15 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 				require.Equal(t, tc.wantKept, persisted, "rejected restored rows must be removed on flush")
 				return nil
 			}))
+			if tc.backendErr != nil {
+				backend.err, backend.valid = nil, true
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				mt := pool.byHash[string(frame.IDHash[:])]
+				require.NotNil(t, mt)
+				require.Equal(t, PendingSubPool, mt.currentSubPool)
+				require.NotNil(t, mt.TxnSlot.frameValidation)
+				require.Equal(t, mt.TxnSlot.frameValidation.MaxCost, pool.frameReservations[sender].cost)
+			}
 		})
 	}
 }
@@ -1614,7 +1679,7 @@ func TestFramePoolReloadDeletesRejectedNonceSuccessor(t *testing.T) {
 	}))
 }
 
-func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
+func TestFramePoolReloadErrorRetainsTransaction(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	pool.chainID.SetUint64(1)
 	backend := pool.ethBackend.(*frameValidationBackend)
@@ -1624,25 +1689,23 @@ func TestFramePoolReloadErrorAllowsResubmission(t *testing.T) {
 	}))
 	backend.err = errors.New("validation backend unavailable")
 	require.NoError(t, pool.start(ctx))
-	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 		known, err := pool.IdHashKnown(tx, frame.IDHash[:])
 		require.NoError(t, err)
-		require.False(t, known, "a failed reload must allow the transaction to be fetched again")
+		require.True(t, known, "retained frames must not need to be fetched again")
 		return nil
 	}))
 	backend.err = nil
-	var txns TxnSlots
-	txns.Append(frame, sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
-	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	_, err := pool.flushNoFsync(ctx)
 	require.NoError(t, err)
 	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 		persisted, err := tx.Has(kv.PoolTransaction, frame.IDHash[:])
 		require.NoError(t, err)
-		require.True(t, persisted, "the deletion queued by reload must not erase a successful resubmission")
+		require.True(t, persisted)
 		return nil
 	}))
 }
