@@ -284,6 +284,13 @@ func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 	evm.Cancel()
 	evm.SetAbortOnDependency(false)
 	require.True(t, evm.Cancelled(), "an explicit Cancel survives the end of the opt-in")
+
+	evm.Reset(evmtypes.TxContext{}, ibs)
+	evm.SetAbortOnDependency(true)
+	evm.cancelOnReadDependency()
+	evm.Cancel()
+	evm.SetAbortOnDependency(false)
+	require.True(t, evm.Cancelled(), "a Cancel after the dependency abort survives the end of the opt-in")
 }
 
 func TestZeroValueCallToUnflushedDeployCancelsOptedInRun(t *testing.T) {

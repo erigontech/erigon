@@ -100,12 +100,12 @@ type EVM struct {
 	// virtual machine configuration options used to initialise the
 	// evm.
 	config Config
-	// abort is used to abort the EVM calling operations
-	abort atomic.Bool
+	// abort is used to abort the EVM calling operations: abortCancel and abortDependency bits,
+	// so ending the dependency opt-in clears only its own cause.
+	abort atomic.Uint32
 	// abortOnDependency cancels once the state recorded a read dependency: the run's
 	// result is discarded and re-executed, so finishing it is wasted work.
 	abortOnDependency bool
-	abortedOnDep      bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -161,13 +161,13 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
-	evm.abort.Store(false)
+	evm.abort.Store(0)
 }
 
 // ResetBetweenBlocks prepares the EVM for new work and clears cancellation.
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	evm.ResetForSystemCall(blockCtx, txCtx, ibs, vmConfig, chainRules)
-	evm.abort.Store(false)
+	evm.abort.Store(0)
 }
 
 // ResetForSystemCall prepares the EVM for another system call while preserving
@@ -185,30 +185,33 @@ func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.precompiles = Precompiles(chainRules)
 }
 
+const (
+	abortCancel uint32 = 1 << iota
+	abortDependency
+)
+
 // Cancel requests cancellation without waiting for execution to stop.
 // It is safe to call concurrently and more than once.
-func (evm *EVM) Cancel() { evm.abort.Store(true) }
+func (evm *EVM) Cancel() { evm.abort.Or(abortCancel) }
 
 // Cancelled reports whether cancellation is currently requested.
-func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
+func (evm *EVM) Cancelled() bool { return evm.abort.Load() != 0 }
 
 // SetAbortOnDependency makes each call frame cancel the run once the state recorded a
 // read dependency. Only for executors that discard and re-run such results.
 // Turning it off clears a cancellation the dependency caused, so it does not reach the next task.
 func (evm *EVM) SetAbortOnDependency(on bool) {
 	evm.abortOnDependency = on
-	if !on && evm.abortedOnDep {
-		evm.abortedOnDep = false
-		evm.abort.Store(false)
+	if !on {
+		evm.abort.And(^abortDependency)
 	}
 }
 
 // cancelOnReadDependency runs once per frame, not per jump: a check in the jump path
 // costs every loop.
 func (evm *EVM) cancelOnReadDependency() {
-	if evm.abortOnDependency && !evm.abort.Load() && evm.intraBlockState.HadInvalidRead() {
-		evm.abortedOnDep = true
-		evm.abort.Store(true)
+	if evm.abortOnDependency && evm.intraBlockState.HadInvalidRead() {
+		evm.abort.Or(abortDependency)
 	}
 }
 
@@ -282,7 +285,7 @@ func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, bailout bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	if evm.abort.Load() {
+	if evm.abort.Load() != 0 {
 		return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
 	}
 
@@ -415,7 +418,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	if evm.abort.Load() {
+	if evm.abort.Load() != 0 {
 		return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
 	}
 
@@ -483,7 +486,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, value uint256.Int, gas mdgas.MdGas) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	if evm.abort.Load() {
+	if evm.abort.Load() != 0 {
 		return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
 	}
 
@@ -541,7 +544,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	if evm.abort.Load() {
+	if evm.abort.Load() != 0 {
 		return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
 	}
 
