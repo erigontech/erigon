@@ -1036,12 +1036,13 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
 
+	var pruneInProgress bool
 	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
 	if err != nil {
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+	} else {
+		pruneInProgress = (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 	}
-
-	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
