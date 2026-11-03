@@ -850,9 +850,10 @@ func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
 }
 
 func enableHistoricalRCache(t *testing.T) {
-	saved := statecfg.Schema.RCacheDomain
+	saved, assertEnabled := statecfg.Schema.RCacheDomain, dbg.AssertEnabled
 	statecfg.EnableHistoricalRCache()
-	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+	dbg.AssertEnabled = false // asserts turn off serving persisted receipts
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain, dbg.AssertEnabled = saved, assertEnabled })
 }
 
 // requirePersistedReceipt checks that block 1's first receipt is served from the persistent cache.
