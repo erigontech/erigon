@@ -282,7 +282,14 @@ func TestValidationChargeSeedsCommittedOrigin(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ws)
 
-	origin, ok := vm.LoadOriginAccount(sender)
-	require.True(t, ok)
-	require.Equal(t, uint64(1_000_000), origin.Balance.Uint64(), "the origin is the committed account, not the balance after tx 0")
+	_, ok := vm.LoadOriginAccount(sender)
+	require.False(t, ok, "the account read after tx 0's credit is not the committed account")
+
+	fresh := state.NewVersionMap(nil)
+	ws, _, err = chargeSenderAtValidation(task, result, state.Version{TxIndex: 1}, fresh, reader)
+	require.NoError(t, err)
+	require.NotNil(t, ws)
+	origin, ok := fresh.LoadOriginAccount(sender)
+	require.True(t, ok, "with no lower write the read account is the committed one")
+	require.Equal(t, uint64(1_000_000), origin.Balance.Uint64())
 }

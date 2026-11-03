@@ -830,6 +830,16 @@ func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key ac
 	return res
 }
 
+// accountWrittenBelow reports whether a tx below txIdx wrote any field of addr's account.
+func (vm *VersionMap) accountWrittenBelow(addr accounts.Address, txIdx int) bool {
+	for _, p := range [...]AccountPath{AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath, CodeHashPath} {
+		if _, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, txIdx-1); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) with a write for (addr, path,
 // key), ok=false when none. Used to detect account revival after a SelfDestruct.
 func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int) (int, bool) {
