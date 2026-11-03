@@ -1904,3 +1904,20 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
 }
+
+func TestResumedBlockDoesNotWaitForDeployerInSkippedPrefix(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x04})
+	bal := types.BlockAccessList{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x00}}},
+	}}
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), bal, discardConsumers(1), false, nil)
+	be.sealSkippedPrefix(3)
+	_, res, _ := be.versionMap.ReadAddress(addr, 4)
+	require.Equal(t, state.MVReadResultNone, res.Status(), "the deployer at tx 1 is in the base state of a block resumed at tx 3")
+
+	fresh := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), bal, discardConsumers(1), false, nil)
+	fresh.sealSkippedPrefix(-1)
+	_, res, _ = fresh.versionMap.ReadAddress(addr, 4)
+	require.Equal(t, state.MVReadResultDependency, res.Status(), "a block run from its start still waits for the deployer")
+}
