@@ -1159,8 +1159,11 @@ func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmod
 	}
 
 	resp := &engine_types.PayloadStatus{Status: convertGrpcStatusToEngineStatus(status)}
-	if resp.Status == engine_types.ValidStatus || resp.Status == engine_types.InvalidStatus {
+	switch resp.Status {
+	case engine_types.ValidStatus:
 		resp.LatestValidHash = &latestValidHash
+	case engine_types.InvalidStatus:
+		resp.LatestValidHash = latestValidOrNull(latestValidHash)
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)

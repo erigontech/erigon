@@ -108,3 +108,18 @@ func TestNewPayloadOfCanonicalUnexecutedBlockIsNotValid(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, status)
 }
+
+func TestNewPayloadWithBadHeaderWhileLaggingIsInvalidWithNullLatestValidHash(t *testing.T) {
+	srv, chainPack := newExecLagEngineServer(t, 5, 2)
+	tip := chainPack.Blocks[3]
+	badHeader := types.CopyHeader(tip.Header())
+	badHeader.Time = chainPack.Blocks[2].Time()
+	bad := tip.WithSeal(badHeader)
+
+	for range 2 {
+		status, err := srv.HandleNewPayload(t.Context(), "test", bad)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.InvalidStatus, status.Status)
+		require.Nil(t, status.LatestValidHash)
+	}
+}
