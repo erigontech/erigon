@@ -349,6 +349,11 @@ func (b *BackwardBeaconDownloader) SetGloasEnvelopeSignatureValidator(anchorStat
 	}
 }
 
+func (b *BackwardBeaconDownloader) GloasEnvelopeSignatureVerifiable(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	_, known, err := backfilledGloasEnvelopeSigningKey(b.gloasSignatureState, block, envelope)
+	return err == nil && known
+}
+
 // SetOnInitialGloasBlock persists the trusted anchor without classifying its payload before traversing its ancestors.
 func (b *BackwardBeaconDownloader) SetOnInitialGloasBlock(root common.Hash, persist func(*cltypes.SignedBeaconBlock) error) {
 	b.initialGloasRoot = root
