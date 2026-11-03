@@ -1339,7 +1339,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 
 	s := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: max(0, uint64(fromTxNum)),
+		startTxNum: uint64(max(0, fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}

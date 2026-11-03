@@ -7,6 +7,7 @@
   executor's `--batchSize` cut or `--sync.loop.block.limit`), and `latestValidHash` is null unless
   the status is `VALID` or `INVALID` (#25382) — by @awskii
 - caplin: historical backfill now bans peers that serve invalid Gloas envelopes and retries other peers, even with fewer than 32 peers connected (#25528).
+- caplin: lower head latency and shorter fork-choice and head-state lock holds: the next-epoch state is precomputed off the fork-choice lock, head events are sent before the head-state copy, and head `validators` responses are encoded after the head-state lock is released (#25473, #25539, #25542, #25543, #25596, #25619, #25646, #25647, #25660).
 
 ---
 

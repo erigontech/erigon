@@ -1407,7 +1407,7 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 			return fmt.Errorf("execution payload envelope blob %d is nil", i)
 		}
 		bundle := BlobBundle{Blob: blob, Commitment: common.Bytes48(*commitment), KzgProofs: make([]common.Bytes48, a.beaconChainCfg.NumberOfColumns)}
-		cells, err := das.ComputeCells(blob)
+		cells, err := peerdasutils.ComputeCells(blob)
 		if err != nil {
 			return err
 		}
