@@ -94,7 +94,6 @@ type blockJob struct {
 	retryDelay          time.Duration
 	storageErrorLogged  bool
 	finishPayloadImport func()
-	elColumnsStarted    atomic.Bool
 	// Block roots exclude the block signature, so different signed copies can share a job.
 	// Retain the accepted copy to preserve its validated signature on retries.
 	pendingBlockWrite *cltypes.SignedBeaconBlock
@@ -230,6 +229,8 @@ type blockService struct {
 	validationCalls map[blockValidationContextKey]*blockValidationContextCall
 	validationSlots chan struct{}
 
+	elImportsStarted *lru.Cache[proposerIndexAndSlot, struct{}]
+
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
@@ -275,18 +276,23 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
+	elImportsStarted, err := lru.New[proposerIndexAndSlot, struct{}]("el_column_imports", seenBlockCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	b := &blockService{
-		forkchoiceStore: forkchoiceStore,
-		syncedData:      syncedData,
-		ethClock:        ethClock,
-		beaconCfg:       beaconCfg,
-		seenBlocksCache: seenBlocksCache,
-		reservations:    make(map[proposerIndexAndSlot]*blockReservation),
-		validationCache: validationCache,
-		validationCalls: make(map[blockValidationContextKey]*blockValidationContextCall),
-		validationSlots: make(chan struct{}, maxConcurrentBlockValidationContexts),
-		emitter:         emitter,
-		db:              db,
+		forkchoiceStore:  forkchoiceStore,
+		syncedData:       syncedData,
+		ethClock:         ethClock,
+		beaconCfg:        beaconCfg,
+		seenBlocksCache:  seenBlocksCache,
+		reservations:     make(map[proposerIndexAndSlot]*blockReservation),
+		validationCache:  validationCache,
+		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
+		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
+		elImportsStarted: elImportsStarted,
+		emitter:          emitter,
+		db:               db,
 	}
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
@@ -322,7 +328,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
-	b.startELColumnsImport(ctx, msg)
+	b.startELColumnsImportOnce(ctx, msg)
 	accepted, err := b.processAndStoreBlock(ctx, msg, false)
 	if err != nil {
 		if waitsForBlockDependency(err) {
@@ -346,14 +352,29 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	return nil
 }
 
+// startELColumnsImportOnce starts the EL column import for the first block of a proposer and slot only, so equivocating
+// blocks and retries of a queued block do not repeat the getBlobs call and the column work.
+func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+	// The importer's fork and engine checks give the same result for every block of a proposer and slot, its blob-count
+	// check does not. A queued block gets here before gossip validation checked that count.
+	if v := block.Version(); v >= clparams.FuluVersion && v < clparams.GloasVersion && b.blobCountOutOfRange(block) {
+		return
+	}
+	if started, _ := b.elImportsStarted.ContainsOrAdd(blockGossipKey(block), struct{}{}); !started {
+		b.startELColumnsImport(ctx, block)
+	}
+}
+
+// blobCountOutOfRange reports whether a Fulu block has no blobs or more than the blob limit of its epoch.
+func (b *blockService) blobCountOutOfRange(block *cltypes.SignedBeaconBlock) bool {
+	blobs := uint64(block.Block.Body.BlobKzgCommitments.Len())
+	return blobs == 0 || blobs > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+}
+
 // importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
 // (engine_getBlobsV2), so the block need not wait for them on gossip.
 func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
-	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || block.Block.Body.BlobKzgCommitments.Len() == 0 || b.engine == nil {
-		return
-	}
-	// A queued block can get here before gossip validation checked its blob count.
-	if uint64(block.Block.Body.BlobKzgCommitments.Len()) > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock {
+	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || b.engine == nil || b.blobCountOutOfRange(block) {
 		return
 	}
 	peerDas := b.forkchoiceStore.GetPeerDas()
@@ -1270,9 +1291,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
 				}
 				authenticated = true
-				if job.elColumnsStarted.CompareAndSwap(false, true) {
-					b.startELColumnsImport(ctx, job.block)
-				}
+				b.startELColumnsImportOnce(ctx, job.block)
 			}
 			accepted, blockErr = b.processAndStoreBlock(ctx, block, hasPendingBlockWrite)
 			return blockErr

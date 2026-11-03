@@ -54,6 +54,15 @@ func (s *invalidEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.Peer
 }
 
 func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeBatchExpiration = 10 * time.Millisecond
+	requestEnvelopeRetryInterval = time.Second
+	t.Cleanup(func() {
+		requestEnvelopeBatchExpiration = previousExpiration
+		requestEnvelopeRetryInterval = previousRetryInterval
+	})
+
 	for _, httpAvailable := range []bool{false, true} {
 		t.Run(fmt.Sprint(httpAvailable), func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
