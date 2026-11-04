@@ -127,21 +127,70 @@ func TestUnwoundBlobTxnDoesNotKeepValidationCells(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 
-	change := &remoteproto.StateChangeBatch{
+	minedChange := &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee:  1,
 		BlockGasLimit:        30_000_000,
 		PendingBlobFeePerGas: 1,
 		ChangeBatch: []*remoteproto.StateChange{{
-			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+			BlockHeight: 1,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, txns, TxnSlots{}))
+	require.NoError(t, pool.OnNewBlock(ctx, minedChange, TxnSlots{}, TxnSlots{}, txns))
+	require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+	for _, hash := range slot.GetBlobHashes() {
+		require.NotContains(t, pool.blobs.bundles, hash)
+	}
+
+	var unwindBlobTxns TxnSlots
+	sender := common.Address{1}
+	unwindBlobTxns.Append(slot, sender[:], false)
+	unwoundChange := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee:  1,
+		BlockGasLimit:        30_000_000,
+		PendingBlobFeePerGas: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 2,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{2}),
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, unwoundChange, TxnSlots{}, unwindBlobTxns, TxnSlots{}))
 
 	pooled := pool.byHash[string(slot.IDHash[:])]
 	require.NotNil(t, pooled)
 	for i, bundle := range pooled.TxnSlot.BlobBundles {
 		require.Nil(t, bundle.Cells, "pooled txn keeps cells for blob %d", i)
 	}
+	bundles := pool.GetBlobs(slot.GetBlobHashes())
+	require.Len(t, bundles, len(slot.BlobBundles))
+	for i, bundle := range bundles {
+		require.NotNil(t, bundle.Cells, "cells served for blob %d", i)
+		want, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+		require.NoError(t, err)
+		for c := range want {
+			require.Equal(t, want[c][:], bundle.Cells[c][:], "blob %d cell %d", i, c)
+		}
+	}
+}
+
+func TestBlobCellsAddIsBoundedAndReplaces(t *testing.T) {
+	cells := make(blobCells)
+	for i := 0; i <= blobCellsCacheSize; i++ {
+		hash := common.Hash{byte(i), byte(i >> 8)}
+		cells.add(hash, &[goethkzg.CellsPerExtBlob]*goethkzg.Cell{})
+	}
+
+	require.Len(t, cells, blobCellsCacheSize)
+	lastIndex := blobCellsCacheSize
+	lastHash := common.Hash{byte(lastIndex), byte(lastIndex >> 8)}
+	require.NotContains(t, cells, lastHash)
+
+	hash := common.Hash{}
+	original := cells[hash]
+	replacement := &[goethkzg.CellsPerExtBlob]*goethkzg.Cell{}
+	cells.add(hash, replacement)
+	require.NotSame(t, original, cells[hash])
+	require.Same(t, replacement, cells[hash])
 }
 
 func TestAmsterdamValidationDoesNotStageCells(t *testing.T) {
@@ -196,6 +245,16 @@ func TestFromDBAmsterdamBlobCellsStayBounded(t *testing.T) {
 	}))
 
 	require.LessOrEqual(t, pool.blobs.cells.Len(), blobCellsCacheSize)
+	bundles := pool.GetBlobs(template.GetBlobHashes())
+	require.Len(t, bundles, len(template.BlobBundles))
+	for i, bundle := range bundles {
+		require.NotNil(t, bundle.Cells, "cells restored for blob %d", i)
+		want, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+		require.NoError(t, err)
+		for c := range want {
+			require.Equal(t, want[c][:], bundle.Cells[c][:], "blob %d cell %d", i, c)
+		}
+	}
 	pool.all.ascendAll(func(mt *metaTxn) bool {
 		for i, bundle := range mt.TxnSlot.BlobBundles {
 			require.Nil(t, bundle.Cells, "restored txn keeps cells for blob %d", i)
