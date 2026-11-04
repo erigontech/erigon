@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -224,6 +225,78 @@ func TestTxPoolContentIncludesBlobTxs(t *testing.T) {
 	contentFrom, err := api.ContentFrom(context.Background(), sender)
 	require.NoError(err)
 	require.Equal(blobTxn, contentFrom["pending"]["7"])
+}
+
+func TestTxPoolKeyedNonceEntries(t *testing.T) {
+	sender, to := common.Address{1}, common.Address{2}
+	for _, tc := range []struct {
+		name          string
+		keys          []uint256.Int
+		wrapped       bool
+		ordinaryNonce uint64
+	}{
+		{name: "keyed", keys: []uint256.Int{{1}}, ordinaryNonce: 7},
+		{name: "multiple keys", keys: []uint256.Int{{1}, {2}}, ordinaryNonce: 7},
+		{name: "wrapped", keys: []uint256.Int{{1}}, wrapped: true, ordinaryNonce: 7},
+		{name: "account nonce", keys: []uint256.Int{{}}, ordinaryNonce: 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := &types.FrameTransaction{
+				ChainID: *uint256.NewInt(1), NonceKeys: tc.keys, Nonce: 7, SenderAddress: sender,
+				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
+				Fees:   types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2)},
+			}
+			var frameRLP bytes.Buffer
+			if tc.wrapped {
+				frame.BlobVersionedHashes = []common.Hash{{1}}
+				wrapped := &types.FrameTxWrapper{
+					FrameTransaction: frame, WrapperVersion: 1,
+					Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}}, Proofs: make(types.KZGProofs, params.CellsPerExtBlob),
+				}
+				require.NoError(t, wrapped.MarshalBinaryWrapped(&frameRLP))
+			} else {
+				require.NoError(t, frame.MarshalBinary(&frameRLP))
+			}
+			frameKey, ordinaryKey := frame.Hash().Hex(), "7"
+			if tc.name == "account nonce" {
+				frameKey, ordinaryKey = "7", "8"
+			}
+			ordinary := types.NewTransaction(tc.ordinaryNonce, to, uint256.NewInt(1), params.TxGas, uint256.NewInt(2), nil)
+			var ordinaryRLP bytes.Buffer
+			require.NoError(t, ordinary.MarshalBinary(&ordinaryRLP))
+			for _, subpool := range []string{"pending", "queued"} {
+				t.Run(subpool, func(t *testing.T) {
+					kind := txpoolproto.AllReply_PENDING
+					encoded := [][]byte{ordinaryRLP.Bytes(), frameRLP.Bytes()}
+					if subpool == "queued" {
+						kind = txpoolproto.AllReply_QUEUED
+						encoded[0], encoded[1] = encoded[1], encoded[0]
+					}
+					pool := &stubPoolContentClient{all: &txpoolproto.AllReply{}}
+					for _, data := range encoded {
+						pool.all.Txs = append(pool.all.Txs, &txpoolproto.AllReply_Tx{TxnType: kind, Sender: gointerfaces.ConvertAddressToH160(sender), RlpTx: data})
+					}
+					api := NewTxPoolAPI(nil, pool)
+					content, err := api.Content(t.Context())
+					require.NoError(t, err)
+					entries := content[subpool][sender.Hex()]
+					require.Len(t, entries, 2)
+					require.Contains(t, entries, ordinaryKey)
+					require.Contains(t, entries, frameKey)
+					require.Equal(t, ordinary.Hash(), entries[ordinaryKey].Hash)
+					require.Equal(t, frame.Hash(), entries[frameKey].Hash)
+					contentFrom, err := api.ContentFrom(t.Context(), sender)
+					require.NoError(t, err)
+					require.Equal(t, entries, contentFrom[subpool])
+					inspect, err := api.Inspect(t.Context())
+					require.NoError(t, err)
+					require.Len(t, inspect[subpool][sender.Hex()], 2)
+					require.Contains(t, inspect[subpool][sender.Hex()], ordinaryKey)
+					require.Contains(t, inspect[subpool][sender.Hex()], frameKey)
+				})
+			}
+		})
+	}
 }
 
 func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {
