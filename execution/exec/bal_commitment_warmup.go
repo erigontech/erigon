@@ -335,10 +335,8 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 	stats.add(part.waves, part.pages, part.plan, part.io)
 }
 
-// prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
-// storage, and the commitment trie level by level, since a branch decides whether the next level exists.
-// prefetchBAL reads into the page cache the file pages of the BAL's commitment trie and, when state is set, of its
-// accounts and storage.
+// prefetchBAL reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie, level by
+// level since a branch decides whether the next level exists, and, when state is set, of its accounts and storage.
 func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, accs, slots [][]byte, state bool) {
 	started := time.Now()
 	var stats [3]prefetchStats
