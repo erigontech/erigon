@@ -115,12 +115,12 @@ type dataAvailabilityForkchoice struct {
 	f *envelopeContentsFixture
 }
 
-func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, blobDataAvailable bool) error {
 	d.f.record(contentsEvent{kind: eventConsensusValidation})
 	if !d.f.dataAvailable() {
 		return forkchoice.ErrEIP7594ColumnDataNotAvailable
 	}
-	return d.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope)
+	return d.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope, blobDataAvailable)
 }
 
 func (d *dataAvailabilityForkchoice) ClaimExecutionPayloadEnvelopeForGossip(ctx context.Context, root common.Hash, builderIndex uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {

@@ -721,6 +721,12 @@ func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash
 	return f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(executionBlockHash)
 }
 
+func (f *ForkChoiceStore) ExecutionPayloadInvalidated(blockRoot, executionBlockHash common.Hash) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.payloadInvalidatedLocked(blockRoot, executionBlockHash)
+}
+
 func (f *ForkChoiceStore) payloadValidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
 	if f.IsPayloadVerified(blockRoot) {
 		return true
@@ -1039,7 +1045,8 @@ func (f *ForkChoiceStore) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoo
 	f.envelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
-func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+// blobDataAvailable promises that the caller holds every bid blob with KZG proofs it verified or received from this node's EL.
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, blobDataAvailable bool) error {
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
 	}
@@ -1065,8 +1072,10 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	}
 	finishImport := f.BeginPayloadImport(block.Block.Slot)
 	defer finishImport()
-	if err := f.checkDataAvailability(block, root); err != nil {
-		return err
+	if !blobDataAvailable {
+		if err := f.checkDataAvailability(block, root); err != nil {
+			return err
+		}
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
