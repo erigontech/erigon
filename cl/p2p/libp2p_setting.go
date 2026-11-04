@@ -12,9 +12,9 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubDlo  = 2 // topic stable mesh low watermark
-	gossipSubDhi  = 6 // topic stable mesh high watermark
-	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
+	gossipSubDlo  = 6  // topic stable mesh low watermark
+	gossipSubDhi  = 12 // topic stable mesh high watermark
+	gossipSubDout = 1  // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
