@@ -125,15 +125,16 @@ func (result *RemoteTxnsResult) incompleteHashes() Hashes {
 	return nil
 }
 
-func (retry *RemoteTxnsRetry) seenRevision(hash []byte) uint64 {
-	for _, hashes := range []Hashes{retry.unsubmitted, retry.result.incompleteHashes()} {
-		for i := 0; i < len(hashes); i += 32 {
-			if bytes.Equal(hash, hashes[i:i+32]) {
-				return 0
+func (retry *RemoteTxnsRetry) seenRevision(hash []byte) (revision uint64, scanned int) {
+	for _, hashes := range [...]Hashes{retry.unsubmitted, retry.result.incompleteHashes()} {
+		for i := 0; i < len(hashes); i += length.Hash {
+			if bytes.Equal(hash, hashes[i:i+length.Hash]) {
+				return 0, scanned + i + length.Hash
 			}
 		}
+		scanned += len(hashes)
 	}
-	return retry.revision
+	return retry.revision, scanned
 }
 
 type discardRecord struct {
@@ -1172,6 +1173,11 @@ func (p *TxPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID Pee
 	return handled, result, err
 }
 
+const (
+	minUnvalidatedHashesForSet = 64
+	unvalidatedScanBudget      = 8
+)
+
 func (p *TxPool) addRemoteTxnsLocked(newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient, retry *RemoteTxnsRetry, view kvcache.CacheView) (handled Hashes, result *RemoteTxnsResult, err error) {
 	var previous *RemoteTxnsResult
 	var filtered []bool
@@ -1181,6 +1187,11 @@ func (p *TxPool) addRemoteTxnsLocked(newTxns TxnSlots, peerID PeerID, sentry sen
 			return nil, nil, nil
 		}
 		frontiers := make(map[common.Address]nonceRetryFrontier)
+		incomplete := previous.incompleteHashes()
+		unvalidatedCount := (len(retry.unsubmitted) + len(incomplete)) / length.Hash
+		var unvalidated map[common.Hash]struct{}
+		// A few early matches are cheaper than building a set for the whole list.
+		scanBytesLeft := unvalidatedScanBudget * unvalidatedCount * length.Hash
 		for i, txn := range newTxns.Txns {
 			if txn.TxType() == SetCodeTxnType {
 				continue
@@ -1193,7 +1204,25 @@ func (p *TxPool) addRemoteTxnsLocked(newTxns TxnSlots, peerID PeerID, sentry sen
 			if record, found := p.discardReasonsLRU.Peek(hash); found {
 				eligible = txn.TxType() != BlobTxnType
 				if record.reason == txpoolcfg.NonceTooDistant {
-					eligible, _, err = p.nonceGapRetryLocked(record.nonceGap, retry.seenRevision(txn.IDHash[:]), view, frontiers)
+					if unvalidated == nil && scanBytesLeft <= 0 && unvalidatedCount >= minUnvalidatedHashesForSet {
+						unvalidated = make(map[common.Hash]struct{}, unvalidatedCount)
+						for _, hashes := range [...]Hashes{retry.unsubmitted, incomplete} {
+							for i := 0; i < len(hashes); i += length.Hash {
+								unvalidated[common.Hash(hashes[i:i+length.Hash])] = struct{}{}
+							}
+						}
+					}
+					seenRevision := retry.revision
+					if unvalidated != nil {
+						if _, ok := unvalidated[txn.IDHash]; ok {
+							seenRevision = 0
+						}
+					} else if unvalidatedCount > 0 {
+						var scanned int
+						seenRevision, scanned = retry.seenRevision(txn.IDHash[:])
+						scanBytesLeft -= scanned
+					}
+					eligible, _, err = p.nonceGapRetryLocked(record.nonceGap, seenRevision, view, frontiers)
 					if err != nil {
 						return nil, nil, err
 					}
