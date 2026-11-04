@@ -407,13 +407,13 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var slot accounts.StorageKey
+		var slot common.Hash
 		if slotIndex < storageChanges {
-			slot = account.StorageChanges[slotIndex].Slot
+			slot = account.StorageChanges[slotIndex].Slot.Value()
 		} else {
-			slot = accounts.InternKey(account.StorageReads[slotIndex-storageChanges])
+			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
+		if _, _, err := stateReader.ReadAccountStorageByPlainKey(address, slot); err != nil {
 			return err
 		}
 	}
@@ -465,7 +465,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
 	stateByBatch := false
-	if mmap.BatchPrefetch {
+	if mmap.NewProbe() != nil {
 		stateByBatch = stateKeysCold(ctx, db, bal)
 		group.Go(func() error {
 			prefetchBAL(ctx, db, bal, stateByBatch)
@@ -595,7 +595,7 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 						if err := workerCtx.Err(); err != nil {
 							return err
 						}
-						if _, _, err := stateReader.ReadAccountStorage(addr, accounts.InternKey(slot)); err != nil {
+						if _, _, err := stateReader.ReadAccountStorageByPlainKey(addr, slot); err != nil {
 							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}
 					}
@@ -750,7 +750,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						_, _, _ = stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
+						_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
 					}
 				}
 			}

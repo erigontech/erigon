@@ -209,8 +209,6 @@ func init() {
 	Forks["BPO2"] = c
 
 	// Amsterdam branches from BPO2 (not BPO3/BPO4).
-	// In EEST, Amsterdam inherits Osaka blob params; the devnet test fixtures
-	// were generated with BPO2's blob schedule (target=14, max=21, fraction=11684671).
 	cAms := configCopy(c)
 	cAms.AmsterdamTime = common.NewUint64(15_000)
 	Forks["BPO2ToAmsterdamAtTime15k"] = cAms
@@ -218,6 +216,32 @@ func init() {
 	cAms = configCopy(cAms)
 	cAms.AmsterdamTime = common.NewUint64(0)
 	Forks["Amsterdam"] = cAms
+
+	cAmsBpo := configCopy(cAms)
+	cAmsBpo.BlobSchedule["bpo3"] = &params.BlobConfig{
+		Target:                21,
+		Max:                   32,
+		BaseFeeUpdateFraction: 17527006,
+	}
+	cAmsBpo.Bpo3Time = common.NewUint64(15_000)
+	Forks["AmsterdamToBPOIncreaseAtTime15k"] = cAmsBpo
+
+	cAmsBpo = configCopy(cAmsBpo)
+	cAmsBpo.Bpo3Time = common.NewUint64(0)
+	Forks["AmsterdamBPOIncrease"] = cAmsBpo
+
+	cAmsBpo = configCopy(cAms)
+	cAmsBpo.BlobSchedule["bpo3"] = &params.BlobConfig{
+		Target:                9,
+		Max:                   14,
+		BaseFeeUpdateFraction: 7511574,
+	}
+	cAmsBpo.Bpo3Time = common.NewUint64(15_000)
+	Forks["AmsterdamToBPODecreaseAtTime15k"] = cAmsBpo
+
+	cAmsBpo = configCopy(cAmsBpo)
+	cAmsBpo.Bpo3Time = common.NewUint64(0)
+	Forks["AmsterdamBPODecrease"] = cAmsBpo
 
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)

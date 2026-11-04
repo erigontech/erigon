@@ -564,19 +564,19 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, p late
 	compact := make([]byte, 0, 128)
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
-		seen := map[string]struct{}{}
-		prefixes := make([][]byte, 0, len(active))
-		for _, k := range active {
-			if depth > len(k) {
-				continue
-			}
-			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
-			if _, ok := seen[pfx]; !ok {
-				seen[pfx] = struct{}{}
-				prefixes = append(prefixes, []byte(pfx))
-			}
-		}
 		if depth > prefetchFlatDepth {
+			seen := map[string]struct{}{}
+			prefixes := make([][]byte, 0, len(active))
+			for _, k := range active {
+				if depth > len(k) {
+					continue
+				}
+				pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+				if _, ok := seen[pfx]; !ok {
+					seen[pfx] = struct{}{}
+					prefixes = append(prefixes, []byte(pfx))
+				}
+			}
 			prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats)
 		}
 		t0 := time.Now()

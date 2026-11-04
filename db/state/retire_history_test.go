@@ -132,6 +132,34 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	require.Equal(t, uint64(3), hf[0].endTxNum/stepSize)
 }
 
+// A Retire through an older view must report only the files it detached, not
+// the ones another view already retired.
+func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	ranges := []testFileRange{{0, 2}, {2, 4}, {4, 5}}
+	generateAccountsFile(t, agg.Dirs(), ranges)
+	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStorageFile(t, agg.Dirs(), ranges)
+	require.NoError(t, agg.OpenFolder(db))
+
+	var deleted []string
+	agg.OnFilesChange(nil, func(paths []string) { deleted = append(deleted, paths...) })
+
+	stale := agg.BeginFilesRo()
+	defer stale.Close()
+	_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
+	require.NoError(t, err)
+
+	deleted = nil
+	_, err = stale.Retire(kv.RetireCutoffs{Default: 4 * stepSize})
+	require.NoError(t, err)
+	require.NotEmpty(t, deleted)
+	for _, p := range deleted {
+		require.NotContains(t, p, ".0-2.", "already retired by another view: %s", p)
+	}
+}
+
 // TestEntirelyBeforeStep_BoundaryStraddlingFileKept is a direct unit test of
 // entirelyBeforeStep's selection predicate: a file whose range straddles the
 // cutoff must never be selected.

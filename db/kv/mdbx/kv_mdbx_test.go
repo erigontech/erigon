@@ -1490,3 +1490,12 @@ func TestRangeDupSortSeekRespectsLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
+
+func TestCursorUnknownTable(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = tx.Cursor("NoSuchTable")
+	require.Error(t, err)
+}

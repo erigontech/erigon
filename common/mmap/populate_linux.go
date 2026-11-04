@@ -117,9 +117,12 @@ func NewProbe() *Probe {
 }
 
 func (pr *Probe) Touch(p unsafe.Pointer) {
-	if pr == nil {
-		return
+	if pr != nil {
+		pr.touch(p)
 	}
+}
+
+func (pr *Probe) touch(p unsafe.Pointer) {
 	page := uintptr(p) &^ (osPageSize - 1)
 	if _, ok := pr.resident[page]; ok {
 		return
