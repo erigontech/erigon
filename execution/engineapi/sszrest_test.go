@@ -80,6 +80,18 @@ func (m *bodiesExecutionModule) GetHeader(_ context.Context, hash *common.Hash, 
 	return m.headers[*blockNumber], nil
 }
 
+func (m *bodiesExecutionModule) GetHeadersByRange(_ context.Context, start, count uint64) ([]*types.Header, error) {
+	headers := make([]*types.Header, 0, count)
+	for i := range count {
+		header := m.headers[start+i]
+		if header == nil {
+			break
+		}
+		headers = append(headers, header)
+	}
+	return headers, nil
+}
+
 func newSSZRequest(ctx context.Context, method, path, fork string, body []byte) *http.Request {
 	req := httptest.NewRequestWithContext(ctx, method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", sszRestContentType)
@@ -665,6 +677,9 @@ func TestSSZRESTBodiesRejectHeaderReadErrors(t *testing.T) {
 					}
 					return nil, headerErr
 				},
+				getHeadersByRangeFunc: func(context.Context, uint64, uint64) ([]*types.Header, error) {
+					return nil, headerErr
+				},
 				getPayloadBodiesByHashFunc: func(_ context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
 					bodiesRead = true
 					return make([]*execmodule.PayloadBody, len(hashes)), nil
@@ -742,18 +757,33 @@ func TestSSZRESTBodiesByRangeReorg(t *testing.T) {
 		{"cancun", clparams.DenebVersion, false},
 	} {
 		t.Run(tc.fork, func(t *testing.T) {
-			shanghai := &types.Header{Number: *uint256.NewInt(10), Time: 199}
-			cancun := &types.Header{Number: *uint256.NewInt(10), Time: 200}
+			shanghai := []*types.Header{
+				{Number: *uint256.NewInt(10), Time: 198},
+				{Number: *uint256.NewInt(11), Time: 199},
+			}
+			shanghai[1].ParentHash = shanghai[0].Hash()
+			cancun := []*types.Header{
+				{Number: *uint256.NewInt(10), Time: 200},
+				{Number: *uint256.NewInt(11), Time: 201},
+			}
+			cancun[1].ParentHash = cancun[0].Hash()
 			canonical := shanghai
 			bodies := map[common.Hash]*execmodule.PayloadBody{
-				shanghai.Hash(): {Transactions: [][]byte{{0x01}}},
-				cancun.Hash():   {Transactions: [][]byte{{0x02}}},
+				shanghai[0].Hash(): {Transactions: [][]byte{{0x01}}},
+				shanghai[1].Hash(): {Transactions: [][]byte{{0x02}}},
+				cancun[0].Hash():   {Transactions: [][]byte{{0x03}}},
+				cancun[1].Hash():   {Transactions: [][]byte{{0x04}}},
 			}
 			module := &stubExecutionModule{
-				getHeaderFunc: func(_ context.Context, _ *common.Hash, _ *uint64) (*types.Header, error) {
-					header := canonical
+				getHeaderFunc: func(_ context.Context, _ *common.Hash, number *uint64) (*types.Header, error) {
+					header := canonical[*number-10]
 					canonical = cancun
 					return header, nil
+				},
+				getHeadersByRangeFunc: func(_ context.Context, start, count uint64) ([]*types.Header, error) {
+					headers := canonical[start-10 : start-10+count]
+					canonical = cancun
+					return headers, nil
 				},
 				getPayloadBodiesByHashFunc: func(_ context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
 					result := make([]*execmodule.PayloadBody, len(hashes))
@@ -766,17 +796,19 @@ func TestSSZRESTBodiesByRangeReorg(t *testing.T) {
 			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
-				newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=1", tc.fork, nil))
+				newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=2", tc.fork, nil))
 
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			entries, err := decodeBodiesResponse(rec.Body.Bytes(), tc.version)
 			require.NoError(t, err)
-			require.Len(t, entries, 1)
-			require.Equal(t, tc.available, entries[0].Available)
-			if tc.available {
-				require.Equal(t, []hexutil.Bytes{{0x01}}, entries[0].Transactions)
-			} else {
-				require.Empty(t, entries[0].Transactions)
+			require.Len(t, entries, 2)
+			for i, entry := range entries {
+				require.Equal(t, tc.available, entry.Available, "entry %d", i)
+				if tc.available {
+					require.Equal(t, []hexutil.Bytes{{byte(i + 1)}}, entry.Transactions)
+				} else {
+					require.Empty(t, entry.Transactions)
+				}
 			}
 		})
 	}

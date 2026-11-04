@@ -55,6 +55,7 @@ import (
 
 type stubExecutionModule struct {
 	getHeaderFunc          func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	getHeadersByRangeFunc  func(ctx context.Context, start, count uint64) ([]*types.Header, error)
 	headerNumberFunc       func(ctx context.Context, hash common.Hash) (*uint64, error)
 	assembleBlockFunc      func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc  func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
@@ -74,6 +75,13 @@ var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
 func (s *stubExecutionModule) GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
 	if s.getHeaderFunc != nil {
 		return s.getHeaderFunc(ctx, blockHash, blockNumber)
+	}
+	return nil, nil
+}
+
+func (s *stubExecutionModule) GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error) {
+	if s.getHeadersByRangeFunc != nil {
+		return s.getHeadersByRangeFunc(ctx, start, count)
 	}
 	return nil, nil
 }

@@ -154,6 +154,35 @@ func (e *ExecModule) GetHeader(ctx context.Context, blockHash *common.Hash, bloc
 	return e.getHeader(ctx, tx, hash, number)
 }
 
+func (e *ExecModule) GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error) {
+	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: could not begin database tx %w", err)
+	}
+	defer cleanup()
+
+	headers := make([]*types.Header, 0, count)
+	for i := range count {
+		number := start + i
+		hash, err := e.canonicalHash(ctx, tx, number)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: canonicalHash error %w", err)
+		}
+		if hash == (common.Hash{}) {
+			break
+		}
+		header, err := e.getHeader(ctx, tx, hash, number)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: getHeader error %w", err)
+		}
+		if header == nil {
+			break
+		}
+		headers = append(headers, header)
+	}
+	return headers, nil
+}
+
 func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {

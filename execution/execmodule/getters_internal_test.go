@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -15,6 +16,8 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type canonicalHashErrorReader struct {
@@ -26,16 +29,22 @@ func (r canonicalHashErrorReader) CanonicalHash(context.Context, kv.Getter, uint
 	return common.Hash{}, false, r.err
 }
 
-func TestGetHeaderByNumberReturnsCanonicalHashError(t *testing.T) {
+func TestHeaderLookupsReturnCanonicalHashError(t *testing.T) {
 	expectedErr := errors.New("canonical hash read failed")
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	module := &ExecModule{db: db, blockReader: canonicalHashErrorReader{err: expectedErr}}
 	number := uint64(11)
 
-	header, err := module.GetHeader(t.Context(), nil, &number)
-
-	require.Nil(t, header)
-	require.ErrorIs(t, err, expectedErr)
+	t.Run("number", func(t *testing.T) {
+		header, err := module.GetHeader(t.Context(), nil, &number)
+		require.Nil(t, header)
+		require.ErrorIs(t, err, expectedErr)
+	})
+	t.Run("range", func(t *testing.T) {
+		headers, err := module.GetHeadersByRange(t.Context(), number, 2)
+		require.Nil(t, headers)
+		require.ErrorIs(t, err, expectedErr)
+	})
 }
 
 func TestResolveSegmentByNumberNotFound(t *testing.T) {
@@ -52,4 +61,75 @@ func TestResolveSegmentByNumberNotFound(t *testing.T) {
 	header, err := module.GetHeader(t.Context(), nil, &number)
 	require.NoError(t, err)
 	require.Nil(t, header)
+	headers, err := module.GetHeadersByRange(t.Context(), number, 2)
+	require.NoError(t, err)
+	require.Empty(t, headers)
+}
+
+type reorgBlockReader struct {
+	dbservices.FullBlockReader
+	reorg func() error
+}
+
+func (r *reorgBlockReader) CanonicalHash(_ context.Context, tx kv.Getter, number uint64) (common.Hash, bool, error) {
+	hash, err := rawdb.ReadCanonicalHash(tx, number)
+	return hash, hash != (common.Hash{}), err
+}
+
+func (r *reorgBlockReader) Header(_ context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+	header := rawdb.ReadHeader(tx, hash, number)
+	if r.reorg != nil {
+		reorg := r.reorg
+		r.reorg = nil
+		if err := reorg(); err != nil {
+			return nil, err
+		}
+	}
+	return header, nil
+}
+
+func TestGetHeadersByRangeReorg(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	oldChain := []*types.Header{
+		{Number: *uint256.NewInt(10), Time: 250},
+		{Number: *uint256.NewInt(11), Time: 251},
+	}
+	oldChain[1].ParentHash = oldChain[0].Hash()
+	newChain := []*types.Header{
+		{Number: *uint256.NewInt(10), Time: 252},
+		{Number: *uint256.NewInt(11), Time: 253},
+	}
+	newChain[1].ParentHash = newChain[0].Hash()
+	writeChain := func(headers []*types.Header) error {
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			for _, header := range headers {
+				if err := rawdb.WriteHeader(tx, header); err != nil {
+					return err
+				}
+				if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	require.NoError(t, writeChain(oldChain))
+	reader := &reorgBlockReader{reorg: func() error {
+		result := make(chan error, 1)
+		go func() { result <- writeChain(newChain) }()
+		return <-result
+	}}
+	module := &ExecModule{db: db, blockReader: reader}
+
+	headers, err := module.GetHeadersByRange(t.Context(), 10, 2)
+	require.NoError(t, err)
+	require.Len(t, headers, 2)
+	for i, header := range headers {
+		require.Equal(t, oldChain[i].Hash(), header.Hash(), "header %d", i)
+	}
+
+	number := uint64(11)
+	header, err := module.GetHeader(t.Context(), nil, &number)
+	require.NoError(t, err)
+	require.Equal(t, newChain[1].Hash(), header.Hash())
 }

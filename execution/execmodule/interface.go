@@ -175,6 +175,10 @@ type ExecutionModule interface {
 	// Returns nil (no error) when the block is not found.
 	GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
 
+	// GetHeadersByRange returns canonical headers from one read view,
+	// stopping at the first unknown block.
+	GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error)
+
 	// GetBody returns the raw body for the block identified by blockHash
 	// and/or blockNumber.  Pass nil for an unknown argument.
 	// Returns nil (no error) when the block is not found.

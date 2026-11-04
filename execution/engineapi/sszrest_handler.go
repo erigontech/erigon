@@ -450,18 +450,10 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 			fmt.Sprintf("invalid from or count, from: %d count: %d", from, count))
 		return
 	}
-	headers := make([]*types.Header, 0, count)
-	for i := range count {
-		number := from + i
-		header, err := e.executionService.GetHeader(r.Context(), nil, &number)
-		if err != nil {
-			writeEngineProblem(w, err)
-			return
-		}
-		if header == nil {
-			break
-		}
-		headers = append(headers, header)
+	headers, err := e.executionService.GetHeadersByRange(r.Context(), from, count)
+	if err != nil {
+		writeEngineProblem(w, err)
+		return
 	}
 	entries, err := e.getSSZBodies(r.Context(), headers, forkName)
 	if err != nil {
