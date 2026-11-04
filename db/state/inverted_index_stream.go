@@ -97,7 +97,8 @@ func (it *InvertedIdxStreamFiles) near(v uint64) bool {
 		return false
 	}
 	lo, hi := it.seq.Min(), it.seq.Max()
-	if it.orderAscend && v > hi || !it.orderAscend && v < lo {
+	asc := bool(it.orderAscend)
+	if asc && v > hi || !asc && v < lo {
 		return false
 	}
 	dist := max(v, it.nextN) - min(v, it.nextN)
