@@ -73,6 +73,72 @@ func TestFrameTransactionEncoding(t *testing.T) {
 	require.Equal(t, txn.Hash(), decoded.Hash())
 }
 
+func TestFrameTransactionEncodingSize(t *testing.T) {
+	maxInt := *new(uint256.Int).SetAllOne()
+	for _, tc := range []struct {
+		name string
+		tx   *FrameTransaction
+	}{
+		{"empty", &FrameTransaction{}},
+		{"zero fields", &FrameTransaction{
+			NonceKeys:           []uint256.Int{{}},
+			Frames:              []Frame{{}},
+			Signatures:          []FrameSignature{{}},
+			BlobVersionedHashes: []common.Hash{{}},
+		}},
+		{"integer boundaries", &FrameTransaction{
+			ChainID:   maxInt,
+			NonceKeys: []uint256.Int{{1}, {127}, {128}, {255}, {256}, maxInt},
+			Nonce:     math.MaxUint64,
+			Frames: []Frame{
+				{Mode: 127, Flags: 128, Limits: mdgas.MdGas{Execution: 127, State: 128}, Value: *uint256.NewInt(127), Data: []byte{0}},
+				{Mode: 255, Flags: 255, Target: new(common.Address), Limits: mdgas.MdGas{Execution: 255, State: 256}, Value: *uint256.NewInt(128), Data: []byte{127}},
+				{Limits: mdgas.MdGas{Execution: math.MaxUint64, State: math.MaxUint64}, Value: maxInt, Data: []byte{128}},
+			},
+			Signatures: []FrameSignature{
+				{Scheme: 127, Signer: []byte{0}, Message: []byte{127}, Signature: []byte{128}},
+				{Scheme: 128, Signature: make([]byte, 65)},
+				{Scheme: 255, Signer: make([]byte, 20), Message: make([]byte, 32), Signature: make([]byte, 128)},
+			},
+			Fees:                FrameFees{TipCap: maxInt, FeeCap: maxInt, BlobFeeCap: maxInt},
+			BlobVersionedHashes: []common.Hash{{1}, {1, 2}},
+		}},
+		{"maximum counts", &FrameTransaction{
+			NonceKeys:  frameNonceKeysAtBit(FrameMaxNonceKeys, 255),
+			Frames:     make([]Frame, FrameMaxCount),
+			Signatures: make([]FrameSignature, FrameMaxCount),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var encoded bytes.Buffer
+			require.NoError(t, tc.tx.MarshalBinary(&encoded))
+			require.Equal(t, encoded.Len(), tc.tx.EncodingSize())
+			allocs := testing.AllocsPerRun(100, func() {
+				if got := tc.tx.EncodingSize(); got != encoded.Len() {
+					t.Fatalf("size %d, want %d", got, encoded.Len())
+				}
+			})
+			require.Zero(t, allocs)
+		})
+	}
+}
+
+func TestFrameTransactionEncodingSizeBoundaries(t *testing.T) {
+	t.Parallel()
+	// Sweep through string and nested-list prefix boundaries, which occur at
+	// different data lengths because each enclosing list adds its own fields.
+	for size := 0; size <= 300; size++ {
+		data := bytes.Repeat([]byte{0x80}, size)
+		tx := FrameTransaction{
+			Frames:     []Frame{{Data: data}},
+			Signatures: []FrameSignature{{Signer: data, Message: data, Signature: data}},
+		}
+		var encoded bytes.Buffer
+		require.NoError(t, tx.MarshalBinary(&encoded))
+		require.Equal(t, encoded.Len(), tx.EncodingSize(), "data length %d", size)
+	}
+}
+
 func TestFrameTransactionNonceKeys(t *testing.T) {
 	for name, keys := range map[string][]uint256.Int{
 		"empty":                 nil,

@@ -27,6 +27,22 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
+func BenchmarkFrameTransactionEncodingSize(b *testing.B) {
+	for _, size := range []int{0, 128 << 10} {
+		b.Run(fmt.Sprint(size), func(b *testing.B) {
+			tx := FrameTransaction{
+				NonceKeys:  []uint256.Int{{}},
+				Frames:     []Frame{{Data: make([]byte, size)}},
+				Signatures: []FrameSignature{{Scheme: FrameSignatureP256, Signature: make([]byte, 128)}},
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				tx.EncodingSize()
+			}
+		})
+	}
+}
+
 func BenchmarkFrameTransactionGasLimits(b *testing.B) {
 	for _, tc := range []struct {
 		name string

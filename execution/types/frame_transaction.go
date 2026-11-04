@@ -494,11 +494,37 @@ func (tx *FrameTransaction) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *FrameTransaction) EncodingSize() int {
-	payload, err := rlp.EncodeToBytes((*frameTransactionRLP)(tx))
-	if err != nil {
-		panic(err)
+	payloadSize := rlp.Uint256Len(tx.ChainID)
+	nonceKeysSize := 0
+	for _, key := range tx.NonceKeys {
+		nonceKeysSize += rlp.Uint256Len(key)
 	}
-	return 1 + len(payload)
+	payloadSize += rlp.ListLen(nonceKeysSize)
+	payloadSize += rlp.U64Len(tx.Nonce) + rlp.StringLen(tx.SenderAddress[:])
+
+	framesSize := 0
+	for i := range tx.Frames {
+		frame := &tx.Frames[i]
+		frameSize := rlp.U64Len(uint64(frame.Mode)) + rlp.U64Len(uint64(frame.Flags)) + 1
+		if frame.Target != nil {
+			frameSize += len(*frame.Target)
+		}
+		frameSize += rlp.ListLen(rlp.U64Len(frame.Limits.Execution) + rlp.U64Len(frame.Limits.State))
+		frameSize += rlp.Uint256Len(frame.Value) + rlp.StringLen(frame.Data)
+		framesSize += rlp.ListLen(frameSize)
+	}
+	payloadSize += rlp.ListLen(framesSize)
+
+	signaturesSize := 0
+	for i := range tx.Signatures {
+		sig := &tx.Signatures[i]
+		sigSize := rlp.U64Len(uint64(sig.Scheme)) + rlp.StringLen(sig.Signer) + rlp.StringLen(sig.Message) + rlp.StringLen(sig.Signature)
+		signaturesSize += rlp.ListLen(sigSize)
+	}
+	payloadSize += rlp.ListLen(signaturesSize)
+	payloadSize += rlp.ListLen(rlp.Uint256Len(tx.Fees.TipCap) + rlp.Uint256Len(tx.Fees.FeeCap) + rlp.Uint256Len(tx.Fees.BlobFeeCap))
+	payloadSize += rlp.ListLen(blobVersionedHashesSize(tx.BlobVersionedHashes))
+	return 1 + rlp.ListLen(payloadSize)
 }
 
 func (tx *FrameTransaction) Hash() common.Hash {
