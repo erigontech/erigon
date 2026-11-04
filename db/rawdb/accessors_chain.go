@@ -453,7 +453,8 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 	return nil
 }
 
-// DeleteHeader - dangerous, use PruneBlocks/TruncateBlocks methods
+// DeleteHeader removes the header and hash-to-number mapping, leaving body data intact.
+// Use DeleteBlock to remove a rejected or orphaned block together with its transactions.
 func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
@@ -552,6 +553,7 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
+// ReadBodyWithTransactions returns (nil, nil) if the body or any expected transaction is missing.
 func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
 	body, firstTxId, txCount := ReadBody(db, hash, number)
 	if body == nil {
@@ -576,6 +578,7 @@ var errMissingBodyTransaction = errors.New("missing body transaction")
 
 func readBodyTransactions(db kv.Getter, firstTxID uint64, txCount uint32, readTxn func([]byte) error) (bool, error) {
 	var count uint32
+	// ForAmount skips missing keys, so a row count alone could include transactions from another block.
 	err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(firstTxID), txCount, func(k, v []byte) error {
 		if len(k) != 8 || binary.BigEndian.Uint64(k) != firstTxID+uint64(count) {
 			return errMissingBodyTransaction
@@ -813,7 +816,7 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 	return nil
 }
 
-// DeleteBody removes all block body data associated with a hash.
+// DeleteBody removes body metadata and the block access list, leaving transaction rows intact.
 func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
@@ -958,6 +961,7 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 }
 
 // DeleteBlock removes stored block data without changing transaction ID sequences.
+// It is for rejected or orphaned blocks; canonical markers and execution state are not updated.
 func DeleteBlock(tx kv.GetPut, hash common.Hash, number uint64) error {
 	key := dbutils.BlockBodyKey(number, hash)
 	body, ok, err := ReadBodyOnlyTxnByKey(tx, key)
@@ -992,11 +996,10 @@ func deleteBodyTransactions(tx kv.Putter, body types.BodyOnlyTxn) error {
 	return nil
 }
 
-// PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
-// keeps genesis in db: [1, to)
-// doesn't change sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-// Returns false if there is nothing to prune
+// PruneBlocks removes stored block data below blockTo, keeping genesis.
+// Each call covers at most blocksDeleteLimit block heights and returns the number of removed headers.
+// Receipts, canonical markers, header-number entries, total difficulty, and transaction ID sequences
+// are preserved.
 func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
@@ -1039,8 +1042,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 				return deleted, err
 			}
 		}
-		// Copying k because otherwise the same memory will be reused
-		// for the next key and Delete below will end up deleting 1 more record than required
+		// Deleting database rows can invalidate cursor-backed key bytes.
 		kCopy := bytes.Clone(k)
 		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return deleted, err
@@ -1067,9 +1069,9 @@ func TruncateCanonicalChain(db kv.RwTx, from uint64) error {
 	})
 }
 
-// TruncateBlocks - delete block >= blockFrom
-// does decrement sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+// TruncateBlocks removes stored block data at or above blockFrom, keeping genesis.
+// Receipts, canonical markers, header-number entries, total difficulty, and transaction ID sequences
+// are preserved.
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1086,8 +1088,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				return err
 			}
 		}
-		// Copying k because otherwise the same memory will be reused
-		// for the next key and Delete below will end up deleting 1 more record than required
+		// Deleting database rows can invalidate cursor-backed key bytes.
 		kCopy := bytes.Clone(k)
 		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return err

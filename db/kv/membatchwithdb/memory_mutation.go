@@ -45,12 +45,9 @@ type DomainReader interface {
 }
 
 type MemoryMutation struct {
-	// mu protects concurrent access to the mutation's maps and backing tx.
-	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
-	// ClearTable, UpdateTxn) acquire Lock. Cursor-based methods are NOT
-	// protected and must only be called single-threaded (under the semaphore).
-	// Read views created via NewReadView share this pointer so they synchronize
-	// with the parent's writers.
+	// mu coordinates overlay writes and access to the backing transaction.
+	// Read views share it, but use their own backing transactions.
+	// Cursor positions and lifetimes are not protected by this mutex.
 	mu               *sync.RWMutex
 	memTx            kv.RwTx
 	memDb            kv.RwDB

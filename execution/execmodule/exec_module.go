@@ -745,6 +745,7 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 	currentHash := headHash
 	currentNumber := headNumber
 	for currentHash != latestValidHash {
+		// Keep both canonical heads available as reconnection points for later forkchoice updates.
 		if currentHash == dbHeadHash || currentHash == canonicalHeadHash {
 			return nil
 		}
