@@ -17,7 +17,9 @@
 package native
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var _ tracing.IntraBlockState = (*postTxIBS)(nil)
@@ -388,4 +391,58 @@ func TestAccountHasNoJSONMarshaler(t *testing.T) {
 	t.Parallel()
 	_, bad := any(&account{}).(json.Marshaler)
 	require.False(t, bad, "account must not implement json.Marshaler")
+}
+
+type fastJSON func(*jsonstream.Stream) error
+
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.Stream) error { return f(s) }
+
+// fastJSONTestState holds the shapes encoding/json treats differently: an empty account kept by
+// includeEmpty, code cleared to 0x, absent fields, and keys inserted out of their sorted order.
+func fastJSONTestState() state {
+	code, cleared := hexutil.Bytes{0x60, 0x00}, hexutil.Bytes{}
+	codeHash := common.HexToHash("0xc0de")
+	return state{
+		accounts.InternAddress(common.HexToAddress("0xff00")): {
+			Balance:  (*hexutil.U256)(uint256.NewInt(1 << 40)),
+			Code:     &code,
+			CodeHash: &codeHash,
+			Nonce:    7,
+			Storage: map[common.Hash]common.Hash{
+				common.HexToHash("0x02"): common.HexToHash("0xbb"),
+				common.HexToHash("0x01"): common.HexToHash("0xaa"),
+				common.HexToHash("0xf0"): {},
+			},
+		},
+		accounts.InternAddress(common.HexToAddress("0x00ff")): {Balance: new(hexutil.U256), Storage: map[common.Hash]common.Hash{}},
+		accounts.InternAddress(common.HexToAddress("0x0a00")): {Code: &cleared},
+		accounts.InternAddress(common.HexToAddress("0x00a0")): {Nonce: 1},
+	}
+}
+
+func TestPrestateTracerFastJSONMatchesGetResult(t *testing.T) {
+	t.Parallel()
+	for _, cfg := range []prestateTracerConfig{{}, {IncludeEmpty: true}, {DiffMode: true}} {
+		tr := newTestPrestateTracer(cfg)
+		tr.pre = fastJSONTestState()
+		if cfg.DiffMode {
+			tr.post = fastJSONTestState()
+		}
+		want, err := tr.GetResult()
+		require.NoError(t, err)
+		got, err := jsonstream.Marshal(fastJSON(tr.MarshalFastJSONTo))
+		require.NoError(t, err)
+		require.Equal(t, string(want), string(got), "config %+v", cfg)
+	}
+}
+
+func TestPrestateTracerFastJSONStoppedWritesNothing(t *testing.T) {
+	t.Parallel()
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.pre = fastJSONTestState()
+	tr.Stop(errors.New("stopped"))
+	var buf bytes.Buffer
+	s := jsonstream.New(&buf)
+	require.EqualError(t, tr.MarshalFastJSONTo(s), "stopped")
+	require.Empty(t, s.Buffer(), "a stopped tracer writes nothing")
 }

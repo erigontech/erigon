@@ -316,6 +316,23 @@ func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
 	require.NoError(t, d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir(), false))
 }
 
+func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter(db)
+	defer writer.Close()
+	require.NoError(t, writer.PutWithPrev([]byte("key1"), []byte("value1"), 1, nil))
+
+	vt := func([]byte, uint64, uint64) ([]byte, error) { return nil, fmt.Errorf("vt failed") }
+	_, err := d.collateETL(t.Context(), 0, 1, writer.valsCollector(), vt, "")
+	require.Error(t, err)
+	leftovers, err := filepath.Glob(filepath.Join(d.dirs.Tmp, "*.idt"))
+	require.NoError(t, err)
+	require.Empty(t, leftovers, "the values compressor is closed when collateETL fails")
+}
+
 // TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
 // dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
 // directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
@@ -813,7 +830,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
-		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		stat, err := domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 		require.NoError(t, err)
 	}

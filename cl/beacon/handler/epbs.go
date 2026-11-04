@@ -39,7 +39,9 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/transition"
@@ -54,6 +56,7 @@ const (
 	maxProposerPreferencesRequestItems     = 2048
 	maxEpbsJSONSize                        = 1 << 20
 	maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+	executionPayloadEnvelopeRebuildTimeout = 5 * time.Second
 )
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
@@ -884,13 +887,10 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		return nil, err
 	}
 
-	// Check if the envelope exists
-	if !a.forkchoiceStore.HasEnvelope(blockRoot) {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
 	}
-
-	envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
+	envelope, slot, fromForkGraph, err := a.executionPayloadEnvelopeForRoot(r.Context(), blockRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -899,23 +899,77 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
 	}
 
-	block, ok := a.forkchoiceStore.GetBlock(blockRoot)
-	if !ok || block == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("block not found for block root %v", blockRoot))
-	}
-	if a.beaconChainCfg.SlotsPerEpoch == 0 {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
-	}
-	slot := block.Block.Slot
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
-	finalized := a.forkchoiceStore.FinalizedCheckpoint()
-	finalizedSlot := finalized.Epoch * a.beaconChainCfg.SlotsPerEpoch
-	isFinalized := slot <= finalizedSlot && a.forkchoiceStore.Ancestor(finalized.Root, slot).Root == blockRoot
+	var isFinalized bool
+	if fromForkGraph {
+		finalized := a.forkchoiceStore.FinalizedCheckpoint()
+		finalizedSlot := finalized.Epoch * a.beaconChainCfg.SlotsPerEpoch
+		isFinalized = slot <= finalizedSlot && a.forkchoiceStore.Ancestor(finalized.Root, slot).Root == blockRoot
+	} else {
+		tx, err := a.indiciesDB.BeginRo(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return nil, err
+		}
+		finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
+		isFinalized = blockRoot == canonicalRoot && slot <= finalizedSlot
+	}
 	return newBeaconResponse(envelope).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
 		WithFinalized(isFinalized), nil
+}
+
+func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, uint64, bool, error) {
+	var envelope *cltypes.SignedExecutionPayloadEnvelope
+	var err error
+	if a.forkchoiceStore.HasEnvelope(blockRoot) {
+		envelope, err = a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
+		if err != nil {
+			return nil, 0, false, err
+		}
+	}
+	block, ok := a.forkchoiceStore.GetBlock(blockRoot)
+	blockFromForkGraph := ok && block != nil && block.Block != nil
+	if blockFromForkGraph && envelope != nil {
+		return envelope, block.Block.Slot, true, nil
+	}
+	if envelope == nil && a.envelopeRebuilder == nil {
+		return nil, 0, false, nil
+	}
+	var prepared *envelope_history.PreparedRebuild
+	var slot uint64
+	found := blockFromForkGraph
+	if found {
+		slot = block.Block.Slot
+	}
+	err = a.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		if !found {
+			header, err := a.blockReader.ReadHeaderByRoot(ctx, tx, blockRoot)
+			if err != nil || header == nil || header.Header == nil {
+				return err
+			}
+			slot, found = header.Header.Slot, true
+		}
+		if envelope != nil || slot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
+			return nil
+		}
+		prepared, err = a.envelopeRebuilder.Prepare(ctx, tx, slot, blockRoot)
+		return err
+	})
+	if err != nil || !found {
+		return nil, 0, false, err
+	}
+	if prepared != nil {
+		rebuildCtx, cancel := context.WithTimeout(ctx, executionPayloadEnvelopeRebuildTimeout)
+		defer cancel()
+		envelope, err = a.envelopeRebuilder.Rebuild(rebuildCtx, prepared)
+	}
+	return envelope, slot, false, err
 }
 
 // PostEthV1BeaconExecutionPayloadEnvelope publishes a SignedExecutionPayloadEnvelope.
@@ -970,7 +1024,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
 	}
-	if canonical && !blobDataIncluded && contents == nil {
+	if !blobDataIncluded && contents == nil {
 		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
@@ -1005,7 +1059,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	claimed := err == nil
 	retry := executionPayloadEnvelopeRetry{}
 	retrying := false
-	retryClaimed := false
+	var retryClaimed bool
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			lookupRequired := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired)
@@ -1096,14 +1150,14 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	var persistenceErr error
 	// An interrupted validation parks the envelope without persisting it; a re-POST must process it again.
 	validationInterrupted := false
-	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
+	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
 			// The envelope passed every consensus check; only the EL verdict is pending.
 			validationInterrupted = true
-		case canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+		case !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		case canonical && validation != BlockPublishingValidationGossip:
@@ -1407,7 +1461,7 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 			return fmt.Errorf("execution payload envelope blob %d is nil", i)
 		}
 		bundle := BlobBundle{Blob: blob, Commitment: common.Bytes48(*commitment), KzgProofs: make([]common.Bytes48, a.beaconChainCfg.NumberOfColumns)}
-		cells, err := das.ComputeCells(blob)
+		cells, err := peerdasutils.ComputeCells(blob)
 		if err != nil {
 			return err
 		}
@@ -1457,10 +1511,10 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 	return nil
 }
 
-func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
+func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 	defer finishBlockWork()
-	return a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, true)
+	return a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
 }
 
 // ---- Execution Payload Bid ----

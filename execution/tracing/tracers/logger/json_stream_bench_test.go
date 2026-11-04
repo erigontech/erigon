@@ -53,8 +53,8 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 	}
 }
 
-// BenchmarkOnOpcodeStackDepth shows the scaling: the saved allocation is per
-// stack slot per step, and a real trace is not two slots deep.
+// BenchmarkOnOpcodeStackDepth shows the scaling with stack depth. As in a real
+// trace, only the top slot changes between steps.
 func BenchmarkOnOpcodeStackDepth(b *testing.B) {
 	for _, depth := range []int{2, 8, 16, 32} {
 		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
@@ -69,6 +69,7 @@ func BenchmarkOnOpcodeStackDepth(b *testing.B) {
 			b.ReportAllocs()
 			i := 0
 			for b.Loop() {
+				stack[depth-1].SetUint64(uint64(i) * 0xfedcba9876543211)
 				l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 				i++
 				// Nothing else drains this stream, and every iteration appends to it.

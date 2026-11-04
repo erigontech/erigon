@@ -24,17 +24,22 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type rulesEngineWithErrors struct {
@@ -66,9 +71,10 @@ func newSerialFinalizeTestExec(t *testing.T, engine rules.Engine) (*serialExecut
 	se := &serialExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: config,
-				engine:      engine,
-				vmConfig:    &vm.Config{},
+				chainConfig:   config,
+				engine:        engine,
+				vmConfig:      &vm.Config{},
+				notifications: shards.NewNotifications(nil),
 			},
 			doms:    domains,
 			rs:      rs,
@@ -110,4 +116,65 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
+}
+
+// failingAccountTemporalTx fails GetLatest for one account in the Accounts domain and
+// passes everything else through, so a finalize-time beneficiary read surfaces as a
+// state-read error rather than a block verdict.
+type failingAccountTemporalTx struct {
+	kv.TemporalTx
+	address common.Address
+	err     error
+}
+
+func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && common.BytesToAddress(key) == tx.address {
+		return nil, 0, tx.err
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func (tx failingAccountTemporalTx) AggTx() any { return nil }
+
+// TestSerialFinalizeStateReadErrorPassesThrough pins that a withdrawal-beneficiary read
+// failure during Finalize is an infrastructure failure: it surfaces via ibs.StateReadError()
+// and passes through unwrapped, not as ErrInvalidBlock. Complements
+// TestSerialFinalizeClassifiesRulesEngineError (which covers the invalid-block verdict side).
+func TestSerialFinalizeStateReadErrorPassesThrough(t *testing.T) {
+	se, task := newSerialFinalizeTestExec(t, merge.New(ethash.NewFaker()))
+	cause := errors.New("withdrawal account read failed")
+	beneficiary := common.Address{19: 0x42}
+	se.applyTx = failingAccountTemporalTx{TemporalTx: se.applyTx, address: beneficiary, err: cause}
+	task.Withdrawals = types.Withdrawals{{Address: beneficiary, Amount: 1}}
+
+	_, err := se.executeBlock(t.Context(), []exec.Task{task}, false)
+
+	require.ErrorIs(t, err, cause)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+}
+
+func TestWarmTxsHashesSkipsAuthListAboveGasLimit(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	chainID := uint256.NewInt(1)
+	signer := types.LatestSignerForChainID(chainID)
+	to := common.Address{1}
+	setCode := func(gasLimit uint64, auths int) *types.Message {
+		txn, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{GasLimit: gasLimit, To: &to},
+				ChainID:  *chainID,
+				FeeCap:   *uint256.NewInt(1),
+			},
+			Authorizations: make([]types.Authorization, auths),
+		}, *signer, key)
+		require.NoError(t, err)
+		block := types.NewBlock(&types.Header{GasLimit: 60_000_000}, []types.Transaction{txn}, nil, nil, nil, nil)
+		warmTxsHashes(block, chainID)
+		msg, err := block.Transactions()[0].AsMessage(*signer, nil, &chain.Rules{IsPrague: true})
+		require.NoError(t, err)
+		return msg
+	}
+	require.NotNil(t, setCode(1_000_000, 100).RecoveredAuthorities(), "a list the gas limit can pay for is warmed")
+	require.Nil(t, setCode(21_000, 1_000).RecoveredAuthorities(), "a list above the gas limit is left to the executor")
 }

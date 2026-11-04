@@ -59,6 +59,7 @@ var migrations = map[kv.Label][]Migration{
 		dropLegacyE2Tables,
 		createPtcWindowEpochTable,
 		createExecutionPayloadEnvelopeSignaturesTable,
+		dropCodeCacheTable,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},
@@ -197,6 +198,15 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	return nil
 }
 
+// StampVersion refuses a DB from a newer schema, then marks it with this binary's schema.
+// It runs on every open: applied migrations are recorded outside chaindata, so a re-created chaindata has no pending ones.
+func (m *Migrator) StampVersion(db kv.RwDB, chaindata string) error {
+	if err := m.VerifyVersion(db, chaindata); err != nil {
+		return err
+	}
+	return db.Update(context.Background(), rawdb.WriteDBSchemaVersion)
+}
+
 // Apply runs all pending migrations in order.
 //
 //   - db is the target database being migrated (e.g. chaindata).
@@ -242,6 +252,7 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 		}
 
 		callbackCalled := false // commit function must be called if no error, protection against people's mistake
+		var stagesProgress []byte
 
 		logger.Info("Apply migration", "name", v.Name)
 		var progress []byte
@@ -269,24 +280,25 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 			}
 			callbackCalled = true
 
-			// Capture the target DB's stage state for bug-report context, then record
-			// the migration as complete in the migrations-tracking DB.
-			stagesProgress, err := json.Marshal(tx)
-			if err != nil {
-				return err
-			}
-			return migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
-				if err := migTx.Put(kv.Migrations, []byte(v.Name), stagesProgress); err != nil {
-					return err
-				}
-				return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
-			})
+			// Capture the target DB's stage state for bug-report context.
+			var err error
+			stagesProgress, err = json.Marshal(tx)
+			return err
 		}, logger); err != nil {
 			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
 		}
 
 		if !callbackCalled {
 			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
+		}
+		// Recorded only after Up committed: the migrations DB is a separate env.
+		if err := migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
+			if err := migTx.Put(kv.Migrations, []byte(v.Name), stagesProgress); err != nil {
+				return err
+			}
+			return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
+		}); err != nil {
+			return fmt.Errorf("migrator.Apply: %s, %w", v.Name, err)
 		}
 		logger.Info("Applied migration", "name", v.Name)
 	}
