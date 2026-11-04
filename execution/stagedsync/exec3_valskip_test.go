@@ -41,15 +41,18 @@ func TestValidationSkipOracleOnReplayedBlock(t *testing.T) {
 	armAssert(t)
 	var skipCount atomic.Int64
 	previous := validationSkipHook
-	validationSkipHook = func(txIdx int) {
-		if txIdx >= 1 {
-			skipCount.Add(1)
-		}
-	}
 	t.Cleanup(func() { validationSkipHook = previous })
 	fx, err := blockreplay.Load(fixturePath(t))
 	require.NoError(t, err)
 	require.NotNil(t, fx.Outputs)
+	block, err := fx.Block()
+	require.NoError(t, err)
+	regularTxs := len(block.Transactions())
+	validationSkipHook = func(txIdx int) {
+		if txIdx >= 1 && txIdx < regularTxs {
+			skipCount.Add(1)
+		}
+	}
 
 	r, closeFn := setupEphemeralReplay(t, fx)
 	defer closeFn()
