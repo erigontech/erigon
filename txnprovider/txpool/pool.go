@@ -84,6 +84,7 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
+	RejectFramePrefix(hash common.Hash)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	GetBlobs(blobhashes []common.Hash) []PoolBlobBundle
@@ -169,7 +170,7 @@ type TxPool struct {
 	remoteFrames            remoteFrameQueue
 	frameReservations       map[common.Address]frameReservation
 	frameAccountsToRefresh  map[common.Address]struct{}
-	frameRejections         *simplelru.LRU[string, uint64] // txn_hash => state generation of a rejected simulation
+	frameRejections         *simplelru.LRU[string, frameRejection]
 
 	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
 	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
@@ -212,7 +213,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	frameRejections, err := simplelru.NewLRU[string, uint64](10_000, nil)
+	frameRejections, err := simplelru.NewLRU[string, frameRejection](10_000, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -381,8 +382,8 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
-			p.lastSeenCond.Broadcast()
 		}
+		p.lastSeenCond.Broadcast()
 	}()
 
 	pendingPre := p.pending.Len()
@@ -479,14 +480,13 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	return frames, nil
 }
 
-// publishDepthMetrics republishes the sub-pool depth gauges. Called on every block
-// so the gauges track the pool at block cadence rather than the LogEvery tick (3
-// minutes on every node, per cmd/utils/flags.go). Caller must hold p.lock; the
-// writes are atomic stores and the Len reads are O(1).
+// Publish at block cadence, including parked frames as queued, as in RPC.
+// Caller must hold p.lock.
 func (p *TxPool) publishDepthMetrics() {
-	pendingSubCounter.SetInt(p.pending.Len())
-	basefeeSubCounter.SetInt(p.baseFee.Len())
-	queuedSubCounter.SetInt(p.queued.Len())
+	pending, baseFee, queued := p.countContent()
+	pendingSubCounter.SetInt(pending)
+	basefeeSubCounter.SetInt(baseFee)
+	queuedSubCounter.SetInt(queued)
 }
 
 // forgetUnusedSenders drops the id of every sender in the batch that has no
@@ -630,10 +630,10 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if _, ok := p.minedBlobTxnsByHash[hashS]; ok {
 		return true, nil
 	}
-	if generation, ok := p.frameRejections.Get(hashS); ok {
-		// A new state generation permits another attempt even if a rejected
-		// transaction's persisted pool row has not been removed yet.
-		return generation == p.stateGeneration, nil
+	if rejection, ok := p.frameRejections.Get(hashS); ok {
+		// Expired rejections permit a retry even if the discarded transaction's
+		// persisted pool row has not been removed yet.
+		return rejection.valid(p, p.stateGeneration), nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
 		// Retryable failures may clear before the discarded pool row is removed.
@@ -652,6 +652,15 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	return p.idHashKnown(tx, hash, hashS)
+}
+
+// HasTxn reports pool membership. Gossip also treats cached rejections as known,
+// but RPC must not tell callers that a rejected transaction was accepted.
+func (p *TxPool) HasTxn(hash []byte) bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	_, ok := p.byHash[string(hash)]
+	return ok
 }
 
 func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error) {
@@ -989,6 +998,10 @@ func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uin
 func (p *TxPool) CountContent() (int, int, int) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	return p.countContent()
+}
+
+func (p *TxPool) countContent() (int, int, int) {
 	queued := p.queued.Len()
 	// Include parked frames in the queued count, matching their RPC listing.
 	for _, mt := range p.all.senderIDFrameTxn {
@@ -1878,6 +1891,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 		}
 		if decision.reason != txpoolcfg.NotSet {
+			if mt.TxnSlot.TxType() == FrameTxnType && decision.reason == txpoolcfg.InvalidFrame {
+				p.frameRejections.Add(string(mt.TxnSlot.IDHash[:]), frameRejection{blocker: found.TxnSlot.IDHash})
+			}
 			return decision.reason
 		}
 	}

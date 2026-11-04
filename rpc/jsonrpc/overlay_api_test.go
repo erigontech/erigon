@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -390,6 +391,36 @@ func TestOverlayGetLogsOrdinaryGasCap(t *testing.T) {
 			}
 			require.Len(t, logs, tc.wantLogs)
 		})
+	}
+}
+
+func TestOverlayGetLogsOverrideGasCeiling(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime, cfg.BogotaTime = nil, nil
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender, target := crypto.PubkeyToAddress(key.PublicKey), common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			target: {Code: program.New().Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes()},
+		},
+	}), execmoduletester.WithKey(key))
+	txn, err := types.SignTx(types.NewTransaction(0, target, new(uint256.Int), 40_000, uint256.NewInt(2), nil), *types.LatestSigner(cfg), key)
+	require.NoError(t, err)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
+	balance := (*hexutil.U256)(uint256.NewInt(1))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Balance: &balance}}
+	for _, cap := range []uint64{params.MaxTxnGasLimit, params.MaxTxnGasLimit + 1, rpccfg.DefaultGasCap, 0} {
+		api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: cap}, NewOtterscanAPI(base, m.DB, 25))
+		logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, &overrides, nil)
+		require.NoError(t, err, "gas cap %d", cap)
+		require.Len(t, logs, 1)
 	}
 }
 

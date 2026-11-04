@@ -54,7 +54,7 @@ import (
 
 type addMockTxPool struct {
 	knownByCall      []bool
-	idHashKnownCalls int
+	hasTxnCalls      int
 	addReasons       []txpoolcfg.DiscardReason
 	addLocalSlotsLen int
 }
@@ -71,13 +71,13 @@ func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]t
 func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
-func (m *addMockTxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
-	i := m.idHashKnownCalls
-	m.idHashKnownCalls++
+func (m *addMockTxPool) HasTxn(hash []byte) bool {
+	i := m.hasTxnCalls
+	m.hasTxnCalls++
 	if i < len(m.knownByCall) {
-		return m.knownByCall[i], nil
+		return m.knownByCall[i]
 	}
-	return false, nil
+	return false
 }
 
 func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
@@ -217,8 +217,6 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 }
 
 func TestGrpcServerParkedFrame(t *testing.T) {
-	t.Parallel()
-
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 	var txns TxnSlots
@@ -242,11 +240,18 @@ func TestGrpcServerParkedFrame(t *testing.T) {
 		require.Equal(t, queued, status.QueuedCount)
 		require.Zero(t, status.BaseFeeCount)
 	}
+	checkMetrics := func(pending, queued uint32) {
+		t.Helper()
+		require.EqualValues(t, pending, pendingSubCounter.GetValue())
+		require.EqualValues(t, queued, queuedSubCounter.GetValue())
+		require.Zero(t, basefeeSubCounter.GetValue())
+	}
 	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
 
 	checkParked := func() {
 		t.Helper()
 		checkContent(txpoolproto.AllReply_QUEUED, 0, 1)
+		checkMetrics(0, 1)
 		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 		require.Zero(t, pool.queued.Len(), "RPC classification must not put parked frames in a scheduling sub-pool")
 		var selected TxnsRlp
@@ -267,6 +272,47 @@ func TestGrpcServerParkedFrame(t *testing.T) {
 	change.ChangeBatch[0].BlockHeight = 2
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
+	checkMetrics(1, 0)
+}
+
+func TestGrpcServerRejectedFrameResubmission(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		ctx, pool, sender := keyedFramePoolEnv(t)
+		pool.chainID.SetUint64(1)
+		backend := pool.ethBackend.(*frameValidationBackend)
+		backend.valid = false
+		frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+		server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+		request := &txpoolproto.AddRequest{RlpTxs: [][]byte{frame.Rlp}}
+		first, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, first.Imported)
+		if persisted {
+			require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+				return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+			}))
+		}
+		second, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+		require.Len(t, backend.calls, 1)
+		require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+		require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+			known, readErr := pool.IdHashKnown(tx, frame.IDHash[:])
+			require.NoError(t, readErr)
+			require.True(t, known, "gossip must still deduplicate rejected transactions")
+			return nil
+		}))
+		backend.valid = true
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		third, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, third.Imported)
+		require.Len(t, backend.calls, 2)
+		duplicate, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, duplicate.Imported)
+	}
 }
 
 // TestQueryAllWithoutPanicUnknown tries to reproduce https://github.com/erigontech/erigon/issues/18076 relying on

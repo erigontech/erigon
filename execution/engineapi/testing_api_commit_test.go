@@ -452,7 +452,13 @@ func TestCommitBlockV1(t *testing.T) {
 		cfg := allForksChainConfig()
 		rawTx0 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
 		rawTx1 := makeSignedRawTx(t, key, cfg, 1, 101, parentTimestamp+1)
-		api, rec, stub := newEnv(defaultAssembled())
+		assembled := defaultAssembled()
+		txn0, err := types.DecodeTransaction(rawTx0)
+		require.NoError(t, err)
+		txn1, err := types.DecodeTransaction(rawTx1)
+		require.NoError(t, err)
+		assembled.Block = types.NewBlockFromStorage(blockHash, assembled.Block.Header(), []types.Transaction{txn0, txn1}, nil, nil, nil)
+		api, rec, stub := newEnv(assembled)
 		var captured *builder.Parameters
 		stub.assembleBlockFunc = func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 			captured = params

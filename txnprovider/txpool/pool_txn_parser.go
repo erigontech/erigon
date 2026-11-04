@@ -63,6 +63,7 @@ type TxnParseContext struct {
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
 	poolRules       bool
+	rejectPrefix    func(common.Hash)
 }
 
 func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
@@ -414,6 +415,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if frame, ok := txn.(*types.FrameTransaction); ok {
 		if ctx.poolRules {
 			if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
+				if ctx.rejectPrefix != nil {
+					ctx.rejectPrefix(slot.IDHash)
+				}
 				// Gossip skips policy rejections; RPC still reports an invalid transaction.
 				return p, fmt.Errorf("%w: %w: %w", ErrRejected, ErrParseTxn, err)
 			}

@@ -89,17 +89,18 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 	}
 }
 
-func (api *OverlayAPIImpl) checkGasCap(txn types.Transaction, isAmsterdam bool) error {
-	if api.GasCap == 0 {
+func checkTransactionGasCap(txn types.Transaction, gasCap uint64) error {
+	if gasCap == 0 {
 		return nil
 	}
-	limits, err := protocol.TransactionGasLimits(txn, isAmsterdam)
+	// Ordinary transactions are bounded by their full gas limit on every fork.
+	limits, err := protocol.TransactionGasLimits(txn, false /* isAmsterdam */)
 	if err != nil {
 		return err
 	}
 	// Match block inclusion: execution and state have separate limits.
-	if gasLimit := max(limits.Execution, limits.State); gasLimit > api.GasCap {
-		return fmt.Errorf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+	if gasLimit := max(limits.Execution, limits.State); gasLimit > gasCap {
+		return clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, gasCap))
 	}
 	return nil
 }
@@ -173,7 +174,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	creationTx := block.Transactions()[transactionIndex]
 	// Signed frame budgets cannot be clamped like an ordinary message's gas limit.
 	if creationTx.Type() == types.FrameTxType {
-		if err := api.checkGasCap(creationTx, chainConfig.IsAmsterdam(block.Time())); err != nil {
+		if err := checkTransactionGasCap(creationTx, api.GasCap); err != nil {
 			return nil, err
 		}
 	}
@@ -480,7 +481,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	// Frame budgets are signed and must stay unchanged even with overrides.
 	for _, txn := range replayTransactions {
 		if !hasStateOverrides || txn.Type() == types.FrameTxType {
-			if err := api.checkGasCap(txn, chainConfig.IsAmsterdam(block.Time())); err != nil {
+			if err := checkTransactionGasCap(txn, api.GasCap); err != nil {
 				return nil, err
 			}
 		}
@@ -528,6 +529,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		}
 		if hasStateOverrides {
 			msg.ChangeGas(api.GasCap, api.GasCap)
+			// The override budget is an RPC limit, not the signed transaction's gas limit.
+			msg.SetCheckGas(false)
 		}
 
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)

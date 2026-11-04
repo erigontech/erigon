@@ -46,6 +46,27 @@ type frameReservation struct {
 	paymasters uint64
 }
 
+// Simulation rejections expire with state; sender-policy rejections expire when
+// the conflicting transaction leaves the pool. Access requires p.lock.
+type frameRejection struct {
+	generation uint64
+	blocker    common.Hash
+}
+
+func (r frameRejection) valid(p *TxPool, generation uint64) bool {
+	if r.blocker != (common.Hash{}) {
+		_, pooled := p.byHash[string(r.blocker[:])]
+		return pooled
+	}
+	return r.generation == generation
+}
+
+func (p *TxPool) RejectFramePrefix(hash common.Hash) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.discardReasonsLRU.Add(string(hash[:]), txpoolcfg.InvalidFrame)
+}
+
 type frameValidationResult struct {
 	validation  *protocol.FrameValidation
 	reason      txpoolcfg.DiscardReason
@@ -184,7 +205,7 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 		if txn.TxType() != FrameTxnType {
 			continue
 		}
-		if generation, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && generation == batch.generation {
+		if rejection, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && rejection.valid(p, batch.generation) {
 			batch.results[txn] = frameValidationResult{reason: txpoolcfg.InvalidFrame}
 			continue
 		}
@@ -284,9 +305,10 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	// Publish rejections before releasing the gate so its waiters can reuse them.
 	hash := string(txn.IDHash[:])
 	p.lock.Lock()
-	rejectedAt, rejected := p.frameRejections.Get(hash)
+	rejection, rejected := p.frameRejections.Get(hash)
+	rejected = rejected && rejection.valid(p, generation)
 	p.lock.Unlock()
-	if rejected && rejectedAt == generation {
+	if rejected {
 		return nil, nil
 	}
 	var data bytes.Buffer
@@ -304,7 +326,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	if !reply.Valid {
 		p.lock.Lock()
 		if generation == p.stateGeneration {
-			p.frameRejections.Add(hash, generation)
+			p.frameRejections.Add(hash, frameRejection{generation: generation})
 		}
 		p.lock.Unlock()
 		return nil, nil
@@ -345,6 +367,7 @@ func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.Dis
 	v := txn.frameValidation
 	pooledFrame := p.all.senderIDFrameTxn[txn.SenderID]
 	if pooledFrame != nil && pooledFrame != found {
+		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{blocker: pooledFrame.TxnSlot.IDHash})
 		return txpoolcfg.InvalidFrame
 	}
 	if v == nil {
@@ -632,6 +655,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 			return err
 		}
 		p.notifyPendingTxns(announcements)
+		p.publishDepthMetrics()
 		return nil
 	})
 }

@@ -112,6 +112,9 @@ func NewFetch(
 		logger:               logger,
 	}
 	f.pooledTxnsParseCtx.ValidateRLP(ValidateSerializedTxn)
+	if pool != nil {
+		f.pooledTxnsParseCtx.rejectPrefix = pool.RejectFramePrefix
+	}
 	f.stateChangesParseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	return f

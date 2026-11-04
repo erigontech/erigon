@@ -1172,10 +1172,15 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 		name         string
 		key          uint64
 		otherCreator bool
+		nonceOffset  int64
+		commit       bool
 	}{
 		{name: "legacy"},
 		{name: "keyed", key: 5},
 		{name: "other creator", otherCreator: true},
+		{name: "nonce gap", key: 5, nonceOffset: 1},
+		{name: "consumed nonce", key: 5, nonceOffset: -1},
+		{name: "commit nonce gap", key: 5, nonceOffset: 1, commit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := chain.AllProtocolChanges.Copy()
@@ -1216,6 +1221,7 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			if tc.key == 0 && creator == sender {
 				secondNonce++
 			}
+			secondNonce = uint64(int64(secondNonce) + tc.nonceOffset)
 			second := &types.FrameTransaction{
 				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: creator, Nonce: secondNonce,
 				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: []types.Frame{approval},
@@ -1231,7 +1237,23 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			attrs := validPayloadAttrs(parent.Time())
 			slot := hexutil.Uint64(parent.NumberU64() + 1)
 			attrs.SlotNumber = &slot
+			if tc.commit {
+				hash, err := api.CommitBlockV1(t.Context(), attrs, &txs, nil)
+				require.ErrorContains(t, err, "transaction 1")
+				require.ErrorContains(t, err, second.Hash().String())
+				require.Zero(t, hash)
+				head, err := m.ExecModule.CurrentHeader(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, parent.Hash(), head.Hash())
+				return
+			}
 			response, err := api.BuildBlockV1(t.Context(), parent.Hash(), attrs, &txs, nil)
+			if tc.nonceOffset != 0 {
+				require.ErrorContains(t, err, "transaction 1")
+				require.ErrorContains(t, err, second.Hash().String())
+				require.Nil(t, response)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, txs, response.ExecutionPayload.Transactions)
 		})

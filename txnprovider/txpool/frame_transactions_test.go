@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -783,6 +784,85 @@ func TestFramePoolRejectionCacheWithinBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame, txpoolcfg.InvalidFrame}, reasons)
 	require.Len(t, backend.calls, 1, "duplicates prepared before simulation must share the rejection")
+}
+
+func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
+	for _, nonce := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("sequence %d", nonce), func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			add := func(key, nonce uint64, want txpoolcfg.DiscardReason) *TxnSlot {
+				t.Helper()
+				frame := framePoolSlotWithNonce(t, sender, nonce, 1, 2, uint256.Int{key})
+				var txns TxnSlots
+				txns.Append(frame, sender[:], true)
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{want}, reasons)
+				return frame
+			}
+			first := add(1, 0, txpoolcfg.Success)
+			rejected := add(2, nonce, txpoolcfg.InvalidFrame)
+			add(2, nonce, txpoolcfg.InvalidFrame)
+			require.Len(t, backend.calls, 2, "repeating a sender-policy rejection must not simulate again")
+			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+				known, err := pool.IdHashKnown(tx, rejected.IDHash[:])
+				require.NoError(t, err)
+				require.True(t, known)
+				return nil
+			}))
+			pool.lock.Lock()
+			mt := pool.byHash[string(first.IDHash[:])]
+			pool.removeFromSubPool(mt, "test")
+			pool.discardLocked(mt, txpoolcfg.Mined)
+			pool.lock.Unlock()
+			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+				known, err := pool.IdHashKnown(tx, rejected.IDHash[:])
+				require.NoError(t, err)
+				require.False(t, known)
+				return nil
+			}))
+			add(2, nonce, txpoolcfg.Success)
+			require.Len(t, backend.calls, 3, "removing the conflicting frame must allow retry without waiting for a block")
+		})
+	}
+}
+
+type failingFrameCacheView struct {
+	kvcache.CacheView
+	err error
+}
+
+func (v failingFrameCacheView) Get([]byte) ([]byte, error) { return nil, v.err }
+
+func TestFramePoolFailedBlockUpdateWakesWaiters(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	var txns TxnSlots
+	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		generation, height := pool.stateGeneration, pool.lastSeenBlock.Load()
+		done := make(chan bool, 1)
+		go func() { done <- pool.waitForFrameStateChange(ctx, generation) }()
+		synctest.Wait()
+		readErr := errors.New("state read failed")
+		change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+		change.ChangeBatch[0].BlockHeight = height + 1
+		_, err := pool.applyBlockUpdate(change, TxnSlots{}, TxnSlots{}, TxnSlots{}, failingFrameCacheView{err: readErr}, nil)
+		require.ErrorIs(t, err, readErr)
+		require.Equal(t, height, pool.lastSeenBlock.Load())
+		synctest.Wait()
+		select {
+		case changed := <-done:
+			require.True(t, changed)
+		default:
+			t.Fatal("a failed block update must wake waiters when the generation changes")
+		}
+	})
 }
 
 func TestFramePoolValidationReleasesLock(t *testing.T) {

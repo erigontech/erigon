@@ -46,7 +46,7 @@ type txPool interface {
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
-	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
+	HasTxn(hash []byte) bool
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
@@ -176,12 +176,6 @@ func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpoolproto.TxHashes) 
 }
 
 func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpoolproto.AddReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	var slots TxnSlots
 	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired().WithPoolRules()
 	parseCtx.ValidateRLP(ValidateSerializedTxn)
@@ -193,8 +187,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		slots.Resize(uint(j + 1))
 		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
-		if _, err = parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
-			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
+			if s.txPool.HasTxn(hash) {
 				return ErrAlreadyKnown
 			}
 			return nil

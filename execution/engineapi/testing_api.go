@@ -55,7 +55,7 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → build from these transactions, subject to execution checks
+	//               [...] → include every supplied transaction in order, or return an error
 	//
 	// Account nonce prechecks cover the ordinary prefix and the first frame transaction's
 	// legacy nonce. Keyed sequences and all later nonces are checked during execution.
@@ -87,7 +87,7 @@ func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB)
 // decodeTxnProvider decodes raw transactions into a TxnProvider.
 // Returns nil if transactions is nil (mempool path).
 // Opens a single temporal DB transaction for all account nonce lookups to avoid per-sender overhead.
-func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
+func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (*staticTxnProvider, error) {
 	if transactions == nil {
 		return nil, nil
 	}
@@ -396,8 +396,10 @@ func (t *testingImpl) assembleTestingBlock(
 		Timestamp:             timestamp,
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
-		CustomTxnProvider:     customProvider,
 		ExtraData:             []byte{},
+	}
+	if customProvider != nil {
+		assembleParams.CustomTxnProvider = customProvider
 	}
 	if extraData != nil {
 		assembleParams.ExtraData = *extraData
@@ -460,6 +462,17 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 	if assembled.Block == nil {
 		return nil, 0, errors.New("no assembled block data available for payload ID")
+	}
+	if customProvider != nil {
+		included := assembled.Block.Block.Transactions()
+		for i, expected := range customProvider.txns {
+			if i >= len(included) || included[i].Hash() != expected.Hash() {
+				return nil, 0, fmt.Errorf("transaction %d (%s) was not included at its requested position", i, expected.Hash())
+			}
+		}
+		if len(included) != len(customProvider.txns) {
+			return nil, 0, errors.New("assembled block contains unrequested transactions")
+		}
 	}
 
 	return &assembled, version, nil
