@@ -89,7 +89,7 @@ func StageBuilderExecCfg(
 //
 // State changes flow through a single execution path:
 //  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
-//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
+//  2. the builder applies the assembler's per-phase write sets to sd
 //  3. ComputeCommitment(sd) produces the state root
 //  4. sd writes are discarded when Builder.Build returns (tx is read-only, sd is never flushed)
 //
@@ -113,7 +113,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 	sd.SetTxNum(txNum)
 
-	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	// filterSd is a separate SharedDomains used only for filterBadTransactions.
@@ -145,11 +144,8 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
 	}, current)
-	ba.SetStateWriter(stateWriter)
 
-	if ba.HasBAL() {
-		ibs.SetVersionMap(state.NewVersionMap(nil))
-	}
+	ibs.SetVersionMap(state.NewVersionMap(nil))
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
@@ -243,22 +239,19 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	blockHeight := block.NumberU64()
 
-	// When assembled in versioned (BAL) mode, FinalizeBlockExecution skipped the
-	// so.data CommitBlock; commit the accumulated per-phase write-sets to the
+	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
 	// domains via ApplyWrites instead — the same domain apply the parallel
 	// executor and block generation use (rw_v3 handles the self-destruct delete,
 	// EIP-161 removal and storage-subtree cascade). Each recorded phase
 	// (init/txs/finalize) is applied in order.
-	if ibs.IsVersioned() {
-		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-		blockRules := blockCtx.Rules(cfg.chainConfig)
-		for _, ws := range ba.BalIO().Outputs() {
-			if ws == nil || ws.IsEmpty() {
-				continue
-			}
-			if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
-				return fmt.Errorf("apply versioned block writes: %w", err)
-			}
+	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
+	blockRules := blockCtx.Rules(cfg.chainConfig)
+	for _, ws := range ba.WriteSets() {
+		if ws == nil || ws.IsEmpty() {
+			continue
+		}
+		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+			return fmt.Errorf("apply versioned block writes: %w", err)
 		}
 	}
 
