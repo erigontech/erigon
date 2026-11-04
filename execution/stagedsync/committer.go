@@ -802,7 +802,18 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
+	emitStart := time.Now()
+	nAcc, nSlot := len(cc.touchedAccounts), 0
+	for _, sl := range cc.touchedStorage {
+		nSlot += len(sl)
+	}
 	emitErr := cc.emitTouched(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
+	emitDur := time.Since(emitStart)
+	defer func() {
+		if logNpPhases {
+			cc.logger.Info("[np-phase] commit-split", "blk", t.blockNum, "emit", emitDur, "fold", time.Since(emitStart)-emitDur, "accs", nAcc, "slots", nSlot)
+		}
+	}()
 	if !m.midBlock {
 		cc.clearTouched()
 	}
