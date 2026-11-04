@@ -473,37 +473,49 @@ func TestPostEnvelopeContentsPublishesColumnsUnderTheBlockEpochDigest(t *testing
 
 func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testing.T) {
 	const failedColumn = 5
-	f := newEnvelopeContentsFixture(t, 0, 2)
-	cfg := f.handler.beaconChainCfg
-	f.failPublish = func(index uint64) error {
-		if index == failedColumn {
-			return errors.New("injected publish failure")
-		}
-		return nil
+	for _, tc := range []struct{ name, query string }{
+		{name: "gossip"},
+		{name: "consensus", query: "?broadcast_validation=consensus"},
+		{name: "consensus_and_equivocation", query: "?broadcast_validation=consensus_and_equivocation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			cfg := f.handler.beaconChainCfg
+			f.failPublish = func(index uint64) error {
+				if index == failedColumn {
+					return errors.New("injected publish failure")
+				}
+				return nil
+			}
+			body := f.contents(f.blobs...)
+
+			first := f.postContents(t.Context(), body, tc.query)
+
+			require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
+			require.Len(t, f.succeededIndices(eventColumnPublish), int(cfg.NumberOfColumns)-1)
+			require.NotContains(t, f.succeededIndices(eventColumnPublish), uint64(failedColumn))
+			envelopes := f.positions(eventEnvelopePublish)
+			writes := f.positions(eventColumnWrite)
+			require.Len(t, envelopes, 1, "a failed column must not withhold the envelope")
+			require.Len(t, writes, int(cfg.NumberOfColumns))
+			require.Less(t, writes[len(writes)-1], envelopes[0], "all columns are stored before the response")
+			for _, b := range f.blobs {
+				_, ok := f.handler.blobBundles.Get(common.Bytes48(b.commitment))
+				require.True(t, ok, "the bundles are cached before the response")
+			}
+
+			f.failPublish = nil
+			second := f.postContents(t.Context(), body, tc.query)
+
+			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+			f.requireAllColumns("published after the re-POST", slices.Compact(f.succeededIndices(eventColumnPublish)))
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "the re-POST must not publish the envelope again")
+
+			third := f.postContents(t.Context(), body, tc.query)
+
+			require.Equal(t, http.StatusBadRequest, third.Code, "a repaired re-POST must clear the retry record")
+		})
 	}
-	body := f.contents(f.blobs...)
-
-	first := f.postContents(t.Context(), body, "")
-
-	require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
-	require.Len(t, f.succeededIndices(eventColumnPublish), int(cfg.NumberOfColumns)-1)
-	require.NotContains(t, f.succeededIndices(eventColumnPublish), uint64(failedColumn))
-	envelopes := f.positions(eventEnvelopePublish)
-	writes := f.positions(eventColumnWrite)
-	require.Len(t, envelopes, 1, "a failed column must not withhold the envelope")
-	require.Len(t, writes, int(cfg.NumberOfColumns))
-	require.Less(t, writes[len(writes)-1], envelopes[0], "all columns are stored before the response")
-	for _, b := range f.blobs {
-		_, ok := f.handler.blobBundles.Get(common.Bytes48(b.commitment))
-		require.True(t, ok, "the bundles are cached before the response")
-	}
-
-	f.failPublish = nil
-	second := f.postContents(t.Context(), body, "")
-
-	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
-	f.requireAllColumns("published after the re-POST", slices.Compact(f.succeededIndices(eventColumnPublish)))
-	require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "the re-POST must not publish the envelope again")
 }
 
 func TestPostEnvelopeContentsColumnPublishFailureWinsOverWriteFailure(t *testing.T) {
