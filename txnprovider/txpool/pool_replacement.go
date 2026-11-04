@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -108,10 +107,12 @@ func frameReplacementFee(previous, replacement *uint256.Int, bump uint64) bool {
 	if replacement.Cmp(previous) <= 0 {
 		return false
 	}
-	// Cross-products preserve the full percentage bump without division rounding
-	// or overflow at the uint256 boundary.
-	percent := new(big.Int).Add(new(big.Int).SetUint64(bump), big.NewInt(100))
-	required := new(big.Int).Mul(previous.ToBig(), percent)
-	offered := new(big.Int).Mul(replacement.ToBig(), big.NewInt(100))
-	return offered.Cmp(required) >= 0
+	var percent, threshold, remainder uint256.Int
+	percent.SetUint64(bump)
+	percent.AddUint64(&percent, 100)
+	_, _, overflow := threshold.MulDivOverflowRem(previous, &percent, &u256.N100, &remainder)
+	cmp := replacement.Cmp(&threshold)
+	// A fractional threshold requires a strictly higher fee. Comparing instead
+	// of rounding up also rejects a threshold just above MaxUint256.
+	return !overflow && (cmp > 0 || cmp == 0 && remainder.IsZero())
 }
