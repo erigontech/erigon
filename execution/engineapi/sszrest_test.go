@@ -1603,6 +1603,42 @@ func TestSSZRESTGetPayload(t *testing.T) {
 	require.Equal(t, []hexutil.Bytes{request}, response.ExecutionRequests)
 }
 
+func TestSSZRESTGetPayloadErrorsAreNotCached(t *testing.T) {
+	const payloadID = "0x0102030405060708"
+	for _, tc := range []struct {
+		name      string
+		fork      string
+		payloadID string
+		lookupErr error
+		code      int
+		problem   string
+	}{
+		{"missing fork header", "", payloadID, nil, http.StatusBadRequest, problemUnsupportedFork},
+		{"unknown fork header", "unknown", payloadID, nil, http.StatusBadRequest, problemUnsupportedFork},
+		{"malformed payload ID", "prague", "not-an-id", nil, http.StatusBadRequest, problemInvalidRequest},
+		{"unknown payload", "prague", payloadID, nil, http.StatusNotFound, problemUnknownPayload},
+		{"backend error", "prague", payloadID, errors.New("payload lookup failed"), http.StatusInternalServerError, problemInternal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &stubExecutionModule{
+				getAssembledBlockFunc: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+					return execmodule.AssembledBlockResult{}, tc.lookupErr
+				},
+			}
+			srv := newProposingEngineServerForGetPayloadTests(module)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec,
+				newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/payloads/"+tc.payloadID, tc.fork, nil))
+
+			require.Equal(t, tc.code, rec.Code, rec.Body.String())
+			require.Equal(t, tc.problem, problemType(t, rec))
+			response := rec.Result()
+			defer response.Body.Close()
+			require.Equal(t, "no-store", response.Header.Get("Cache-Control"))
+		})
+	}
+}
+
 func TestSSZRESTGetPayloadForkMatching(t *testing.T) {
 	for _, tc := range []struct {
 		fork      string
@@ -1639,6 +1675,9 @@ func TestSSZRESTGetPayloadForkMatching(t *testing.T) {
 				newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/payloads/0x000000000000002a", tc.fork, nil))
 
 			require.Equal(t, tc.code, rec.Code)
+			httpResponse := rec.Result()
+			defer httpResponse.Body.Close()
+			require.Equal(t, "no-store", httpResponse.Header.Get("Cache-Control"))
 			if tc.code == http.StatusBadRequest {
 				require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 				return

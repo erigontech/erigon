@@ -128,6 +128,10 @@ func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 		return
 	}
+	if route == sszForkRouteGetPayload {
+		// The caching rule applies to errors as well as successful payloads.
+		w.Header().Set("Cache-Control", "no-store")
+	}
 
 	forkName := r.Header.Get(engineForkHeader)
 	version, ok := engineForkVersion(forkName)
@@ -319,7 +323,6 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	e.logger.Info("[SSZ-REST] handled get payload", "fork", forkName, "payloadId", decodedID)
-	w.Header().Set("Cache-Control", "no-store")
 	writeSSZBytes(w, out)
 }
 
