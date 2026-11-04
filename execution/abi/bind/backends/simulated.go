@@ -200,9 +200,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uint256.Int) *state.IntraBlockState {
 	if blockNumber == nil {
-		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+		return state.NewWithVersionMap(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db), state.NewVersionMap(nil))
 	}
-	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	return state.NewWithVersionMap(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db), state.NewVersionMap(nil))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -579,7 +579,9 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 	}
 	var res *evmtypes.ExecutionResult
 	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
-		s := state.New(b.m.NewStateReader(tx))
+		s := state.NewWithVersionMap(b.m.NewStateReader(tx), state.NewVersionMap(nil))
+		defer s.Close()
+		s.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
 			return err
