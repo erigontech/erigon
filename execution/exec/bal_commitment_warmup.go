@@ -337,17 +337,18 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie, level by
 // level since a branch decides whether the next level exists, and, when state is set, of its accounts and storage.
-func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, accs, slots [][]byte, state bool) {
+func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, state bool) {
 	started := time.Now()
 	var stats [3]prefetchStats
 	var g errgroup.Group
 	if state {
+		accs, slots := balPrefetchKeys(bal)
 		g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
 		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
 	}
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
 	err := g.Wait()
-	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "state", state,
+	log.Info("[warmBAL] batch prefetch", "accounts", len(bal), "slots", balSlotCount(bal), "state", state,
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
 		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),

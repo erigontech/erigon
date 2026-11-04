@@ -468,8 +468,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	if mmap.BatchPrefetch {
 		stateByBatch = stateKeysCold(ctx, db, bal)
 		group.Go(func() error {
-			accs, slots := balPrefetchKeys(bal)
-			prefetchBAL(ctx, db, bal, accs, slots, stateByBatch)
+			prefetchBAL(ctx, db, bal, stateByBatch)
 			return nil
 		})
 	}
