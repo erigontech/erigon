@@ -2055,58 +2055,67 @@ func TestInvertedIndex_IdxRange_Seek(t *testing.T) {
 	ic := ii.beginForTests()
 	defer ic.Close()
 
-	type txRange struct{ from, to int }
-	ascRanges := []txRange{{-1, -1}, {0, -1}, {37, 450}, {100, 101}, {300, 510}}
-	descRanges := []txRange{{-1, -1}, {450, 37}, {510, -1}, {101, 100}, {600, 300}}
+	ranges := map[order.By][][2]int{
+		order.Asc:  {{-1, -1}, {0, -1}, {37, 450}, {100, 101}, {300, 510}},
+		order.Desc: {{-1, -1}, {450, 37}, {510, -1}, {101, 100}, {600, 300}},
+	}
 	for _, keyNum := range []uint64{1, 3, 7} {
 		var key [8]byte
 		binary.BigEndian.PutUint64(key[:], keyNum)
-		for _, asc := range []order.By{order.Asc, order.Desc} {
-			ranges := ascRanges
-			if !asc {
-				ranges = descRanges
-			}
-			for _, r := range ranges {
-				var want []uint64
-				for n := uint64(1); n <= txs; n++ {
-					inRange := (r.from < 0 || n >= uint64(r.from)) && (r.to < 0 || n < uint64(r.to))
-					if !asc {
-						inRange = (r.from < 0 || n <= uint64(r.from)) && (r.to < 0 || n > uint64(r.to))
-					}
-					if n%keyNum == 0 && inRange {
-						want = append(want, n)
-					}
-				}
-				if !asc {
-					slices.Reverse(want)
-				}
+		for asc, rs := range ranges {
+			for _, r := range rs {
+				want := filledInvIndexRange(keyNum, txs, r[0], r[1], asc)
 				for _, gap := range []uint64{1, 2, 15, 16, 100, 1000} {
 					t.Run(fmt.Sprintf("key=%d/asc=%t/range=%v/gap=%d", keyNum, asc, r, gap), func(t *testing.T) {
-						it, err := ic.IdxRange(key[:], r.from, r.to, asc, -1, roTx)
+						it, err := ic.IdxRange(key[:], r[0], r[1], asc, -1, roTx)
 						require.NoError(t, err)
 						defer it.Close()
-						s, ok := it.(stream.Seeker[uint64])
-						require.True(t, len(want) == 0 || ok && s.CanSeek())
-						i := 0
-						for it.HasNext() {
-							n, err := it.Next()
-							require.NoError(t, err)
-							require.Less(t, i, len(want))
-							require.Equal(t, want[i], n)
-							i++
-							target := n + gap
-							if !asc {
-								target = n - min(n, gap)
-							}
-							require.NoError(t, s.Seek(target))
-							for i < len(want) && (asc && want[i] < target || !asc && want[i] > target) {
-								i++
-							}
-						}
-						require.Equal(t, len(want), i)
+						requireSeekEvery(t, it, want, asc, gap)
 					})
 				}
 			}
 		}
 	}
+}
+
+// filledInvIndexRange is what IdxRange returns for keyNum over filledInvIndexOfSize data.
+func filledInvIndexRange(keyNum, txs uint64, from, to int, asc order.By) []uint64 {
+	var want []uint64
+	for n := uint64(1); n <= txs; n++ {
+		inRange := (from < 0 || n >= uint64(from)) && (to < 0 || n < uint64(to))
+		if !asc {
+			inRange = (from < 0 || n <= uint64(from)) && (to < 0 || n > uint64(to))
+		}
+		if n%keyNum == 0 && inRange {
+			want = append(want, n)
+		}
+	}
+	if !asc {
+		slices.Reverse(want)
+	}
+	return want
+}
+
+// requireSeekEvery reads it to the end, seeking gap past every element it returns, and checks it against want.
+func requireSeekEvery(t *testing.T, it stream.U64, want []uint64, asc order.By, gap uint64) {
+	t.Helper()
+	s, ok := it.(stream.Seeker[uint64])
+	require.True(t, len(want) == 0 || ok && s.CanSeek())
+	i := 0
+	for it.HasNext() {
+		n, err := it.Next()
+		require.NoError(t, err)
+		require.Less(t, i, len(want))
+		require.Equal(t, want[i], n)
+		i++
+		target := n + gap
+		if !asc {
+			target = n - min(n, gap)
+		}
+		require.NoError(t, s.Seek(target))
+		for i < len(want) && (asc && want[i] < target || !asc && want[i] > target) {
+			i++
+		}
+	}
+	require.Equal(t, len(want), i)
 }
