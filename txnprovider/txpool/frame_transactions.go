@@ -153,7 +153,7 @@ func (p *TxPool) hasParkedLegacyFrame(senderID uint64) bool {
 }
 
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
-	if !p.chainConfig.IsBogota(uint64(time.Now().Unix())) {
+	if !p.isBogota() {
 		return txpoolcfg.TypeNotActivated
 	}
 	frame := txn.Txn.(*types.FrameTransaction)

@@ -120,8 +120,14 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
+func newTestPool(t *testing.T, configs ...*chain.Config) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
 	t.Helper()
+
+	chainConfig := chain.AllProtocolChanges
+	if len(configs) > 0 {
+		require.Len(t, configs, 1)
+		chainConfig = configs[0]
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -135,7 +141,7 @@ func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRw
 		coreDB,
 		txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig),
-		chain.AllProtocolChanges,
+		chainConfig,
 		nil,
 		nil,
 		func() {},
@@ -149,10 +155,10 @@ func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRw
 	return ctx, pool, poolDB, coreDB
 }
 
-func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash, configs ...*chain.Config) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
 
-	ctx, pool, poolDB, coreDB := newTestPool(t)
+	ctx, pool, poolDB, coreDB := newTestPool(t, configs...)
 
 	sender := common.Address{1}
 	account := accounts.Account{

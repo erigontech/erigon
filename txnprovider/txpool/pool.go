@@ -157,6 +157,8 @@ type TxPool struct {
 	isPostOsaka             atomic.Bool
 	amsterdamTime           *uint64
 	isPostAmsterdam         atomic.Bool
+	bogotaTime              *uint64
+	isPostBogota            atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -283,6 +285,7 @@ func New(
 	res.pragueTime = chainConfig.PragueTime
 	res.osakaTime = chainConfig.OsakaTime
 	res.amsterdamTime = chainConfig.AmsterdamTime
+	res.bogotaTime = chainConfig.BogotaTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
@@ -1366,6 +1369,10 @@ func (p *TxPool) isOsaka() bool {
 
 func (p *TxPool) isAmsterdam() bool {
 	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
+}
+
+func (p *TxPool) isBogota() bool {
+	return isTimeBasedForkActivated(&p.isPostBogota, p.bogotaTime)
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {

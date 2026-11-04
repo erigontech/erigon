@@ -126,6 +126,37 @@ func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, fee
 	return &TxnSlot{Txn: tx, Nonce: nonce, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
 }
 
+func TestFramePoolBogotaActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		forkTime *uint64
+		want     txpoolcfg.DiscardReason
+	}{
+		{"disabled", nil, txpoolcfg.TypeNotActivated},
+		{"genesis", common.NewUint64(0), txpoolcfg.Success},
+		{"scheduled", common.NewUint64(math.MaxUint64), txpoolcfg.TypeNotActivated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chainConfig := chain.AllProtocolChanges.Copy()
+			chainConfig.BogotaTime = tc.forkTime
+			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
+			slot := framePoolSlot(t, sender, 1, 2)
+			require.Equal(t, tc.want, pool.validateFrame(slot, true))
+		})
+	}
+	t.Run("activation boundary", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			chainConfig := chain.AllProtocolChanges.Copy()
+			chainConfig.BogotaTime = common.NewUint64(uint64(time.Now().Unix()) + 1)
+			_, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
+			slot := framePoolSlot(t, sender, 1, 2)
+			require.Equal(t, txpoolcfg.TypeNotActivated, pool.validateFrame(slot, true))
+			time.Sleep(time.Second)
+			require.Equal(t, txpoolcfg.Success, pool.validateFrame(slot, true))
+		})
+	})
+}
+
 func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -204,7 +235,7 @@ func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {
 	var txns TxnSlots
 	txns.Append(framePoolSlot(t, sender, 1, 2), sender[:], false)
 	// Force a panic during the locked policy checks.
-	pool.chainConfig = nil
+	pool.frameRejections = nil
 	require.Panics(t, func() { pool.prepareFrames(ctx, txns, false) })
 	unlocked := pool.lock.TryLock()
 	if unlocked {
@@ -305,9 +336,9 @@ func TestFramePoolDelegatedSenderLimit(t *testing.T) {
 		{name: "frame first in batch", frameFirst: true, batch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
-			pool.chainConfig = pool.chainConfig.Copy()
-			pool.chainConfig.BogotaTime = common.NewUint64(0)
+			chainConfig := chain.AllProtocolChanges.Copy()
+			chainConfig.BogotaTime = common.NewUint64(0)
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash(), chainConfig)
 			pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
 			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 			ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -1326,9 +1357,9 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 			if outcome == "delegated" {
 				codeHash = testDelegationCodeHash()
 			}
-			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, codeHash)
-			pool.chainConfig = pool.chainConfig.Copy()
-			pool.chainConfig.BogotaTime = common.NewUint64(0)
+			chainConfig := chain.AllProtocolChanges.Copy()
+			chainConfig.BogotaTime = common.NewUint64(0)
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, codeHash, chainConfig)
 			backend := &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
 			pool.ethBackend = backend
 			blockChange := func(hash common.Hash, nonce uint64) *remoteproto.StateChangeBatch {
@@ -1635,9 +1666,9 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 	for _, mode := range []string{"new local transaction", "restored local transaction"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-			pool.chainConfig = pool.chainConfig.Copy()
-			pool.chainConfig.BogotaTime = common.NewUint64(0)
+			chainConfig := chain.AllProtocolChanges.Copy()
+			chainConfig.BogotaTime = common.NewUint64(0)
+			ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 			pool.chainID.SetUint64(1)
 			executedHead, headerHead := common.Hash{1}, common.Hash{2}
 			require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
@@ -2359,9 +2390,9 @@ func TestFramePoolCreationNonceChanges(t *testing.T) {
 }
 
 func TestFramePoolReservationsAndReplacement(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.chainConfig = pool.chainConfig.Copy()
-	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BogotaTime = common.NewUint64(0)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 	backend := &frameValidationBackend{payer: common.Address{9}, balance: 50_000, valid: true}
 	pool.ethBackend = backend
 	add := func(sender common.Address, tip, fee uint64) txpoolcfg.DiscardReason {
@@ -2382,9 +2413,9 @@ func TestFramePoolReservationsAndReplacement(t *testing.T) {
 }
 
 func TestFramePoolPaymasterLimit(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.chainConfig = pool.chainConfig.Copy()
-	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BogotaTime = common.NewUint64(0)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 	pool.ethBackend = &frameValidationBackend{payer: common.Address{9}, balance: 1_000_000, paymaster: true, valid: true}
 	for i, address := range []common.Address{sender, {2}} {
 		var txns TxnSlots
@@ -2400,9 +2431,9 @@ func TestFramePoolPaymasterLimit(t *testing.T) {
 }
 
 func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.chainConfig = pool.chainConfig.Copy()
-	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BogotaTime = common.NewUint64(0)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 	pool.ethBackend = &frameValidationBackend{payer: common.Address{9}, balance: 1_000_000, valid: true}
 	first := framePoolSlot(t, sender, 1, 2)
 	var txns TxnSlots
@@ -2421,9 +2452,9 @@ func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
 }
 
 func TestFramePoolReplacementRequiresSameKeys(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
-	pool.chainConfig = pool.chainConfig.Copy()
-	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BogotaTime = common.NewUint64(0)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash(), chainConfig)
 	pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
 	var txns TxnSlots
 	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
@@ -2469,9 +2500,9 @@ func TestFramePoolMinedNonceDomains(t *testing.T) {
 
 func keyedFramePoolEnv(t *testing.T) (context.Context, *TxPool, common.Address) {
 	t.Helper()
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	pool.chainConfig = pool.chainConfig.Copy()
-	pool.chainConfig.BogotaTime = common.NewUint64(0)
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BogotaTime = common.NewUint64(0)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 	pool.ethBackend = &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 	return ctx, pool, sender
 }
