@@ -1092,14 +1092,3 @@ func TestBatchReadsStateOnlyWithoutCodeWarmup(t *testing.T) {
 	}
 	require.Equal(t, 1, sampled, "a code warmup skips the residency sample")
 }
-
-func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
-	a1, a2 := common.Address{19: 1}, common.Address{19: 2}
-	bal := types.BlockAccessList{
-		{Address: a1, BalanceChanges: []*types.BalanceChange{{Index: 1}}, StorageChanges: []types.SlotChanges{{}}, StorageReads: []common.Hash{{}}},
-		{Address: a2, StorageReads: []common.Hash{{}}},
-	}
-	got := balAccounts(bal)
-	require.Equal(t, types.BlockAccessList{{Address: a1, BalanceChanges: bal[0].BalanceChanges}, {Address: a2}}, got)
-	require.Len(t, bal[0].StorageChanges, 1, "the BAL itself is unchanged")
-}

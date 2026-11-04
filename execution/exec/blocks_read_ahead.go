@@ -470,43 +470,26 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
-	stateByBatch := false
+	var cold coldState
 	if mmap.NewProbe() != nil {
 		group.Go(func() error {
 			prefetchBALCommitment(ctx, db, trieKeys())
 			return nil
 		})
-		cold := batchReadsState(codeMode, func() coldState { return stateKeysCold(ctx, db, bal) })
-		if stateByBatch = cold.any(); stateByBatch {
-			group.Go(func() error {
-				prefetchBALState(ctx, db, bal, cold)
-				// The batch only reads pages; the accounts' per-key warmup also fills the state cache that exec reads.
-				accs := balAccounts(bal)
-				accTasks, accWorkers := makeBALWarmupPlan(accs, workers)
-				return bra.warmBALState(ctx, db, accs, accTasks, codeMode, txCodeDestinations, accWorkers)
-			})
+		cold = batchReadsState(codeMode, func() coldState { return stateKeysCold(ctx, db, bal) })
+	}
+	group.Go(func() error {
+		if cold.any() {
+			// The batch only reads pages; the per-key warmup after it also fills the state cache that exec reads.
+			prefetchBALState(ctx, db, bal, cold)
 		}
-	}
-	if !stateByBatch {
-		group.Go(func() error {
-			return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
-		})
-	}
+		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+	})
 	return group.Wait()
 }
 
-// balAccounts returns the BAL without its storage changes and reads.
-func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
-	accs := make(types.BlockAccessList, len(bal))
-	for i := range bal {
-		accs[i] = bal[i]
-		accs[i].StorageChanges, accs[i].StorageReads = nil, nil
-	}
-	return accs
-}
-
-// batchReadsState reports whether the batch prefetch reads the BAL state instead of the per-key warmup: only when the
-// state is cold and no code warmup is asked for, since code is warmed only by the per-key warmup.
+// batchReadsState reports which state domains the batch prefetch reads ahead of the per-key warmup: the cold ones, and
+// none when a code warmup is asked for.
 func batchReadsState(codeMode balCodeWarmupMode, stateCold func() coldState) coldState {
 	if codeMode != balCodeWarmupNone {
 		return coldState{}
