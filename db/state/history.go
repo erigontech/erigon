@@ -461,9 +461,6 @@ func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *histo
 	return w
 }
 
-func (w *historyBufferedWriter) init() {
-}
-
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -712,6 +709,78 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		historyPath:   historyPath,
 		historyComp:   historyWriter,
 	}, nil
+}
+
+func (h *History) collateETL(ctx context.Context, step kv.Step, vals *etl.Collector) (coll HistoryCollation, err error) {
+	if h.SnapshotsDisabled {
+		return HistoryCollation{}, nil
+	}
+	if h.HistoryLargeValues {
+		return HistoryCollation{}, fmt.Errorf("%s: collate history from ETL supports only DupSort history", h.FilenameBase)
+	}
+	defer func() {
+		if err != nil {
+			coll.Close()
+		}
+	}()
+	coll.historyPath, coll.efHistoryPath = h.vNewFilePath(step, step+1), h.efNewFilePath(step, step+1)
+	coll.efBaseTxNum = uint64(step) * h.stepSize
+	histComp, err := seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, coll.historyPath, h.dirs.Tmp, h.CompressorCfg.WithValuesOnCompressedPage(0), log.LvlTrace, h.logger)
+	if err != nil {
+		return coll, fmt.Errorf("create %s history compressor: %w", h.FilenameBase, err)
+	}
+	coll.historyComp = h.dataWriter(ctx, histComp)
+	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, coll.efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	if err != nil {
+		return coll, fmt.Errorf("create %s ef history compressor: %w", h.FilenameBase, err)
+	}
+	coll.efHistoryComp = h.InvertedIndex.dataWriter(efComp, true)
+
+	var (
+		key, histKey, ef []byte
+		txNums           []uint64
+		seq              multiencseq.SequenceBuilder
+	)
+	finishKey := func() error {
+		if len(txNums) == 0 {
+			return nil
+		}
+		seq.Reset(coll.efBaseTxNum, uint64(len(txNums)), txNums[len(txNums)-1])
+		for _, txNum := range txNums {
+			seq.AddOffset(txNum)
+		}
+		seq.Build()
+		ef = seq.AppendBytes(ef[:0])
+		if _, err := coll.efHistoryComp.Write(key); err != nil {
+			return err
+		}
+		_, err := coll.efHistoryComp.Write(ef)
+		return err
+	}
+	err = vals.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		txNum := binary.BigEndian.Uint64(v)
+		if !bytes.Equal(k, key) || len(txNums) == 0 {
+			if err := finishKey(); err != nil {
+				return err
+			}
+			key, txNums = append(key[:0], k...), txNums[:0]
+		} else if last := txNums[len(txNums)-1]; txNum <= last {
+			return fmt.Errorf("%s history of %x: txNum %d after %d", h.FilenameBase, k, txNum, last)
+		}
+		txNums = append(txNums, txNum)
+		histKey = historyKey(txNum, key, histKey)
+		return coll.historyComp.Add(histKey, v[8:])
+	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return coll, err
+	}
+	if err := finishKey(); err != nil {
+		return coll, err
+	}
+	if err := coll.historyComp.Flush(); err != nil {
+		return coll, err
+	}
+	return coll, nil
 }
 
 type HistoryFiles struct {
@@ -964,12 +1033,13 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
 
+	var pruneInProgress bool
 	stat, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
 	if err != nil {
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+	} else {
+		pruneInProgress = (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 	}
-
-	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
@@ -1066,15 +1136,6 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	}
 
 	return ht.iit.TableScanningPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
-}
-
-// Prune [txFrom; txTo)
-// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
-// `useProgress` flag to restore and update prune progress.
-//   - E.g. Unwind can't use progress, because it's not linear
-//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	return ht.Prune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
 }
 
 func (ht *HistoryRoTx) Close() {
@@ -1299,7 +1360,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 
 	s := &HistoryChangesIterFiles{
 		hc:         ht,
-		startTxNum: max(0, uint64(fromTxNum)),
+		startTxNum: uint64(max(0, fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
 	}
