@@ -455,7 +455,12 @@ func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (u
 	gr.data = idx.grData
 
 	bucket := remap(bucketHash, idx.bucketCount)
-	cumKeys, cumKeysNext, bitPos := idx.ef.Get3Probe(bucket, pr)
+	var cumKeys, cumKeysNext, bitPos uint64
+	if pr == nil {
+		cumKeys, cumKeysNext, bitPos = idx.ef.Get3(bucket)
+	} else {
+		cumKeys, cumKeysNext, bitPos = idx.ef.Get3Probe(bucket, pr)
+	}
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
 	if pr != nil {
 		pr.Touch(unsafe.Pointer(&gr.data[bitPos/64]))

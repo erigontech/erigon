@@ -25,9 +25,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/db/recsplit/efcommon"
+
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/mmap"
-	"github.com/erigontech/erigon/db/recsplit/efcommon"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -426,7 +427,108 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 	return ef.data
 }
 
-func (ef *DoubleEliasFano) get2(i uint64, pr *mmap.Probe) (cumKeys, position uint64,
+func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
+) {
+	posLower := i * (ef.lCumKeys + ef.lPosition)
+	idx64, shift := posLower/64, posLower%64
+	lower = ef.lowerBits[idx64] >> shift
+	if shift > 0 {
+		lower |= ef.lowerBits[idx64+1] << (64 - shift)
+	}
+	//fmt.Printf("i = %d, posLower = %d, lower = %b\n", i, posLower, lower)
+
+	jumpSuperQ := (i / superQ) * superQSize * 2
+	jumpInsideSuperQ := (i % superQ) / q
+	idx16 := 4*(jumpSuperQ+2) + 2*jumpInsideSuperQ
+	idx64 = idx16 / 4
+	shift = 16 * (idx16 % 4)
+	mask := uint64(0xffff) << shift
+	jumpCumKeys := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
+	idx16++
+	idx64 = idx16 / 4
+	shift = 16 * (idx16 % 4)
+	mask = uint64(0xffff) << shift
+	jumpPosition := ef.jump[jumpSuperQ+1] + (ef.jump[idx64]&mask)>>shift
+	//fmt.Printf("i = %d, jumpCumKeys = %d, jumpPosition = %d\n", i, jumpCumKeys, jumpPosition)
+
+	currWordCumKeys = jumpCumKeys / 64
+	currWordPosition := jumpPosition / 64
+	windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys] & (uint64(0xffffffffffffffff) << (jumpCumKeys % 64))
+	windowPosition := ef.upperBitsPosition[currWordPosition] & (uint64(0xffffffffffffffff) << (jumpPosition % 64))
+	deltaCumKeys := int(i & qMask)
+	deltaPosition := int(i & qMask)
+
+	for bitCount := bits.OnesCount64(windowCumKeys); bitCount <= deltaCumKeys; bitCount = bits.OnesCount64(windowCumKeys) {
+		//fmt.Printf("i = %d, bitCount cum = %d\n", i, bitCount)
+		currWordCumKeys++
+		windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys]
+		deltaCumKeys -= bitCount
+	}
+	for bitCount := bits.OnesCount64(windowPosition); bitCount <= deltaPosition; bitCount = bits.OnesCount64(windowPosition) {
+		//fmt.Printf("i = %d, bitCount pos = %d\n", i, bitCount)
+		currWordPosition++
+		windowPosition = ef.upperBitsPosition[currWordPosition]
+		deltaPosition -= bitCount
+	}
+
+	selectCumKeys = bitutil.Select64(windowCumKeys, deltaCumKeys)
+	//fmt.Printf("i = %d, select cum in %b for %d = %d\n", i, windowCumKeys, deltaCumKeys, selectCumKeys)
+	cumDelta = i * ef.cumKeysMinDelta
+	cumKeys = ((currWordCumKeys*64+uint64(selectCumKeys)-i)<<ef.lCumKeys | (lower & ef.lowerBitsMaskCumKeys)) + cumDelta
+
+	lower >>= ef.lCumKeys
+	//fmt.Printf("i = %d, lower = %b\n", i, lower)
+	selectPosition := bitutil.Select64(windowPosition, deltaPosition)
+	//fmt.Printf("i = %d, select pos in %b for %d = %d\n", i, windowPosition, deltaPosition, selectPosition)
+	bitDelta := i * ef.posMinDelta
+	position = ((currWordPosition*64+uint64(selectPosition)-i)<<ef.lPosition | (lower & ef.lowerBitsMaskPosition)) + bitDelta
+	return
+}
+
+func (ef *DoubleEliasFano) Get2(i uint64) (cumKeys, position uint64) {
+	cumKeys, position, _, _, _, _, _ = ef.get2(i)
+	return
+}
+
+func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64) {
+	var (
+		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
+		selectCumKeys                                   int
+	)
+	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2(i)
+	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
+	for windowCumKeys == 0 {
+		currWordCumKeys++
+		windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys]
+	}
+
+	lower >>= ef.lPosition
+	cumKeysNext = ((currWordCumKeys*64+uint64(bits.TrailingZeros64(windowCumKeys))-i-1)<<ef.lCumKeys | (lower & ef.lowerBitsMaskCumKeys)) + cumDelta + ef.cumKeysMinDelta
+	return
+}
+
+// Get3Probe is Get3 with pr touching the first word of each structure it reads; a read that
+// crosses into the next page faults that page in as usual. It and get2Probe are copies of Get3
+// and get2, so the default reads carry no probe check.
+func (ef *DoubleEliasFano) Get3Probe(i uint64, pr *mmap.Probe) (cumKeys, cumKeysNext, position uint64) {
+	var (
+		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
+		selectCumKeys                                   int
+	)
+	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2Probe(i, pr)
+	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
+	for windowCumKeys == 0 {
+		currWordCumKeys++
+		windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys]
+	}
+
+	lower >>= ef.lPosition
+	cumKeysNext = ((currWordCumKeys*64+uint64(bits.TrailingZeros64(windowCumKeys))-i-1)<<ef.lCumKeys | (lower & ef.lowerBitsMaskCumKeys)) + cumDelta + ef.cumKeysMinDelta
+	return
+}
+
+func (ef *DoubleEliasFano) get2Probe(i uint64, pr *mmap.Probe) (cumKeys, position uint64,
 	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
 ) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
@@ -487,34 +589,6 @@ func (ef *DoubleEliasFano) get2(i uint64, pr *mmap.Probe) (cumKeys, position uin
 	//fmt.Printf("i = %d, select pos in %b for %d = %d\n", i, windowPosition, deltaPosition, selectPosition)
 	bitDelta := i * ef.posMinDelta
 	position = ((currWordPosition*64+uint64(selectPosition)-i)<<ef.lPosition | (lower & ef.lowerBitsMaskPosition)) + bitDelta
-	return
-}
-
-func (ef *DoubleEliasFano) Get2(i uint64) (cumKeys, position uint64) {
-	cumKeys, position, _, _, _, _, _ = ef.get2(i, nil)
-	return
-}
-
-func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64) {
-	return ef.Get3Probe(i, nil)
-}
-
-// Get3Probe is Get3 with pr touching the first word of each structure it reads; a read that
-// crosses into the next page faults that page in as usual.
-func (ef *DoubleEliasFano) Get3Probe(i uint64, pr *mmap.Probe) (cumKeys, cumKeysNext, position uint64) {
-	var (
-		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
-		selectCumKeys                                   int
-	)
-	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2(i, pr)
-	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
-	for windowCumKeys == 0 {
-		currWordCumKeys++
-		windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys]
-	}
-
-	lower >>= ef.lPosition
-	cumKeysNext = ((currWordCumKeys*64+uint64(bits.TrailingZeros64(windowCumKeys))-i-1)<<ef.lCumKeys | (lower & ef.lowerBitsMaskCumKeys)) + cumDelta + ef.cumKeysMinDelta
 	return
 }
 
