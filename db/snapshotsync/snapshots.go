@@ -1805,7 +1805,11 @@ func (s *BaseRoSnapshots) claimIndexJobs() []indexJob {
 				if !s.TryAcquireRange(t, from, to) {
 					continue
 				}
-				info := segment.FileInfo(s.dir)
+				info, _, ok := snaptype.ParseFileName(s.dir, segment.FileName())
+				if !ok {
+					s.ReleaseRange(t, from, to)
+					continue
+				}
 				segment.closeIdx()
 				jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
 			}
