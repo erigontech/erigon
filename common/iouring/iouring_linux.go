@@ -23,6 +23,7 @@
 package iouring
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"unsafe"
@@ -158,6 +159,9 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
 // io_uring, keeping up to the ring size in flight. It returns after all complete. After an
 // error, reads may still be in flight into scratch: the caller must not reuse the ring or scratch.
+// ErrReadFailed marks a read that completed with an error; the ring itself still works.
+var ErrReadFailed = errors.New("io_uring read failed")
+
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
@@ -191,7 +195,7 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 				cqe := r.cqes + (ch&r.cqMask)*cqeSize
 				if res := int32(*p32(r.cqRing, cqe+8)); res < 0 && failed == nil {
 					i := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
-					failed = fmt.Errorf("io_uring read of request %d: %w", i, unix.Errno(-res))
+					failed = fmt.Errorf("%w: request %d: %w", ErrReadFailed, i, unix.Errno(-res))
 				}
 				ch++
 				reaped++

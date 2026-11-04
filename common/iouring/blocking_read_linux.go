@@ -19,6 +19,7 @@
 package iouring
 
 import (
+	"errors"
 	"os"
 	"runtime"
 	"sync"
@@ -91,7 +92,7 @@ func BlockingRead(fd int, off int64, length int) {
 		return
 	}
 	pr.offs[0], pr.lens[0], pr.bufs[0] = off, length, pr.buf
-	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil {
+	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil && !errors.Is(err, ErrReadFailed) {
 		pr = replaceBroken(pr)
 	}
 	ringPool <- pr

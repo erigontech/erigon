@@ -52,4 +52,15 @@ func TestBlockingBatchReadReportsAFailedCompletion(t *testing.T) {
 	// Reading a directory completes with -EISDIR.
 	err = r.BlockingBatchRead(int(dir.Fd()), []int64{0}, []int{4}, [][]byte{make([]byte, 4)})
 	require.ErrorIs(t, err, unix.EISDIR)
+	require.ErrorIs(t, err, ErrReadFailed)
+
+	// The ring still reads after a failed completion.
+	p := filepath.Join(t.TempDir(), "f")
+	require.NoError(t, os.WriteFile(p, []byte("abcd"), 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	defer f.Close()
+	buf := make([]byte, 4)
+	require.NoError(t, r.BlockingBatchRead(int(f.Fd()), []int64{0}, []int{4}, [][]byte{buf}))
+	require.Equal(t, "abcd", string(buf))
 }

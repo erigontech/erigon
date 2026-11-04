@@ -231,7 +231,9 @@ func ReadPages(pages []uintptr) error {
 				}
 				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
 					errOnce.Do(func() { firstErr = err })
-					br = replaceBrokenBatchRing(br)
+					if !errors.Is(err, iouring.ErrReadFailed) {
+						br = replaceBrokenBatchRing(br)
+					}
 				}
 			})
 		}
