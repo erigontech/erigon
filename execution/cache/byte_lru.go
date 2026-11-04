@@ -210,15 +210,11 @@ func (b *ByteLRU[V]) growLocked() {
 	}
 	lim, ceil := b.limit.Load(), b.ceiling.Load()
 	for lim < ceil && b.resident.Load() > lim {
-		chunk := min(byteLRUChunkBytes, ceil-lim)
-		if !cachebudget.Global.Reserve(chunk) {
-			// Take what is left of the envelope; only an empty one pins the limit.
-			chunk = min(chunk, cachebudget.Global.Limit()-cachebudget.Global.Used())
-			if chunk <= 0 || !cachebudget.Global.Reserve(chunk) {
-				b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
-				b.c.SetMaximum(uint64(lim))
-				return
-			}
+		chunk := cachebudget.Global.ReserveUpTo(min(byteLRUChunkBytes, ceil-lim))
+		if chunk == 0 {
+			b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
+			b.c.SetMaximum(uint64(lim))
+			return
 		}
 		lim += chunk
 		b.limit.Store(lim)
