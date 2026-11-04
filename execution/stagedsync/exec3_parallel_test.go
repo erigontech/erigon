@@ -657,6 +657,26 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 	}
 }
 
+func TestBALDispatchWindow(t *testing.T) {
+	for _, tc := range []struct {
+		workers int
+		want    int
+	}{
+		{workers: 0, want: 32},
+		{workers: 1, want: 32},
+		{workers: 4, want: 32},
+		{workers: 6, want: 48},
+		{workers: 8, want: 64},
+		{workers: 16, want: 128},
+		{workers: 48, want: 128},
+		{workers: 128, want: 128},
+	} {
+		t.Run(fmt.Sprintf("workers=%d", tc.workers), func(t *testing.T) {
+			require.Equal(t, tc.want, balDispatchWindow(tc.workers))
+		})
+	}
+}
+
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	tb.Helper()
 	ctx := tb.Context()
