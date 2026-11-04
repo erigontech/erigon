@@ -803,6 +803,7 @@ type blockWrites struct {
 	tx         kv.TemporalTx
 	blockStart uint64
 	keys       map[kv.Domain]map[string]struct{}
+	scanned    map[string]struct{}
 }
 
 func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
@@ -830,6 +831,13 @@ func (w *blockWrites) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uin
 // recordStorageDeleted records the account's block-start slots: the shared domains' own storage
 // cascade reads latest state, which misses them.
 func (w *blockWrites) recordStorageDeleted(addr []byte) error {
+	if _, ok := w.scanned[string(addr)]; ok {
+		return nil
+	}
+	if w.scanned == nil {
+		w.scanned = map[string]struct{}{}
+	}
+	w.scanned[string(addr)] = struct{}{}
 	if acc, _, err := w.tx.GetAsOf(kv.AccountsDomain, addr, w.blockStart); err != nil || len(acc) == 0 {
 		return err // no account at block start, no block-start slots: skip scanning its later history
 	}
