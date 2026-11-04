@@ -792,7 +792,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			}
 		}
 		if s.noMaterialize && so != nil {
-			panic(fmt.Sprintf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key}))
+			r.err = fmt.Errorf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key})
+			r.outcome = outcomeReturnDefault
+			r.source = StorageRead
+			r.version = UnknownVersion
+			return
 		}
 		r.outcome = outcomeStorageRead
 		r.so = so
