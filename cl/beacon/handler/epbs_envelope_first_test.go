@@ -714,6 +714,51 @@ func TestPostEnvelopeConsensusModeBroadcastFailureKeepsContentsRequired(t *testi
 	f.requireContentsRequiredRecord(false)
 }
 
+func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
+	const failedColumn = 5
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		for _, tc := range []struct {
+			name       string
+			failColumn bool
+		}{
+			{name: "envelope publish fails"},
+			{name: "envelope and column publish fail", failColumn: true},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
+				f.failEnvelope = errors.New("injected envelope publish failure")
+				if tc.failColumn {
+					f.failPublish = failPublishOf(failedColumn)
+				}
+				body := f.contents(f.blobs...)
+				query := "?broadcast_validation=" + mode
+				key := executionPayloadEnvelopeGossipKey{BeaconBlockRoot: f.root, BuilderIndex: f.signedEnvelope.Message.BuilderIndex}
+
+				first := f.postContents(t.Context(), body, query)
+
+				require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
+				retry, ok := f.handler.executionPayloadEnvelopeRetries.Peek(key)
+				require.True(t, ok)
+				require.True(t, retry.GossipRequired)
+				require.Equal(t, tc.failColumn, retry.ContentsRequired)
+
+				f.failEnvelope, f.failPublish = nil, nil
+				second := f.postContents(t.Context(), body, query)
+
+				require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+				envelopes := f.eventsOf(eventEnvelopePublish)
+				require.Len(t, envelopes, 2)
+				require.NoError(t, envelopes[1].err)
+				if tc.failColumn {
+					require.Contains(t, f.succeededIndices(eventColumnPublish), uint64(failedColumn))
+				}
+				_, ok = f.handler.executionPayloadEnvelopeRetries.Peek(key)
+				require.False(t, ok, "a published envelope must clear its retry record")
+			})
+		}
+	}
+}
+
 func TestPostEnvelopeContentsConsensusModesPublishEnvelopeLast(t *testing.T) {
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		t.Run(mode, func(t *testing.T) {
