@@ -86,6 +86,9 @@ func DeriveForRange(
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+		if err == nil {
+			err = endTx(ibs, evm.ChainRules())
+		}
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d (warmup): %w", i, err)
 		}
@@ -111,10 +114,28 @@ func DeriveForRange(
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("receipts.DeriveForRange: execution aborted (context cancelled)")
 		}
+		if err := endTx(ibs, evm.ChainRules()); err != nil {
+			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
+		}
 		receipts = append(receipts, receipt)
 	}
 
 	return receipts, nil
+}
+
+// endTx publishes a versioned state's finished tx to its version map, where the next tx reads it.
+func endTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+	if !ibs.IsVersioned() {
+		return nil
+	}
+	writes, err := ibs.FinalizedWrites(rules)
+	defer writes.ReleaseMaps() // the flush copies values into version-map cells
+	if err != nil {
+		return err
+	}
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetVersionedIO()
+	return nil
 }
 
 // applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it
