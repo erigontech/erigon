@@ -2012,8 +2012,9 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
-	// The stored origin is the committed base the state reader would return; a BAL-marked
-	// AddressPath defers to it, so the fee calculation's per-tx reads stay in memory.
+	// A BAL-marked AddressPath defers to the stored origin, so the fee calculation's per-tx reads
+	// stay in memory. An origin seeded at validation may hold in-block writes below its txIndex; it
+	// is seeded only after every lower tx is validated, so its readers read at or after that index.
 	if vr.versionMap != nil {
 		if base, ok := vr.versionMap.LoadOriginAccount(address); ok && base != nil {
 			updated := vr.applyVersionedUpdates(address, *base)

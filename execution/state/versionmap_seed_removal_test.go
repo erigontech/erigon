@@ -364,6 +364,7 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		require.Equal(t, uint64(3), got.Nonce)
+		require.Equal(t, *uint256.NewInt(50), got.Balance, "txIndex %d: the BAL balance cell overlays the origin", txIndex)
 	}
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
