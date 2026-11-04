@@ -29,7 +29,7 @@ import (
 )
 
 // BenchmarkAbsentKeyLatestLookup compares, per absent key over several domain files, the existence-filter pass that
-// PrefetchLatest now runs first with the probed lookup it used to run for every key.
+// PrefetchLatest runs first (a mapped filter keeps every key) with the probed lookup it used to run for every key.
 func BenchmarkAbsentKeyLatestLookup(b *testing.B) {
 	db, d := testDbAndDomain(b, log.New())
 	tx, err := db.BeginRw(b.Context())
@@ -56,7 +56,15 @@ func BenchmarkAbsentKeyLatestLookup(b *testing.B) {
 	for i := range absent {
 		absent[i] = fmt.Appendf(nil, "absent-%d", i)
 	}
-	b.Run("existence-filter-pass", func(b *testing.B) {
+	b.Run("mapped-filter-pass", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			dt.mayContainInFiles(absent[i%len(absent)])
+		}
+	})
+	for _, f := range dt.files {
+		f.src.existence.ForceInMem()
+	}
+	b.Run("in-heap-filter-pass", func(b *testing.B) {
 		for i := 0; b.Loop(); i++ {
 			dt.mayContainInFiles(absent[i%len(absent)])
 		}
