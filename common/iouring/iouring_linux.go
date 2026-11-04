@@ -77,6 +77,8 @@ type Ring struct {
 	sqMask         uint32
 	sqArray        []uint32
 	cqHead, cqTail *uint32
+	cqMask         uint32
+	cqes           uint32 // offset of the CQE array in cqRing
 }
 
 func p32(b []byte, off uint32) *uint32 { return (*uint32)(unsafe.Pointer(&b[off])) }
@@ -120,6 +122,8 @@ func New(entries uint32) (*Ring, error) {
 
 	ring.cqHead = p32(ring.cqRing, pp.cqOff.head)
 	ring.cqTail = p32(ring.cqRing, pp.cqOff.tail)
+	ring.cqMask = *p32(ring.cqRing, pp.cqOff.ringMask)
+	ring.cqes = pp.cqOff.cqes
 
 	return ring, nil
 }
@@ -178,12 +182,17 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 		// The kernel may take only part of the wave and then returns without waiting, so each
 		// wait also submits what is still queued.
 		submitted, reaped := 0, 0
+		var failed error
 		for reaped < wave {
 			ch := atomic.LoadUint32(r.cqHead)
 			ct := atomic.LoadUint32(r.cqTail)
-			// A CQE result (res @8) is discarded: a failed read moves the work
-			// to the following mmap access. Only the count matters.
 			for ch != ct {
+				// A failed read leaves its page cold; report it once the wave is drained so the caller stops.
+				cqe := r.cqes + (ch&r.cqMask)*cqeSize
+				if res := int32(*p32(r.cqRing, cqe+8)); res < 0 && failed == nil {
+					i := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
+					failed = fmt.Errorf("io_uring read of request %d: %w", i, unix.Errno(-res))
+				}
 				ch++
 				reaped++
 			}
@@ -199,6 +208,9 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 				return fmt.Errorf("io_uring_enter: %w", errno)
 			}
 			submitted += int(taken)
+		}
+		if failed != nil {
+			return failed
 		}
 		done += wave
 	}
