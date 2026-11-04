@@ -762,7 +762,8 @@ func (s *simulator) simulateBlock(
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
 	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
-	// A BAL block applies its writes to sharedDomains directly, past the state writer.
+	// A BAL block resolves its writes against head: state overrides go through the state writer below,
+	// BAL tx writes go to sharedDomains past it.
 	writesThroughView := !latest && !balMode
 	putDel := sharedDomains.AsPutDel(tx)
 	if writesThroughView {
@@ -1531,7 +1532,8 @@ func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomain
 	// We use CommitmentReplayStateReader (not a plain SplitStateReader) so that Clone() only propagates the new tx to
 	// the commitment (temp DB) reader, keeping the plain state (main DB) reader pointing at the original outer-DB tx.
 	// This is critical: accounts whose data didn't change during simulation are not written to sd.mem, so when the trie
-	// reads them it must fall back to the base block state (via the original tx), not to the empty temp DB (via ttx).
+	// reads them it must fall back to the original tx (the base block state, or head for a BAL block), not to the
+	// empty temp DB (via ttx).
 	return &commitmentdb.CommitmentReplayStateReader{
 		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
 			commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
