@@ -372,13 +372,15 @@ func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) b
 		return false
 	}
 	accs, slots := balPrefetchSample(bal)
-	return stateSampleCold(ctx, p, accs, slots)
+	return stateSampleCold(ctx, p, accs, slots, len(bal), balSlotCount(bal))
 }
 
-// stateSampleCold decides on every second key of the sample, after probing the others: pages that all keys share are
-// read by the first probe and would make a resident domain look cold.
-func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte) bool {
-	cold := func(domain kv.Domain, sample [][]byte) bool {
+// stateSampleCold reports whether accounts or storage are cold enough for the batch to read them. It decides on every
+// second sampled key, after probing the others: pages that all keys share are read by the first probe and would make a
+// resident domain look cold. A sample that holds every key of its domain has read all its pages, and a failed sample
+// read leaves the residency unknown: both keep the per-key warmup.
+func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte, nAcc, nSlot int) bool {
+	cold := func(domain kv.Domain, sample [][]byte, total int) (bool, error) {
 		first, second := make([][]byte, 0, (len(sample)+1)/2), make([][]byte, 0, len(sample)/2)
 		for i, k := range sample {
 			if i%2 == 0 {
@@ -387,10 +389,15 @@ func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]by
 				second = append(second, k)
 			}
 		}
-		mostlyResident(ctx, p, domain, first)
-		return len(second) > 0 && !mostlyResident(ctx, p, domain, second)
+		if _, err := sampleCold(ctx, p, domain, first); err != nil {
+			return false, err
+		}
+		isCold, err := sampleCold(ctx, p, domain, second)
+		return isCold && len(sample) < total, err
 	}
-	return cold(kv.AccountsDomain, accs) || cold(kv.StorageDomain, slots)
+	accCold, accErr := cold(kv.AccountsDomain, accs, nAcc)
+	slotCold, slotErr := cold(kv.StorageDomain, slots, nSlot)
+	return accErr == nil && slotErr == nil && (accCold || slotCold)
 }
 
 // balPrefetchSample returns the 2*residencySampleKeys sampleEvenly of balPrefetchKeys without building all keys, so the residency check does
@@ -491,8 +498,18 @@ func mostlyResident(ctx context.Context, p latestPrefetcher, domain kv.Domain, s
 	if len(sample) == 0 {
 		return false
 	}
+	isCold, err := sampleCold(ctx, p, domain, sample)
+	return err != nil || !isCold
+}
+
+// sampleCold probes the sample keys, reading their cold pages, and reports whether at least coldPagesPerMille pages per
+// 1000 keys were cold.
+func sampleCold(ctx context.Context, p latestPrefetcher, domain kv.Domain, sample [][]byte) (bool, error) {
+	if len(sample) == 0 {
+		return false, nil
+	}
 	_, cold, _, _, err := p.PrefetchLatest(ctx, domain, sample)
-	return err != nil || cold*1000 < len(sample)*coldPagesPerMille
+	return cold*1000 >= len(sample)*coldPagesPerMille, err
 }
 
 const (

@@ -411,18 +411,42 @@ func TestStateSampleColdIgnoresPagesTheFirstProbeRead(t *testing.T) {
 		keys[i] = []byte{byte(i >> 8), byte(i)}
 	}
 	calls := 0
-	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys))
+	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys, 0, 10*len(keys)))
+}
+
+func TestStateSampleColdKeepsThePerKeyWarmupWhenTheSampleReadEveryKey(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	cold := coldPagesPrefetcher{coldPerKey: 1}
+	require.False(t, stateSampleCold(context.Background(), cold, nil, keys, 0, len(keys)), "the probes already read every page of the domain")
+	require.True(t, stateSampleCold(context.Background(), cold, nil, keys, 0, 10*len(keys)))
+}
+
+// domainErrPrefetcher reports every page cold and fails its reads in one domain.
+type domainErrPrefetcher struct{ failing kv.Domain }
+
+func (p domainErrPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration, error) {
+	if domain == p.failing {
+		return 1, len(keys), 0, 0, errors.New("read failed")
+	}
+	return 1, len(keys), 0, 0, nil
+}
+
+func TestStateSampleColdKeepsThePerKeyWarmupWhenOneDomainCannotRead(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	for _, failing := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		require.False(t, stateSampleCold(context.Background(), domainErrPrefetcher{failing: failing}, keys, keys, 1000, 1000), "failing %s", failing)
+	}
 }
 
 func TestStateSampleColdKeepsThePerKeyWarmupWhenTheBatchCannotRead(t *testing.T) {
 	keys := [][]byte{{1}, {2}, {3}}
 	broken := coldPagesPrefetcher{coldPerKey: 1, err: errors.New("no batch ring")}
-	require.False(t, stateSampleCold(context.Background(), broken, keys, keys))
+	require.False(t, stateSampleCold(context.Background(), broken, keys, keys, 1000, 1000))
 }
 
 func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {
 	keys := [][]byte{{1}, {2}, {3}}
-	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys, keys))
-	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil))
-	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil), "no state keys: nothing to batch")
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys, keys, 1000, 1000))
+	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil, 1000, 0))
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil, 0, 0), "no state keys: nothing to batch")
 }
