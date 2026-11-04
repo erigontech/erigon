@@ -1228,3 +1228,17 @@ func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
 		})
 	}
 }
+
+// Execute re-creates the contract on every run, so a Config reused across runs must not
+// carry the previous run's storage into the new contract.
+func TestExecuteReusedConfigStartsWithEmptyStorage(t *testing.T) {
+	cfg := &Config{}
+	_, _, err := Execute(program.New().Sstore(0, 1).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	p := program.New()
+	loadTo(p, 0, 0)
+	ret, _, err := Execute(p.Return(0, 32).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	require.Zero(t, new(uint256.Int).SetBytes(ret).Uint64())
+}

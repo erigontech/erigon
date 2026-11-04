@@ -87,7 +87,8 @@ func (p *p2pClient) Connect(ctx context.Context) (<-chan TxMessage, <-chan error
 		} `json:"result"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+	err = json.NewDecoder(r.Body).Decode(&resp)
+	if err != nil {
 		return nil, nil, err
 	}
 

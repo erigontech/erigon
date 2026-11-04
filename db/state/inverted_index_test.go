@@ -1119,7 +1119,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	var key [8]byte
 	binary.BigEndian.PutUint64(key[:], 1)
 
-	txNums := []uint64{2, 5, 10, 18, 25, 30, 35, 42}
+	txNums := []uint64{2, 5, 10, 18, 25, 30, 32, 35, 42}
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
@@ -1188,6 +1188,18 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
 	}
 	require.Equal(wantDesc, gotDesc, "descending IdxRange after prune")
+
+	// Descending from exactly the files end: 32 lives only in the DB.
+	it, err = ic.IdxRange(key[:], 32, -1, order.Desc, -1, roTx)
+	require.NoError(err)
+	gotDesc = gotDesc[:0]
+	for it.HasNext() {
+		v, err := it.Next()
+		require.NoError(err)
+		gotDesc = append(gotDesc, v)
+	}
+	it.Close()
+	require.Equal([]uint64{32, 30, 25, 18, 10, 5, 2}, gotDesc)
 }
 
 // TestInvertedIndex_IdxRange_IgnoresDBInFileRange proves the DB is not consulted

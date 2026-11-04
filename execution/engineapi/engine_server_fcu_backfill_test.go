@@ -48,8 +48,19 @@ func (f *initialHeaderRecorder) FetchHeadersBackwards(_ context.Context, hash co
 	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
 }
 
+func (f *initialHeaderRecorder) FetchHeaders(context.Context, uint64, uint64, *p2p.PeerId, ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+	return p2p.FetcherResponse[[]*types.Header]{}, errors.New("unknown header")
+}
+
 func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *initialHeaderRecorder, *types.Header) {
+	return newForkchoiceResultServer(t, execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusMissingSegment, MissingHash: missingHash})
+}
+
+var testHeadParent = common.Hash{0x41}
+
+func newForkchoiceResultServer(t *testing.T, result execmodule.ForkChoiceResult) (*EngineServer, *engine_block_downloader.EngineBlockDownloader, *initialHeaderRecorder, *types.Header) {
 	head := makeParentHeader(1000)
+	head.ParentHash = testHeadParent
 	headNumber := head.Number.Uint64()
 	stub := &stubExecutionModule{
 		getHeaderFunc: getHeaderReturning(head.Hash(), head),
@@ -57,7 +68,7 @@ func newMissingSegmentServer(t *testing.T, missingHash common.Hash) (*EngineServ
 			return &headNumber, nil
 		},
 		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
-			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusMissingSegment, MissingHash: missingHash}, nil
+			return result, nil
 		},
 	}
 
@@ -130,4 +141,34 @@ func TestForkchoiceKnownBadHeadWithUnknownAncestor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, engine_types.InvalidStatus, resp.PayloadStatus.Status)
 	require.Nil(t, resp.PayloadStatus.LatestValidHash)
+}
+
+func TestForkchoiceBadBlockReturnsLatestValidHash(t *testing.T) {
+	t.Parallel()
+
+	// The executor reports its head, which is the last valid ancestor only when it is the bad head's parent.
+	for name, tc := range map[string]struct{ reported, want common.Hash }{
+		"parent":       {reported: testHeadParent, want: testHeadParent},
+		"older_head":   {reported: common.Hash{0x42}, want: common.Hash{}},
+		"unknown_head": {reported: common.Hash{}, want: common.Hash{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, downloader, _, head := newForkchoiceResultServer(t, execmodule.ForkChoiceResult{
+				Status:          execmodule.ExecutionStatusBadBlock,
+				LatestValidHash: tc.reported,
+				ValidationError: "invalid state root",
+			})
+
+			status, err := srv.HandleForkChoice(t.Context(), "test", &engine_types.ForkChoiceState{HeadHash: head.Hash()})
+			require.NoError(t, err)
+			require.Equal(t, engine_types.InvalidStatus, status.Status)
+			require.Equal(t, latestValidOrNull(tc.want), status.LatestValidHash)
+			require.EqualError(t, status.ValidationError.Error(), "invalid state root")
+
+			bad, lastValid, validationErr := downloader.IsBadHeader(head.Hash())
+			require.True(t, bad)
+			require.Equal(t, tc.want, lastValid)
+			require.Equal(t, "invalid state root", validationErr)
+		})
+	}
 }
