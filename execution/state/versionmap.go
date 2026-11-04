@@ -648,6 +648,45 @@ func floorCell[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) (int, *Wr
 	return fk, fv
 }
 
+// accountFloors is addr's raw field and address floor cells at txIdx.
+type accountFloors struct {
+	balance                                                       uint256.Int
+	nonce, incarnation                                            uint64
+	codeHash                                                      accounts.CodeHash
+	address                                                       *accounts.Account
+	hasBalance, hasNonce, hasIncarnation, hasCodeHash, hasAddress bool
+	balanceDeleted, addressFromBAL                                bool
+}
+
+// accountFloorsAt reads addr's floor cells under one entry lock instead of one lock per field.
+func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accountFloors) {
+	if vm == nil {
+		return f
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return f
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if _, c := floorCell(e.Balance, txIdx); c != nil {
+		f.balance, f.hasBalance, f.balanceDeleted = c.Value, true, c.valStatus == ValueDeleted
+	}
+	if _, c := floorCell(e.Nonce, txIdx); c != nil {
+		f.nonce, f.hasNonce = c.Value, true
+	}
+	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
+		f.incarnation, f.hasIncarnation = c.Value, true
+	}
+	if _, c := floorCell(e.CodeHash, txIdx); c != nil {
+		f.codeHash, f.hasCodeHash = c.Value, true
+	}
+	if _, c := floorCell(e.Address, txIdx); c != nil {
+		f.address, f.hasAddress, f.addressFromBAL = c.Value, true, c.accSource == AccountFromBAL
+	}
+	return f
+}
+
 // applySubFieldWrites overlays the Balance/Nonce/Incarnation/CodeHash floor cells for
 // addr onto account under a SINGLE e.mu.RLock. Destruct/lifecycle is resolved centrally
 // by the read core, so these are plain same-txIdx floor reads; coalescing them here avoids
