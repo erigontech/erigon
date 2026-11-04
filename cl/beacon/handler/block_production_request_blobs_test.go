@@ -24,6 +24,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -371,6 +372,18 @@ func TestVerifyBlobBundlesRejectsInvalidBlobInLaterBundle(t *testing.T) {
 	bundles[2].Blob = &cltypes.Blob{0xff} // not a canonical field element
 
 	require.ErrorContains(t, verifyBlobBundles(bundles, true), "not canonical")
+}
+
+func TestVerifyBlobBundlesSkipsUnstartedBlobsAfterFailure(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	bundles := newCellProofBundles(t, 3)
+	bundles[0].Blob = &cltypes.Blob{0xff} // not a canonical field element
+
+	require.ErrorContains(t, verifyBlobBundles(bundles, true), "not canonical")
+
+	for i := 1; i < len(bundles); i++ {
+		require.Zero(t, len(bundles[i].Cells), "bundle %d must not be verified after an earlier failure", i)
+	}
 }
 
 func TestVerifyBlobBundlesRejectsProofCountOtherThanCellCount(t *testing.T) {
