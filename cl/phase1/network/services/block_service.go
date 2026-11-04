@@ -813,7 +813,7 @@ func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slo
 	// checked first because fetching a non-head parent state replays it.
 	epoch := slot / b.beaconCfg.SlotsPerEpoch
 	if parentHeader, ok := b.forkchoiceStore.GetHeader(parentRoot); ok &&
-		b.parentStateReadableInPlace(parentHeader.Slot/b.beaconCfg.SlotsPerEpoch, epoch) {
+		parentStateReadableInPlace(b.beaconCfg, parentHeader.Slot/b.beaconCfg.SlotsPerEpoch, epoch) {
 		var validationContext *blockValidationContext
 		if err := b.forkchoiceStore.ViewStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
 			if state.Epoch(parentState) == epoch {
@@ -854,13 +854,15 @@ func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slo
 	return readBlockValidationContext(parentState, bid, slot)
 }
 
-func (b *blockService) parentStateReadableInPlace(parentEpoch, epoch uint64) bool {
+// parentStateReadableInPlace reports whether a parent state of parentEpoch gives the proposers of epoch without being
+// advanced: in the same epoch, or from Fulu on within the proposer lookahead and without a fork upgrade in between.
+func parentStateReadableInPlace(cfg *clparams.BeaconChainConfig, parentEpoch, epoch uint64) bool {
 	if parentEpoch == epoch {
 		return true
 	}
-	version := b.beaconCfg.GetCurrentStateVersion(epoch)
-	return parentEpoch < epoch && epoch-parentEpoch <= b.beaconCfg.MinSeedLookahead &&
-		version >= clparams.FuluVersion && b.beaconCfg.GetCurrentStateVersion(parentEpoch) == version
+	version := cfg.GetCurrentStateVersion(epoch)
+	return parentEpoch < epoch && epoch-parentEpoch <= cfg.MinSeedLookahead &&
+		version >= clparams.FuluVersion && cfg.GetCurrentStateVersion(parentEpoch) == version
 }
 
 // readBlockValidationContext reads the context from a state already in the epoch of slot.
