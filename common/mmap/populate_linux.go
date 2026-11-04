@@ -146,6 +146,10 @@ func (pr *Probe) touch(p unsafe.Pointer) {
 
 const batchRingEntries = 256
 
+// batchReadSize is the length of one page read: reading any part of a page fills the whole page-cache page, so 4 KiB
+// scratch serves kernels with larger pages too.
+const batchReadSize = 4096
+
 type batchRing struct {
 	r    *iouring.Ring
 	bufs [][]byte
@@ -179,7 +183,7 @@ func newBatchRing() (*batchRing, bool) {
 	}
 	br := &batchRing{r: r, bufs: make([][]byte, batchRingEntries)}
 	for i := range br.bufs {
-		br.bufs[i] = make([]byte, osPageSize)
+		br.bufs[i] = make([]byte, batchReadSize)
 	}
 	return br, true
 }
@@ -257,7 +261,7 @@ func ReadPages(ctx context.Context, pages []uintptr) error {
 				}
 				lens := make([]int, len(chunk))
 				for i := range lens {
-					lens[i] = int(osPageSize)
+					lens[i] = batchReadSize
 				}
 				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
 					errOnce.Do(func() { firstErr = err })

@@ -286,7 +286,7 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 		wg.Go(func() {
 			// Best effort: without a free read-tx permit the chunk is skipped, since the parent holds one.
 			to := min(from+chunk, len(keys))
-			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
+			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx))
 			if err != nil {
 				for i := from; i < to; i++ {
 					keep[i] = true // unchecked keys stay for the deeper levels
@@ -326,7 +326,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 		wg.Go(func() {
 			pp := p
 			if !first {
-				tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
+				tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx))
 				if err != nil {
 					return
 				}

@@ -2744,6 +2744,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		t0 := time.Now()
 		cold := make([]uintptr, 0, len(pending))
+		wave := make(map[uintptr]struct{}, len(pending))
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
@@ -2756,7 +2757,10 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			if _, done := tried[page]; done {
 				continue // an earlier wave read or skipped it: leave the key to the normal read
 			}
-			cold = append(cold, page)
+			if _, dup := wave[page]; !dup {
+				wave[page] = struct{}{}
+				cold = append(cold, page)
+			}
 			next = append(next, k)
 		}
 		t1 := time.Now()
