@@ -143,6 +143,7 @@ type TxPool struct {
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
+	reloading               atomic.Bool
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
@@ -281,6 +282,8 @@ func (p *TxPool) start(ctx context.Context) error {
 		return nil
 	}
 
+	p.reloading.Store(true)
+	defer p.reloading.Store(false)
 	return p.poolDB.View(ctx, func(tx kv.Tx) error {
 		if err := p.fromDB(ctx, tx); err != nil {
 			return fmt.Errorf("loading pool from DB: %w", err)
@@ -910,6 +913,15 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 }
 
 func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	// The reload holds p.lock, and p.lock cannot be taken interruptibly, so a build that waits for it
+	// misses its slot. Nothing is restored yet either.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if p.reloading.Load() {
+		return nil, nil
+	}
+
 	provideOptions := txnprovider.ApplyProvideOptions(opts...)
 	var txnsRlp TxnsRlp
 	_, _, err := p.best(

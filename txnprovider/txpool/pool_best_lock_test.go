@@ -112,6 +112,34 @@ func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
 	}
 }
 
+// The reload holds p.lock, which cannot be taken interruptibly.
+func TestProvideTxnsReturnsWhileTheStartupReloadHoldsTheLock(t *testing.T) {
+	p, _ := newLoggingPool()
+
+	p.reloading.Store(true)
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	type provided struct {
+		txns []types.Transaction
+		err  error
+	}
+	returned := make(chan provided, 1)
+	go func() {
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(1))
+		returned <- provided{txns, err}
+	}()
+
+	// Nothing has been restored yet, and waiting for the reload would cost the proposer its slot.
+	select {
+	case got := <-returned:
+		require.NoError(t, got.err)
+		require.Empty(t, got.txns)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ProvideTxns waited for the lock that the startup reload holds")
+	}
+}
+
 func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) {
 	p, logs := newLoggingPool()
 	stop := make(chan struct{})
