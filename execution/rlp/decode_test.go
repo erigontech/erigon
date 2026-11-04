@@ -541,6 +541,9 @@ func TestStreamViewListInsideList(t *testing.T) {
 	if !bytes.Equal(b, unhex("010203")) {
 		t.Fatalf("got %x, want 010203", b)
 	}
+	if cap(b) != len(b) {
+		t.Fatalf("view cap %d must be clamped to len %d so an append cannot overwrite the next value", cap(b), len(b))
+	}
 	v, err := s.Bytes()
 	if err != nil {
 		t.Fatal(err)

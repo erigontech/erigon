@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"runtime"
 	"testing"
 
@@ -147,6 +148,20 @@ func TestDecodeLogsForStorageRejectsMalformed(t *testing.T) {
 		_, err = decodeLogsForStorage(rlp.NewStream(bytes.NewReader(list), 0))
 		require.Error(t, err, "%s, reader", name)
 	}
+}
+
+// A plain io.Reader gives the stream no input limit, so a declared list size
+// must not be allocated before its bytes arrive.
+func TestDecodeStoredLogsForgedSizeOnReader(t *testing.T) {
+	t.Parallel()
+	forged := []byte{0xff, 0x80, 0, 0, 0, 0, 0, 0, 0}
+	reader := func() io.Reader { return struct{ io.Reader }{bytes.NewReader(forged)} }
+
+	var l LogForStorage
+	require.ErrorIs(t, rlp.Decode(reader(), &l), io.ErrUnexpectedEOF)
+
+	_, err := decodeLogsForStorage(rlp.NewStream(reader(), 0))
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
 // The arena is sized from attacker-controlled bytes: a payload of one-byte items

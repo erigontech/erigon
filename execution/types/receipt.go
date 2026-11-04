@@ -470,6 +470,9 @@ func (s *storedReceiptScratch) release() {
 }
 
 func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
+	if !inMemoryStream(s) {
+		return decodeLogsForStorageStream(s)
+	}
 	content, err := s.ViewList()
 	if err != nil {
 		return nil, err
@@ -499,6 +502,21 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 		logs = append(logs, log)
 	}
 	return logs, nil
+}
+
+func decodeLogsForStorageStream(s *rlp.Stream) (Logs, error) {
+	if _, err := s.List(); err != nil {
+		return nil, err
+	}
+	logs := Logs{}
+	for s.MoreDataInList() {
+		log := new(Log)
+		if err := log.decodeStoredStream(s); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+	return logs, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation

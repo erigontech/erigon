@@ -472,11 +472,35 @@ func decodeHashListTo(s *rlp.Stream, dst []common.Hash) ([]common.Hash, error) {
 //
 // Note some redundant fields(e.g. block number, txn hash etc) will be assembled later.
 func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
+	if !inMemoryStream(s) {
+		return (*Log)(l).decodeStoredStream(s)
+	}
 	fields, err := s.ViewList()
 	if err != nil {
 		return err
 	}
 	return (*Log)(l).decodeStoredFields(fields)
+}
+
+// inMemoryStream reports whether s reads from memory. On any other reader a list
+// is decoded through the stream, which allocates only as bytes arrive.
+func inMemoryStream(s *rlp.Stream) bool { return s.Peek() != nil }
+
+func (l *Log) decodeStoredStream(s *rlp.Stream) error {
+	if _, err := s.List(); err != nil {
+		return err
+	}
+	var err error
+	if l.Address, err = s.Addr(); err != nil {
+		return fmt.Errorf("read Address: %w", err)
+	}
+	if l.Topics, err = decodeHashListTo(s, nil); err != nil {
+		return fmt.Errorf("read Topics: %w", err)
+	}
+	if l.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
+	}
+	return s.ListEnd()
 }
 
 // decodeStoredFields decodes the fields of a stored log from the content of its list.

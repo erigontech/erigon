@@ -768,15 +768,10 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 		s.kind = -1 // rearm Kind
 		return []byte{s.byteval}, nil
 	case String:
-		if err := s.willRead(size); err != nil {
+		b, err := s.view(size)
+		if err != nil {
 			return nil, err
 		}
-		if uint64(len(s.sliceRdr)-s.off) < size {
-			return nil, io.ErrUnexpectedEOF
-		}
-		end := s.off + int(size)
-		b := s.sliceRdr[s.off:end:end]
-		s.off = end
 		if size == 1 && b[0] < 128 {
 			return nil, ErrCanonSize
 		}
@@ -801,16 +796,22 @@ func (s *Stream) ViewList() ([]byte, error) {
 		b := make([]byte, size)
 		return b, s.readFull(b)
 	}
-	sr := &s.sliceRdr
+	return s.view(size)
+}
+
+// view returns the next size bytes of a NewBytesStream input without copying and
+// moves past them. The capacity is capped so an append cannot overwrite the input.
+func (s *Stream) view(size uint64) ([]byte, error) {
 	if err := s.willRead(size); err != nil {
 		return nil, err
 	}
-	if uint64(len(*sr)) < size {
+	if uint64(len(s.sliceRdr)-s.off) < size {
 		return nil, io.ErrUnexpectedEOF
 	}
-	content := (*sr)[:size:size]
-	*sr = (*sr)[size:]
-	return content, nil
+	end := s.off + int(size)
+	b := s.sliceRdr[s.off:end:end]
+	s.off = end
+	return b, nil
 }
 
 // ReadBytes reads an RLP string into b, which must match the exact decoded value size.
