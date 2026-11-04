@@ -333,3 +333,19 @@ func TestTrieMostlyResidentSkipsAResidentTrie(t *testing.T) {
 	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys))
 	require.False(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys))
 }
+
+func TestBALPrefetchKeys(t *testing.T) {
+	a1, a2 := common.Address{19: 1}, common.Address{19: 2}
+	s1, s2, s3 := common.Hash{31: 1}, common.Hash{31: 2}, common.Hash{31: 3}
+	bal := types.BlockAccessList{
+		{Address: a1, StorageChanges: []types.SlotChanges{{Slot: accounts.InternKey(s1)}}, StorageReads: []common.Hash{s2}},
+		{Address: a2, StorageReads: []common.Hash{s3}},
+	}
+	accs, slots := balPrefetchKeys(bal)
+	require.Equal(t, [][]byte{a1[:], a2[:]}, accs)
+	require.Equal(t, [][]byte{append(a1[:], s1[:]...), append(a1[:], s2[:]...), append(a2[:], s3[:]...)}, slots)
+
+	// Keys are independent: appending to one must not overwrite its neighbour.
+	_ = append(slots[0], 0xff)
+	require.Equal(t, append(a1[:], s2[:]...), slots[1])
+}
