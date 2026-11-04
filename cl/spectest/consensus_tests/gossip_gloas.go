@@ -172,13 +172,13 @@ func gloasGossipHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	forkStore.InitPeerDas(peerDas)
 	store := &gossipFixtureStore{ForkChoiceStore: forkStore, config: cfg}
 	store.timeMs = (anchorState.GenesisTime() + anchorState.Slot()*cfg.SecondsPerSlot) * 1000
+	store.minTimeMs = store.timeMs
 	if err := store.setFinalizedCheckpoint(root, c, meta.FinalizedCheckpoint); err != nil {
 		return err
 	}
 	if err := store.importBlocks(ctx, meta.Blocks); err != nil {
 		return err
 	}
-	store.minTimeMs = store.timeMs
 
 	headRoot, _, err := store.GetHead(nil)
 	if err != nil {
@@ -259,6 +259,7 @@ func (s *gossipFixtureStore) importBlocks(ctx context.Context, blocks []gloasGos
 	if common.Hash(anchorRoot) != s.AnchorRoot() {
 		return fmt.Errorf("anchor block %s root does not match anchor state", blocks[0].Block)
 	}
+	floor := s.minTimeMs
 	for i, entry := range blocks {
 		if entry.Payload != "" || entry.PayloadStatus != "" {
 			return fmt.Errorf("setup block %d %s: payload and payload_status are not supported", i, entry.Block)
@@ -275,7 +276,11 @@ func (s *gossipFixtureStore) importBlocks(ctx context.Context, blocks []gloasGos
 		if !entry.Failed && importErr != nil {
 			return fmt.Errorf("setup block %d %s: %w", i, entry.Block, importErr)
 		}
+		if importErr == nil {
+			floor = s.timeMs
+		}
 	}
+	s.minTimeMs = floor
 	return nil
 }
 
