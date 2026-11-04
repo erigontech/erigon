@@ -143,8 +143,8 @@ type AddressEntry struct {
 	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
 	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
-	// MarkWritesComplete flips flags to Done under RLock only while SelfDestruct
-	// is nil: readers combine several cells' flags only through destruct cells.
+	// MarkWritesComplete flips flags to Done under RLock only while no SelfDestruct
+	// cell is true: readers combine several cells' flags only through a destruct.
 	mu sync.RWMutex
 }
 
@@ -1327,6 +1327,18 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 	})
 }
 
+// hasDestruct reports a true SelfDestruct cell; a created account holds only false markers.
+func hasDestruct(cells *btree.Map[int, *WriteCell[bool]]) bool {
+	found := false
+	if cells != nil {
+		cells.Scan(func(_ int, v *WriteCell[bool]) bool {
+			found = v.Value
+			return !found
+		})
+	}
+	return found
+}
+
 // MarkWritesComplete advances every cell named by writes from Estimate to Done, writing
 // no values (each cell must already hold the write's value at its incarnation). It is the
 // commit-boundary check enforcing one-value-per-version — a mismatch panics.
@@ -1345,7 +1357,7 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
 		}
 		e.mu.RLock()
-		exclusive := e.SelfDestruct != nil
+		exclusive := hasDestruct(e.SelfDestruct)
 		if exclusive {
 			e.mu.RUnlock()
 			e.mu.Lock()
