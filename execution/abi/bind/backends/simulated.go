@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -200,9 +201,19 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uint256.Int) *state.IntraBlockState {
 	if blockNumber == nil {
-		return state.NewWithVersionMap(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db), state.NewVersionMap(nil))
+		return newCallState(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.NewWithVersionMap(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db), state.NewVersionMap(nil))
+	return newCallState(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+}
+
+// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites, unless CALL_NO_MATERIALIZE is off.
+func newCallState(r state.StateReader) *state.IntraBlockState {
+	s := state.New(r)
+	if dbg.CallNoMaterialize {
+		s.SetVersionMap(state.NewVersionMap(nil))
+		s.SetNoConflictDetection()
+	}
+	return s
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -579,7 +590,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 	}
 	var res *evmtypes.ExecutionResult
 	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
-		s := state.NewWithVersionMap(b.m.NewStateReader(tx), state.NewVersionMap(nil))
+		s := newCallState(b.m.NewStateReader(tx))
 		defer s.Close()
 		s.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
