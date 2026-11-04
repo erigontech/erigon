@@ -830,6 +830,9 @@ func (w *blockWrites) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uin
 // recordStorageDeleted records the account's block-start slots: the shared domains' own storage
 // cascade reads latest state, which misses them.
 func (w *blockWrites) recordStorageDeleted(addr []byte) error {
+	if acc, _, err := w.tx.GetAsOf(kv.AccountsDomain, addr, w.blockStart); err != nil || len(acc) == 0 {
+		return err // no account at block start, no block-start slots: skip scanning its later history
+	}
 	to, ok := kv.NextSubtree(addr)
 	if !ok {
 		to = nil
