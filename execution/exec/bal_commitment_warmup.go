@@ -337,19 +337,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
 func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	started := time.Now()
-	accs := make([][]byte, 0, len(bal))
-	var slots [][]byte
-	for i := range bal {
-		addr := bal[i].Address
-		accs = append(accs, bytes.Clone(addr[:]))
-		for _, sc := range bal[i].StorageChanges {
-			slot := sc.Slot.Value()
-			slots = append(slots, append(bytes.Clone(addr[:]), slot[:]...))
-		}
-		for _, sr := range bal[i].StorageReads {
-			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
-		}
-	}
+	accs, slots := balPrefetchKeys(bal)
 	var stats [3]prefetchStats
 	var g errgroup.Group
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
@@ -361,6 +349,23 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
 		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
 		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
+}
+
+// balPrefetchKeys returns the account keys and the address||slot storage keys the BAL touches.
+func balPrefetchKeys(bal types.BlockAccessList) (accs, slots [][]byte) {
+	accs = make([][]byte, 0, len(bal))
+	for i := range bal {
+		addr := bal[i].Address
+		accs = append(accs, bytes.Clone(addr[:]))
+		for _, sc := range bal[i].StorageChanges {
+			slot := sc.Slot.Value()
+			slots = append(slots, append(bytes.Clone(addr[:]), slot[:]...))
+		}
+		for _, sr := range bal[i].StorageReads {
+			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
+		}
+	}
+	return accs, slots
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
