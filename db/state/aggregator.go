@@ -2760,7 +2760,10 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			next = append(next, k)
 		}
 		t1 := time.Now()
-		_ = mmap.ReadPages(ctx, cold) // failed pages are in tried, so the next wave goes on with the other keys
+		// A failed page goes into tried below, so the next wave goes on with the other keys.
+		if err := mmap.ReadPages(ctx, cold); err == nil {
+			dt.probe.MarkResident(cold)
+		}
 		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
 		pages += len(cold)
 		for _, page := range cold {

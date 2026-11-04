@@ -124,6 +124,13 @@ func (pr *Probe) Touch(p unsafe.Pointer) {
 	}
 }
 
+// MarkResident records pages that were just read, so later touches skip their mincore.
+func (pr *Probe) MarkResident(pages []uintptr) {
+	for _, page := range pages {
+		pr.resident[page] = struct{}{}
+	}
+}
+
 func (pr *Probe) touch(p unsafe.Pointer) {
 	page := uintptr(p) &^ (osPageSize - 1)
 	if _, ok := pr.resident[page]; ok {
