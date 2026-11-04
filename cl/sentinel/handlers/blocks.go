@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -96,31 +97,26 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	maxRoots := int(c.beaconConfig.MaxRequestBlocksDeneb)
-	var req solid.HashListSSZ = solid.NewHashList(maxRoots)
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	// Altair keeps MAX_REQUEST_BLOCKS for BeaconBlocksByRoot v2, Deneb lowers it to MAX_REQUEST_BLOCKS_DENEB.
+	maxRoots := c.beaconConfig.MaxRequestBlocks
+	if c.ethClock.GetCurrentEpoch() >= c.beaconConfig.DenebForkEpoch {
+		maxRoots = c.beaconConfig.MaxRequestBlocksDeneb
+	}
+	var req solid.HashListSSZ = solid.NewHashList(int(maxRoots))
+	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, clparams.Phase0Version, maxRoots*length.Hash); err != nil {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		}
 		return err
 	}
-	if req.Length() > maxRoots {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
-	}
 
-	blockRoots := []common.Hash{}
-	for i := 0; i < req.Length(); i++ {
-		blockRoot := req.Get(i)
-		blockRoots = append(blockRoots, blockRoot)
-		// Limit the number of blocks to the count specified in the request.
-		if len(blockRoots) >= MaxRequestsBlocks {
-			break
-		}
-	}
-
-	if len(blockRoots) == 0 {
+	if req.Length() == 0 {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the number of roots.
-	if cost := len(blockRoots) - 1; !c.consumeRateLimit(s, cost) {
+	// Consume additional rate-limit tokens proportional to the number of roots,
+	// capped so that a full pre-Deneb request still fits in the bucket.
+	if cost := min(req.Length(), blockRateBurst) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -131,8 +127,10 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	var block *cltypes.SignedBeaconBlock
+	written := 0
 	req.Range(func(index int, blockRoot common.Hash, length int) bool {
-		if index >= len(blockRoots) {
+		// Limit the number of blocks served, not the number of roots inspected.
+		if written >= MaxRequestsBlocks {
 			return false
 		}
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
@@ -169,6 +167,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err = ssz_snappy.EncodeAndWrite(s, block); err != nil {
 			return false
 		}
+		written++
 		return true
 	})
 
