@@ -111,6 +111,16 @@ func (noOpAttestationDataProducer) CachedAttestationData(uint64) (solid.Attestat
 	return solid.AttestationData{}, false, nil
 }
 
+type countingAttestationDataProducer struct {
+	attestation_producer.AttestationDataProducer
+	produceCalls atomic.Int32
+}
+
+func (p *countingAttestationDataProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot common.Hash, slot uint64) (solid.AttestationData, error) {
+	p.produceCalls.Add(1)
+	return p.AttestationDataProducer.ProduceAndCacheAttestationData(tx, baseState, baseStateBlockRoot, slot)
+}
+
 type lockOrderFixture struct {
 	cfg        *Cfg
 	syncedData *synced_data.SyncedDataManager
@@ -1866,6 +1876,22 @@ func TestPostForkchoiceSameRootAfterOtherWriterCachesAttestationData(t *testing.
 	require.NoError(t, err)
 	require.True(t, ok, "attestation data for the head slot is not cached")
 	require.Equal(t, f.headRoot, data.BeaconBlockRoot)
+}
+
+func TestPostForkchoiceSameRootSkipsWarmUpWhenAttestationDataCached(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	noExpiryCfg := *f.cfg.beaconCfg
+	noExpiryCfg.SecondsPerSlot = 0 // a zero cache ttl disables expiry, so the result does not depend on the wall clock
+	producer := &countingAttestationDataProducer{AttestationDataProducer: attestation_producer.New(&noExpiryCfg)}
+	f.cfg.attestationDataProducer = producer
+	require.NoError(t, f.syncedData.OnHeadStateWithBlockRoot(f.headState, f.headRoot))
+
+	require.NoError(t, f.runPass())
+	require.EqualValues(t, 1, producer.produceCalls.Load(), "first pass warms the empty cache")
+
+	require.NoError(t, f.runPass())
+	require.EqualValues(t, 1, producer.produceCalls.Load(), "second pass must not warm a populated cache")
+	f.requireCopiesAndPublishes(t, 0)
 }
 
 func TestPostForkchoiceRepublishesNewRootOrSlot(t *testing.T) {
