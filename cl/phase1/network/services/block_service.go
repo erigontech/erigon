@@ -77,6 +77,7 @@ type blockJob struct {
 	lastAttempt         *blockJobAttempt
 	retryAfter          time.Time
 	retryDelay          time.Duration
+	waitsForColumns     bool
 	storageErrorLogged  bool
 	finishPayloadImport func()
 }
@@ -312,7 +313,16 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	if err != nil {
 		if waitsForBlockDependency(err) {
-			b.ScheduleBlockForLaterProcessing(msg)
+			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true)
+			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+				job.mu.Lock()
+				job.waitsForColumns = true
+				job.mu.Unlock()
+				// Wake once for columns stored before the flag was set.
+				if root, err := msg.Block.HashSSZ(); err == nil {
+					b.emitter.NotifyDataColumnStored(root)
+				}
+			}
 			return nil
 		}
 		// Retain canceled imports too: gossip validation has already marked the block as seen.
@@ -1157,21 +1167,60 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
+func drainDataColumnStored(stored <-chan common.Hash, first common.Hash) map[[32]byte]struct{} {
+	roots := map[[32]byte]struct{}{[32]byte(first): {}}
+	for range len(stored) {
+		select {
+		case root := <-stored:
+			roots[[32]byte(root)] = struct{}{}
+		default:
+			return roots
+		}
+	}
+	return roots
+}
+
 // loop is the main loop of the block service
 func (b *blockService) loop(ctx context.Context) {
 	ticker := time.NewTicker(blockJobsIntervalTick)
 	defer ticker.Stop()
+	dataColumnStored := b.emitter.DataColumnStored()
 	for {
 		select {
 		case <-ctx.Done():
 			b.stopPublishedBlockJobs()
 			return
 		case <-ticker.C:
+			b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+				b.processScheduledBlock(ctx, key.([32]byte), value.(*blockJob), time.Now())
+				return true
+			})
+		case root := <-dataColumnStored:
+			roots := drainDataColumnStored(dataColumnStored, root)
+			for root := range roots {
+				value, ok := b.blocksScheduledForLaterExecution.Load(root)
+				if !ok {
+					continue
+				}
+				job := value.(*blockJob)
+				job.mu.Lock()
+				waitsForColumns := job.waitsForColumns
+				slot := job.block.Block.Slot
+				job.mu.Unlock()
+				if !waitsForColumns {
+					continue
+				}
+				peerDas := b.forkchoiceStore.GetPeerDas()
+				if peerDas == nil {
+					continue
+				}
+				available, err := peerDas.IsDataAvailable(slot, root)
+				if err != nil || !available {
+					continue
+				}
+				b.processScheduledBlock(ctx, root, job, time.Now())
+			}
 		}
-		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			b.processScheduledBlock(ctx, key.([32]byte), value.(*blockJob), time.Now())
-			return true
-		})
 	}
 }
 
@@ -1273,6 +1322,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	job.logStorageErrorOnce(err)
 	job.mu.Lock()
 	job.running = false
+	job.waitsForColumns = errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
 	if job.terminal && job.completedGeneration >= generation {
 		job.mu.Unlock()
 		return

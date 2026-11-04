@@ -98,6 +98,10 @@ func newBackfillFixture(t *testing.T, currentSlot uint64, blocks map[uint64]*clt
 			}
 			return nil, nil
 		}).AnyTimes()
+	columnStorage.EXPECT().ColumnSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, slot uint64, _ common.Hash, _ int64) (bool, error) {
+			return complete[slot], nil
+		}).AnyTimes()
 	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 	return &backfillFixture{d: &peerdas{

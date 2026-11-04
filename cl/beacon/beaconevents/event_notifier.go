@@ -7,6 +7,9 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+// Sized for every column of two blocks.
+const dataColumnStoredBufferSize = 256
+
 type EventEmitter struct {
 	stateFeed                    *stateFeed     // block state feed
 	operationFeed                *operationFeed // block operation feed
@@ -17,6 +20,7 @@ type EventEmitter struct {
 	hasHeadEvent                 bool
 	hasHeadV2Event               bool
 	payloadAttributesSubscribers atomic.Int64
+	dataColumnStored             chan common.Hash
 }
 
 func (e *EventEmitter) TrackPayloadAttributesSubscriber() func() {
@@ -70,8 +74,26 @@ func (e *EventEmitter) sendHeadV2IfChanged(headV2 *HeadV2Data) {
 
 func NewEventEmitter() *EventEmitter {
 	return &EventEmitter{
-		operationFeed: newOpFeed(),
-		stateFeed:     newStateFeed(),
+		operationFeed:    newOpFeed(),
+		stateFeed:        newStateFeed(),
+		dataColumnStored: make(chan common.Hash, dataColumnStoredBufferSize),
+	}
+}
+
+func (e *EventEmitter) DataColumnStored() <-chan common.Hash {
+	if e == nil {
+		return nil
+	}
+	return e.dataColumnStored
+}
+
+func (e *EventEmitter) NotifyDataColumnStored(blockRoot common.Hash) {
+	if e == nil {
+		return
+	}
+	select {
+	case e.dataColumnStored <- blockRoot:
+	default:
 	}
 }
 
