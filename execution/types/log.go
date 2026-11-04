@@ -20,7 +20,6 @@
 package types
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -537,7 +536,7 @@ func (l *Log) decodeStoredFields(b []byte) error {
 	if err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	l.Data = bytes.Clone(data)
+	l.Data = append(make([]byte, 0, len(data)), data...)
 	if len(b) != 0 {
 		return errors.New("stored log: trailing data")
 	}
