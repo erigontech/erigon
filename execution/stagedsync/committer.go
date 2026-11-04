@@ -90,8 +90,9 @@ type commitmentCalculator struct {
 	// drains synchronously, so by the next rotation the handed-off buffer is idle.
 	spare *commitment.Updates
 
-	prefetch *commitment.Warmuper
-	balBlock bool
+	prefetch   *commitment.Warmuper
+	balBlock   bool
+	hashAtFold bool
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// to avoid reallocating a fresh prefix-trie arena each block.
@@ -375,15 +376,19 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 	switch r := msg.(type) {
 	case *txResult:
 		var base state.StateReader
+		perBlock := cc.perBlockCompute(r.blockNum)
 		if r.versionMap != nil {
 			cc.curVersionMap = r.versionMap
 			if r.versionMap != cc.blockBaseVM {
 				cc.setBlockBase(r.versionMap, cc.asOfReader.dr.StateReaderAt(r.txNum))
 			}
-			base = cc.blockBase
+			if perBlock {
+				base = cc.blockBase
+			}
 		}
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
+			cc.hashAtFold = !perBlock
 			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
 				cc.accumulateTouched(r.writes, base)
 			}

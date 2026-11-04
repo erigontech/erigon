@@ -1057,6 +1057,36 @@ func TestHandleMessage_ComputedAheadBlockSkipsTouchedUnion(t *testing.T) {
 	}
 }
 
+// In batch mode a key touched in an earlier block is folded at batch end, after
+// its block's version map has left the first-touch cache, so its base read and
+// key hash wait for the fold. Per-block mode does both at first touch.
+func TestHandleMessage_FirstTouchWorkOnlyInPerBlockMode(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BatchCommitments = true
+	for _, perBlock := range []bool{false, true} {
+		t.Run(fmt.Sprintf("perBlock=%v", perBlock), func(t *testing.T) {
+			ctx := context.Background()
+			db, _, doms := setupStepTest(t)
+			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), perBlock, 1<<62, make(chan applyResult, 4), nil, make(chan commitmentResult, 4), state.NewLayeredDomainReader(doms, nil, nil), nil)
+			require.NoError(t, err)
+			defer cc.Stop()
+
+			addr := accounts.InternAddress([20]byte{0xe5})
+			slot := accounts.InternKey([32]byte{0x7})
+			ws := nonceBalanceWrites(addr, 1, *uint256.NewInt(5))
+			ws.SetStorage(addr, slot, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: slot}, Val: *uint256.NewInt(9)})
+			cc.handleMessage(ctx, recordTx(newRawViewVM(11), 1, common.Hash{0x01}, 12, &chain.Rules{}, ws))
+
+			require.Contains(t, cc.touchedAccounts, addr)
+			require.Contains(t, cc.touchedStorage[addr], slot)
+			_, cached := cc.baseAccounts[addr]
+			require.Equal(t, perBlock, cached, "first-touch base read")
+			require.Equal(t, perBlock, cc.touchedAccounts[addr] != nil, "account key hash")
+			require.Equal(t, perBlock, cc.touchedStorage[addr][slot] != nil, "storage key hash")
+		})
+	}
+}
+
 // A block resumed mid-block carries no cells for the txs a previous run already
 // committed; the fold must still see their domain writes in each touched account's base.
 func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
