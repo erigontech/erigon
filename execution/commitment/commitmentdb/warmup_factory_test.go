@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -323,6 +324,21 @@ func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
 	}
 }
 
+func TestConcurrentTrieContextLeavesHPHMainReaderUnchanged(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	sdc, _ := newSnapshotSdc(t)
+	sdc.patriciaTrie = commitment.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig())
+	mainReader := NewLatestStateReader(caller, sdc.sharedDomains, LatestStateReaderOptions{})
+	main := &TrieContext{stepSize: 1, stateReader: mainReader}
+
+	_, drain := sdc.concurrentTrieContextFactory(t.Context(), &snapshotDB{viewID: 8, val: []byte("committed-head")}, nil, caller, 0, main)
+	for _, c := range drain() {
+		c.Close()
+	}
+	require.Same(t, mainReader, main.stateReader)
+}
+
 // The v3 fold reads the caller's tx on its own context while the storage phase
 // runs on workers. Once a commit lands during the fold, those workers fall back
 // to the caller's tx too, so the fold's own reads have to take the same turns.
@@ -331,6 +347,7 @@ func TestConcurrentTrieContextSerializesMainContextWithPinnedWorkers(t *testing.
 	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
 	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
 	sdc, _ := newSnapshotSdc(t)
+	sdc.patriciaTrie = &stateCodecTrie{}
 	main := &TrieContext{stepSize: 1, stateReader: NewLatestStateReader(caller, sdc.sharedDomains, LatestStateReaderOptions{})}
 
 	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, main)

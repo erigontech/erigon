@@ -911,7 +911,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 			src = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(pinnedMetrics))
 		}
 		pinned = newSyncStateReader(&pinnedMu, src)
-		if main != nil {
+		if main != nil && sdc.patriciaTrie != nil && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
 			main.stateReader = newSyncStateReader(&pinnedMu, main.stateReader)
 		}
 	}
