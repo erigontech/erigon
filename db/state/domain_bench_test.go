@@ -31,6 +31,9 @@ import (
 // BenchmarkAbsentKeyLatestLookup compares, per absent key over several domain files, the existence-filter pass that
 // PrefetchLatest runs first (a mapped filter keeps every key) with the probed lookup it used to run for every key.
 func BenchmarkAbsentKeyLatestLookup(b *testing.B) {
+	prev := domainExistenceForceRandom
+	domainExistenceForceRandom = []string{kv.AccountsDomain.String()} // build mapped filters
+	b.Cleanup(func() { domainExistenceForceRandom = prev })
 	db, d := testDbAndDomain(b, log.New())
 	tx, err := db.BeginRw(b.Context())
 	require.NoError(b, err)

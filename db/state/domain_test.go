@@ -4282,7 +4282,9 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 }
 
 func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
-	t.Parallel()
+	prev := domainExistenceForceInMem
+	domainExistenceForceInMem = []string{kv.AccountsDomain.String()}
+	t.Cleanup(func() { domainExistenceForceInMem = prev })
 	db, d := testDbAndDomain(t, log.New())
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -4301,7 +4303,7 @@ func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
 	defer domainTx.Close()
 	require.NotEmpty(t, domainTx.files)
 	for _, f := range domainTx.files {
-		f.src.existence.ForceInMem()
+		require.True(t, f.src.existence.InMem(), "a freshly built filter follows the domain's filter mode")
 	}
 	for i := range 1000 {
 		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "present-%d", i)))
@@ -4325,7 +4327,9 @@ func TestDomain_MayContainInFilesWithoutFiles(t *testing.T) {
 
 // A mapped existence filter would read its pages one at a time, so its keys stay for the probed lookup.
 func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
-	t.Parallel()
+	prev := domainExistenceForceRandom
+	domainExistenceForceRandom = []string{kv.AccountsDomain.String()}
+	t.Cleanup(func() { domainExistenceForceRandom = prev })
 	db, d := testDbAndDomain(t, log.New())
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -4344,7 +4348,7 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	defer domainTx.Close()
 	require.NotEmpty(t, domainTx.files)
 	for _, f := range domainTx.files {
-		require.False(t, f.src.existence.InMem(), "a freshly built filter is mapped")
+		require.False(t, f.src.existence.InMem(), "a mapped filter mode keeps the filter mapped")
 	}
 	for i := range 100 {
 		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)))
