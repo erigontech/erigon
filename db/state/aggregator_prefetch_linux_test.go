@@ -63,7 +63,8 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 	defer dt.Close()
 	at := &AggregatorRoTx{}
 	at.d[kv.AccountsDomain] = dt
-	at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
+	_, err = at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
+	require.NoError(t, err)
 	require.Nil(t, dt.probe)
 	for _, r := range dt.dataReaders {
 		if r != nil {
