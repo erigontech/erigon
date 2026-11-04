@@ -185,16 +185,19 @@ var (
 	brokenBatchRings []*batchRing
 )
 
-// replaceBrokenBatchRing parks a failed ring and gives its slot a new one; a slot whose ring cannot be
-// recreated stops reading, so parked rings stay bounded by the pool size.
+// replaceBrokenBatchRing parks a failed ring and gives its slot a new one while fewer rings than the
+// pool size are parked; after that, or when a new ring cannot be made, the slot stops reading.
 func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
 	brokenMu.Lock()
 	brokenBatchRings = append(brokenBatchRings, br)
+	parked := len(brokenBatchRings)
 	brokenMu.Unlock()
-	if nbr, ok := newBatchRing(); ok {
-		return nbr
+	if parked <= cap(batchRings) {
+		if nbr, ok := newBatchRing(); ok {
+			return nbr
+		}
 	}
-	brokenBatchLog.Do(func() { log.Warn("[mmap] batch read ring failed and cannot be recreated", "err", err) })
+	brokenBatchLog.Do(func() { log.Warn("[mmap] batch read ring failed, slot stops reading", "err", err) })
 	return &batchRing{}
 }
 

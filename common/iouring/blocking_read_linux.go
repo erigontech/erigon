@@ -105,12 +105,17 @@ var (
 	brokenRings []*pooledRing
 )
 
-// replaceBroken parks a failed ring and gives its slot a new one; a slot whose ring cannot be
-// recreated stops reading, so parked rings stay bounded by the pool size.
+// replaceBroken parks a failed ring and gives its slot a new one while fewer rings than the pool
+// size are parked; after that, or when a new ring cannot be made, the slot stops reading.
 func replaceBroken(pr *pooledRing, err error) *pooledRing {
 	brokenMu.Lock()
 	brokenRings = append(brokenRings, pr)
+	parked := len(brokenRings)
 	brokenMu.Unlock()
+	if parked > cap(ringPool) {
+		brokenLog.Do(func() { log.Warn("[iouring] read ring failed, slot falls back to mmap faults", "err", err) })
+		return &pooledRing{}
+	}
 	r, newErr := New(8)
 	if newErr != nil {
 		brokenLog.Do(func() {
