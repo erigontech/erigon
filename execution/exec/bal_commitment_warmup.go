@@ -381,6 +381,34 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	return nil
 }
 
+const (
+	trieResidencySampleKeys = 256
+	// trieColdPagesPerMille is the cold-page rate of the sample below which the trie walk costs more planner CPU than
+	// the reads it saves.
+	trieColdPagesPerMille = 50
+)
+
+// trieMostlyResident probes the flat-depth prefixes of evenly spaced keys and reports whether their pages were
+// already resident; the probe also reads the cold ones.
+func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]byte) bool {
+	step := max(1, len(hashedKeys)/trieResidencySampleKeys)
+	compact := make([]byte, 0, 128)
+	seen := map[string]struct{}{}
+	var prefixes [][]byte
+	for i := 0; i < len(hashedKeys); i += step {
+		k := hashedKeys[i]
+		for depth := 0; depth <= min(max(prefetchFlatDepth, 0), len(k)); depth++ {
+			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
+			if _, ok := seen[pfx]; !ok {
+				seen[pfx] = struct{}{}
+				prefixes = append(prefixes, []byte(pfx))
+			}
+		}
+	}
+	_, cold, _, _ := p.PrefetchLatest(ctx, kv.CommitmentDomain, prefixes)
+	return cold*1000 < len(prefixes)*trieColdPagesPerMille
+}
+
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *prefetchStats) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -393,6 +421,9 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 	}
 	p, ok := ttx.AggTx().(latestPrefetcher)
 	if !ok {
+		return nil
+	}
+	if trieMostlyResident(ctx, p, hashedKeys) {
 		return nil
 	}
 	compact := make([]byte, 0, 128)
