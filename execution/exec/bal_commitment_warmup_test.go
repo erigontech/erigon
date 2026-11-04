@@ -349,3 +349,13 @@ func TestBALPrefetchKeys(t *testing.T) {
 	_ = append(slots[0], 0xff)
 	require.Equal(t, append(a1[:], s2[:]...), slots[1])
 }
+
+func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
+	accs, slots := balPrefetchKeys(nil)
+	require.Empty(t, accs)
+	require.Empty(t, slots)
+}
+
+func TestTrieMostlyResidentWithoutKeysWalksNothing(t *testing.T) {
+	require.False(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, nil))
+}
