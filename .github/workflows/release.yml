@@ -253,8 +253,9 @@ jobs:
           docker run --rm -v "${GITHUB_WORKSPACE}/docker-build-output:/out:ro" "${BUILDER_IMAGE}" bash -c '
             fail=0
             for f in /out/*/usr/local/bin/*; do
+              versions=$(readelf -V "$f") || { echo "readelf failed on $f"; fail=1; continue; }
               for max in GLIBC_2.34 GLIBCXX_3.4.29; do
-                need=$(readelf -V "$f" | grep -o "${max%%_*}_[0-9.]*" | sort -uV | tail -1)
+                need=$(printf "%s\n" "$versions" | grep -o "${max%%_*}_[0-9.]*" | sort -uV | tail -1)
                 if [ -n "$need" ] && [ "$(printf "%s\n" "$max" "$need" | sort -V | tail -1)" != "$max" ]; then
                   echo "$f needs $need, newer than $max"
                   fail=1
