@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3880,6 +3881,53 @@ func TestCachedOrdinaryRetrySkipsStillDistantTransaction(t *testing.T) {
 	_, _, err = pool.AddRemoteTxns(ctx, txns, peerID, nil, &RemoteTxnsRetry{})
 	require.NoError(t, err)
 	require.Equal(t, []*TxnSlot{near}, pool.unprocessedRemoteTxns.Txns)
+}
+
+func TestCachedRetryPreservesPerHashRevisionsAfterIndexing(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	require.NoError(t, pool.start(ctx))
+	updateP2PRetryNonce(t, pool, sender, 1, 1)
+	const consumedRevision = 1
+	pool.nonceRetryRevision.Store(consumedRevision)
+	result := &RemoteTxnsResult{invalidSidecar: new(atomic.Bool)}
+	retry := &RemoteTxnsRetry{revision: consumedRevision, result: result}
+
+	unsubmittedHash, incompleteHash := common.Hash{1}, common.Hash{2}
+	for i := range minUnvalidatedHashesForSet - 2 {
+		padding := common.Hash{3, byte(i)}
+		retry.unsubmitted = append(retry.unsubmitted, padding[:]...)
+	}
+	retry.unsubmitted = append(retry.unsubmitted, unsubmittedHash[:]...)
+	incomplete := Hashes(incompleteHash[:])
+	result.incomplete.Store(&incomplete)
+
+	var txns TxnSlots
+	appendCandidate := func(hash common.Hash) *TxnSlot {
+		txn := newTestTxnSlot(pool.cfg.MaxNonceGap+1, 0, 1, 2, 21_000)
+		txn.IDHash = hash
+		pool.discardReasonsLRU.Add(string(hash[:]), discardRecord{
+			reason: txpoolcfg.NonceTooDistant,
+			nonceGap: &nonceGapState{
+				sender: sender, stateNonce: 1, firstMissingNonce: 1, minRetryNonce: 1,
+				targetNonce: txn.Nonce, checkedGeneration: pool.stateGeneration, progressRevision: consumedRevision,
+			},
+		})
+		txns.Append(txn, sender[:], false)
+		return txn
+	}
+	// Already attempted hashes exhaust the scan budget before the two unvalidated candidates.
+	for i := range unvalidatedScanBudget {
+		appendCandidate(common.Hash{4, byte(i)})
+	}
+	unsubmitted := appendCandidate(unsubmittedHash)
+	skipped := appendCandidate(incompleteHash)
+	appendCandidate(common.Hash{5})
+
+	_, _, err := pool.AddRemoteTxns(ctx, txns, peerID, nil, retry)
+	require.NoError(t, err)
+	require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
+	require.Same(t, unsubmitted, pool.unprocessedRemoteTxns.Txns[0])
+	require.Same(t, skipped, pool.unprocessedRemoteTxns.Txns[1])
 }
 
 func TestCachedBlobRetryRechecksNonceFrontier(t *testing.T) {
