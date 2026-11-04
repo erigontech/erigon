@@ -417,14 +417,14 @@ func TestStateSampleColdIgnoresPagesTheFirstProbeRead(t *testing.T) {
 		keys[i] = []byte{byte(i >> 8), byte(i)}
 	}
 	calls := 0
-	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys, 0, 10*len(keys)))
+	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys, 0, 10*len(keys)).any())
 }
 
 func TestStateSampleColdKeepsThePerKeyWarmupWhenTheSampleReadEveryKey(t *testing.T) {
 	keys := [][]byte{{1}, {2}, {3}}
 	cold := coldPagesPrefetcher{coldPerKey: 1}
-	require.False(t, stateSampleCold(context.Background(), cold, nil, keys, 0, len(keys)), "the probes already read every page of the domain")
-	require.True(t, stateSampleCold(context.Background(), cold, nil, keys, 0, 10*len(keys)))
+	require.False(t, stateSampleCold(context.Background(), cold, nil, keys, 0, len(keys)).any(), "the probes already read every page of the domain")
+	require.True(t, stateSampleCold(context.Background(), cold, nil, keys, 0, 10*len(keys)).any())
 }
 
 // domainErrPrefetcher reports every page cold and fails its reads in one domain.
@@ -440,21 +440,37 @@ func (p domainErrPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain,
 func TestStateSampleColdKeepsThePerKeyWarmupWhenOneDomainCannotRead(t *testing.T) {
 	keys := [][]byte{{1}, {2}, {3}}
 	for _, failing := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		require.False(t, stateSampleCold(context.Background(), domainErrPrefetcher{failing: failing}, keys, keys, 1000, 1000), "failing %s", failing)
+		require.False(t, stateSampleCold(context.Background(), domainErrPrefetcher{failing: failing}, keys, keys, 1000, 1000).any(), "failing %s", failing)
 	}
+}
+
+// domainColdPrefetcher reports every page cold in one domain and none in the others.
+type domainColdPrefetcher struct{ cold kv.Domain }
+
+func (p domainColdPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
+	if domain == p.cold {
+		return len(keys), nil
+	}
+	return 0, nil
+}
+
+func TestStateSampleColdGatesEachDomain(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	require.Equal(t, coldState{storage: true}, stateSampleCold(context.Background(), domainColdPrefetcher{cold: kv.StorageDomain}, keys, keys, 1000, 1000))
+	require.Equal(t, coldState{accounts: true}, stateSampleCold(context.Background(), domainColdPrefetcher{cold: kv.AccountsDomain}, keys, keys, 1000, 1000))
 }
 
 func TestStateSampleColdKeepsThePerKeyWarmupWhenTheBatchCannotRead(t *testing.T) {
 	keys := [][]byte{{1}, {2}, {3}}
 	broken := coldPagesPrefetcher{coldPerKey: 1, err: errors.New("no batch ring")}
-	require.False(t, stateSampleCold(context.Background(), broken, keys, keys, 1000, 1000))
+	require.False(t, stateSampleCold(context.Background(), broken, keys, keys, 1000, 1000).any())
 }
 
 func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {
 	keys := [][]byte{{1}, {2}, {3}}
-	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys, keys, 1000, 1000))
-	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil, 1000, 0))
-	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil, 0, 0), "no state keys: nothing to batch")
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys, keys, 1000, 1000).any())
+	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil, 1000, 0).any())
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil, 0, 0).any(), "no state keys: nothing to batch")
 }
 
 // prefetcherTx hands p to the code under test as its AggTx.

@@ -1085,10 +1085,10 @@ func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
 
 func TestBatchReadsStateOnlyWithoutCodeWarmup(t *testing.T) {
 	sampled := 0
-	cold := func() bool { sampled++; return true }
-	require.True(t, batchReadsState(balCodeWarmupNone, cold))
+	cold := func() coldState { sampled++; return coldState{accounts: true, storage: true} }
+	require.True(t, batchReadsState(balCodeWarmupNone, cold).any())
 	for _, mode := range []balCodeWarmupMode{balCodeWarmupTxnDestinations, balCodeWarmupAll} {
-		require.False(t, batchReadsState(mode, cold), "code is warmed only by the per-key warmup")
+		require.False(t, batchReadsState(mode, cold).any(), "code is warmed only by the per-key warmup")
 	}
 	require.Equal(t, 1, sampled, "a code warmup skips the residency sample")
 }
