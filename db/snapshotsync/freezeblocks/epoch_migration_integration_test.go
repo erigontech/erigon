@@ -17,6 +17,7 @@
 package freezeblocks_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -290,4 +292,139 @@ func TestEpochMigration_RefusesToLeaveATypeWithoutSegments(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(before), len(after), "nothing is converted or deleted")
 	require.True(t, decimalSegsLeft(t, m))
+}
+
+// shiftDBTxnIDs moves every DB body's transactions d ids up, the state a node is left in once the
+// EthTx sequence has handed ids to bodies that never became canonical.
+func shiftDBTxnIDs(t *testing.T, m *migrationFixture, d uint64) {
+	t.Helper()
+	type stored struct {
+		key  []byte
+		body types.BodyForStorage
+		txs  [][]byte
+	}
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		var all []stored
+		if err := tx.ForEach(kv.BlockBody, nil, func(k, v []byte) error {
+			s := stored{key: bytes.Clone(k)}
+			if err := rlp.DecodeBytes(v, &s.body); err != nil {
+				return err
+			}
+			if s.body.TxCount > 2 {
+				if err := tx.ForAmount(kv.EthTx, hexutil.EncodeTs(s.body.BaseTxnID.At(0)), s.body.TxCount-2, func(_, v []byte) error {
+					s.txs = append(s.txs, bytes.Clone(v))
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			all = append(all, s)
+			return nil
+		}); err != nil {
+			return err
+		}
+		if err := tx.ClearTable(kv.EthTx); err != nil {
+			return err
+		}
+		for _, s := range all {
+			s.body.BaseTxnID += types.BaseTxnID(d)
+			v, err := rlp.EncodeToBytes(&s.body)
+			if err != nil {
+				return err
+			}
+			if err := tx.Put(kv.BlockBody, s.key, v); err != nil {
+				return err
+			}
+			for i, txn := range s.txs {
+				if err := tx.Put(kv.EthTx, hexutil.EncodeTs(s.body.BaseTxnID.At(i)), txn); err != nil {
+					return err
+				}
+			}
+		}
+		_, err := tx.IncrementSequence(kv.EthTx, d)
+		return err
+	}))
+}
+
+// readTailTxs returns the transactions stored at each tail block's own txn ids. It reads every id
+// on its own: a range read skips a missing id and returns the next stored transaction instead.
+func readTailTxs(t *testing.T, m *migrationFixture) map[uint64][][]byte {
+	t.Helper()
+	res := make(map[uint64][][]byte)
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		for n := uint64(migrationTailFrom); n < migrationChainSize; n++ {
+			hash, err := rawdb.ReadCanonicalHash(tx, n)
+			if err != nil {
+				return err
+			}
+			body, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(n, hash))
+			if err != nil {
+				return err
+			}
+			require.NotNil(t, body, "block %d", n)
+			txs := make([][]byte, 0, body.TxCount-2)
+			for i := 0; i < int(body.TxCount)-2; i++ {
+				v, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(body.BaseTxnID.At(i)))
+				if err != nil {
+					return err
+				}
+				txs = append(txs, v)
+			}
+			res[n] = txs
+		}
+		return nil
+	}))
+	return res
+}
+
+// DB txn ids run ahead of the canonical numbering once the node has stored a non-canonical body, and
+// frozen bodies are pruned a few at a time, so some are still in the DB when the migration writes
+// the tail back at canonical ids. Pruning them afterwards must not take the tail's transactions.
+func TestEpochMigration_TailSurvivesPruningShiftedBodies(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpAllDecimal(t, m, logger)
+	want := readTailTxs(t, m)
+	shiftDBTxnIDs(t, m, 2)
+
+	require.NoError(t, migrate(t, m, logger))
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		_, err := rawdb.PruneBlocks(tx, migrationTailFrom, migrationChainSize)
+		return err
+	}))
+
+	require.Equal(t, want, readTailTxs(t, m))
+}
+
+// A decimal segment that survives the final cleanup, like one held open on Windows, would be opened
+// beside the epoch segments covering the same blocks, so the migration must fail instead of finishing.
+// The next run deletes it.
+func TestEpochMigration_FailsWhileADecimalSegmentSurvivesCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpAllDecimal(t, m, logger)
+	straddle := filepath.Join(m.dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, 2000, migrationChainSize, snaptype2.Headers.Enum()))
+	content, err := os.ReadFile(straddle)
+	require.NoError(t, err)
+
+	var restored bool
+	restore := freezeblocks.SetEpochMigrationCrashHook(func() error {
+		if _, statErr := os.Stat(straddle); !restored && os.IsNotExist(statErr) {
+			restored = true
+			return os.WriteFile(straddle, content, 0o644)
+		}
+		return nil
+	})
+	require.Error(t, migrate(t, m, logger))
+	restore()
+	require.True(t, restored)
+
+	require.NoError(t, migrate(t, m, logger))
+	requireEpochOnly(t, m)
 }

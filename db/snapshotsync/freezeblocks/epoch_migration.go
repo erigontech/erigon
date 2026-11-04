@@ -213,7 +213,7 @@ func (m *epochMigrator) planFrom(startBlock uint64) [][2]uint64 {
 //
 // A removal that fails is ignored, as elsewhere in the snapshot code. On Windows it fails while
 // anything still holds the file, and by this point its blocks are in an epoch segment, so the
-// leftover is redundant: the next run sweeps it.
+// leftover is redundant: a later step retries, and the run fails if one survives the final cleanup.
 func removeDecimalSegFiles(segs []snaptype.FileInfo) error {
 	for i := range segs {
 		f := &segs[i]
@@ -424,15 +424,28 @@ func writeTailBlock(rwTx kv.RwTx, headerWord, bodyWord []byte, txWords [][]byte)
 	if err := rawdb.WriteCanonicalHash(rwTx, hash, num); err != nil {
 		return err
 	}
-	if err := rwTx.Put(kv.BlockBody, dbutils.BlockBodyKey(num, hash), bodyWord); err != nil {
-		return err
-	}
 
 	var b types.BodyForStorage
 	if err := rlp.DecodeBytes(bodyWord, &b); err != nil {
 		return fmt.Errorf("epoch-migrate tail: decode body %d: %w", num, err)
 	}
-	base := b.BaseTxnID.U64()
+	canonicalBase := b.BaseTxnID.U64()
+	// A body the DB still holds is kept. A new one takes txn ids from the EthTx sequence like any DB
+	// body: the DB numbers txns apart from the segments, so the segment's ids may already be in use.
+	stored, err := rwTx.Has(kv.BlockBody, dbutils.BlockBodyKey(num, hash))
+	if err != nil {
+		return err
+	}
+	if !stored {
+		id, err := rwTx.IncrementSequence(kv.EthTx, uint64(b.TxCount))
+		if err != nil {
+			return err
+		}
+		b.BaseTxnID = types.BaseTxnID(id)
+		if err := rawdb.WriteBodyForStorage(rwTx, hash, num, &b); err != nil {
+			return err
+		}
+	}
 	senders := make([]common.Address, 0, len(txWords))
 	lookup := make([]byte, 16)
 	for i, w := range txWords {
@@ -441,10 +454,12 @@ func writeTailBlock(rwTx kv.RwTx, headerWord, bodyWord []byte, txWords [][]byte)
 		}
 
 		// segment word is firstByte(1) + sender(20) + txRLP; EthTx stores just the txRLP, keyed by the
-		// global txn id (base + i, since begin-system is index 0).
+		// txn id (base + i, since begin-system is index 0).
 		txnRlp := w[1+length.Addr:]
-		if err := rwTx.Put(kv.EthTx, hexutil.EncodeTs(base+uint64(i)), txnRlp); err != nil {
-			return err
+		if !stored {
+			if err := rwTx.Put(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.U64()+uint64(i)), txnRlp); err != nil {
+				return err
+			}
 		}
 		senders = append(senders, common.BytesToAddress(w[1:1+length.Addr]))
 
@@ -458,7 +473,7 @@ func writeTailBlock(rwTx kv.RwTx, headerWord, bodyWord []byte, txWords [][]byte)
 		}
 		txnHash := txn.Hash()
 		binary.BigEndian.PutUint64(lookup[:8], num)
-		binary.BigEndian.PutUint64(lookup[8:], base+uint64(i))
+		binary.BigEndian.PutUint64(lookup[8:], canonicalBase+uint64(i))
 		if err := rwTx.Put(kv.TxLookup, txnHash[:], lookup); err != nil {
 			return err
 		}
@@ -470,7 +485,7 @@ func writeTailBlock(rwTx kv.RwTx, headerWord, bodyWord []byte, txWords [][]byte)
 // has exactly BodyForStorage.TxCount words (1 begin-system + TxCount-2 real + 1 end-system, or none if
 // TxCount==0). So it reads bodies (for each block's TxCount and BaseTxnID) and transactions together,
 // taking TxCount tx words per block and splitting on epoch boundaries. Tail blocks go to onTail with
-// their BaseTxnID, needed to put them back in the EthTx table.
+// their BaseTxnID, the canonical txn number their TxLookup entries need.
 func (m *epochMigrator) repackTransactions(ctx context.Context, startBlock, frozenMax uint64, onTail func(blockNum, baseTxnID uint64, txnWords [][]byte) error) error {
 	if startBlock >= frozenMax {
 		return nil
@@ -794,6 +809,11 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	// tail is in the DB now, so the straddle segments (and any leftovers) can go.
 	if err := m.deleteDecimalSegs(frozenMax); err != nil {
 		return err
+	}
+	if left, err := HasDecimalBlockSegments(m.dirs, m.chainConfig); err != nil {
+		return err
+	} else if left {
+		return fmt.Errorf("epoch-migration: decimal block segments in %s could not be deleted; stop whatever holds them open and start again", m.dirs.Snap)
 	}
 	if err := m.setInProgress(ctx, false); err != nil {
 		return err

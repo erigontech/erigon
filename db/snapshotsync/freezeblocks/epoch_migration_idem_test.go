@@ -35,8 +35,7 @@ import (
 
 // A crash between tail commits is repaired by re-writing the tail on the next run, so writing the
 // same tail block twice must leave the DB byte-identical — no duplicated rows, no shifted EthTx ids.
-// Every table the tail touches is a plain (non-DupSort) table written with Put, and the EthTx
-// sequence is deliberately not advanced; this pins that.
+// The second write finds the body in the DB and keeps it, so it takes no new txn ids; this pins that.
 func TestWriteTailBlockIsIdempotent(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
@@ -105,12 +104,11 @@ func TestWriteTailBlockIsIdempotent(t *testing.T) {
 		bfs, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(7, hash))
 		require.NoError(t, err)
 		require.Equal(t, uint32(4), bfs.TxCount)
-		require.Equal(t, uint64(200), bfs.BaseTxnID.U64())
 
-		for id, want := range map[uint64][]byte{201: raw1, 202: raw2} {
-			v, getErr := tx.GetOne(kv.EthTx, hexutil.EncodeTs(id))
+		for i, want := range [][]byte{raw1, raw2} {
+			v, getErr := tx.GetOne(kv.EthTx, hexutil.EncodeTs(bfs.BaseTxnID.At(i)))
 			require.NoError(t, getErr)
-			require.Equal(t, want, v, "EthTx %d", id)
+			require.Equal(t, want, v, "txn %d", i)
 		}
 
 		senders, err := rawdb.ReadSenders(tx, hash, 7)

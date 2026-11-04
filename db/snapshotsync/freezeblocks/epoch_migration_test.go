@@ -51,10 +51,13 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
-// writeTailBlock re-inserts a block from its segment words into the DB at the ORIGINAL BaseTxnID
-// (real txns only in EthTx; system-tx slots skipped) and it round-trips back through the reader.
+// writeTailBlock re-inserts a block from its segment words into the DB, taking txn ids from the EthTx
+// sequence like any DB body (real txns only in EthTx; system-tx slots skipped), and it round-trips
+// back through the reader.
 func TestWriteTailBlock(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
+	seqBefore, err := tx.ReadSequence(kv.EthTx)
+	require.NoError(t, err)
 
 	h := &types.Header{Number: *uint256.NewInt(5)}
 	hRLP, err := rlp.EncodeToBytes(h)
@@ -82,16 +85,18 @@ func TestWriteTailBlock(t *testing.T) {
 	bfs, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(5, hash))
 	require.NoError(t, err)
 	require.Equal(t, uint32(4), bfs.TxCount)
-	require.Equal(t, uint64(100), bfs.BaseTxnID.U64())
+	require.Equal(t, seqBefore, bfs.BaseTxnID.U64())
+	seqAfter, err := tx.ReadSequence(kv.EthTx)
+	require.NoError(t, err)
+	require.Equal(t, seqBefore+4, seqAfter)
 
-	// real txns at base+1=101, base+2=102 (system slots 100 and 103 hold nothing)
-	v1, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(101))
+	v1, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(bfs.BaseTxnID.At(0)))
 	require.NoError(t, err)
 	require.Equal(t, raw1, v1)
-	v2, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(102))
+	v2, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(bfs.BaseTxnID.At(1)))
 	require.NoError(t, err)
 	require.Equal(t, raw2, v2)
-	sys, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(100))
+	sys, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(bfs.BaseTxnID.U64()))
 	require.NoError(t, err)
 	require.Nil(t, sys)
 
@@ -102,16 +107,11 @@ func TestWriteTailBlock(t *testing.T) {
 	require.Equal(t, byte(2), senders[1][0])
 }
 
-// The tail is written into the (pruned) key range below the DB's existing data. writeTailBlock must
-// place it there with Put — filling the low keys without disturbing the higher, already-present data
-// and without touching the EthTx sequence counter (which tracks the tip). This mirrors the real
-// state: blocks [F,tip) and their high txn ids are in the DB, [1,F) were pruned, and the migration
-// back-fills a tail block below F.
-func TestWriteTailBlockBelowExistingData(t *testing.T) {
+// The segment's canonical txn ids can belong to bodies the DB still holds, so the tail takes fresh
+// ids from the EthTx sequence, above everything already stored, and leaves the existing rows alone.
+func TestWriteTailBlockTakesFreshTxnIDs(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 
-	// Pre-existing high-range data: a header at a high block and an EthTx entry at a high txn id, with
-	// the EthTx sequence advanced to the tip (as IncrementSequence would leave it during normal sync).
 	const existingBlock, existingTxnID = uint64(900_000), uint64(5_000_000)
 	existing := &types.Header{Number: *uint256.NewInt(existingBlock)}
 	existingHash := existing.Hash()
@@ -119,13 +119,14 @@ func TestWriteTailBlockBelowExistingData(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteHeaderRaw(tx, existingBlock, existingHash, existingRLP, false))
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, existingHash, existingBlock))
+	require.NoError(t, tx.Put(kv.EthTx, hexutil.EncodeTs(101), []byte("unpruned-body-tx")))
 	require.NoError(t, tx.Put(kv.EthTx, hexutil.EncodeTs(existingTxnID), []byte("existing-tx")))
-	_, err = tx.IncrementSequence(kv.EthTx, existingTxnID+1) // sequence now sits at the tip
+	_, err = tx.IncrementSequence(kv.EthTx, existingTxnID+1)
 	require.NoError(t, err)
 	seqBefore, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 
-	// A tail block far below the existing data: block 5, BaseTxnID 100, TxCount 4 (2 real + 2 system).
+	// block 5 was frozen at canonical BaseTxnID 100, whose first real txn id 101 is taken above
 	h := &types.Header{Number: *uint256.NewInt(5)}
 	hRLP, err := rlp.EncodeToBytes(h)
 	require.NoError(t, err)
@@ -134,38 +135,29 @@ func TestWriteTailBlockBelowExistingData(t *testing.T) {
 	bodyWord, err := rlp.EncodeToBytes(&body)
 	require.NoError(t, err)
 	w1, raw1, _ := tailTxWord(t, 0, 1)
-	w2, _, _ := tailTxWord(t, 1, 2)
+	w2, raw2, _ := tailTxWord(t, 1, 2)
 	txWords := [][]byte{{0}, w1, w2, {0}}
 
 	require.NoError(t, writeTailBlock(tx, headerWord, bodyWord, txWords))
 
-	// The tail block landed at the low keys.
-	require.NotNil(t, rawdb.ReadHeaderByNumber(tx, 5))
-	v, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(101)) // first real txn at base+1
+	bfs, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(5, h.Hash()))
 	require.NoError(t, err)
-	require.Equal(t, raw1, v)
-
-	// The pre-existing high-range data is untouched.
-	require.NotNil(t, rawdb.ReadHeaderByNumber(tx, existingBlock))
-	ev, err := tx.GetOne(kv.EthTx, hexutil.EncodeTs(existingTxnID))
-	require.NoError(t, err)
-	require.Equal(t, []byte("existing-tx"), ev)
-
-	// The EthTx sequence counter (the tip's next id) is unchanged — the tail used Put, not the sequence.
+	require.Equal(t, seqBefore, bfs.BaseTxnID.U64())
+	for i, want := range [][]byte{raw1, raw2} {
+		v, getErr := tx.GetOne(kv.EthTx, hexutil.EncodeTs(bfs.BaseTxnID.At(i)))
+		require.NoError(t, getErr)
+		require.Equal(t, want, v)
+	}
 	seqAfter, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
-	require.Equal(t, seqBefore, seqAfter)
+	require.Equal(t, seqBefore+4, seqAfter)
 
-	// EthTx stays sorted: the back-filled low ids come first, the pre-existing high id stays last.
-	c, err := tx.Cursor(kv.EthTx)
-	require.NoError(t, err)
-	defer c.Close()
-	first, _, err := c.First()
-	require.NoError(t, err)
-	require.Equal(t, hexutil.EncodeTs(101), first)
-	last, _, err := c.Last()
-	require.NoError(t, err)
-	require.Equal(t, hexutil.EncodeTs(existingTxnID), last)
+	for id, want := range map[uint64][]byte{101: []byte("unpruned-body-tx"), existingTxnID: []byte("existing-tx")} {
+		v, getErr := tx.GetOne(kv.EthTx, hexutil.EncodeTs(id))
+		require.NoError(t, getErr)
+		require.Equal(t, want, v, "EthTx %d", id)
+	}
+	require.NotNil(t, rawdb.ReadHeaderByNumber(tx, existingBlock))
 }
 
 // createSeqSeg writes a decimal .seg for [from,to) whose word for block K is big-endian K, so a
