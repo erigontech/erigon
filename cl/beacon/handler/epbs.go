@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
-	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -57,6 +56,7 @@ const (
 	maxProposerPreferencesRequestItems     = 2048
 	maxEpbsJSONSize                        = 1 << 20
 	maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+	executionPayloadEnvelopeRebuildTimeout = 5 * time.Second
 )
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
@@ -965,7 +965,7 @@ func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockR
 		return nil, 0, false, err
 	}
 	if prepared != nil {
-		rebuildCtx, cancel := context.WithTimeout(ctx, handlers.StreamDeadline)
+		rebuildCtx, cancel := context.WithTimeout(ctx, executionPayloadEnvelopeRebuildTimeout)
 		defer cancel()
 		envelope, err = a.envelopeRebuilder.Rebuild(rebuildCtx, prepared)
 	}

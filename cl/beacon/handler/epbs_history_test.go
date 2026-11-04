@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/phase1/envelope_history"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -219,7 +218,7 @@ func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
 	handler.envelopeRebuilder = &apiEnvelopeRebuilder{rebuild: func(ctx context.Context) error {
 		deadline, ok := ctx.Deadline()
 		hasDeadline = ok
-		deadlineWithinLimit = ok && time.Until(deadline) <= handlers.StreamDeadline
+		deadlineWithinLimit = ok && time.Until(deadline) <= executionPayloadEnvelopeRebuildTimeout
 		openDuringRebuild = trackedDB.open.Load()
 		return context.DeadlineExceeded
 	}}

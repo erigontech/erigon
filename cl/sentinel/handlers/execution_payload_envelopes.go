@@ -138,6 +138,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			ok = err == nil && block != nil
 		}
 		if err != nil {
+			log.Debug("failed to read block by root", "blockRoot", root, "error", err)
 			canonicalUnavailable = true
 			return false
 		}
@@ -247,6 +248,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			err = prepareErr
 			if err == nil && prepared != nil {
 				envelope, err = c.tryRebuildEnvelope(requestCtx, peerID, prepared)
+			}
+			if err != nil {
+				log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.root, "error", err)
 			}
 		}
 		if err != nil || envelope == nil {
