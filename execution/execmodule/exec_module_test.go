@@ -811,7 +811,7 @@ func TestUpdateForkChoiceResentForkTipOverOtherBranchStateIsNotValid(t *testing.
 	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status)
 	res, err = m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
 	require.NoError(t, err)
-	require.NotEqual(t, execmodule.ExecutionStatusSuccess, res.Status)
+	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, res.Status)
 }
 
 func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangesets bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
