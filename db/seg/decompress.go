@@ -770,7 +770,6 @@ func (v *SequentialView) Close() {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
-	probe      *mmap.Probe
 	dataP      uint64     // current byte offset in data
 	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
 	dataBit    int        // bit offset within current byte (0-7)
@@ -788,6 +787,7 @@ type Getter struct {
 	trace                      bool
 	residencyGate              bool
 	slowReset                  bool // residencyGate or a probe set
+	probe                      *mmap.Probe
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
