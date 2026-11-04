@@ -1655,14 +1655,18 @@ func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step) (v []by
 	return dt.lookupLatestFromFiles(k, buf, maxTxNum, true)
 }
 
-// mayContainInFiles reports whether some file's existence filter may hold k; without existence filters it reports true.
+// mayContainInFiles reports whether some file may hold k. Only filters in the heap reject a key: a mapped filter
+// would read its pages one at a time here, so its key stays for the probed lookup, which batches those pages.
 func (dt *DomainRoTx) mayContainInFiles(k []byte) bool {
+	if len(dt.files) == 0 {
+		return false
+	}
 	if !dt.d.Accessors.Has(statecfg.AccessorExistence) {
 		return true
 	}
 	hi, _ := dt.ht.iit.hashKey(k)
 	for _, f := range dt.files {
-		if f.src.existence == nil || f.src.existence.ContainsHash(hi) {
+		if f.src.existence == nil || !f.src.existence.InMem() || f.src.existence.ContainsHash(hi) {
 			return true
 		}
 	}
@@ -1704,7 +1708,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
 			if f.src.existence != nil {
-				if !f.src.existence.ContainsHash(hi) {
+				maybe := dt.probe == nil && f.src.existence.ContainsHash(hi) || dt.probe != nil && f.src.existence.ContainsHashProbe(hi, dt.probe)
+				if !maybe {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}

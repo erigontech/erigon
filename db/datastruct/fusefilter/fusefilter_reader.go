@@ -199,6 +199,9 @@ func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
 
 // ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
+// InMem reports whether the filter is a heap copy, so a lookup reads no file page.
+func (r *Reader) InMem() bool { return r.keepInMem }
+
 func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
 	if pr != nil {
 		r.probe(v, pr)
@@ -342,6 +345,16 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 	}
 	r.m = m[:offset]
 	return r, offset, nil
+}
+
+// InMem reports whether the filter is a heap copy, so a lookup reads no file page.
+func (r *ReaderSharded) InMem() bool {
+	for i := range r.shards {
+		if r.shards[i].inner != nil {
+			return r.shards[i].keepInMem
+		}
+	}
+	return true
 }
 
 func (r *ReaderSharded) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
