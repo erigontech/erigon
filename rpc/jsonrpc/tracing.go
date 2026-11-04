@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -337,6 +338,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	if config != nil && config.TxIndex != nil {
 		txIndex = int(min(*config.TxIndex, math.MaxInt))
 		if _, err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+			if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+				err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", *config.TxIndex, blockNumber)}
+			}
 			return err
 		}
 	}
