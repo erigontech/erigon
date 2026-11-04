@@ -107,6 +107,10 @@ func (noOpAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.
 	return solid.AttestationData{}, nil
 }
 
+func (noOpAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+	return solid.AttestationData{}, false, nil
+}
+
 type lockOrderFixture struct {
 	cfg        *Cfg
 	syncedData *synced_data.SyncedDataManager
@@ -1847,6 +1851,21 @@ func TestPostForkchoiceSameRootAfterOtherWriterRunsPerPassSteps(t *testing.T) {
 	headV2Statuses, headEvents := f.drainHeadEvents()
 	require.Equal(t, []string{"empty"}, headV2Statuses)
 	require.Equal(t, 1, headEvents)
+}
+
+func TestPostForkchoiceSameRootAfterOtherWriterCachesAttestationData(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	producer := attestation_producer.New(f.cfg.beaconCfg)
+	f.cfg.attestationDataProducer = producer
+	require.NoError(t, f.syncedData.OnHeadStateWithBlockRoot(f.headState, f.headRoot))
+
+	require.NoError(t, f.runPass())
+
+	f.requireCopiesAndPublishes(t, 0)
+	data, ok, err := producer.CachedAttestationData(f.headSlot)
+	require.NoError(t, err)
+	require.True(t, ok, "attestation data for the head slot is not cached")
+	require.Equal(t, f.headRoot, data.BeaconBlockRoot)
 }
 
 func TestPostForkchoiceRepublishesNewRootOrSlot(t *testing.T) {

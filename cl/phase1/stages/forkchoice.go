@@ -541,6 +541,13 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 			logger.Warn("failed to produce and cache attestation data", "err", err)
 		}
+	} else if _, cached, _ := cfg.attestationDataProducer.CachedAttestationData(headSlot); !cached {
+		if err := cfg.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			_, err := cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, root, headState.Slot())
+			return err
+		}); err != nil {
+			logger.Warn("failed to produce and cache attestation data", "err", err)
+		}
 	}
 	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
