@@ -4280,3 +4280,34 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
 	}
 }
+
+func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	for i := range 1000 {
+		require.NoError(t, writer.PutWithPrev(fmt.Appendf(nil, "present-%d", i), []byte("v"), 5, nil))
+	}
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	require.NotEmpty(t, domainTx.files)
+	for i := range 1000 {
+		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "present-%d", i)))
+	}
+	absent := 0
+	for i := range 1000 {
+		if !domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)) {
+			absent++
+		}
+	}
+	require.Greater(t, absent, 950, "the existence filter drops absent keys apart from its false positives")
+}

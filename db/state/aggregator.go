@@ -2756,7 +2756,13 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			}
 		}
 	}()
-	pending := keys
+	// A key that no existence filter holds needs no page: drop it before the probed lookups, which touch every file.
+	pending := make([][]byte, 0, len(keys))
+	for _, k := range keys {
+		if dt.mayContainInFiles(k) {
+			pending = append(pending, k)
+		}
+	}
 	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		t0 := time.Now()
 		cold := make([]uintptr, 0, len(pending))

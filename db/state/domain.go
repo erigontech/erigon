@@ -1655,6 +1655,20 @@ func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step) (v []by
 	return dt.lookupLatestFromFiles(k, buf, maxTxNum, true)
 }
 
+// mayContainInFiles reports whether some file's existence filter may hold k; without existence filters it reports true.
+func (dt *DomainRoTx) mayContainInFiles(k []byte) bool {
+	if !dt.d.Accessors.Has(statecfg.AccessorExistence) {
+		return true
+	}
+	hi, _ := dt.ht.iit.hashKey(k)
+	for _, f := range dt.files {
+		if f.src.existence == nil || f.src.existence.ContainsHash(hi) {
+			return true
+		}
+	}
+	return false
+}
+
 func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, bounded bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
