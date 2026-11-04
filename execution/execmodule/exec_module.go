@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -761,6 +762,20 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 			return nil
 		}
 
+		body, ok, err := rawdb.ReadBodyOnlyTxnByKey(tx, dbutils.BlockBodyKey(currentNumber, currentHash))
+		if err != nil {
+			return err
+		}
+		if ok {
+			txIDBytes := make([]byte, 8)
+			for txID := body.BaseTxnID.U64(); txID <= body.BaseTxnID.LastSystemTx(body.TxCount); txID++ {
+				binary.BigEndian.PutUint64(txIDBytes, txID)
+				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
+					return err
+				}
+			}
+		}
+		rawdb.DeleteBody(tx, currentHash, currentNumber)
 		rawdb.DeleteHeader(tx, currentHash, currentNumber)
 		currentHash = currentHeader.ParentHash
 		currentNumber--
