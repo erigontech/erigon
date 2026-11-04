@@ -463,8 +463,8 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 	return nil
 }
 
-// stateKeysCold reports whether a sample of the BAL's account or storage keys hit cold pages: then the batch prefetch
-// reads the state instead of the per-key warmup, which would read the same pages again.
+// stateKeysCold reports which state domains a sample of the BAL's keys finds cold: the batch prefetch reads those
+// domains before the per-key warmup, so the warmup finds their pages resident.
 func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) coldState {
 	var cold coldState
 	_ = withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
@@ -479,7 +479,7 @@ func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) c
 // stateSampleCold reports whether accounts or storage are cold enough for the batch to read them. It decides on every
 // second sampled key, after probing the others: pages that all keys share are read by the first probe and would make a
 // resident domain look cold. A sample that holds every key of its domain has read all its pages, and a failed sample
-// read leaves the residency unknown: both keep the per-key warmup.
+// read leaves the residency unknown: both skip the batch.
 func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte, nAcc, nSlot int) coldState {
 	cold := func(domain kv.Domain, sample [][]byte, total int) (bool, error) {
 		first, second := make([][]byte, 0, (len(sample)+1)/2), make([][]byte, 0, len(sample)/2)
