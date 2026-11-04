@@ -22,12 +22,19 @@ func NewPrevBlockReader(base StateReader, reg *PrevBlockList) *PrevBlockReader {
 	return &PrevBlockReader{base: base, reg: reg, chain: base}
 }
 
+// HistoryReader is a reader of history at a set txNum. ReadsHistory marks it, so a latest-state reader that has
+// SetTxNum and GetTxNum never matches.
+type HistoryReader interface {
+	HistoricalStateReader
+	ReadsHistory()
+}
+
 // HistoryReaderOf returns r, or the base under a PrevBlockReader, when it reads history at a set txNum.
-func HistoryReaderOf(r StateReader) (HistoricalStateReader, bool) {
+func HistoryReaderOf(r StateReader) (HistoryReader, bool) {
 	if pr, ok := r.(*PrevBlockReader); ok {
 		r = pr.base
 	}
-	h, ok := r.(HistoricalStateReader)
+	h, ok := r.(HistoryReader)
 	return h, ok
 }
 

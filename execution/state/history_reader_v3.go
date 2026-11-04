@@ -79,6 +79,7 @@ func (hr *HistoryReaderV3) String() string {
 func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx, hr.asOf = tx, nil }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
+func (hr *HistoryReaderV3) ReadsHistory()          {}
 func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.trace = trace
 	hr.tracePrefix = tracePrefix
