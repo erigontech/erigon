@@ -99,18 +99,10 @@ func BlockingRead(fd int, off int64, length int) {
 	ringPool <- pr
 }
 
-// brokenRings keeps failed rings and their buffers alive: the kernel may still write into them.
-var (
-	brokenMu    sync.Mutex
-	brokenRings []*pooledRing
-)
-
-// replaceBroken parks a failed ring and gives its slot a new one; a slot whose ring cannot be
-// recreated stops reading, so parked rings stay bounded by the pool size.
+// replaceBroken abandons a failed ring and gives its slot a new one; a slot whose ring cannot be recreated stops
+// reading.
 func replaceBroken(pr *pooledRing, err error) *pooledRing {
-	brokenMu.Lock()
-	brokenRings = append(brokenRings, pr)
-	brokenMu.Unlock()
+	pr.r.Abandon(pr.buf)
 	r, newErr := New(8)
 	if newErr != nil {
 		brokenLog.Do(func() {

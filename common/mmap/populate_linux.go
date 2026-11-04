@@ -191,18 +191,10 @@ func newBatchRing() (*batchRing, bool) {
 // errNoBatchRing reports a pool slot whose ring failed earlier, so the pages stay cold.
 var errNoBatchRing = errors.New("mmap: no io_uring ring for this batch")
 
-// brokenBatchRings keeps failed rings and their buffers alive: the kernel may still write into them.
-var (
-	brokenMu         sync.Mutex
-	brokenBatchRings []*batchRing
-)
-
-// replaceBrokenBatchRing parks a failed ring and gives its slot a new one; a slot whose ring cannot be
-// recreated stops reading, so parked rings stay bounded by the pool size.
+// replaceBrokenBatchRing abandons a failed ring and gives its slot a new one; a slot whose ring cannot be recreated
+// stops reading.
 func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
-	brokenMu.Lock()
-	brokenBatchRings = append(brokenBatchRings, br)
-	brokenMu.Unlock()
+	br.r.Abandon(br.bufs...)
 	if nbr, ok := newBatchRing(); ok {
 		return nbr
 	}
