@@ -163,13 +163,22 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
-	nonceTooHigh := map[accounts.Address][][32]byte{}
+	nonceTooHigh := map[accounts.Address][]nonceTooHighTxn{}
+	readNonce := func(sender accounts.Address) (uint64, error) {
+		if !ibs.IsVersioned() {
+			return ibs.GetNonce(sender)
+		}
+		// Filtering must observe executed writes without adding reads to the BAL.
+		view := state.NewVersionedAccountView(sender, len(ba.Txns), ibs.VersionMap(), stateReader)
+		nonce := view.GetNonce()
+		return nonce, view.Err()
+	}
 
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, nonceTooHigh, filterReader, filterWriter, logger, filtration)
+		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, nonceTooHigh, filterReader, filterWriter, readNonce, logger, filtration)
 		if err != nil {
 			return err
 		}
@@ -182,6 +191,13 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 			if stop {
 				break
+			}
+			retry, err := retryNonceTooHighTransactions(nonceTooHigh, yielded, readNonce)
+			if err != nil {
+				return err
+			}
+			if retry {
+				continue
 			}
 		}
 
@@ -262,9 +278,10 @@ func getNextTransactions(
 	amount int,
 	executionAt uint64,
 	alreadyYielded mapset.Set[[32]byte],
-	nonceTooHigh map[accounts.Address][][32]byte,
+	nonceTooHigh map[accounts.Address][]nonceTooHighTxn,
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
+	readNonce func(accounts.Address) (uint64, error),
 	logger log.Logger,
 	stats *filtrationStats,
 ) ([]types.Transaction, int, error) {
@@ -300,27 +317,50 @@ func getNextTransactions(
 	}
 
 	blockNum := executionAt + 1
-	txns, nonceTooHighTxns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
+	txns, nonceTooHighTxns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, readNonce, logger, stats)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// A nonce-too-high txn stays yielded until a later batch accepts a txn from the same sender,
-	// so the provider moves on to lower-ranked txns instead of returning the same batch again.
-	// The provider can skip a lower nonce for lack of gas in one call and return it later.
-	for _, txn := range txns {
-		sender, _ := txn.GetSender()
-		for _, h := range nonceTooHigh[sender] {
-			alreadyYielded.Remove(h)
-		}
-		delete(nonceTooHigh, sender)
-	}
 	for _, txn := range nonceTooHighTxns {
 		sender, _ := txn.GetSender()
-		nonceTooHigh[sender] = append(nonceTooHigh[sender], txn.Hash())
+		nonceTooHigh[sender] = append(nonceTooHigh[sender], nonceTooHighTxn{hash: txn.Hash(), nonce: txn.GetNonce()})
 	}
 
 	return txns, len(allTxns), nil
+}
+
+type nonceTooHighTxn struct {
+	hash  [32]byte
+	nonce uint64
+}
+
+// Keep nonce-gapped transactions yielded until execution reaches their nonce.
+// Frame code can advance account nonces through CREATE even when using keyed nonces.
+func retryNonceTooHighTransactions(nonceTooHigh map[accounts.Address][]nonceTooHighTxn, yielded mapset.Set[[32]byte], readNonce func(accounts.Address) (uint64, error)) (bool, error) {
+	var retry bool
+	for sender, txns := range nonceTooHigh {
+		nonce, err := readNonce(sender)
+		if err != nil {
+			return false, err
+		}
+		pending := txns[:0]
+		for _, txn := range txns {
+			if txn.nonce <= nonce {
+				yielded.Remove(txn.hash)
+				retry = true
+			} else {
+				pending = append(pending, txn)
+			}
+		}
+		clear(txns[len(pending):])
+		if len(pending) == 0 {
+			delete(nonceTooHigh, sender)
+		} else {
+			nonceTooHigh[sender] = pending
+		}
+	}
+	return retry, nil
 }
 
 // filtrationStats accumulates txpool-filtration outcomes across all batches of a
@@ -361,10 +401,13 @@ func (s *filtrationStats) logArgs() []any {
 	return args
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger, stats *filtrationStats) ([]types.Transaction, []types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, readNonce func(accounts.Address) (uint64, error), logger log.Logger, stats *filtrationStats) ([]types.Transaction, []types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
+	// Predictions are local to this batch. Frame execution may advance the account
+	// nonce by more than one, so the next batch starts from actual execution state.
+	nonces := make(map[accounts.Address]uint64)
 
 	missedTxs := 0
 	badChainId := 0
@@ -377,6 +420,8 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	overflowCnt := 0
 	for len(transactions) > 0 && missedTxs != len(transactions) {
 		transaction := transactions[0]
+		frame, isFrame := transaction.Unwrap().(*types.FrameTransaction)
+		usesLegacyNonce := !isFrame || frame.UsesLegacyNonce()
 		transactionChainId := transaction.GetChainID()
 		if !transactionChainId.IsZero() && transactionChainId.Cmp(chainID) != 0 {
 			transactions = transactions[1:]
@@ -393,26 +438,40 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if err != nil {
 			return nil, nil, err
 		}
+		if account == nil && isFrame {
+			emptyAccount := accounts.NewAccount()
+			account = &emptyAccount
+		}
 		if account == nil {
 			transactions = transactions[1:]
 			noAccountCnt++
 			continue
 		}
-		// Check transaction nonce
-		if account.Nonce > transaction.GetNonce() {
-			transactions = transactions[1:]
-			nonceTooLowCnt++
-			continue
+		nonce, known := nonces[senderAddress]
+		if !known {
+			nonce, err = readNonce(senderAddress)
+			if err != nil {
+				return nil, nil, err
+			}
+			nonces[senderAddress] = nonce
 		}
-		if account.Nonce < transaction.GetNonce() {
-			missedTxs++
-			transactions = append(transactions[1:], transaction)
-			continue
+		// Execution validates keyed nonces against nonce-manager storage.
+		if usesLegacyNonce {
+			if nonce > transaction.GetNonce() {
+				transactions = transactions[1:]
+				nonceTooLowCnt++
+				continue
+			}
+			if nonce < transaction.GetNonce() {
+				missedTxs++
+				transactions = append(transactions[1:], transaction)
+				continue
+			}
 		}
 		missedTxs = 0
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
+		if !account.IsEmptyCodeHash() && !isFrame {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
@@ -441,6 +500,14 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 					continue
 				}
 			}
+		}
+		if isFrame {
+			if usesLegacyNonce {
+				nonces[senderAddress] = nonce + 1
+			}
+			filtered = append(filtered, transaction)
+			transactions = transactions[1:]
+			continue
 		}
 		txnGasLimit := transaction.GetGasLimit()
 		value := transaction.GetValue()
@@ -471,7 +538,8 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		newAccount := new(accounts.Account)
 		*newAccount = *account
 		// Updates account in the simulation
-		newAccount.Nonce++
+		newAccount.Nonce = nonce + 1
+		nonces[senderAddress] = newAccount.Nonce
 		newAccount.Balance.Sub(&account.Balance, want)
 		if err := simStateWriter.UpdateAccountData(senderAddress, account, newAccount); err != nil {
 			return nil, nil, err
