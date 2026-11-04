@@ -195,6 +195,11 @@ func (s *syncCommitteeMessagesService) storeVerifiedMessage(subnet uint64, msg *
 	if stale {
 		return ErrIgnore
 	}
+	// An identical submission is answered from the seen map while this one waits for the pool, and may have been
+	// published meanwhile; then there is nothing left for this one to publish.
+	if verified, ok := s.seenSyncCommitteeMessages.Load(key); ok && verified.(verifiedSyncCommitteeMessage).published {
+		return ErrIgnore
+	}
 	return nil
 }
 

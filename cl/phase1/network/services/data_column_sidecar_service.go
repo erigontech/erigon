@@ -54,6 +54,7 @@ type dataColumnSidecarService struct {
 	columnSidecarStorage blob_storage.DataColumnStorage
 	emitters             *beaconevents.EventEmitter
 	gossipManager        gossipmgr.Gossip
+	expectedProposer     func(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error)
 
 	// Key by the full sidecar root so an unverified candidate cannot suppress
 	// another candidate for the same block and column.
@@ -104,6 +105,7 @@ func NewDataColumnSidecarService(
 		emitters:             emitters,
 		gossipManager:        gossipManager,
 	}
+	s.expectedProposer = newExpectedProposers(ctx, cfg, forkChoice, syncDataManager).get
 	s.pendingGloasSidecars = s.newPendingGloasSidecarQueue(ctx)
 	return s
 }
@@ -267,6 +269,19 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	// [REJECT] The KZG proofs are valid
 	if !verifyDataColumnSidecarKZGProofs(msg) {
 		return errors.New("invalid kzg proofs for data column sidecar")
+	}
+
+	// [REJECT] The sidecar is proposed by the expected proposer_index for the block's slot in the context of the
+	// current shuffling. It comes after the proof checks, as in the spec, so an invalid sidecar is rejected even when
+	// the proposer read ignores it. A block in fork choice passed the state transition, which checks its proposer.
+	if _, known := s.forkChoice.GetHeader(blockRoot); !known {
+		expectedProposer, err := s.expectedProposer(ctx, blockHeader.ParentRoot, parentHeader.Slot, blockHeader.Slot)
+		if err != nil {
+			return err
+		}
+		if blockHeader.ProposerIndex != expectedProposer {
+			return fmt.Errorf("data column sidecar proposer index %d does not match expected proposer %d", blockHeader.ProposerIndex, expectedProposer)
+		}
 	}
 
 	// Claim the tuple atomically: columns built from EL blobs may have claimed it during validation.
