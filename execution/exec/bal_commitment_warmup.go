@@ -357,7 +357,15 @@ func logBatchPrefetch(what string, keys int, started time.Time, err error) {
 // in the domains that cold marks.
 func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, cold coldState) {
 	started := time.Now()
-	accs, slots := balPrefetchKeys(bal)
+	var accs, slots [][]byte
+	if cold.storage {
+		accs, slots = balPrefetchKeys(bal)
+	} else {
+		accs = make([][]byte, len(bal))
+		for i := range bal {
+			accs[i] = bal[i].Address[:]
+		}
+	}
 	var g errgroup.Group
 	keys := 0
 	if cold.accounts {
