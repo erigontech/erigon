@@ -574,6 +574,48 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSSZRESTBodiesExcludePoW(t *testing.T) {
+	pow := &types.Header{Number: *uint256.NewInt(10), Time: 98, Difficulty: *uint256.NewInt(131072)}
+	pos := &types.Header{Number: *uint256.NewInt(11), Time: 99, ParentHash: pow.Hash()}
+	hashes := []common.Hash{pow.Hash(), pos.Hash()}
+	body, err := encodeHashListRequest(hashes, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"hash", http.MethodPost, "/engine/v1/bodies/hash", body},
+		{"range", http.MethodGet, "/engine/v1/bodies?from=10&count=2", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &bodiesExecutionModule{
+				headers:       map[uint64]*types.Header{10: pow, 11: pos},
+				headersByHash: map[common.Hash]*types.Header{pow.Hash(): pow, pos.Hash(): pos},
+				bodies: map[common.Hash]*execmodule.PayloadBody{
+					pow.Hash(): {Transactions: [][]byte{{0x01}}},
+					pos.Hash(): {Transactions: [][]byte{{0x02}}},
+				},
+			}
+			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec,
+				newSSZRequest(t.Context(), tc.method, tc.path, "paris", tc.body))
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.BellatrixVersion)
+			require.NoError(t, err)
+			require.Len(t, entries, 2)
+			require.False(t, entries[0].Available)
+			require.Empty(t, entries[0].Transactions)
+			require.True(t, entries[1].Available)
+			require.Equal(t, []hexutil.Bytes{{0x02}}, entries[1].Transactions)
+			require.Equal(t, [][]common.Hash{{pos.Hash()}}, module.bodyRequests)
+		})
+	}
+}
+
 func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 	shanghai := &types.Header{Time: 199}
 	cancun := &types.Header{Time: 200}

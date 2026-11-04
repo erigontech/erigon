@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -375,7 +376,7 @@ func (e *EngineServer) getSSZBodies(ctx context.Context, headers []*types.Header
 	// Filter by fork before fetching bodies: retrieval can re-execute blocks
 	// to recover missing block access lists.
 	for i, header := range headers {
-		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
+		if header == nil || !misc.IsPoSHeader(header) || forkNameAtTime(e.config, header.Time) != forkName {
 			continue
 		}
 		// Pin each body to the header used for fork filtering, even if the canonical
