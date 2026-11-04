@@ -1202,9 +1202,9 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 
 	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
 		}
-		return txpoolcfg.Spammer
+		return txpoolcfg.BlobSlotsOverflow
 	}
 	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
 		if txn.Traced {
@@ -2866,6 +2866,8 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			return err
 		}
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
+			// The flush-time delete needs only the hash and the sender; dropping the body frees blobs now.
+			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
 			continue
 		}
 		p.recoverAuthorizations(txn)

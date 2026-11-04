@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	xsha3 "golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
@@ -445,4 +446,14 @@ func TestKeccak256HashMatchesReference(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestPrefaultKeepsBucketsInUse(t *testing.T) {
+	buckets := new([1 << 17]keccakBucket)
+	buckets[0].seq.Store(5)
+	buckets[0].tag.Store(7)
+	prefault(buckets)
+	require.Equal(t, uint64(5), buckets[0].seq.Load())
+	require.Equal(t, uint64(7), buckets[0].tag.Load())
+	require.Zero(t, buckets[len(buckets)-1].seq.Load())
 }
