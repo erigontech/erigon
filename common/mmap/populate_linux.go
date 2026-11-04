@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/iouring"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // BatchPrefetch enables probed reads (Probe) and io_uring page batches (ReadPages).
@@ -184,13 +185,20 @@ var (
 	brokenBatchRings []*batchRing
 )
 
-// replaceBrokenBatchRing parks a failed ring; its slot stops reading, so parked rings stay bounded by the pool size.
-func replaceBrokenBatchRing(br *batchRing) *batchRing {
+// replaceBrokenBatchRing parks a failed ring and gives its slot a new one; a slot whose ring cannot be
+// recreated stops reading, so parked rings stay bounded by the pool size.
+func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
 	brokenMu.Lock()
 	brokenBatchRings = append(brokenBatchRings, br)
 	brokenMu.Unlock()
+	if nbr, ok := newBatchRing(); ok {
+		return nbr
+	}
+	brokenBatchLog.Do(func() { log.Warn("[mmap] batch read ring failed and cannot be recreated", "err", err) })
 	return &batchRing{}
 }
+
+var brokenBatchLog sync.Once
 
 // ReadPages reads the given mapped pages into the page cache with io_uring, up to 8 rings of 256 reads in flight; a
 // page outside the registered file mappings is skipped. It returns the first failed batch's error.
@@ -234,7 +242,9 @@ func ReadPages(pages []uintptr) error {
 				}
 				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
 					errOnce.Do(func() { firstErr = err })
-					br = replaceBrokenBatchRing(br)
+					if !errors.Is(err, iouring.ErrRingReset) {
+						br = replaceBrokenBatchRing(br, err)
+					}
 				}
 			})
 		}

@@ -272,13 +272,17 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	for from := chunk; from < len(keys); from += chunk {
 		wg.Go(func() {
 			// Best effort: without a free read-tx permit the chunk is skipped, since the parent holds one.
+			to := min(from+chunk, len(keys))
 			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic
 			if err != nil {
+				for i := from; i < to; i++ {
+					keep[i] = true // unchecked keys stay for the deeper levels
+				}
 				return
 			}
 			defer tx.Rollback()
 			if ttx, ok := tx.(kv.TemporalTx); ok {
-				check(ttx, from, min(from+chunk, len(keys)))
+				check(ttx, from, to)
 			}
 		})
 	}

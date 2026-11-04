@@ -1663,7 +1663,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil
+	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil && dt.probe == nil // a cache hit would hide a cold page from the probe
 
 	hi, lo := dt.ht.iit.hashKey(k)
 

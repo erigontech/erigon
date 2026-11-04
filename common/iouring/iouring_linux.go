@@ -23,6 +23,7 @@
 package iouring
 
 import (
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"unsafe"
@@ -124,6 +125,15 @@ func New(entries uint32) (*Ring, error) {
 	return ring, nil
 }
 
+// ErrRingReset reports a batch that failed with no read left in flight: the ring was reset and stays usable.
+var ErrRingReset = errors.New("io_uring: ring reset with nothing in flight")
+
+// reset resyncs the cached indices to the kernel's, dropping unsubmitted SQEs and unreaped CQEs.
+func (r *Ring) reset() {
+	atomic.StoreUint32(r.sqTail, atomic.LoadUint32(r.sqHead))
+	atomic.StoreUint32(r.cqHead, atomic.LoadUint32(r.cqTail))
+}
+
 func (r *Ring) Close() {
 	if r.sqRing != nil {
 		_ = unix.Munmap(r.sqRing)
@@ -153,7 +163,7 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
 // io_uring, keeping up to the ring size in flight. It returns after all complete. After an
-// error, reads may still be in flight into scratch: the caller must not reuse the ring or scratch.
+// error other than ErrRingReset, reads may still be in flight into scratch: the caller must not reuse the ring or scratch.
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
@@ -196,6 +206,10 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 				continue
 			}
 			if errno != 0 {
+				if submitted == reaped { // a failed enter submits nothing, so no read is in flight
+					r.reset()
+					return fmt.Errorf("io_uring_enter: %w: %w", ErrRingReset, errno)
+				}
 				return fmt.Errorf("io_uring_enter: %w", errno)
 			}
 			submitted += int(taken)
