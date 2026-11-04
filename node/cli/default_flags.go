@@ -209,6 +209,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
 	&utils.OverrideAmsterdamFlag,
+	&utils.OverrideGenesisFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
