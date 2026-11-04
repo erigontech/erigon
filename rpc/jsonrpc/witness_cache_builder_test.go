@@ -346,6 +346,7 @@ func TestOpenRollingPin(t *testing.T) {
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 
 	roTx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -433,6 +434,7 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 	require.Equal(t, buildNum-1, pin.num, "pin sits one block behind the block to build")
 
 	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
@@ -729,6 +731,7 @@ func insertHeadCaptureChain(t *testing.T, ctx context.Context, buildNum uint64) 
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 	require.Equal(t, buildNum-1, pin.num, "pin sits one block behind the block to build")
 
 	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
@@ -842,8 +845,8 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 	require.Equal(t, pinAt, pin.num)
-	defer pin.close()
 
 	baseHash, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
 	require.NoError(t, err)
@@ -995,6 +998,8 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
 		pin, err := openRollingPin(ctx, m.DB)
 		require.NoError(t, err)
+		require.NotNil(t, pin)
+		t.Cleanup(pin.close)
 		require.NoError(t, m.InsertChain(testChain.Slice(int(n)-1, int(n))), "block %d", n)
 		hash, _ := buildTestChainHeader(t, m, n)
 		parentHash, _ := buildTestChainHeader(t, m, n-1)
