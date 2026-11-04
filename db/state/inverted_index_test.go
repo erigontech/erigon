@@ -2043,3 +2043,70 @@ func TestInvertedIndexChunkLayout(t *testing.T) {
 	_, err = decodeIIChunk(nil, []byte{0, 0, 0, 0, 0, 0, 0, 9, 2})
 	require.Error(t, err, "odd deltas length")
 }
+
+func TestInvertedIndex_IdxRange_Seek(t *testing.T) {
+	t.Parallel()
+	db, ii, txs := filledInvIndexOfSize(t, 512, 16, 7, log.New())
+	mergeInverted(t, db, ii, txs)
+
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	ic := ii.beginForTests()
+	defer ic.Close()
+
+	type txRange struct{ from, to int }
+	ascRanges := []txRange{{-1, -1}, {0, -1}, {37, 450}, {100, 101}, {300, 510}}
+	descRanges := []txRange{{-1, -1}, {450, 37}, {510, -1}, {101, 100}, {600, 300}}
+	for _, keyNum := range []uint64{1, 3, 7} {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], keyNum)
+		for _, asc := range []order.By{order.Asc, order.Desc} {
+			ranges := ascRanges
+			if !asc {
+				ranges = descRanges
+			}
+			for _, r := range ranges {
+				var want []uint64
+				for n := uint64(1); n <= txs; n++ {
+					inRange := (r.from < 0 || n >= uint64(r.from)) && (r.to < 0 || n < uint64(r.to))
+					if !asc {
+						inRange = (r.from < 0 || n <= uint64(r.from)) && (r.to < 0 || n > uint64(r.to))
+					}
+					if n%keyNum == 0 && inRange {
+						want = append(want, n)
+					}
+				}
+				if !asc {
+					slices.Reverse(want)
+				}
+				for _, gap := range []uint64{1, 2, 15, 16, 100, 1000} {
+					t.Run(fmt.Sprintf("key=%d/asc=%t/range=%v/gap=%d", keyNum, asc, r, gap), func(t *testing.T) {
+						it, err := ic.IdxRange(key[:], r.from, r.to, asc, -1, roTx)
+						require.NoError(t, err)
+						defer it.Close()
+						s, ok := it.(stream.Seeker[uint64])
+						require.True(t, len(want) == 0 || ok && s.CanSeek())
+						i := 0
+						for it.HasNext() {
+							n, err := it.Next()
+							require.NoError(t, err)
+							require.Less(t, i, len(want))
+							require.Equal(t, want[i], n)
+							i++
+							target := n + gap
+							if !asc {
+								target = n - min(n, gap)
+							}
+							require.NoError(t, s.Seek(target))
+							for i < len(want) && (asc && want[i] < target || !asc && want[i] > target) {
+								i++
+							}
+						}
+						require.Equal(t, len(want), i)
+					})
+				}
+			}
+		}
+	}
+}
