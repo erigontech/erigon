@@ -412,21 +412,22 @@ func balPrefetchSample(bal types.BlockAccessList) (accs, slots [][]byte) {
 	for j := range kAcc {
 		accs = append(accs, bal[j*nAcc/kAcc].Address[:])
 	}
-	idx := 0
-	take := func(addr []byte, slot common.Hash) {
-		if len(slots) < kSlot && idx == len(slots)*nSlot/kSlot {
-			slots = append(slots, slotKey(addr, slot))
+	first, j := 0, 0 // index of the account's first slot, next sample
+	for i := 0; i < len(bal) && j < kSlot; i++ {
+		a := &bal[i]
+		nChanges, n := len(a.StorageChanges), len(a.StorageChanges)+len(a.StorageReads)
+		for ; j < kSlot; j++ {
+			off := j*nSlot/kSlot - first
+			if off >= n {
+				break
+			}
+			if off < nChanges {
+				slots = append(slots, slotKey(a.Address[:], a.StorageChanges[off].Slot.Value()))
+			} else {
+				slots = append(slots, slotKey(a.Address[:], a.StorageReads[off-nChanges]))
+			}
 		}
-		idx++
-	}
-	for i := range bal {
-		addr := bal[i].Address[:]
-		for _, sc := range bal[i].StorageChanges {
-			take(addr, sc.Slot.Value())
-		}
-		for _, sr := range bal[i].StorageReads {
-			take(addr, sr)
-		}
+		first += n
 	}
 	return accs, slots
 }
