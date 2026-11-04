@@ -153,7 +153,7 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
-	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 2))
+	require.NoError(t, warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(bal), 2))
 
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
@@ -178,7 +178,7 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 		},
 	}
 
-	err := warmBALCommitment(t.Context(), db, bal, 2)
+	err := warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(bal), 2)
 	require.ErrorIs(t, err, firstErr)
 	require.ErrorIs(t, err, secondErr)
 }
@@ -189,7 +189,7 @@ func TestWarmBALCommitmentSkipsAnEndedContext(t *testing.T) {
 	cancel()
 	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("unexpected BeginRo") }}
 
-	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+	err := warmBALCommitment(ctx, db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.Equal(t, context.Canceled, err)
 	require.Zero(t, db.calls.Load())
@@ -203,7 +203,7 @@ func TestWarmBALCommitmentReportsACancellationOnce(t *testing.T) {
 		return nil, context.Canceled
 	}}
 
-	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+	err := warmBALCommitment(ctx, db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.Equal(t, context.Canceled, err)
 }
@@ -218,7 +218,7 @@ func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
 		return nil, kv.ErrReadTxLimitExceeded
 	}}
 
-	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+	err := warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.Equal(t, int64(3), db.calls.Load())
 	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
@@ -229,7 +229,7 @@ func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
 func TestWarmBALCommitmentReportsAnErrorMessageOnce(t *testing.T) {
 	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("db closed") }}
 
-	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+	err := warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.EqualError(t, err, "db closed")
 }
@@ -299,7 +299,7 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
-	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
+	require.NoError(t, warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(bal), 1))
 	require.Positive(t, tx.calls)
 	require.True(t, tx.opts.BranchCache())
 }
@@ -480,10 +480,25 @@ type prefetcherTx struct {
 }
 
 func (t prefetcherTx) AggTx() any { return t.p }
+func (prefetcherTx) Rollback()    {}
+
+// prefetcherDB opens read txs whose AggTx is p.
+type prefetcherDB struct {
+	kv.RoDB
+	p latestPrefetcher
+}
+
+func (d prefetcherDB) BeginRo(context.Context) (kv.Tx, error) { return prefetcherTx{p: d.p}, nil }
 
 func TestPrefetchKeysKeepsTheFirstReadError(t *testing.T) {
-	err := prefetchKeys(context.Background(), nil, prefetcherTx{p: domainErrPrefetcher{failing: kv.CommitmentDomain}}, kv.CommitmentDomain, [][]byte{{1}})
-	require.Error(t, err)
+	keys := make([][]byte, 4*prefetchPar) // spread over every planner tx
+	for i := range keys {
+		keys[i] = []byte{byte(i)}
+	}
+	parent := prefetcherTx{p: coldPagesPrefetcher{}}
+	failing := prefetcherDB{p: domainErrPrefetcher{failing: kv.CommitmentDomain}}
+	require.Error(t, prefetchKeys(context.Background(), failing, parent, kv.CommitmentDomain, keys), "an error from a planner's own tx")
+	require.NoError(t, prefetchKeys(context.Background(), prefetcherDB{p: coldPagesPrefetcher{}}, parent, kv.CommitmentDomain, keys))
 }
 
 // branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.

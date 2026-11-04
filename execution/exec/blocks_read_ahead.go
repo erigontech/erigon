@@ -463,16 +463,17 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
+	trieKeys := sync.OnceValue(func() [][]byte { return balCommitmentWarmupKeys(bal) })
 	var group errgroup.Group
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
-			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
+			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
 	stateByBatch := false
 	if mmap.NewProbe() != nil {
 		group.Go(func() error {
-			prefetchBALCommitment(ctx, db, bal)
+			prefetchBALCommitment(ctx, db, trieKeys())
 			return nil
 		})
 		cold := batchReadsState(codeMode, func() coldState { return stateKeysCold(ctx, db, bal) })

@@ -105,11 +105,11 @@ func (*balCommitmentContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, errors.New("BAL commitment warmup does not read storage")
 }
 
-func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, workers int) error {
+// warmBALCommitment warms the trie branches of keys, the BAL's balCommitmentWarmupKeys.
+func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	keys := balCommitmentWarmupKeys(bal)
 	if len(keys) == 0 || workers <= 0 {
 		return nil
 	}
@@ -373,9 +373,8 @@ func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList
 
 // prefetchBALCommitment reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie,
 // level by level since a branch decides whether the next level exists.
-func prefetchBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
+func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 	started := time.Now()
-	keys := balCommitmentWarmupKeys(bal)
 	logBatchPrefetch("trie", len(keys), started, prefetchCommitment(ctx, db, keys))
 }
 
