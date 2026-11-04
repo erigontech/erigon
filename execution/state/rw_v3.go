@@ -358,10 +358,9 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	return nil
 }
 
-// ApplyTxIndexes writes trace indices, log indices, and receipts. skipReceiptCache
-// skips the receipt-cache domain write for the parallel executor's block-finalize
-// txResult, which shares the system-tx-end txNum: a second DomainPut there would
-// overwrite the last regular tx's receipt history entry.
+// ApplyTxIndexes writes trace indices, log indices, and receipts.
+// A nil receipt clears the cached value when receipt caching is enabled.
+// skipReceiptCache leaves the receipt cache and its history unchanged.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
@@ -927,8 +926,12 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	return r.ReadAccountStorageByPlainKey(address, key.Value())
+}
+
+// ReadAccountStorageByPlainKey is ReadAccountStorage for a slot that is not interned.
+func (r *ReaderV3) ReadAccountStorageByPlainKey(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
 	addressValue := address.Value()
-	keyValue := key.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
@@ -943,7 +946,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 
 	if r.trace {
-		r.traceReadAccountStorage(address, key, enc, res)
+		r.traceReadAccountStorage(address, keyValue, enc, res)
 	}
 
 	return res, ok, err
@@ -953,7 +956,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 // needs for %x formatting does not force res to the heap on every read.
 //
 //go:noinline
-func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key accounts.StorageKey, enc []byte, res uint256.Int) {
+func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.Hash, enc []byte, res uint256.Int) {
 	if enc == nil {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 	} else {

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type rulesEngineWithErrors struct {
@@ -70,9 +71,10 @@ func newSerialFinalizeTestExec(t *testing.T, engine rules.Engine) (*serialExecut
 	se := &serialExecutor{
 		txExecutor: txExecutor{
 			cfg: ExecuteBlockCfg{
-				chainConfig: config,
-				engine:      engine,
-				vmConfig:    &vm.Config{},
+				chainConfig:   config,
+				engine:        engine,
+				vmConfig:      &vm.Config{},
+				notifications: shards.NewNotifications(nil),
 			},
 			doms:    domains,
 			rs:      rs,
