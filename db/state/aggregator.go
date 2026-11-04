@@ -2724,12 +2724,12 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
 // Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
 // stay correct without it.
-func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
+func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) {
 	dt := at.d[domain]
 	dt.probe = mmap.NewProbe()
 	if dt.probe == nil || len(keys) == 0 {
 		dt.probe = nil
-		return 0, 0, 0, 0
+		return
 	}
 	defer func() {
 		dt.probe = nil
@@ -2741,14 +2741,12 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 	}()
 	pending := keys
 	tried := map[uintptr]struct{}{}
-	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
-		t0 := time.Now()
+	for waves := 0; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
-		wave := make(map[uintptr]struct{}, len(pending))
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
-				return waves, pages, plan, io
+				return
 			}
 			page, ok := probeLatestFromFiles(dt, k)
 			if !ok {
@@ -2757,25 +2755,18 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			if _, done := tried[page]; done {
 				continue // an earlier wave read or skipped it: leave the key to the normal read
 			}
-			if _, dup := wave[page]; !dup {
-				wave[page] = struct{}{}
-				cold = append(cold, page)
-			}
+			cold = append(cold, page)
 			next = append(next, k)
 		}
-		t1 := time.Now()
 		// A failed page goes into tried below, so the next wave goes on with the other keys.
 		if err := mmap.ReadPages(ctx, cold); err == nil {
 			dt.probe.MarkResident(cold)
 		}
-		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
-		pages += len(cold)
 		for _, page := range cold {
 			tried[page] = struct{}{}
 		}
 		pending = next
 	}
-	return waves, pages, plan, io
 }
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
