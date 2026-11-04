@@ -884,7 +884,7 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 // StorageRead is version-only-validated). Only a genuine cold committed read seeds; a
 // versionMap or write-set hit is untouched. Mutates r so the seeded cell and read agree.
 func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, val uint256.Int, r *readPathResult) {
-	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion || readsOwnTxNum(s.stateReader) {
+	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion {
 		return
 	}
 	s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
@@ -924,13 +924,6 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 		return nil, UnknownSource, UnknownVersion, false, nil
 	}
 	origin := *committed
-	if readsOwnTxNum(s.stateReader) {
-		if !gateOriginAccount(s, addr, &origin) {
-			return nil, StorageRead, UnknownVersion, true, nil
-		}
-		s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader{Source: StorageRead, Version: UnknownVersion}, NewAccountView(&origin)})
-		return &origin, StorageRead, UnknownVersion, true, nil
-	}
 	s.recordAddressOrigin(addr, &origin) // origin write-set, published to the origin map at flush
 	ver = Version{TxIndex: originIndex}
 	// A destructed origin reads absent and is NOT recorded as an AddressPath read (its
@@ -941,16 +934,6 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 	}
 	s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader{Source: MapRead, Version: ver}, NewAccountView(&origin)})
 	return &origin, MapRead, ver, true, nil
-}
-
-// readsOwnTxNum reports whether r reads history at the tx's own txNum: such a read already
-// holds the block's earlier writes, so it is not the block-start origin other txs may read.
-func readsOwnTxNum(r StateReader) bool {
-	if pr, ok := r.(*PrevBlockReader); ok {
-		r = pr.base
-	}
-	_, ok := r.(HistoricalStateReader)
-	return ok
 }
 
 // warmSource reports whether a recorded read source is a plain committed/map

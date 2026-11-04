@@ -22,6 +22,15 @@ func NewPrevBlockReader(base StateReader, reg *PrevBlockList) *PrevBlockReader {
 	return &PrevBlockReader{base: base, reg: reg, chain: base}
 }
 
+// HistoryReaderOf returns r, or the base under a PrevBlockReader, when it reads history at a set txNum.
+func HistoryReaderOf(r StateReader) (HistoricalStateReader, bool) {
+	if pr, ok := r.(*PrevBlockReader); ok {
+		r = pr.base
+	}
+	h, ok := r.(HistoricalStateReader)
+	return h, ok
+}
+
 // PrevBlockBase wraps raw with the prev-block layers for a block known at
 // construction — for readers built fresh per block rather than reused per worker.
 // Returns raw unchanged when there are no prior blocks to layer.

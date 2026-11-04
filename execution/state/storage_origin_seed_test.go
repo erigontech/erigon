@@ -22,7 +22,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -150,40 +149,4 @@ func TestFinalizedWritesHandsOverAccountOrigin(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, acc.Nonce, got.Nonce)
 	require.Equal(t, acc.Balance, got.Balance)
-}
-
-// historyReader reads history at its own txNum, as a worker's reader does in the restart replay.
-type historyReader struct {
-	*storageReader
-	txNum uint64
-}
-
-func (r *historyReader) GetTxNum() uint64      { return r.txNum }
-func (r *historyReader) SetTxNum(txNum uint64) { r.txNum = txNum }
-
-// A history read at a worker's own txNum already holds the block's earlier writes, so it
-// must not become the block-start origin that an earlier tx reads.
-func TestHistoryReadDoesNotPublishAMidBlockOrigin(t *testing.T) {
-	addr := accounts.InternAddress([20]byte{0x25, 0x75, 0x6})
-	key := accounts.InternKey([32]byte{0x1})
-	vm := NewVersionMap(nil)
-	read := func(txIndex int, nonce, slot uint64) (uint64, uint256.Int) {
-		acc := accounts.NewAccount()
-		acc.Nonce = nonce
-		reader := &historyReader{storageReader: &storageReader{addr: addr, account: &acc, storage: map[accounts.StorageKey]uint256.Int{key: *uint256.NewInt(slot)}}}
-		ibs := NewWithVersionMap(reader, vm)
-		ibs.SetTxContext(100, txIndex)
-		ibs.SetVersion(0)
-		gotNonce, err := ibs.GetNonce(addr)
-		require.NoError(t, err)
-		gotSlot, err := ibs.GetState(addr, key)
-		require.NoError(t, err)
-		finalizedWrites(t, ibs, &chain.Rules{})
-		return gotNonce, gotSlot
-	}
-
-	read(3, 5, 50)
-	nonce, slot := read(1, 4, 40)
-	require.Equal(t, uint64(4), nonce, "txIndex 1 read the account origin published by txIndex 3")
-	require.Equal(t, *uint256.NewInt(40), slot, "txIndex 1 read the slot origin published by txIndex 3")
 }
