@@ -18,7 +18,7 @@ package types
 
 import (
 	"fmt"
-	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -51,10 +51,9 @@ type TxTypeSpec struct {
 	Nonceless bool
 }
 
-var (
-	txTypeRegistryMu sync.RWMutex
-	txTypeRegistry   = map[byte]TxTypeSpec{}
-)
+// txTypeRegistry holds the spec of each registered id. Reads take no lock:
+// concurrent execution workers look types up per transaction.
+var txTypeRegistry [256]atomic.Pointer[TxTypeSpec]
 
 // RegisterTxType registers spec for id. It panics if id collides with a
 // built-in transaction type, lies outside the EIP-2718 typed-envelope range,
@@ -72,20 +71,15 @@ func RegisterTxType(id byte, spec TxTypeSpec) {
 	if spec.New == nil {
 		panic("types: RegisterTxType: spec.New is nil")
 	}
-	txTypeRegistryMu.Lock()
-	defer txTypeRegistryMu.Unlock()
-	if _, ok := txTypeRegistry[id]; ok {
+	if !txTypeRegistry[id].CompareAndSwap(nil, &spec) {
 		panic(fmt.Sprintf("types: RegisterTxType: %d already registered", id))
 	}
-	txTypeRegistry[id] = spec
 }
 
 // UnregisterTxTypeForTesting removes id from the registry, undoing a test's
 // RegisterTxType.
 func UnregisterTxTypeForTesting(id byte) {
-	txTypeRegistryMu.Lock()
-	defer txTypeRegistryMu.Unlock()
-	delete(txTypeRegistry, id)
+	txTypeRegistry[id].Store(nil)
 }
 
 // IsRegisteredTxType reports whether id was registered with RegisterTxType.
@@ -107,10 +101,11 @@ func TxTypeNonceless(id byte) bool {
 }
 
 func registeredTxType(id byte) (TxTypeSpec, bool) {
-	txTypeRegistryMu.RLock()
-	defer txTypeRegistryMu.RUnlock()
-	spec, ok := txTypeRegistry[id]
-	return spec, ok
+	spec := txTypeRegistry[id].Load()
+	if spec == nil {
+		return TxTypeSpec{}, false
+	}
+	return *spec, true
 }
 
 // builtinTxType is the registration-collision list: the ids this package defines
