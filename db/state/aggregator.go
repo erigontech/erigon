@@ -2741,12 +2741,12 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
 // Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
 // stay correct without it.
-func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration) {
+func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration, err error) {
 	dt := at.d[domain]
 	dt.probe = mmap.NewProbe()
 	if dt.probe == nil || len(keys) == 0 {
 		dt.probe = nil
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, nil
 	}
 	defer func() {
 		dt.probe = nil
@@ -2769,7 +2769,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
-				return waves, pages, plan, io
+				return waves, pages, plan, io, nil
 			}
 			if page, ok := probeLatestFromFiles(dt, k); ok {
 				cold = append(cold, page)
@@ -2777,7 +2777,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			}
 		}
 		t1 := time.Now()
-		err := mmap.ReadPages(cold)
+		err = mmap.ReadPages(cold)
 		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
 		pages += len(cold)
 		if err != nil {
@@ -2786,7 +2786,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 		pending = next
 	}
-	return waves, pages, plan, io
+	return waves, pages, plan, io, err
 }
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {

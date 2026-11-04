@@ -322,10 +322,13 @@ func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
 	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
 }
 
-type coldPagesPrefetcher struct{ coldPerKey int }
+type coldPagesPrefetcher struct {
+	coldPerKey int
+	err        error
+}
 
-func (p coldPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration) {
-	return 1, p.coldPerKey * len(keys), 0, 0
+func (p coldPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration, error) {
+	return 1, p.coldPerKey * len(keys), 0, 0, p.err
 }
 
 func TestTrieMostlyResidentSkipsAResidentTrie(t *testing.T) {
@@ -388,6 +391,12 @@ func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
 	require.True(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, nil))
+}
+
+func TestStateSampleColdKeepsThePerKeyWarmupWhenTheBatchCannotRead(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	broken := coldPagesPrefetcher{coldPerKey: 1, err: errors.New("no batch ring")}
+	require.False(t, stateSampleCold(context.Background(), broken, keys, keys))
 }
 
 func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {

@@ -226,7 +226,7 @@ func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitme
 }
 
 type latestPrefetcher interface {
-	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration)
+	PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration, err error)
 }
 
 type prefetchStats struct {
@@ -234,7 +234,7 @@ type prefetchStats struct {
 	plan, io, branchChk time.Duration
 }
 
-func (s *prefetchStats) add(waves, pages int, plan, io time.Duration) {
+func (s *prefetchStats) add(waves, pages int, plan, io time.Duration, _ error) {
 	s.waves, s.pages, s.plan, s.io = s.waves+waves, s.pages+pages, s.plan+plan, s.io+io
 }
 
@@ -324,7 +324,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 					return
 				}
 			}
-			waves, pages, plan, io := pp.PrefetchLatest(ctx, domain, keys)
+			waves, pages, plan, io, _ := pp.PrefetchLatest(ctx, domain, keys)
 			mu.Lock()
 			defer mu.Unlock()
 			part.waves, part.pages = max(part.waves, waves), part.pages+pages
@@ -332,7 +332,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 		})
 	}
 	wg.Wait()
-	stats.add(part.waves, part.pages, part.plan, part.io)
+	stats.add(part.waves, part.pages, part.plan, part.io, nil)
 }
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie, level by
@@ -479,8 +479,8 @@ func mostlyResident(ctx context.Context, p latestPrefetcher, domain kv.Domain, s
 	if len(sample) == 0 {
 		return false
 	}
-	_, cold, _, _ := p.PrefetchLatest(ctx, domain, sample)
-	return cold*1000 < len(sample)*coldPagesPerMille
+	_, cold, _, _, err := p.PrefetchLatest(ctx, domain, sample)
+	return err != nil || cold*1000 < len(sample)*coldPagesPerMille
 }
 
 const (
