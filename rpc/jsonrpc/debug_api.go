@@ -174,6 +174,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, blockNumber, int(min(txIndex, math.MaxInt)))
 	if err != nil {
+		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNumber)}
+		}
 		return StorageRangeResult{}, err
 	}
 
@@ -607,6 +610,9 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, *blockNumber, int(min(txIndex, math.MaxInt)))
 	if err != nil {
+		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, *blockNumber)}
+		}
 		return nil, err
 	}
 

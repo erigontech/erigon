@@ -486,6 +486,9 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 					_, err = tc.call(variant.api, index)
 					var invalidParams *rpc.InvalidParamsError
 					require.ErrorAs(t, err, &invalidParams, "%s, index %d", variant.name, index)
+					if tc.name == "accountAt" || tc.name == "storageRangeAt" {
+						require.Equal(t, fmt.Sprintf("transaction index %d out of range for block %d", index, block.NumberU64()), invalidParams.Message, variant.name)
+					}
 				}
 			}
 		})
