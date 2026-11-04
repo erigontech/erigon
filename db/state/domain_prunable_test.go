@@ -77,7 +77,7 @@ func requirePrunableGauge(t *testing.T, cfg statecfg.DomainCfg, gauge metrics.Ga
 	defer tx.Rollback()
 
 	drt := d.beginForTests()
-	w := drt.NewWriter()
+	w := drt.NewWriter(db)
 	prev := map[string][]byte{}
 	for txNum := range uint64(totalSteps) * aggStep {
 		k := fmt.Appendf(nil, "key-%d", txNum%3)
@@ -130,7 +130,7 @@ func TestDomain_PrunableGaugeInterruptedRotation(t *testing.T) {
 	defer tx.Rollback()
 
 	drt := d.beginForTests()
-	w := drt.NewWriter()
+	w := drt.NewWriter(db)
 	prev := map[string][]byte{}
 	for txNum := range uint64(totalSteps) * aggStep {
 		k := fmt.Appendf(nil, "key-%d", txNum%3)

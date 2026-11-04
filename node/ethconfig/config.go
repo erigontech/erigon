@@ -259,6 +259,11 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
+	// GenesisFromFile marks a genesis supplied through --override.genesis.
+	// On restart, its block hash after fork overrides must match the stored genesis hash.
+	// The chain config may differ, subject to the writer's compatibility checks.
+	GenesisFromFile bool
+
 	// Account Abstraction
 	AllowAA bool
 

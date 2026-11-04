@@ -53,6 +53,14 @@ func (b *gapBackend) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (
 	}, nil
 }
 
+func (b *gapBackend) LatestHead(ctx context.Context) (uint64, common.Hash, error) {
+	h, err := b.HeaderByNumber(ctx, rpc.BlockNumber(b.head))
+	if err != nil || h == nil {
+		return 0, common.Hash{}, err
+	}
+	return b.head, h.Hash(), nil
+}
+
 func (b *gapBackend) BlockByNumber(context.Context, rpc.BlockNumber) (*types.Block, error) {
 	return nil, nil
 }

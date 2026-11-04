@@ -211,6 +211,12 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	defer sd.Close()
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
+	// The dump commits the state, which the versioned path does not materialize.
+	if dbg.CallNoMaterialize && !ctx.Bool(DumpFlag.Name) {
+		statedb.SetVersionMap(state.NewVersionMap(nil))
+		statedb.SetTxContext(0, 0)
+		statedb.SetNoConflictDetection()
+	}
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
@@ -318,7 +324,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if ctx.Bool(CreateFlag.Name) {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
-			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
+			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig)
 			return output, initialGas - gasLeft.Total(), err
 		}
 	} else {

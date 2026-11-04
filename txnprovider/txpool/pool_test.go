@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -117,7 +120,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPool(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -143,6 +146,14 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	)
 	require.NoError(t, err)
 
+	return ctx, pool, poolDB, coreDB
+}
+
+func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
+
+	ctx, pool, poolDB, coreDB := newTestPool(t)
+
 	sender := common.Address{1}
 	account := accounts.Account{
 		Balance:  *uint256.NewInt(common.Ether),
@@ -163,6 +174,100 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	return ctx, pool, poolDB, coreDB, sender
+}
+
+func TestIdHashKnownDiscardReasons(t *testing.T) {
+	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	hash := common.Hash{1}
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		known  bool
+	}{
+		{txpoolcfg.NonceTooDistant, false},
+		{txpoolcfg.NonceTooLow, true},
+		{txpoolcfg.IntrinsicGas, true},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			pool.discardReasonsLRU.Add(string(hash[:]), tc.reason)
+			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+				known, err := pool.IdHashKnown(tx, hash[:])
+				require.NoError(t, err)
+				require.Equal(t, tc.known, known)
+				return nil
+			}))
+		})
+	}
+}
+
+func TestRejectedTransactionsCleanSenderActivity(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.MaxNonceGap = 64
+
+	for range 3 {
+		var txns TxnSlots
+		txn := newTestTxnSlot(65, 0, 1, 2, 21_000)
+		txn.IDHash[0] = 1
+		txns.Append(txn, sender[:], true)
+
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+		require.Empty(t, pool.senders.senderIDs)
+		require.Empty(t, pool.senders.senderID2Addr)
+		require.Empty(t, pool.senderLastActivity)
+
+		_, err = pool.flushNoFsync(ctx)
+		require.NoError(t, err)
+		require.Empty(t, pool.senderLastActivity)
+	}
+}
+
+func TestFlushSenderActivity(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining int
+	}{
+		{"last transaction", 0},
+		{"sender still active", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			var txns TxnSlots
+			for i := 0; i <= tc.remaining; i++ {
+				txn := newTestTxnSlot(uint64(i+1), 0, 1, 2, 21_000)
+				txn.IDHash[0] = byte(i + 1)
+				txns.Append(txn, sender[:], true)
+			}
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			for _, reason := range reasons {
+				require.Equal(t, txpoolcfg.Success, reason)
+			}
+			senderID := txns.Txns[0].SenderID
+			require.Contains(t, pool.senderLastActivity, senderID)
+			lastActivity := pool.senderLastActivity[senderID]
+			mt := pool.byHash[string(txns.Txns[0].IDHash[:])]
+			require.NotNil(t, mt)
+
+			pool.lock.Lock()
+			pool.removeFromSubPool(mt, "test")
+			pool.discardLocked(mt, txpoolcfg.NonceTooLow)
+			pool.lock.Unlock()
+			_, err = pool.flushNoFsync(ctx)
+			require.NoError(t, err)
+
+			if tc.remaining == 0 {
+				require.Empty(t, pool.senders.senderIDs)
+				require.Empty(t, pool.senders.senderID2Addr)
+				require.Empty(t, pool.senderLastActivity)
+			} else {
+				require.Equal(t, senderID, pool.senders.senderIDs[sender])
+				require.Contains(t, pool.senderLastActivity, senderID)
+				require.Equal(t, lastActivity, pool.senderLastActivity[senderID])
+				require.True(t, pool.all.hasTxns(senderID))
+			}
+		})
+	}
 }
 
 func TestAddLocalTxnsRejectsTotalGasAboveCap(t *testing.T) {
@@ -332,7 +437,7 @@ func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 }
 
 func TestFromDBSkipsInvalidTransactions(t *testing.T) {
-	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
 	invalidTxn := newTestTxnSlot(0, 0, 2, 1, 21_000)
 	validTxn := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -354,15 +459,120 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	}))
 
 	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
-			return pool.fromDB(ctx, poolTx, coreTx)
-		})
+		return pool.fromDB(ctx, poolTx)
 	}))
 
 	validHash := validTxn.Txn.Hash()
 	invalidHash := invalidTxn.Txn.Hash()
 	require.Contains(t, pool.byHash, string(validHash[:]))
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
+}
+
+// A restart reaches fromDB before any OnNewBlock sets the block gas limit.
+func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
+	ctx, pool, poolDB, coreDB := newTestPool(t)
+	sender := common.Address{1}
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
+
+	txn := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	hash := txn.Txn.Hash()
+	var encoded bytes.Buffer
+	require.NoError(t, txn.Txn.MarshalBinary(&encoded))
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+
+	require.Contains(t, pool.byHash, string(hash[:]))
+}
+
+// Rejections that depend on the sender's state are deleted too: a kept row is not in
+// memory but still makes the hash look known.
+func TestFromDBDeletesRejectedRows(t *testing.T) {
+	ctx, pool, poolDB, coreDB := newTestPool(t)
+	sender := common.Address{1}
+	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
+
+	nonceTooLow := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	valid := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	insufficientFunds := newTestTxnSlot(2, 0, 1, 100_000_000_000_000, 21_000)
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		for _, txn := range []*TxnSlot{nonceTooLow, valid, insufficientFunds} {
+			var encoded bytes.Buffer
+			if err := txn.Txn.MarshalBinary(&encoded); err != nil {
+				return err
+			}
+			hash := txn.Txn.Hash()
+			if err := tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+	_, err := pool.flush(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		for name, want := range map[string]struct {
+			txn  *TxnSlot
+			kept bool
+		}{
+			"nonce too low":      {nonceTooLow, false},
+			"valid":              {valid, true},
+			"insufficient funds": {insufficientFunds, false},
+		} {
+			hash := want.txn.Txn.Hash()
+			has, err := tx.Has(kv.PoolTransaction, hash[:])
+			require.NoError(t, err)
+			require.Equal(t, want.kept, has, name)
+		}
+		return nil
+	}))
+}
+
+// addLocked drops blob txns below p.pendingBlobFee.
+func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
+	const blobFee = 1_000_000
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	blobTxn := func(nonce, blobFeeCap uint64) ([]byte, common.Hash) {
+		wrapped := types.MakeV1WrappedBlobTxn(chain.AllProtocolChanges.ChainID)
+		wrapped.Tx.Nonce = nonce
+		wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(blobFeeCap)
+		wrapped.Tx.FeeCap = *uint256.NewInt(1_000_000_000)
+		wrapped.Tx.TipCap = *uint256.NewInt(1_000_000_000)
+		var encoded bytes.Buffer
+		require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+		return append(sender[:], encoded.Bytes()...), wrapped.Tx.Hash()
+	}
+	priced, pricedHash := blobTxn(0, 2*blobFee)
+	underpriced, underpricedHash := blobTxn(1, blobFee/2)
+
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.Put(kv.PoolInfo, PoolPendingBlobFeeKey, binary.BigEndian.AppendUint64(nil, blobFee)); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.PoolTransaction, pricedHash[:], priced); err != nil {
+			return err
+		}
+		return tx.Put(kv.PoolTransaction, underpricedHash[:], underpriced)
+	}))
+
+	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return pool.fromDB(ctx, poolTx)
+	}))
+
+	require.Contains(t, pool.byHash, string(pricedHash[:]))
+	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
 }
 
 func TestGetCachedBlobTxnLockedSkipsUnparseableCachedRow(t *testing.T) {
@@ -405,10 +615,7 @@ func TestGetCachedBlobTxnLockedSkipsTruncatedCachedRow(t *testing.T) {
 	}))
 }
 
-// newAmsterdamPoolWithPendingSelfTransfer returns a pool on an Amsterdam chain
-// holding one pending zero-value self-transfer with the given gas limit, so its
-// intrinsic gas is exactly params.TxBaseEIP2780.
-func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, txnGasLimit uint64) *TxPool {
+func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, txnGasLimits ...uint64) *TxPool {
 	t.Helper()
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -431,37 +638,138 @@ func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, 
 	)
 	require.NoError(t, err)
 
-	sender := common.Address{0x01}
 	account := accounts.Account{
 		Balance:  *uint256.NewInt(1 * common.Ether),
 		CodeHash: accounts.EmptyCodeHash,
 	}
 	change := &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee: 200_000,
-		BlockGasLimit:       1_000_000,
+		BlockGasLimit:       40_000_000,
 		ChangeBatch: []*remoteproto.StateChange{{
 			BlockHeight: 0,
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
-			Changes: []*remoteproto.AccountChange{{
-				Action:  remoteproto.Action_UPSERT,
-				Address: gointerfaces.ConvertAddressToH160(sender),
-				Data:    accounts.SerialiseV3(&account),
-			}},
+		}},
+	}
+	var slots TxnSlots
+	for i, gasLimit := range txnGasLimits {
+		sender := common.Address{byte(i + 1)}
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(sender),
+			Data:    accounts.SerialiseV3(&account),
+		})
+		slot := newTestTxnSlot(0, 0, 300_000-uint64(i), 300_000-uint64(i), gasLimit)
+		slot.Txn.(*types.DynamicFeeTransaction).To = &sender
+		slot.Txn.SetSender(accounts.InternAddress(sender))
+		slot.IDHash[0] = byte(i + 1)
+		slot.Rlp = []byte{byte(i + 1)}
+		slot.Size = uint32(len(slot.Rlp))
+		slots.Append(slot, sender[:], true)
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	for _, reason := range reasons {
+		require.Equal(t, txpoolcfg.Success, reason)
+	}
+	require.Equal(t, len(txnGasLimits), pool.pending.Len())
+
+	return pool
+}
+
+func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		gas, execution, state uint64
+		want                  int
+	}{
+		{"execution insufficient", 100_000, 50_000, 100_000, 0},
+		{"both budgets equal", 100_000, 100_000, 100_000, 1},
+		{"above execution cap", 30_000_000, 20_000_000, 40_000_000, 1},
+		{"below execution cap", 30_000_000, params.MaxTxnGasLimit - 1, 40_000_000, 0},
+		{"at execution cap", 30_000_000, params.MaxTxnGasLimit, 30_000_000, 1},
+		{"at block gas limit", 40_000_000, params.MaxTxnGasLimit, 40_000_000, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), tc.gas)
+			txns, err := pool.ProvideTxns(t.Context(),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, tc.state, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, tc.want)
+		})
+	}
+}
+
+func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
+	ctx := t.Context()
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 40_000_000)
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 200_000,
+		BlockGasLimit:       50_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 0,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
 		}},
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, 1, pool.pending.Len())
 
-	slot := newTestTxnSlot(0, 0, 300_000, 300_000, txnGasLimit)
-	slot.IDHash[0] = 1
-	slot.Rlp = []byte{1}
-	slot.Size = uint32(len(slot.Rlp))
-	var slots TxnSlots
-	slots.Append(slot, sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, slots)
+	change.BlockGasLimit = 40_000_000
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, 1, pool.pending.Len())
+	require.Equal(t, 0, pool.queued.Len())
+}
+
+func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000, 100_000)
+	for _, tc := range []struct {
+		execution uint64
+		want      int
+	}{
+		{124_000, 2},
+		{112_000, 2},
+		{111_999, 1},
+		{100_000, 1},
+	} {
+		txns, err := pool.ProvideTxns(t.Context(),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, 100_000, 0)))
+		require.NoError(t, err)
+		require.Len(t, txns, tc.want, "execution gas: %d", tc.execution)
+	}
+}
+
+func TestProvideTxnsRejectsAAAboveExecutionGasTarget(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
+	aaTxn := &types.AccountAbstractionTransaction{
+		SenderAddress: accounts.InternAddress(common.Address{1}),
+		GasLimit:      100_000 - params.TxAAGas,
+	}
+	pool.pending.best.ms[0].TxnSlot.Txn = aaTxn
+	txns, err := pool.ProvideTxns(t.Context(),
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Empty(t, txns)
+}
 
-	return pool
+func TestProvideTxnsContinuesAfterGasRejection(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000, 12_000)
+	first, second := pool.pending.best.ms[0].TxnSlot, pool.pending.best.ms[1].TxnSlot
+	require.Equal(t, uint64(100_000), first.GetGas())
+	yielded := mapset.NewThreadUnsafeSet[[32]byte]()
+	txns, err := pool.ProvideTxns(t.Context(),
+		txnprovider.WithTxnIdsFilter(yielded),
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{second.Txn}, txns)
+	require.False(t, yielded.Contains(first.IDHash))
+	require.True(t, yielded.Contains(second.IDHash))
+	require.Equal(t, 2, pool.pending.Len())
+
+	txns, err = pool.ProvideTxns(t.Context(),
+		txnprovider.WithTxnIdsFilter(yielded),
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{first.Txn}, txns)
 }
 
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
@@ -477,6 +785,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 		1,
 		&selected,
 		0,
+		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit-1, math.MaxUint64),
 		nil,
 		math.MaxInt,
@@ -505,6 +814,7 @@ func TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam(t *testing.T) {
 		1,
 		&selected,
 		0,
+		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit, math.MaxUint64),
 		nil,
 		math.MaxInt,
@@ -538,7 +848,7 @@ func TestNonceFromAddress(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -624,6 +934,66 @@ func TestNonceFromAddress(t *testing.T) {
 		require.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
+		}
+	}
+}
+
+func TestSetCodeAuthorizationAdmission(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(key.PublicKey)
+
+	for _, tc := range []struct {
+		name   string
+		gas    uint64
+		feeCap uint64
+		reason txpoolcfg.DiscardReason
+	}{
+		{"gas limit", params.MaxTxnGasLimit + 1, 2, txpoolcfg.GasLimitTooHigh},
+		{"intrinsic gas", 21_000, 2, txpoolcfg.IntrinsicGas},
+		{"insufficient funds", 100_000, common.Ether, txpoolcfg.InsufficientFunds},
+		{"accepted", 100_000, 2, txpoolcfg.Success},
+	} {
+		for _, local := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/local=%t", tc.name, local), func(t *testing.T) {
+				ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+				auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+				require.NoError(t, err)
+				txn := newTestSetCodeTxnSlot(0, 0, 0, tc.feeCap, tc.gas).Txn.(*types.SetCodeTransaction)
+				txn.ChainID = pool.chainID
+				txn.Authorizations = []types.Authorization{auth, {}}
+				var encoded bytes.Buffer
+				require.NoError(t, txn.MarshalBinary(&encoded))
+				parseCtx := NewTxnParseContext(pool.chainID)
+				parseCtx.WithSender(false)
+				parseCtx.ValidateRLP(ValidateSerializedTxn)
+				var slot TxnSlot
+				_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, false, nil)
+				require.NoError(t, err)
+
+				var txns TxnSlots
+				txns.Append(&slot, sender[:], local)
+				var reasons []txpoolcfg.DiscardReason
+				if local {
+					reasons, err = pool.AddLocalTxns(ctx, txns)
+				} else {
+					pool.AddRemoteTxns(ctx, txns, nil, nil)
+					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+				}
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+				require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+				require.Empty(t, pool.unprocessedRemoteByHash)
+				if tc.reason == txpoolcfg.Success {
+					require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+					require.Equal(t, []AuthAndNonce{{authority, 0}}, slot.AuthAndNonces)
+					require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
+				} else {
+					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+					require.Empty(t, slot.AuthAndNonces)
+					require.Empty(t, pool.auths)
+				}
+			})
 		}
 	}
 }
@@ -767,7 +1137,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
-	require.NotEqual(t, pool, nil)
+	require.NotNil(t, pool)
 
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(50_000)
@@ -949,7 +1319,7 @@ func TestReverseNonces(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -1052,7 +1422,7 @@ func TestTxnPoke(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -1323,7 +1693,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -1402,7 +1772,6 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := newTestSetCodeTxnSlot(0, 0, 0, 21000, 500000)
-	txn.AuthAndNonces = []AuthAndNonce{{nonce: 0, authority: common.Address{}}}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),
@@ -1516,7 +1885,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
@@ -1774,7 +2143,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	t.Cleanup(cancel)
 	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Shanghai"], nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(txnPool, nil)
+	require.NotNil(txnPool)
 
 	err = txnPool.start(ctx)
 	require.NoError(err)
@@ -1878,7 +2247,7 @@ func TestBlobSlots(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
@@ -1925,8 +2294,8 @@ func TestBlobSlots(t *testing.T) {
 		blobTxn.IDHash[0] = uint8(2*i + 1)
 		blobTxn.Nonce = 0
 		txnSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
+		reasons, addErr := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(addErr)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
@@ -2008,8 +2377,8 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 	{
 		var txnSlots TxnSlots
 		txnSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
+		reasons, addErr := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(addErr)
 		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
 	}
 
@@ -2083,7 +2452,7 @@ func TestGetBlobs(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	pool.blockGasLimit.Store(30000000)
 	var stateVersionID uint64 = 0
 
@@ -2167,7 +2536,7 @@ func TestGasLimitChanged(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
-	require.NotEqual(pool, nil)
+	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -2935,9 +3304,7 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
 	}))
 	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
-			return pool.fromDB(ctx, poolTx, coreTx)
-		})
+		return pool.fromDB(ctx, poolTx)
 	}))
 
 	bundles := pool.GetBlobs(blobHashes)
@@ -2958,4 +3325,335 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	bundles = pool.GetBlobs(blobHashes)
 	require.Len(bundles, len(blobHashes))
 	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
+}
+
+func TestAddLocalTxnsClearsPreviousDiscardReason(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	txn := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	txn.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	hash := string(txn.IDHash[:])
+	pool.lock.Lock()
+	pooled := pool.byHash[hash]
+	pool.removeFromSubPool(pooled, "test")
+	pool.discardLocked(pooled, txpoolcfg.Mined)
+	pool.lock.Unlock()
+
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Contains(t, pool.byHash, hash)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+}
+
+func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	original := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{{authority: sender, nonce: 7}}
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+
+	require.Contains(t, pool.byHash, string(original.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestAddLocalTxnsReplacesSetCodeTxnWithSameAuthorization(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	auth := AuthAndNonce{authority: common.Address{9}, nonce: 3}
+
+	original := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	original.AuthAndNonces = []AuthAndNonce{auth}
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{auth}
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
+	require.Same(t, pool.byHash[string(replacement.IDHash[:])], pool.auths[auth])
+}
+
+func TestOnNewBlockKeepsOriginalWhenUnwoundReplacementRejected(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	original := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{{authority: sender, nonce: 7}}
+	var unwind TxnSlots
+	unwind.Append(replacement, sender[:], false)
+
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+
+	require.Contains(t, pool.byHash, string(original.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+	senderID, ok := pool.senders.getID(sender)
+	require.True(t, ok)
+	kept := pool.all.get(senderID, 0)
+	require.NotNil(t, kept)
+	require.Equal(t, original.IDHash, kept.TxnSlot.IDHash)
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestOnNewBlockKeepsUnwoundLocalTxnLocal(t *testing.T) {
+	for _, local := range []bool{true, false} {
+		t.Run(fmt.Sprintf("local=%t", local), func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			slotsCount := 1
+			if local {
+				slotsCount = int(txpoolcfg.DefaultConfig.AccountSlots) + 4
+				var txns TxnSlots
+				for nonce := range slotsCount {
+					txn := newTestTxnSlot(uint64(nonce), 0, 1, 2, 100_000)
+					txn.IDHash[0] = byte(nonce + 1)
+					txns.Append(txn, sender[:], true)
+				}
+				reasons, err := pool.AddLocalTxns(ctx, txns)
+				require.NoError(t, err)
+				for _, reason := range reasons {
+					require.Equal(t, txpoolcfg.Success, reason)
+				}
+			}
+
+			changeWithNonce := func(nonce uint64, blockHash common.Hash) *remoteproto.StateChangeBatch {
+				account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+				return &remoteproto.StateChangeBatch{
+					PendingBlockBaseFee: 1,
+					BlockGasLimit:       1_000_000,
+					ChangeBatch: []*remoteproto.StateChange{{
+						BlockHash: gointerfaces.ConvertHashToH256(blockHash),
+						Changes: []*remoteproto.AccountChange{{
+							Action:  remoteproto.Action_UPSERT,
+							Address: gointerfaces.ConvertAddressToH160(sender),
+							Data:    accounts.SerialiseV3(&account),
+						}},
+					}},
+				}
+			}
+
+			mined := newTestTxnSlot(0, 0, 1, 2, 100_000)
+			mined.IDHash[0] = 1
+			var minedTxns TxnSlots
+			minedTxns.Append(mined, sender[:], false)
+			require.NoError(t, pool.OnNewBlock(ctx, changeWithNonce(1, common.Hash{1}), TxnSlots{}, TxnSlots{}, minedTxns))
+			require.NotContains(t, pool.byHash, string(mined.IDHash[:]))
+
+			unwound := newTestTxnSlot(0, 0, 1, 2, 100_000)
+			unwound.IDHash[0] = 1
+			var unwindTxns TxnSlots
+			unwindTxns.Append(unwound, sender[:], false)
+			require.NoError(t, pool.OnNewBlock(ctx, changeWithNonce(0, common.Hash{2}), unwindTxns, TxnSlots{}, TxnSlots{}))
+
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, slotsCount, pending+baseFee+queued)
+			reunwound := pool.byHash[string(unwound.IDHash[:])]
+			require.NotNil(t, reunwound)
+			require.Equal(t, local, reunwound.subPool&IsLocal != 0)
+		})
+	}
+}
+
+func newTestSenderTxnSlot(sender common.Address, nonce uint64) *TxnSlot {
+	s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+	s.IDHash[0] = byte(nonce + 1)
+	s.Rlp = []byte{byte(nonce + 1)}
+	s.Txn.SetSender(accounts.InternAddress(sender))
+	return s
+}
+
+func providedNonces(t *testing.T, ctx context.Context, pool *TxPool) []uint64 {
+	t.Helper()
+	txns, err := pool.ProvideTxns(ctx)
+	require.NoError(t, err)
+	nonces := make([]uint64, len(txns))
+	for i, txn := range txns {
+		nonces[i] = txn.GetNonce()
+	}
+	return nonces
+}
+
+// A reorg re-injects the unwound txn as remote while the sender's next txn stays
+// local.
+func TestProvideTxnsKeepsSenderNonceOrderAfterUnwind(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		return &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 1,
+			BlockGasLimit:       1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: uint64(height),
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{height}),
+				Direction:   direction,
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT,
+					Address: gointerfaces.ConvertAddressToH160(sender),
+					Data:    accounts.SerialiseV3(&account),
+				}},
+			}},
+		}
+	}
+
+	var local TxnSlots
+	local.Append(newTestSenderTxnSlot(sender, 0), sender[:], true)
+	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+
+	var mined TxnSlots
+	mined.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
+
+	var unwound TxnSlots
+	unwound.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), unwound, TxnSlots{}, TxnSlots{}))
+	pending, _, _ := pool.CountContent()
+	require.Equal(t, 2, pending)
+
+	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
+}
+
+// One sender's nonces can reach the pool by different routes: a lower nonce via
+// devp2p (remote) and a higher nonce via RPC (local).
+func TestProvideTxnsKeepsSenderNonceOrderForRemoteThenLocal(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+
+	var remote TxnSlots
+	remote.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	pool.AddRemoteTxns(ctx, remote, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	var local TxnSlots
+	local.Append(newTestSenderTxnSlot(sender, 1), sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	pending, _, _ := pool.CountContent()
+	require.Equal(t, 2, pending)
+
+	require.Equal(t, []uint64{0, 1}, providedNonces(t, ctx, pool))
+}
+
+func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		localFrom int
+		localTo   int
+		want      []uint64
+	}{
+		{"local", 0, 17, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		{"local suffix", 9, 17, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+		{"local prefix", 0, 9, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8}},
+		{"local middle", 12, 13, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}},
+		{"remote", 17, 17, []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			require.NoError(t, pool.start(ctx))
+			pool.cfg.AccountSlots = 16
+			pool.cfg.MaxNonceGap = 64
+
+			for i := range 17 {
+				txn := newTestTxnSlot(uint64(i), 0, 1, 2, 21_000)
+				txn.IDHash[0] = byte(i + 1)
+				var slots TxnSlots
+				isLocal := i >= tc.localFrom && i < tc.localTo
+				slots.Append(txn, sender[:], isLocal)
+				if isLocal {
+					reasons, err := pool.AddLocalTxns(ctx, slots)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				} else {
+					pool.AddRemoteTxns(ctx, slots, nil, nil)
+					require.NoError(t, pool.processRemoteTxns(ctx))
+				}
+			}
+			pending, baseFee, queued := pool.CountContent()
+			require.Equal(t, 17, pending)
+			require.Zero(t, baseFee)
+			require.Zero(t, queued)
+
+			replay := newTestTxnSlot(82, 0, 1, 2, 21_000)
+			replay.IDHash[0] = 99
+			var slots TxnSlots
+			slots.Append(replay, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, slots)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+				known, err := pool.IdHashKnown(tx, replay.IDHash[:])
+				require.NoError(t, err)
+				require.False(t, known)
+				return nil
+			}))
+
+			pool.AddRemoteTxns(ctx, slots, nil, nil)
+			require.NoError(t, pool.processRemoteTxns(ctx))
+			require.NotContains(t, pool.byHash, string(replay.IDHash[:]))
+			var nonces []uint64
+			pool.all.ascend(replay.SenderID, func(mt *metaTxn) bool {
+				nonces = append(nonces, mt.TxnSlot.Nonce)
+				return true
+			})
+			require.Equal(t, tc.want, nonces)
+			pending, baseFee, queued = pool.CountContent()
+			require.Equal(t, len(tc.want), pending)
+			require.Zero(t, baseFee)
+			require.Zero(t, queued)
+		})
+	}
 }

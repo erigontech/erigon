@@ -7,11 +7,13 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
@@ -19,10 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	globalBeaconConfig *clparams.BeaconChainConfig
-	globalCaplinConfig *clparams.CaplinConfig
-)
+var globalBeaconConfig *clparams.BeaconChainConfig
 
 func init() {
 	// Initialize global config once for all tests
@@ -34,8 +33,7 @@ func init() {
 	cfg.MaxBlobCommittmentsPerBlock = 6
 	cfg.GloasForkEpoch = cfg.FarFutureEpoch
 	globalBeaconConfig = &cfg
-	globalCaplinConfig = &clparams.CaplinConfig{}
-	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
+	clparams.InitGlobalStaticConfig(globalBeaconConfig)
 }
 
 func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig) {
@@ -130,9 +128,96 @@ func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
 	event := <-events
 	require.Equal(t, beaconevents.OpDataColumnSidecar, event.Event)
+	select {
+	case notifiedRoot := <-emitters.DataColumnStored():
+		require.Equal(t, root, notifiedRoot)
+	default:
+		t.Fatal("new column write did not notify its block root")
+	}
 
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
 	require.Len(t, events, 0)
+	select {
+	case <-emitters.DataColumnStored():
+		t.Fatal("duplicate column write emitted another notification")
+	default:
+	}
+}
+
+func TestColumnWriteNotifiesBeforeOperationFeedDelivers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		emitters := beaconevents.NewEventEmitter()
+		events := make(chan *beaconevents.EventStream)
+		subscription := emitters.Operation().Subscribe(events)
+		defer subscription.Unsubscribe()
+		storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+		root := common.HexToHash("0x1234567890abcdef")
+
+		go func() {
+			assert.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1)))
+		}()
+		synctest.Wait()
+		select {
+		case notifiedRoot := <-emitters.DataColumnStored():
+			require.Equal(t, root, notifiedRoot)
+		default:
+			t.Fatal("a blocked operation feed delayed the stored-column notification")
+		}
+		<-events
+	})
+}
+
+// Real time, not synctest: a goroutine blocked on a mutex is not durably blocked.
+func TestSavedColumnIndexDoesNotWaitForOperationFeed(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	root := common.HexToHash("0x1234567890abcdef")
+	const slot = 1000
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
+	}()
+	select {
+	case notifiedRoot := <-emitters.DataColumnStored():
+		require.Equal(t, root, notifiedRoot)
+	case err := <-writeDone:
+		t.Fatalf("the write returned without a stored-column notification: %v", err)
+	}
+
+	scanDone := make(chan []uint64, 1)
+	go func() {
+		saved, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+		assert.NoError(t, err)
+		scanDone <- saved
+	}()
+	select {
+	case saved := <-scanDone:
+		require.Equal(t, []uint64{1}, saved)
+	case <-time.After(5 * time.Second):
+		<-events
+		t.Fatal("the saved column index scan waited for the operation feed")
+	}
+	<-events
+	require.NoError(t, <-writeDone)
+}
+
+type panicCreateFs struct{ afero.Fs }
+
+func (panicCreateFs) Create(string) (afero.File, error) { panic("create") }
+
+func TestColumnWritePanicReleasesLocks(t *testing.T) {
+	storage := NewDataColumnStore(panicCreateFs{afero.NewMemMapFs()}, globalBeaconConfig, beaconevents.NewEventEmitter())
+	const slot = 1000
+	require.Panics(t, func() {
+		_ = storage.WriteColumnSidecars(t.Context(), common.HexToHash("0x1234567890abcdef"), 1, createTestDataColumnSidecar(slot, 1))
+	})
+	impl := storage.(*dataColumnStorageImpl)
+	require.True(t, impl.forSlot(slot).TryLock())
+	require.True(t, impl.pruneMutex.TryLock())
 }
 
 func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
@@ -429,6 +514,58 @@ func TestWriteStream(t *testing.T) {
 	err = ssz_snappy.DecodeAndReadNoForkDigest(&buf, streamedData, version)
 	require.NoError(t, err)
 	assert.Equal(t, sidecar.SignedBlockHeader.Header.Slot, streamedData.SignedBlockHeader.Header.Slot)
+}
+
+func addTestBlob(sidecars ...*cltypes.DataColumnSidecar) {
+	for _, sidecar := range sidecars {
+		sidecar.Column.Append(&cltypes.Cell{1})
+		sidecar.KzgCommitments.Append(&cltypes.KZGCommitment{2})
+		sidecar.KzgProofs.Append(&cltypes.KZGProof{3})
+	}
+}
+
+// A canonical file is served as stored, without decoding it: the junk byte would not survive a re-encode.
+func TestWriteStreamServesCanonicalFileVerbatim(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	sidecar := createTestDataColumnSidecar(1000, 1)
+	addTestBlob(sidecar)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 1, sidecar))
+
+	_, file := storage.(*dataColumnStorageImpl).path(1000, blockRoot, 1)
+	fh, err := fs.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = fh.Write([]byte{0xff})
+	require.NoError(t, err)
+	require.NoError(t, fh.Close())
+	want, err := afero.ReadFile(fs, file)
+	require.NoError(t, err)
+
+	var got bytes.Buffer
+	require.NoError(t, storage.WriteStream(&got, 1000, blockRoot, 1))
+	require.Equal(t, want, got.Bytes())
+}
+
+// A sidecar stored with a 17-hash inclusion proof must be served with the canonical 4-hash proof, keeping its hashes.
+func TestWriteStreamServesLegacyInclusionProofCanonically(t *testing.T) {
+	storage, _, _ := setupTestDataColumnStorage(t)
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	canonical := createTestDataColumnSidecar(1000, 1)
+	legacy := createTestDataColumnSidecar(1000, 1)
+	legacy.KzgCommitmentsInclusionProof = solid.NewHashVector(cltypes.CommitmentBranchSize)
+	for i := range cltypes.KzgCommitmentsInclusionProofDepth {
+		canonical.KzgCommitmentsInclusionProof.Set(i, common.Hash{byte(i + 1)})
+		legacy.KzgCommitmentsInclusionProof.Set(i, common.Hash{byte(i + 1)})
+	}
+	addTestBlob(canonical, legacy)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 1, legacy))
+
+	var got bytes.Buffer
+	require.NoError(t, storage.WriteStream(&got, 1000, blockRoot, 1))
+
+	var want bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&want, canonical))
+	require.Equal(t, want.Bytes(), got.Bytes())
 }
 
 func TestGetSavedColumnIndex(t *testing.T) {

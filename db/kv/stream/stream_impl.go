@@ -90,10 +90,35 @@ func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 type TransformKV2U64Iter[K, V []byte] struct {
 	it        KV
 	transform func(K, V) (uint64, error)
+	encode    func(dst []byte, n uint64) []byte // appends the value n is stored as, for Seek; nil = no Seek
+	seekBuf   []byte
 }
 
 func TransformKV2U64[K, V []byte](it KV, transform func(K, V) (uint64, error)) *TransformKV2U64Iter[K, V] {
 	return &TransformKV2U64Iter[K, V]{it: it, transform: transform}
+}
+
+// ValueSeeker is a KV stream over the values of one key that can skip to a value, see Seeker.
+// SeekValue must not keep v: callers reuse its memory.
+type ValueSeeker interface {
+	CanSeekValue() bool
+	SeekValue(v []byte) error
+}
+
+// TransformKV2U64Seekable is TransformKV2U64 over the values of one key, stored as encode(nil, n):
+// it seeks when it supports ValueSeeker.
+func TransformKV2U64Seekable[K, V []byte](it KV, transform func(K, V) (uint64, error), encode func(dst []byte, n uint64) []byte) *TransformKV2U64Iter[K, V] {
+	return &TransformKV2U64Iter[K, V]{it: it, transform: transform, encode: encode}
+}
+
+func (m *TransformKV2U64Iter[K, V]) CanSeek() bool {
+	s, ok := m.it.(ValueSeeker)
+	return ok && m.encode != nil && s.CanSeekValue()
+}
+
+func (m *TransformKV2U64Iter[K, V]) Seek(v uint64) error {
+	m.seekBuf = m.encode(m.seekBuf[:0], v)
+	return m.it.(ValueSeeker).SeekValue(m.seekBuf)
 }
 func (m *TransformKV2U64Iter[K, V]) HasNext() bool { return m.it.HasNext() }
 func (m *TransformKV2U64Iter[K, V]) Next() (uint64, error) {

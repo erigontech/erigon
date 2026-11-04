@@ -27,7 +27,6 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
-	"testing"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
@@ -250,8 +249,8 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 // Run executes a specific subtest and verifies the post-state and logs.
 // sd is the caller-owned SharedDomains: discard (Close without Flush) to
 // prevent per-subtest state from polluting the long-lived branch cache.
-func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
-	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig)
+func (t *StateTest) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+	st, root, _, err := t.RunNoVerify(sd, tx, subtest, vmconfig)
 	return st, root, t.checkResult(subtest, st, root, err)
 }
 
@@ -278,7 +277,7 @@ func (t *StateTest) checkResult(subtest StateSubtest, st *state.IntraBlockState,
 // into it via MakePreStateInto so the per-subtest writes can be discarded by
 // closing sd without Flush — keeping ephemeral test state out of the long-lived
 // branch cache.
-func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
+func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}

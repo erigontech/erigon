@@ -27,9 +27,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -52,7 +55,7 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	for _, dc := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain, statecfg.Schema.ReceiptDomain} {
 		b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 		for i := range 10 {
-			createFiles(t, dirs, i*10, (i+1)*10, &b)
+			createFiles(t, i*10, (i+1)*10, &b)
 		}
 	}
 
@@ -154,7 +157,7 @@ func confirmDoesntExist(t *testing.T, filename string) {
 	}
 }
 
-func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *bundle) {
+func createFiles(t *testing.T, from, to int, b *bundle) {
 	t.Helper()
 	createSchemaFiles(t, b.domain, from, to)
 	if b.history != nil {
@@ -173,7 +176,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 	for i := range 3 {
-		createFiles(t, dirs, i*10, (i+1)*10, &b)
+		createFiles(t, i*10, (i+1)*10, &b)
 	}
 
 	touchFile := func(path string) {
@@ -214,7 +217,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	dc := statecfg.Schema.ReceiptDomain
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 	for i := range 3 {
-		createFiles(t, dirs, i*10, (i+1)*10, &b)
+		createFiles(t, i*10, (i+1)*10, &b)
 	}
 
 	touchFile := func(path string) {
@@ -269,7 +272,7 @@ func Test_DeleteLatestStateSnaps_SubsetRemoval(t *testing.T) {
 		{224, 225},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// First call: should remove only the tip file 224-225
@@ -327,7 +330,7 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 		{223, 224},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// Use --step 192-224 to remove the merged file and its subsets
@@ -401,7 +404,7 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 		{223, 224},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// "192+" must behave like "192-224" because 224 is the highest available step.
@@ -417,6 +420,48 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 	confirmExist(t, file)
 	file, _ = b.domain.DataFile(version.V1_0, RootNum(128), RootNum(192))
 	confirmExist(t, file)
+}
+
+func Test_DeleteStateSnaps_EmptyStepRange(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		stepRange    string
+		removeLatest bool
+	}{
+		{name: "from plus at latest", stepRange: "224+"},
+		{name: "from plus past latest", stepRange: "225+"},
+		{name: "equal bounds", stepRange: "224-224"},
+		{name: "zero bounds", stepRange: "0-0"},
+		{name: "reversed bounds", stepRange: "225-224"},
+		{name: "step overrides latest", stepRange: "224+", removeLatest: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			b := bundle{}
+			b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.ReceiptDomain, dirs, 1)
+			createFiles(t, 0, 224, &b)
+			file, _ := b.domain.DataFile(version.V1_0, 0, 224)
+			require.NoError(t, os.WriteFile(file+".torrent", []byte("torrent"), 0o644))
+			require.NoError(t, os.WriteFile(file+".123.tmp", []byte("tmp"), 0o644))
+			var files []string
+			require.NoError(t, filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && !entry.IsDir() {
+					files = append(files, path)
+				}
+				return err
+			}))
+
+			require.NoError(t, DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+				Dirs:         dirs,
+				StepRange:    tc.stepRange,
+				RemoveLatest: tc.removeLatest,
+				DomainNames:  []string{"receipt"},
+			}))
+			for _, path := range files {
+				require.FileExists(t, path)
+			}
+		})
+	}
 }
 
 // Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval verifies that sub-range files
@@ -438,7 +483,7 @@ func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
 		{192, 193},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// Remove latest: should only remove 192-193
@@ -469,7 +514,7 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	acctBundle := bundle{}
 	acctBundle.domain, acctBundle.history, acctBundle.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.AccountsDomain, dirs, 1)
 	for _, r := range [][2]int{{0, 128}, {128, 192}, {192, 224}, {192, 208}, {208, 216}, {224, 225}} {
-		createFiles(t, dirs, r[0], r[1], &acctBundle)
+		createFiles(t, r[0], r[1], &acctBundle)
 	}
 
 	// Set up storage: NO merged 192-224, only has sub-range files + tip 224-225
@@ -477,7 +522,7 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	stoBundle := bundle{}
 	stoBundle.domain, stoBundle.history, stoBundle.ii = state.SnapSchemaFromDomainCfg(statecfg.Schema.StorageDomain, dirs, 1)
 	for _, r := range [][2]int{{0, 128}, {128, 192}, {192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224}, {224, 225}} {
-		createFiles(t, dirs, r[0], r[1], &stoBundle)
+		createFiles(t, r[0], r[1], &stoBundle)
 	}
 
 	// First --latest: remove tip 224-225 from both domains
@@ -533,7 +578,7 @@ func Test_DeleteStateSnaps_StepRange_OverlappingNonSubsetPreserved(t *testing.T)
 		{64, 128},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// Use --step 64-192 to precisely target the merged file
@@ -578,7 +623,7 @@ func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
 		{256, 257},
 	}
 	for _, r := range ranges {
-		createFiles(t, dirs, r[0], r[1], &b)
+		createFiles(t, r[0], r[1], &b)
 	}
 
 	// First dry-run call: targets tip 256-257 — should NOT delete anything
@@ -1523,4 +1568,33 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		confirmExist(t, f)
 	}
 	confirmExist(t, dataTorrent)
+}
+
+// Every commitment branch key sorts before "state", so a seek for it in a file
+// without the state key runs past the last key and finds no cursor.
+func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "v1.0-commitment.0-1.kv")
+	compression := statecfg.Schema.CommitmentDomain.Compression
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), dataPath, dir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer comp.Close()
+	w := seg.NewWriter(comp, compression)
+	for _, word := range [][]byte{{0x01}, {0xaa}} {
+		_, err = w.Write(word)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+
+	d, err := seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	defer d.Close()
+	btPath := filepath.Join(dir, "v1.0-commitment.0-1.bt")
+	require.NoError(t, btindex.BuildBtreeIndexWithDecompressor(btPath, "", seg.NewReader(d.MakeGetter(), compression),
+		background.NewProgressSet(), dir, 1, log.New(), true, statecfg.AccessorBTree))
+
+	hasState, broken, _, err := checkCommitmentFileHasRoot(dataPath)
+	require.NoError(t, err)
+	require.False(t, hasState)
+	require.False(t, broken)
 }

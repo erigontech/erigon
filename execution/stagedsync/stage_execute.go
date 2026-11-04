@@ -88,6 +88,19 @@ type ExecuteBlockCfg struct {
 	// the ephemeral single-block replay harness sets it directly since the env is
 	// read only at package init.
 	discardCommitment bool
+
+	// balSink, when set, receives the BAL derived from each executed block's
+	// VersionedIO (see ProcessBAL). Test-only seam: lets the block-replay
+	// harness capture the derived BAL for a block whose header carries no BAL
+	// hash (pre-Amsterdam), so the harness can own the pre-seed==post-output
+	// reference instead of the header.
+	balSink func(blockNum uint64, bal types.BlockAccessList)
+}
+
+// SetBALSink registers a callback receiving each executed block's derived BAL.
+// Test-only.
+func (cfg *ExecuteBlockCfg) SetBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) {
+	cfg.balSink = sink
 }
 
 func StageExecuteBlocksCfg(
@@ -244,13 +257,9 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 ) error {
 	var currentInc uint64
 
-	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// TODO: This is broken - becuase it does not handle the way value changes
-		// for previous steps are represented - they will pass nil values here
-		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything receives these
-		// changes at what it does with them)
+		// Value changes from previous steps arrive with nil values, which are
+		// indistinguishable from a delete here.
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var account accounts.Account
@@ -300,15 +309,14 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				switch {
-				case len(entry.Value) > 0:
+				if len(entry.Value) > 0 { //nolint:gocritic
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
-				case entry.Value == nil:
+				} else if entry.Value == nil {
 					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-				default:
+				} else {
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
@@ -404,6 +412,15 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if to < s.BlockNumber {
 		return nil
 	}
+	from := s.BlockNumber + 1
+	defer func() {
+		// A loop-exhausted batch still advanced progress past these blocks.
+		if err == nil || IsOnlyLoopExhausted(err) {
+			if werr := writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber); werr != nil {
+				err = werr
+			}
+		}
+	}()
 
 	// Stage coordination hoisted out of the exec core: resolve the start point
 	// and exec window from committed domains + the txNum index before handing a
@@ -455,11 +472,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
-	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
 
-	// Write stage progress to the SharedDomains overlay when present; otherwise
-	// use the caller-owned stage transaction, which parallel execution preserves.
-	if execErr == nil && out.verdict == nil && out.applyTx != nil {
+	// Stage progress: target the SharedDomains overlay (not replaced during exec)
+	// when present, else the live post-exec applyTx (parallel exec may have rolled
+	// the passed-in rwTx via Flush/CommitAndBegin).
+	if savesExecProgress(execErr, out) && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -472,7 +490,21 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	return renderExecOutcome(execErr, out, cfg, s, u, logger)
 }
 
-// renderExecOutcome maps executor outcomes to the stage's error and unwind contract.
+// savesExecProgress reports whether a parallel-exec outcome may advance stage
+// progress: a clean or purely-exhausted batch. An operational failure (execErr) or
+// an invalid-block verdict (out.verdict) must not — progress would move past an
+// unexecuted or bad block.
+func savesExecProgress(execErr error, out execV3Outcome) bool {
+	return execErr == nil && out.verdict == nil
+}
+
+// renderExecOutcome converts the parallel executor's typed outcome back to the
+// stage's error contracts. Precedence is fixed by the order of the checks: an
+// operational failure (execErr) outranks a verdict, which outranks a resumable
+// boundary. A non-initial-cycle wrong trie root binary-searches the bad-block
+// unwind from the implicated block; any other verdict propagates for the caller to
+// unwind. Under badBlockHalt (in-memory fork validation), or on the initial cycle,
+// it unwinds nothing and returns the verdict unchanged.
 func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if execErr != nil {
 		return execErr
@@ -480,16 +512,17 @@ func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 
 	if v := out.verdict; v != nil {
 		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
-			// Initial sync has no competing fork to recover from, so a wrong root
-			// must propagate as a fatal error. The recovery handler can return nil
-			// even without scheduling an unwind, which would hide the mismatch.
+			// During the initial cycle a wrong trie root is fatal: there is no fork to
+			// recover from, and handleIncorrectRootHashError can return nil (hiding the
+			// mismatch) or unwind a canonical block. Propagate it instead.
 			if !s.CurrentSyncCycle.IsInitialCycle {
 				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
 			}
 		}
-		// The caller owns recovery for invalid-block verdicts other than wrong roots.
-		// Setting a stage unwind point here could leave a stale bad-block reason
-		// that is reported again during a later sync cycle.
+		// A plain invalid block propagates the error without setting a stage unwind
+		// point — the caller owns the unwind. Setting one here would leave a stale
+		// bad-block verdict that blocks a fresh canonical block at the same height
+		// from being re-executed on the next fork-choice.
 		return v.err
 	}
 
@@ -592,11 +625,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	// 2026-04: tip-mode commitment-domain prune throughput exceeded the prior
-	// /2 budget. Use a base budget of one-third of a slot and extend it
-	// adaptively when there is a large prunable backlog, capped at two-thirds
-	// of a slot so FCU still has time. The proper fix is a background prune
-	// that defers to FCU when work is pending — out of scope here.
+	// Base budget is one-third of a slot, extended adaptively up to two-thirds when the prunable backlog is large.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
 	extra := time.Duration(cfg.db.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond

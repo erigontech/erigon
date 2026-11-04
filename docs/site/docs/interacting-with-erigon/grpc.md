@@ -13,7 +13,7 @@ The gRPC server can be explicitly enabled using the `--grpc` flag when running t
 ### Performance Considerations
 
 * gRPC APIs provide better performance than JSON-RPC for high-throughput applications
-* Direct database access via KV interface offers the fastest data retrieval
+* Direct database access via the key-value (KV) interface offers the fastest data retrieval
 * Shared memory access (when running locally) provides optimal performance
 
 ### Data Format and Buckets
@@ -24,7 +24,7 @@ Database bucket names and their formats are documented in `db/kv/tables.go`. Und
 
 * gRPC services can be accessed over the network when properly configured
 * TLS encryption is recommended for production deployments
-* Rate limiting can be configured via `--private.api.ratelimit` flag
+* Rate limiting can be configured via the `--private.api.ratelimit` flag
 
 ### Integration Libraries
 
@@ -33,7 +33,7 @@ Erigon provides Go, Rust, and C++ implementations of the RoKV (read-only key-val
 ### Availability
 
 * gRPC services are available when enabled with the `--grpc` flag on the **standalone `rpcdaemon`** binary
-* Default listening address is configurable via `--grpc.addr` and `--grpc.port`
+* The default listening address is configurable via `--grpc.addr` and `--grpc.port`
 * Services require the main Erigon node to be running and accessible
 
 For more information, visit the [Erigon Interfaces GitHub repository](https://github.com/erigontech/interfaces).
@@ -104,8 +104,8 @@ The TxPool interface provides access to transaction pool operations and status i
 | FindUnknownHashes | Finds unknown transaction hashes          |
 | GetTransactions   | Retrieves transactions from the pool      |
 | All               | Returns all transactions in the pool      |
-| PendingAdd        | Adds transactions to pending pool         |
-| PendingRemove     | Removes transactions from pending pool    |
+| PendingAdd        | Adds transactions to the pending pool         |
+| PendingRemove     | Removes transactions from the pending pool    |
 | OnAdd             | Subscribes to transaction addition events |
 | Mining            | Returns mining-related transaction data   |
 | NonceFromAddress  | Gets the next nonce for an address        |
@@ -120,8 +120,8 @@ The Downloader interface provides access to snapshot downloading and torrent man
 
 | Method       | Description                        |
 | ------------ | ---------------------------------- |
-| Add          | Adds files to download queue       |
-| Delete       | Removes files from download queue  |
+| Add          | Adds files to the download queue       |
+| Delete       | Removes files from the download queue  |
 | Completed    | Checks if downloads are completed  |
 | SetLogPrefix | Sets logging prefix for Downloader |
 

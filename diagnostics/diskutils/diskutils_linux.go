@@ -75,14 +75,14 @@ func MountPointForDirPath(dirPath string) string {
 func SmlinkForDirPath(dirPath string) string {
 	fileInfo, err := os.Lstat(dirPath)
 	if err != nil {
-		log.Debug("[diskutils] Error getting file info for dir path:", dirPath, "Error:", err)
+		log.Debug("[diskutils] Error getting file info for dir path", "path", dirPath, "err", err)
 		return dirPath
 	}
 
 	if fileInfo.Mode()&os.ModeSymlink != 0 {
 		targetPath, err := os.Readlink(dirPath)
 		if err != nil {
-			log.Debug("[diskutils] Error getting target path for symlink:", dirPath, "Error:", err)
+			log.Debug("[diskutils] Error getting target path for symlink", "path", dirPath, "err", err)
 			return dirPath
 		} else {
 			return targetPath
@@ -98,7 +98,7 @@ func diskUUID(disk string) (string, error) {
 	// Capture the output
 	output, err := cmd.Output()
 	if err != nil {
-		log.Debug("[diskutils] Error executing lsblk command: %v", err)
+		log.Debug("[diskutils] Error executing lsblk command", "err", err)
 	}
 
 	// Process the output
@@ -117,7 +117,7 @@ func diskUUID(disk string) (string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Debug("[diskutils] Error reading output: %v", err)
+		log.Debug("[diskutils] Error reading output", "err", err)
 	}
 
 	return "", nil
@@ -126,7 +126,7 @@ func diskUUID(disk string) (string, error) {
 func DiskInfo(disk string) (string, error) {
 	uuid, err := diskUUID(disk)
 	if err != nil {
-		log.Debug("[diskutils] Error getting disk UUID: %v", err)
+		log.Debug("[diskutils] Error getting disk UUID", "err", err)
 		return "", err
 	}
 
@@ -143,7 +143,7 @@ func DiskInfo(disk string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), "bash", "-c", "lsblk -o"+headersString+` | awk 'NR>1 {printf "`+percentSstring+`\n", `+valString+`}'`)
 	output, err := cmd.Output()
 	if err != nil {
-		log.Debug("[diskutils] Error executing lsblk command: %v", err)
+		log.Debug("[diskutils] Error executing lsblk command", "err", err)
 	}
 
 	return processOutput(output, uuid, headersArray)

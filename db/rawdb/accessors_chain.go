@@ -463,16 +463,6 @@ func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	}
 }
 
-// ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
-	body, _ := ReadBodyWithTransactions(db, hash, number)
-	bodyRlp, err := rlp.EncodeToBytes(body)
-	if err != nil {
-		log.Error("ReadBodyRLP failed", "err", err)
-	}
-	return bodyRlp
-}
-
 // Deprecated: use readBodyForStorage
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
@@ -573,6 +563,27 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 		return nil, err
 	}
 	return body, nil
+}
+
+// ReadRawBody is ReadBodyWithTransactions without decoding the transactions: each is returned in
+// its binary (canonical EIP-2718) encoding, copied out of the database.
+func ReadRawBody(db kv.Getter, hash common.Hash, number uint64) (*types.RawBody, error) {
+	body, firstTxId, txCount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil, nil
+	}
+	txs := make([][]byte, 0, txCount)
+	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(firstTxId), txCount, func(_, v []byte) error {
+		txn, err := types.BinaryFromStoredTxn(v)
+		if err != nil {
+			return err
+		}
+		txs = append(txs, bytes.Clone(txn))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &types.RawBody{Transactions: txs, Uncles: body.Uncles, Withdrawals: body.Withdrawals}, nil
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
@@ -1144,45 +1155,6 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[8:], blockHash[:])
 	return tx.Put(kv.PendingEpoch, k, transitionProof)
-}
-
-// Transitioned returns true if the block number comes after POS transition or is the last POW block
-func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *uint256.Int) (trans bool, err error) {
-	if terminalTotalDifficulty == nil {
-		return false, nil
-	}
-
-	if terminalTotalDifficulty.Sign() == 0 {
-		return true, nil
-	}
-	header := ReadHeaderByNumber(db, blockNum)
-	if header == nil {
-		return false, nil
-	}
-
-	if header.Difficulty.Sign() == 0 {
-		return true, nil
-	}
-
-	headerTd, err := ReadTd(db, header.Hash(), blockNum)
-	if err != nil {
-		return false, err
-	}
-
-	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
-}
-
-// IsPosBlock returns true if the block number comes after POS transition or is the last POW block
-func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
-	header, err := ReadHeaderByHash(db, blockHash)
-	if err != nil {
-		return false, err
-	}
-	if header == nil {
-		return false, nil
-	}
-
-	return header.Difficulty.Sign() == 0, nil
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
