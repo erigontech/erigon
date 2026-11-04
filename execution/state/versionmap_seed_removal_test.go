@@ -344,3 +344,26 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 }
+
+// TestVersionedReaderServesBALMarkedAccountFromOrigin pins that a versioned reader over an
+// empty read set (the fee calculation) answers a BAL-marked account from its stored origin
+// instead of reading the committed base again for every tx.
+func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xc0ba5e"))
+	acc := accounts.NewAccount()
+	acc.Nonce = 3
+	acc.Balance = *uint256.NewInt(100)
+	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
+	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(50)}}}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	SeedOrigin(vm, a, &acc)
+
+	for txIndex := 1; txIndex <= 3; txIndex++ {
+		got, err := NewVersionedStateReader(txIndex, ReadSet{}, vm, reader).ReadAccountData(a)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, uint64(3), got.Nonce)
+	}
+	require.Zero(t, reader.reads, "the stored origin answers every tx")
+}

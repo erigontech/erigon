@@ -2012,6 +2012,15 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
+	// The stored origin is the committed base the state reader would return; a BAL-marked
+	// AddressPath defers to it, so the fee calculation's per-tx reads stay in memory.
+	if vr.versionMap != nil {
+		if base, ok := vr.versionMap.LoadOriginAccount(address); ok && base != nil {
+			updated := vr.applyVersionedUpdates(address, *base)
+			return &updated, nil
+		}
+	}
+
 	if vr.stateReader != nil {
 		account, err := vr.stateReader.ReadAccountData(address)
 		if err != nil {
