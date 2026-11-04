@@ -143,16 +143,33 @@ func TestExecutionPayloadDecodeSSZAboveConsensusTransactionLimit(t *testing.T) {
 			require.NoError(t, err)
 
 			for _, test := range []struct {
-				name   string
-				decode func(*ExecutionPayload, []byte, int) error
+				name            string
+				decode          func(*ExecutionPayload, []byte, int) error
+				decodeConsensus func(*cltypes.Eth1Block, []byte, int) error
 			}{
-				{name: "regular", decode: (*ExecutionPayload).DecodeSSZ},
-				{name: "strict", decode: (*ExecutionPayload).DecodeSSZStrict},
+				{
+					name:            "regular",
+					decode:          (*ExecutionPayload).DecodeSSZ,
+					decodeConsensus: (*cltypes.Eth1Block).DecodeSSZ,
+				},
+				{
+					name:            "strict",
+					decode:          (*ExecutionPayload).DecodeSSZStrict,
+					decodeConsensus: (*cltypes.Eth1Block).DecodeSSZStrict,
+				},
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					decoded := NewExecutionPayloadSSZ(version)
 					require.NoError(t, test.decode(decoded, encoded, int(version)))
 					require.Equal(t, payload.Transactions, decoded.Transactions)
+
+					block := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
+					err := test.decodeConsensus(block, encoded, int(version))
+					if version >= clparams.GloasVersion {
+						require.ErrorIs(t, err, commonssz.ErrTooBigList)
+					} else {
+						require.NoError(t, err)
+					}
 				})
 			}
 		})

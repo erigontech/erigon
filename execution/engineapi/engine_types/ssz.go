@@ -56,32 +56,11 @@ func (p *ExecutionPayload) DecodeSSZStrict(buf []byte, version int) error {
 func (p *ExecutionPayload) decodeSSZ(buf []byte, version int, strict bool) error {
 	p.SSZVersion = clparams.StateVersion(version)
 	block := cltypes.NewEth1Block(p.SSZVersion, mainnetBeaconCfg)
-	block.Extra = solid.NewExtraData()
-	// Decode the schema directly to preserve Engine API transaction limits on every fork.
-	// Eth1Block.DecodeSSZ replaces the transaction list and, from Gloas onward, caps its
-	// total size at the consensus network chunk limit. Keep this field order aligned
-	// with Eth1Block's payload schema.
-	block.Transactions = solid.NewTransactionsSSZWithLimits(mainnetBeaconCfg.MaxTransactionsPerPayload, sszMaxBytesPerTransaction)
-	block.Withdrawals = newWithdrawalList(nil)
-	schema := []any{
-		block.ParentHash[:], block.FeeRecipient[:], block.StateRoot[:], block.ReceiptsRoot[:], block.LogsBloom[:],
-		block.PrevRandao[:], &block.BlockNumber, &block.GasLimit, &block.GasUsed, &block.Time,
-		block.Extra, block.BaseFeePerGas[:], block.BlockHash[:], block.Transactions,
-	}
-	if p.SSZVersion >= clparams.CapellaVersion {
-		schema = append(schema, block.Withdrawals)
-	}
-	if p.SSZVersion >= clparams.DenebVersion {
-		schema = append(schema, &block.BlobGasUsed, &block.ExcessBlobGas)
-	}
-	if p.SSZVersion >= clparams.GloasVersion {
-		schema = append(schema, block.BlockAccessList, &block.SlotNumber)
-	}
-	unmarshal := ssz2.UnmarshalSSZ
+	decode := block.DecodeSSZWithTransactionLimits
 	if strict {
-		unmarshal = ssz2.UnmarshalSSZStrict
+		decode = block.DecodeSSZStrictWithTransactionLimits
 	}
-	if err := unmarshal(buf, version, schema...); err != nil {
+	if err := decode(buf, version, mainnetBeaconCfg.MaxTransactionsPerPayload, sszMaxBytesPerTransaction); err != nil {
 		return err
 	}
 	*p = *ExecutionPayloadFromSSZBlock(block, p.SSZVersion)
