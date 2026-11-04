@@ -186,26 +186,35 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 
 // TestPreByzantiumPostStateFromCommitmentHistory pins the per-tx root that the
 // commitment-history replay writes into a pre-Byzantium receipt against the root
-// rebuilt from state history. The block's later txs read the earlier txs' writes,
-// so each root depends on the replay carrying state from one tx to the next.
+// rebuilt from state history. Later txs of the block read the earlier txs' writes, and
+// one destroys a contract whose storage predates the block, so each root depends on the
+// replay folding every key the block has changed so far.
 func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
 	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil
 
 	signer := types.LatestSignerForChainID(nil)
-	runtime := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // SSTORE(0, 1) LOG0 STOP
+	// no calldata: SSTORE(0, 1) LOG0 STOP; with calldata: SELFDESTRUCT(CALLER)
+	runtime := []byte{0x36, 0x60, 0x0f, 0x57, 0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00, 0x5b, 0x33, 0xff}
 	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
-	contract := types.CreateAddress(testAddr, 1)
+	preBlock, inBlock := types.CreateAddress(testAddr, 0), types.CreateAddress(testAddr, 3)
 	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
-		if i == 0 {
-			return
+		nonce := block.TxNonce(testAddr)
+		txns := []types.Transaction{
+			types.NewContractCreation(nonce, uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode),
+			types.NewTransaction(nonce+1, preBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
 		}
-		for _, txn := range []types.Transaction{
-			types.NewTransaction(block.TxNonce(testAddr), common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
-			types.NewContractCreation(block.TxNonce(testAddr)+1, uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode),
-			types.NewTransaction(block.TxNonce(testAddr)+2, contract, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
-		} {
+		if i == 1 {
+			txns = []types.Transaction{
+				types.NewTransaction(nonce, common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+				types.NewContractCreation(nonce+1, uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode),
+				types.NewTransaction(nonce+2, inBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
+				types.NewTransaction(nonce+3, preBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), []byte{0x01}),
+				types.NewTransaction(nonce+4, common.Address{0x02}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+			}
+		}
+		for _, txn := range txns {
 			signed, err := types.SignTx(txn, *signer, testKey)
 			require.NoError(t, err)
 			block.AddTx(signed)
@@ -220,7 +229,7 @@ func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
 	txns := block.Transactions()
-	require.Len(t, txns, 3)
+	require.Len(t, txns, 5)
 	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
 
@@ -241,4 +250,5 @@ func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 		require.Equal(t, want.PostState, blockReceipts[i].PostState, "GetReceipts tx %d", i)
 	}
 	require.Len(t, blockReceipts[2].Logs, 1)
+	require.Empty(t, blockReceipts[3].Logs, "tx 3 takes the SELFDESTRUCT branch")
 }

@@ -591,6 +591,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 
 		var stateWriter state.StateWriter
+		var written *blockWrites
 		if opts.CommitmentHistoryEnabled {
 			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 			if err != nil {
@@ -601,7 +602,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			if err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
+			written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains}
+			stateWriter = state.NewWriter(written, nil, latestTxNum)
 		} else {
 			stateWriter = genEnv.noopWriter
 		}
@@ -639,10 +641,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
-				// The seek restores the block-start trie, and EndTx touched only this tx's keys.
-				if _, _, err := sharedDomains.TouchChangedKeysFromHistory(tx, minTxNum, txNum); err != nil {
-					return nil, err
-				}
+				written.touchAll()
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
@@ -790,6 +789,42 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 	}
 	baseBlockNum := blockNum - 1
 	return g.commitmentReplay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, receiptComputeCommitment)
+}
+
+// blockWrites records the keys a replay writes. Each per-tx root starts again from the
+// block-start trie, so it must fold the keys of the block's earlier txs too.
+type blockWrites struct {
+	kv.TemporalPutDel
+	sd   *execctx.SharedDomains
+	keys map[kv.Domain]map[string][]byte
+}
+
+func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	w.record(domain, k, v)
+	return w.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
+}
+
+func (w *blockWrites) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	w.record(domain, k, nil)
+	return w.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (w *blockWrites) record(domain kv.Domain, k, v []byte) {
+	if w.keys == nil {
+		w.keys = map[kv.Domain]map[string][]byte{}
+	}
+	if w.keys[domain] == nil {
+		w.keys[domain] = map[string][]byte{}
+	}
+	w.keys[domain][string(k)] = common.Copy(v)
+}
+
+func (w *blockWrites) touchAll() {
+	for domain, keys := range w.keys {
+		for k, v := range keys {
+			w.sd.GetCommitmentContext().TouchKey(domain, k, v)
+		}
+	}
 }
 
 // applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it
