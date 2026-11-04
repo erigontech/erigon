@@ -60,6 +60,10 @@ type CanonicalReader interface {
 
 type BodyReader interface {
 	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
+	// TxnHashes returns the block's txn hashes without decoding the transactions.
+	// A nil slice means they could not be located - a missing body, segment or index -
+	// as distinct from an empty non-nil slice for a block that carries no txns.
+	TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (hashes []common.Hash, err error)
 	// BodyWithRawTransactions returns the body with its transactions in their binary (canonical
 	// EIP-2718) encoding, skipping the decode where the storage allows.
 	BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.RawBody, err error)
