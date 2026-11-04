@@ -158,19 +158,25 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, hi
 // NODE: if caller wants legacy txn SuggestedPrice, we need to add
 // baseFee to the returned bigInt
 func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
+	price, _, _, err := oracle.SuggestTipCapAtHead(ctx)
+	return price, err
+}
+
+// SuggestTipCapAtHead is SuggestTipCap that also returns the head the tip was sampled at.
+func (oracle *Oracle) SuggestTipCapAtHead(ctx context.Context) (*uint256.Int, uint64, common.Hash, error) {
 	latestHead, latestPrice := oracle.cache.GetLatest()
 	number, headHash, err := oracle.backend.LatestHead(ctx)
 	if err != nil {
-		return latestPrice, err
+		return latestPrice, 0, common.Hash{}, err
 	}
 	if latestHead == headHash {
-		return latestPrice, nil
+		return latestPrice, number, headHash, nil
 	}
 
 	// check again, the last request could have populated the cache
 	latestHead, latestPrice = oracle.cache.GetLatest()
 	if latestHead == headHash {
-		return latestPrice, nil
+		return latestPrice, number, headHash, nil
 	}
 
 	txPrices := make([]*uint256.Int, 0, 2*sampleNumber*oracle.checkBlocks)
@@ -183,7 +189,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 	phase1, err := oracle.fetchBlockPricesParallel(ctx, number, count1)
 	if err != nil {
-		return latestPrice, err
+		return latestPrice, 0, common.Hash{}, err
 	}
 
 	// Post-process phase 1: apply the empty-block fallback (issue #17617) and
@@ -215,7 +221,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 		if count2 > 0 {
 			phase2, err := oracle.fetchBlockPricesParallel(ctx, startBlock2, count2)
 			if err != nil {
-				return latestPrice, err
+				return latestPrice, 0, common.Hash{}, err
 			}
 			for _, prices := range phase2 {
 				if len(prices) == 0 && latestPrice != nil {
@@ -240,7 +246,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 
 	oracle.cache.SetLatest(headHash, price)
 
-	return price, nil
+	return price, number, headHash, nil
 }
 
 // fetchBlockPricesParallel fetches prices for count consecutive blocks, starting

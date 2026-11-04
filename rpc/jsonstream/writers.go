@@ -19,7 +19,6 @@ package jsonstream
 import (
 	"encoding"
 	"slices"
-	"strconv"
 
 	"github.com/holiman/uint256"
 
@@ -62,7 +61,7 @@ func HexUint64Field(s *Stream, name string, v uint64) {
 	writeObjectFieldFast(s.stream, name)
 	buf := s.stream.Buffer()
 	start := len(buf)
-	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	buf = hexutil.AppendUint64(append(buf, '"'), v)
 	s.commit(append(buf, '"'), start)
 	s.separatorPending = true
 	flushIfFull(s.stream)
