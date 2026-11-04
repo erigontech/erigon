@@ -198,10 +198,10 @@ func (r *Reader) MadvRandom() {
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
 
-// ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
 // InMem reports whether the filter is a heap copy, so a lookup reads no file page.
 func (r *Reader) InMem() bool { return r.keepInMem }
 
+// ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
 func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
 	if pr != nil {
 		r.probe(v, pr)
