@@ -1077,7 +1077,9 @@ type asOfStateReader struct {
 
 func (r *asOfStateReader) WithHistory() bool { return false }
 
-func (r *asOfStateReader) ReadsOwnedBranches() {}
+type ownedAsOfStateReader struct{ *asOfStateReader }
+
+func (ownedAsOfStateReader) ReadsOwnedBranches() {}
 
 func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 	return nil
@@ -1132,14 +1134,22 @@ func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched}
+	return r.clone(tx, nil)
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
 // accumulator carried by workerCtx, so a clone used during block assembly (where
 // trie-warmup runs concurrently) doesn't write the shared main accumulator.
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched}
+	return r.clone(tx, workerCtx)
+}
+
+func (r *asOfStateReader) clone(tx kv.TemporalTx, workerCtx context.Context) commitmentdb.StateReader {
+	reader := &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched}
+	if r.sd != nil && r.sd.GetCommitmentContext() != nil && r.sd.GetCommitmentContext().Trie().Variant() == commitment.VariantCommitmentV3 {
+		return ownedAsOfStateReader{reader}
+	}
+	return reader
 }
 
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed

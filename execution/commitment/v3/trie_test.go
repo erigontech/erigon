@@ -224,6 +224,17 @@ func TestTrieAPI(t *testing.T) {
 			_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 			require.EqualError(t, err, "commitment v3: Process requires ModeCollect updates")
 		}},
+		{"E45/EmptyCodeTouchLeavesEmptyTrieEmpty", func(t *testing.T) {
+			trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
+			t.Cleanup(trie.Release)
+			t.Cleanup(updates.Close)
+			trie.ResetContext(newMockContext())
+
+			updates.TouchPlainKey(string(bytes.Repeat([]byte{0x11}, 20)), nil, updates.TouchCode)
+			root, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
+			require.NoError(t, err)
+			require.Equal(t, empty.RootHash[:], root)
+		}},
 	} {
 		t.Run(tc.name, tc.run)
 	}

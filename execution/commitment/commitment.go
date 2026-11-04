@@ -1806,14 +1806,16 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 }
 
 func (t *Updates) TouchCode(c *KeyUpdate, code []byte) {
-	c.update.Flags |= CodeUpdate
 	if len(code) == 0 {
-		if c.update.Flags == 0 {
+		if t.mode == ModeCollect && c.update.Flags == 0 {
 			c.update.Flags = DeleteUpdate
+		} else {
+			c.update.Flags |= CodeUpdate
 		}
 		c.update.CodeHash = empty.CodeHash
 		return
 	}
+	c.update.Flags |= CodeUpdate
 	c.update.CodeHash = crypto.Keccak256Hash(code)
 }
 
