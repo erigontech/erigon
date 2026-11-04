@@ -2467,10 +2467,13 @@ func verifyBlobBundles(bundles []BlobBundle, cellProofs bool) error {
 		}
 		return kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs)
 	}
-	var g errgroup.Group
+	g, ctx := errgroup.WithContext(context.Background())
 	g.SetLimit(runtime.GOMAXPROCS(0))
 	for i := range bundles {
 		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			bundle := &bundles[i]
 			blobCells, err := peerdasutils.ComputeCells(bundle.Blob)
 			if err != nil {
