@@ -327,6 +327,69 @@ func TestFrameTransactionGasLimit(t *testing.T) {
 	})
 }
 
+func frameNonceKeysAtBit(count int, bit uint) []uint256.Int {
+	keys := make([]uint256.Int, count)
+	for i := range keys {
+		keys[i].Lsh(uint256.NewInt(1), bit)
+		keys[i].AddUint64(&keys[i], uint64(i))
+	}
+	return keys
+}
+
+func TestFrameTransactionNonceGasMatchesRLP(t *testing.T) {
+	keys255 := frameNonceKeysAtBit(8, 240)
+	keys255[0].Rsh(&keys255[0], 8)
+	for _, tc := range []struct {
+		name string
+		keys []uint256.Int
+	}{
+		{"empty", nil},
+		{"legacy", []uint256.Int{{}}},
+		{"single byte", []uint256.Int{{1}, {127}}},
+		{"prefixed integer", []uint256.Int{{128}, {255}, {256}}},
+		{"full width", []uint256.Int{*new(uint256.Int).SetAllOne()}},
+		{"list payload 55", []uint256.Int{*new(uint256.Int).Lsh(uint256.NewInt(1), 160), *new(uint256.Int).Lsh(uint256.NewInt(1), 248)}},
+		{"list payload 56", []uint256.Int{*new(uint256.Int).Lsh(uint256.NewInt(1), 168), *new(uint256.Int).Lsh(uint256.NewInt(1), 248)}},
+		{"list payload 255", keys255},
+		{"list payload 256", frameNonceKeysAtBit(8, 240)},
+		{"maximum key count", frameNonceKeysAtBit(FrameMaxNonceKeys, 255)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encodedKeys, err := rlp.EncodeToBytes(tc.keys)
+			require.NoError(t, err)
+			for _, nonce := range []uint64{0, 1, 127, 128, 255, 256, 1 << 32, math.MaxUint64} {
+				tx := FrameTransaction{NonceKeys: tc.keys, Nonce: nonce, Frames: []Frame{{}}}
+				encoded := rlp.AppendUint64(encodedKeys, nonce)
+				args := mdgas.FrameIntrinsicGasCalcArgs{
+					FramesLen: 1, DataLen: uint64(len(encoded)),
+					DataNonZeroLen: uint64(len(encoded) - bytes.Count(encoded, []byte{0})),
+				}
+				if !tx.UsesLegacyNonce() {
+					args.KeyedNoncesLen = uint64(len(tc.keys))
+				}
+				want := mdgas.CalcFrameIntrinsicGas(args)
+				intrinsic, floor, limits, err := tx.GasLimits()
+				require.NoError(t, err)
+				require.Equal(t, want.ExecutionGas, intrinsic, "nonce %d", nonce)
+				require.Equal(t, want.FloorGasCost, floor, "nonce %d", nonce)
+				require.Equal(t, max(intrinsic, floor), limits.Execution)
+			}
+		})
+	}
+}
+
+func TestFrameTransactionGasLimitsNoAllocations(t *testing.T) {
+	for _, keys := range [][]uint256.Int{{{}}, frameNonceKeysAtBit(FrameMaxNonceKeys, 255)} {
+		tx := FrameTransaction{NonceKeys: keys, Nonce: math.MaxUint64, Frames: []Frame{{}}}
+		allocs := testing.AllocsPerRun(100, func() {
+			if _, _, _, err := tx.GasLimits(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		require.Zero(t, allocs, "key count %d", len(keys))
+	}
+}
+
 func TestFrameTransactionSigningHash(t *testing.T) {
 	t.Parallel()
 	sender := common.HexToAddress("0x1234567890123456789012345678901234567890")

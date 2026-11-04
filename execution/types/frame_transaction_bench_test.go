@@ -21,10 +21,32 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/chain"
 )
+
+func BenchmarkFrameTransactionGasLimits(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		keys []uint256.Int
+	}{
+		{"legacy", []uint256.Int{{}}},
+		{"keyed", []uint256.Int{{1}, {256}}},
+		{"16 keys", frameNonceKeysAtBit(FrameMaxNonceKeys, 255)},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			tx := FrameTransaction{NonceKeys: tc.keys, Nonce: 256, Frames: []Frame{{}}}
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, _, _, err := tx.GasLimits(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func BenchmarkFrameTransactionValidate(b *testing.B) {
 	for name, scheme := range map[string]uint8{"secp256k1": FrameSignatureSecp256k1, "p256": FrameSignatureP256} {

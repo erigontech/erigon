@@ -303,16 +303,12 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 	if !tx.UsesLegacyNonce() {
 		args.KeyedNoncesLen = uint64(len(tx.NonceKeys))
 	}
+	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
+	args.DataLen, args.DataNonZeroLen = tx.nonceDataCounts()
 	addData := func(data []byte) {
 		args.DataLen += uint64(len(data))
 		args.DataNonZeroLen += uint64(mdgas.CountNonZeroBytes(data))
 	}
-	nonceData, err := rlp.EncodeToBytes(tx.NonceKeys)
-	if err != nil {
-		return 0, 0, limits, err
-	}
-	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
-	addData(rlp.AppendUint64(nonceData, tx.Nonce))
 	var total uint64
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
@@ -348,6 +344,27 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 		return 0, 0, limits, errors.New("frame gas limit overflow")
 	}
 	return intrinsic, floor, limits, nil
+}
+
+func (tx *FrameTransaction) nonceDataCounts() (size, nonZero uint64) {
+	payloadLen := 0
+	for _, key := range tx.NonceKeys {
+		keyLen := rlp.Uint256Len(key)
+		payloadLen += keyLen
+		// Single-byte integers (including zero as 0x80) and integer prefixes
+		// each contribute one nonzero byte.
+		nonZero++
+		if keyLen > 1 {
+			keyBytes := key.Bytes32()
+			nonZero += uint64(mdgas.CountNonZeroBytes(keyBytes[:]))
+		}
+	}
+	var buf [9]byte
+	prefixLen := rlp.EncodeListPrefixToBuf(payloadLen, buf[:])
+	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:prefixLen]))
+	nonceLen := rlp.EncodeU64ToBuf(tx.Nonce, buf[:])
+	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:nonceLen]))
+	return uint64(payloadLen + prefixLen + nonceLen), nonZero
 }
 
 func (tx *FrameTransaction) GetValue() *uint256.Int { return new(uint256.Int) }
