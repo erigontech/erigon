@@ -2045,7 +2045,7 @@ func (result *execResult) calcFees(
 		// Only a real contract signal: deployed code (non-empty) or a removed
 		// contract's code (ValueDeleted). An empty-codehash write from account
 		// creation — e.g. a self-destruct beneficiary funding a new coinbase — is not.
-		coinbaseHasCodeHashWrite = cw.Deletes() || cw.Val != accounts.EmptyCodeHash
+		coinbaseHasCodeHashWrite = cw.Deletes() || !cw.Val.IsEmpty()
 		coinbaseCodeHash = cw.Val
 	}
 	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
@@ -2078,7 +2078,7 @@ func (result *execResult) calcFees(
 			burntNonce = nw.Val
 		}
 		if cw, ok := result.TxOut.GetCodeHash(burntAddr); ok {
-			burntHasCodeHashWrite = cw.Deletes() || cw.Val != accounts.EmptyCodeHash
+			burntHasCodeHashWrite = cw.Deletes() || !cw.Val.IsEmpty()
 		}
 		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
 			burntCreatedContract = true
