@@ -377,7 +377,16 @@ func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) b
 
 func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte) bool {
 	cold := func(domain kv.Domain, sample [][]byte) bool {
-		return len(sample) > 0 && !mostlyResident(ctx, p, domain, sample)
+		var warm, probe [][]byte
+		for i, k := range sample {
+			if i%2 == 0 {
+				warm = append(warm, k)
+			} else {
+				probe = append(probe, k)
+			}
+		}
+		mostlyResident(ctx, p, domain, warm)
+		return len(probe) > 0 && !mostlyResident(ctx, p, domain, probe)
 	}
 	return cold(kv.AccountsDomain, accs) || cold(kv.StorageDomain, slots)
 }
@@ -386,7 +395,7 @@ func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]by
 // not delay the per-key warmup on a large BAL.
 func balPrefetchSample(bal types.BlockAccessList) (accs, slots [][]byte) {
 	nAcc, nSlot := len(bal), balSlotCount(bal)
-	kAcc, kSlot := min(nAcc, residencySampleKeys), min(nSlot, residencySampleKeys)
+	kAcc, kSlot := min(nAcc, 2*residencySampleKeys), min(nSlot, 2*residencySampleKeys)
 	for j := range kAcc {
 		accs = append(accs, bal[j*nAcc/kAcc].Address[:])
 	}
