@@ -63,6 +63,40 @@ func TestProcessMessageRetriesWhenStoredColumnArrives(t *testing.T) {
 	})
 }
 
+// Real time, not synctest: a goroutine blocked on a mutex is not durably blocked.
+func TestArchiveColumnRetryDoesNotWaitForOperationFeed(t *testing.T) {
+	service, block, processing, peerDas := newFuluColumnGossipFixture(t)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	events := make(chan *beaconevents.EventStream)
+	subscription := service.emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), service.beaconCfg, service.emitter)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).DoAndReturn(func(slot uint64, root common.Hash) (bool, error) {
+		saved, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+		if len(saved) > 0 {
+			processing.err = nil
+		}
+		return len(saved) > 0, err
+	}).AnyTimes()
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go service.loop(ctx)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	sidecar.SignedBlockHeader = block.SignedBeaconBlockHeader()
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- storage.WriteColumnSidecars(t.Context(), root, 0, sidecar) }()
+
+	require.Eventually(t, func() bool {
+		_, queued := service.blocksScheduledForLaterExecution.Load(root)
+		return !queued
+	}, 5*time.Second, time.Millisecond, "the retry waited for the operation feed")
+	<-events
+	require.NoError(t, <-writeDone)
+}
+
 type afterOnBlockStore struct {
 	*onBlockErrorStore
 	after func()

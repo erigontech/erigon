@@ -167,6 +167,59 @@ func TestColumnWriteNotifiesBeforeOperationFeedDelivers(t *testing.T) {
 	})
 }
 
+// Real time, not synctest: a goroutine blocked on a mutex is not durably blocked.
+func TestSavedColumnIndexDoesNotWaitForOperationFeed(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	root := common.HexToHash("0x1234567890abcdef")
+	const slot = 1000
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
+	}()
+	select {
+	case notifiedRoot := <-emitters.DataColumnStored():
+		require.Equal(t, root, notifiedRoot)
+	case err := <-writeDone:
+		t.Fatalf("the write returned without a stored-column notification: %v", err)
+	}
+
+	scanDone := make(chan []uint64, 1)
+	go func() {
+		saved, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+		assert.NoError(t, err)
+		scanDone <- saved
+	}()
+	select {
+	case saved := <-scanDone:
+		require.Equal(t, []uint64{1}, saved)
+	case <-time.After(5 * time.Second):
+		<-events
+		t.Fatal("the saved column index scan waited for the operation feed")
+	}
+	<-events
+	require.NoError(t, <-writeDone)
+}
+
+type panicCreateFs struct{ afero.Fs }
+
+func (panicCreateFs) Create(string) (afero.File, error) { panic("create") }
+
+func TestColumnWritePanicReleasesLocks(t *testing.T) {
+	storage := NewDataColumnStore(panicCreateFs{afero.NewMemMapFs()}, globalBeaconConfig, beaconevents.NewEventEmitter())
+	const slot = 1000
+	require.Panics(t, func() {
+		_ = storage.WriteColumnSidecars(t.Context(), common.HexToHash("0x1234567890abcdef"), 1, createTestDataColumnSidecar(slot, 1))
+	})
+	impl := storage.(*dataColumnStorageImpl)
+	require.True(t, impl.forSlot(slot).TryLock())
+	require.True(t, impl.pruneMutex.TryLock())
+}
+
 func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
 	t.Run("saved index scan", func(t *testing.T) {
 		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
