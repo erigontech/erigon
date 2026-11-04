@@ -45,16 +45,12 @@ type DomainReader interface {
 }
 
 type MemoryMutation struct {
-	// mu protects concurrent access to the mutation's maps and backing tx.
-	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
-	// ClearTable, UpdateTxn) acquire Lock. Cursor-based methods are NOT
-	// protected and must only be called single-threaded (under the semaphore).
-	// Read views created via NewReadView share this pointer so they synchronize
-	// with the parent's writers.
+	// mu coordinates overlay writes and access to the backing transaction.
+	// Read views share it, but use their own backing transactions.
 	mu               *sync.RWMutex
 	memTx            kv.RwTx
 	memDb            kv.RwDB
-	deletedEntries   map[string]map[string]struct{}
+	deletedEntries   *sync.Map
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
 	readTx           kv.Tx
@@ -83,7 +79,7 @@ func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 		db:             tx,
 		memDb:          memDB,
 		memTx:          mem,
-		deletedEntries: make(map[string]map[string]struct{}),
+		deletedEntries: &sync.Map{},
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
 	}, nil
@@ -109,7 +105,7 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 		db:             tx,
 		memDb:          tmpDB,
 		memTx:          memTx,
-		deletedEntries: make(map[string]map[string]struct{}),
+		deletedEntries: &sync.Map{},
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
 	}, nil
@@ -162,12 +158,23 @@ func (m *MemoryMutation) isTableCleared(table string) bool {
 }
 
 func (m *MemoryMutation) isEntryDeleted(table string, key []byte) bool {
-	_, ok := m.deletedEntries[table]
+	keys, ok := m.deletedEntries.Load(table)
 	if !ok {
-		return ok
+		return false
 	}
-	_, ok = m.deletedEntries[table][string(key)]
+	_, ok = keys.(*sync.Map).Load(string(key))
 	return ok
+}
+
+func (m *MemoryMutation) deletedKeys(yield func(table, key string) bool) {
+	more := true
+	m.deletedEntries.Range(func(table, keys any) bool {
+		keys.(*sync.Map).Range(func(key, _ any) bool {
+			more = yield(table.(string), key.(string))
+			return more
+		})
+		return more
+	})
 }
 
 func (m *MemoryMutation) isDupDeleted(table string, key []byte, val []byte) bool {
@@ -383,7 +390,8 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 	cleared := m.isTableCleared(table)
 	// Hidden rows don't count against limit, so the db side must be free to
 	// look past them; the merge below still stops at limit.
-	hidden := len(m.deletedEntries[table]) > 0 || len(m.deletedDups[table]) > 0
+	_, hidden := m.deletedEntries.Load(table)
+	hidden = hidden || len(m.deletedDups[table]) > 0
 	m.mu.RUnlock()
 	if m.readTx != nil && !cleared {
 		dbLimit := limit
@@ -607,12 +615,12 @@ func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) Delete(table string, k []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t, ok := m.deletedEntries[table]
+	t, ok := m.deletedEntries.Load(table)
 	if !ok {
-		t = make(map[string]struct{})
-		m.deletedEntries[table] = t
+		t = &sync.Map{}
+		m.deletedEntries.Store(table, t)
 	}
-	t[string(k)] = struct{}{}
+	t.(*sync.Map).Store(string(k), struct{}{})
 	return m.memTx.Delete(table, k)
 }
 
@@ -723,11 +731,9 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	// Obliterate entries who are to be deleted
-	for bucket, keys := range m.deletedEntries {
-		for key := range keys {
-			if err := tx.Delete(bucket, []byte(key)); err != nil {
-				return err
-			}
+	for bucket, key := range m.deletedKeys {
+		if err := tx.Delete(bucket, []byte(key)); err != nil {
+			return err
 		}
 	}
 	// Iterate over each bucket and apply changes accordingly.
@@ -872,10 +878,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 		memDiff.clearedTableNames = append(memDiff.clearedTableNames, bucket)
 	}
 	// Obliterate entries who are to be deleted
-	for bucket, keys := range m.deletedEntries {
-		for key := range keys {
-			memDiff.deletedEntries[bucket] = append(memDiff.deletedEntries[bucket], key)
-		}
+	for bucket, key := range m.deletedKeys {
+		memDiff.deletedEntries[bucket] = append(memDiff.deletedEntries[bucket], key)
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {

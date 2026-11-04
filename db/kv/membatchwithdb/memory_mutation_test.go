@@ -165,6 +165,8 @@ func TestFlush(t *testing.T) {
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("CBAA")))
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("AAAA")))
 	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4")))
 	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5")))
 	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5")))
@@ -178,6 +180,9 @@ func TestFlush(t *testing.T) {
 	value, err = rwTx.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
 	require.Equal(t, value, []byte("value5"))
+	value, err = rwTx.GetOne(kv.HeaderNumber, []byte("CBAA"))
+	require.NoError(t, err)
+	require.Nil(t, value)
 }
 
 // TestFlushAppendPath exercises the Append fast-path used when all in-memory
