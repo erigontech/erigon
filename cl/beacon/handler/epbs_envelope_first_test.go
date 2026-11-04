@@ -368,7 +368,11 @@ func TestPostEnvelopeContentsGossipModeReleasesPreparationAfterOneSlot(t *testin
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- f.post(t.Context(), body, "application/octet-stream", "true", "") }()
 
-	<-writing
+	select {
+	case <-writing:
+	case recorder := <-done:
+		require.Failf(t, "the handler answered before the first column write", "status %d: %s", recorder.Code, recorder.Body.String())
+	}
 	require.False(t, f.preparationAllowed(), "preparation must wait while the columns are stored")
 	require.Eventually(t, f.preparationAllowed, 2*time.Second, 10*time.Millisecond, "the hold must end one slot after gossip validation")
 	closeRelease()
@@ -602,27 +606,65 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 	})
 
 	// The rows below are not on the early path, so their contents validation runs under the request context.
-	cancelDuringGossipValidation := func(f *envelopeContentsFixture) context.Context {
-		requestCtx, cancel := context.WithCancel(f.t.Context())
-		f.t.Cleanup(cancel)
-		f.forkchoice.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
-			cancel()
-			return nil
-		}
-		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(ctx context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
-			return ctx.Err()
-		}
-		return requestCtx
+	interruptions := []struct {
+		name      string
+		interrupt func(*envelopeContentsFixture) context.Context
+	}{
+		{name: "the client leaves", interrupt: func(f *envelopeContentsFixture) context.Context {
+			requestCtx, cancel := context.WithCancel(f.t.Context())
+			f.t.Cleanup(cancel)
+			f.forkchoice.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+				cancel()
+				return nil
+			}
+			f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(ctx context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+				return ctx.Err()
+			}
+			return requestCtx
+		}},
+		{name: "the request deadline passes", interrupt: func(f *envelopeContentsFixture) context.Context {
+			requestCtx, cancel := context.WithTimeout(f.t.Context(), 500*time.Millisecond)
+			f.t.Cleanup(cancel)
+			f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(ctx context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			return requestCtx
+		}},
 	}
 
-	t.Run("consensus mode", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
+	for _, interruption := range interruptions {
+		t.Run("consensus mode when "+interruption.name, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
 
-		recorder := f.postContents(cancelDuringGossipValidation(f), f.contents(f.blobs...), "?broadcast_validation=consensus")
+			recorder := f.postContents(interruption.interrupt(f), f.contents(f.blobs...), "?broadcast_validation=consensus")
 
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		f.requireNoEvents()
-	})
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			f.requireNoEvents()
+		})
+
+		t.Run("legacy route when "+interruption.name, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+
+			recorder := f.postLegacy(interruption.interrupt(f))
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			f.requireNoEvents()
+		})
+
+		t.Run("retry of a persisted envelope when "+interruption.name, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failPublish = failPublishOf(5)
+			body := f.contents(f.blobs...)
+			require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, "").Code)
+			events := len(f.events)
+
+			recorder := f.postContents(interruption.interrupt(f), body, "")
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Len(t, f.events, events)
+		})
+	}
 
 	t.Run("consensus mode publishes the columns after the client leaves", func(t *testing.T) {
 		f := newEnvelopeContentsFixture(t, 0, 2)
@@ -636,28 +678,6 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 		f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
 
 		f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
-	})
-
-	t.Run("legacy route", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-
-		recorder := f.postLegacy(cancelDuringGossipValidation(f))
-
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		f.requireNoEvents()
-	})
-
-	t.Run("retry of a persisted envelope", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		f.failPublish = failPublishOf(5)
-		body := f.contents(f.blobs...)
-		require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, "").Code)
-		events := len(f.events)
-
-		recorder := f.postContents(cancelDuringGossipValidation(f), body, "")
-
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		require.Len(t, f.events, events)
 	})
 }
 

@@ -1095,7 +1095,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		}
 		if err != nil {
 			status := http.StatusBadRequest
-			if errors.Is(err, context.DeadlineExceeded) && errors.Is(contentsCtx.Err(), context.DeadlineExceeded) {
+			if envelopeFirst && errors.Is(err, context.DeadlineExceeded) && errors.Is(contentsCtx.Err(), context.DeadlineExceeded) {
 				status = http.StatusServiceUnavailable
 			}
 			beaconhttp.NewEndpointError(status, err).WriteTo(w)
