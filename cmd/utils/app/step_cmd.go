@@ -295,6 +295,11 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 	if current.StepSize != plan.fromStepSize {
 		return fmt.Errorf("step size is %d, the plan was made at %d", current.StepSize, plan.fromStepSize)
 	}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if _, ok := current.FrozenAt(domain); ok {
+			return fmt.Errorf("%s domain is frozen, its files cannot be rebased", domain)
+		}
+	}
 	stoppedEnds, err := readStoppedCommitmentEnds(ctx, dirs)
 	if err != nil {
 		return err

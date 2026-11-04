@@ -191,6 +191,52 @@ func TestStepRebaseKeepsDatadirSettings(t *testing.T) {
 	}
 }
 
+func TestStepRebaseApplyRefusesNewFrozenCommitment(t *testing.T) {
+	commitmentflags.Restore(t)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	refs := false
+	variant := state.TrieVariantHexBin
+	hash := commitment.PBinHashBlake3
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{
+		StepSize:                       16,
+		StepsInFrozenFile:              4,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+		TrieHash:                       &hash,
+	}))
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	writeTestChaindata(t, dirs)
+	oldFile := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-2.kv")
+	newFile := filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-4.kv")
+	writeTestFile(t, oldFile)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := buildStepRebasePlan(dirs, settings, 8, false, 0, nil, nil, logger)
+	require.NoError(t, err)
+	frozen := *settings
+	frozen.FrozenAtTxNum = map[string]uint64{kv.CommitmentDomain.String(): 64}
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &frozen))
+
+	err = applyStepRebasePlan(context.Background(), dirs, plan, logger)
+	require.ErrorContains(t, err, "commitment domain is frozen")
+	require.FileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	require.FileExists(t, oldFile)
+	require.NoFileExists(t, newFile)
+	tx, err := openTestChaindata(t, dirs).BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	headerVal, err := tx.GetOne(kv.Headers, []byte("header-key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("header-val"), headerVal)
+	untouched, err := state.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	_, ok := untouched.FrozenAt(kv.CommitmentDomain)
+	require.True(t, ok)
+	require.Equal(t, uint64(16), untouched.StepSize)
+}
+
 func TestStepRebaseIncreaseRefusesMisalignedFile(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	writeTestFile(t, filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-20.kv"))
