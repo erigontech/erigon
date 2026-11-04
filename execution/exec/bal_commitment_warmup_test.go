@@ -350,6 +350,21 @@ func TestBALPrefetchKeys(t *testing.T) {
 	require.Equal(t, append(a1[:], s2[:]...), slots[1])
 }
 
+func TestBALPrefetchSampleIsTheEvenSampleOfAllKeys(t *testing.T) {
+	bal := make(types.BlockAccessList, 700)
+	for i := range bal {
+		bal[i].Address = common.Address{18: byte(i >> 8), 19: byte(i)}
+		for j := range i % 5 {
+			bal[i].StorageChanges = append(bal[i].StorageChanges, types.SlotChanges{Slot: accounts.InternKey(common.Hash{30: byte(j), 31: byte(i)})})
+			bal[i].StorageReads = append(bal[i].StorageReads, common.Hash{29: 1, 30: byte(j), 31: byte(i)})
+		}
+	}
+	accs, slots := balPrefetchKeys(bal)
+	sampleAccs, sampleSlots := balPrefetchSample(bal)
+	require.Equal(t, sampleEvenly(accs), sampleAccs)
+	require.Equal(t, sampleEvenly(slots), sampleSlots)
+}
+
 func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
 	accs, slots := balPrefetchKeys(nil)
 	require.Empty(t, accs)

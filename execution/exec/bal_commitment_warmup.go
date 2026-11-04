@@ -358,7 +358,7 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, acc
 
 // stateKeysCold reports whether a sample of the BAL's account or storage keys hit cold pages: then the batch prefetch
 // reads the state instead of the per-key warmup, which would read the same pages again.
-func stateKeysCold(ctx context.Context, db kv.RoDB, accs, slots [][]byte) bool {
+func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) bool {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return false
@@ -372,23 +372,51 @@ func stateKeysCold(ctx context.Context, db kv.RoDB, accs, slots [][]byte) bool {
 	if !ok {
 		return false
 	}
+	accs, slots := balPrefetchSample(bal)
 	return stateSampleCold(ctx, p, accs, slots)
 }
 
 func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte) bool {
-	cold := func(domain kv.Domain, keys [][]byte) bool {
-		return len(keys) > 0 && !mostlyResident(ctx, p, domain, sampleEvenly(keys))
+	cold := func(domain kv.Domain, sample [][]byte) bool {
+		return len(sample) > 0 && !mostlyResident(ctx, p, domain, sample)
 	}
 	return cold(kv.AccountsDomain, accs) || cold(kv.StorageDomain, slots)
+}
+
+// balPrefetchSample returns sampleEvenly of balPrefetchKeys without building all keys, so the residency check does
+// not delay the per-key warmup on a large BAL.
+func balPrefetchSample(bal types.BlockAccessList) (accs, slots [][]byte) {
+	accStep, slotStep := max(1, len(bal)/residencySampleKeys), max(1, balSlotCount(bal)/residencySampleKeys)
+	for i := 0; i < len(bal); i += accStep {
+		accs = append(accs, bal[i].Address[:])
+	}
+	idx := 0
+	for i := range bal {
+		addr := bal[i].Address[:]
+		for _, sc := range bal[i].StorageChanges {
+			if idx%slotStep == 0 {
+				slots = append(slots, slotKey(addr, sc.Slot.Value()))
+			}
+			idx++
+		}
+		for _, sr := range bal[i].StorageReads {
+			if idx%slotStep == 0 {
+				slots = append(slots, slotKey(addr, sr))
+			}
+			idx++
+		}
+	}
+	return accs, slots
+}
+
+func slotKey(addr []byte, slot common.Hash) []byte {
+	return append(append(make([]byte, 0, length.Addr+length.Hash), addr...), slot[:]...)
 }
 
 // balPrefetchKeys returns the account keys and the address||slot storage keys the BAL touches. Account keys alias
 // bal's addresses; storage keys share one allocation, each capped at its own length so an append cannot reach the next.
 func balPrefetchKeys(bal types.BlockAccessList) (accs, slots [][]byte) {
-	n := 0
-	for i := range bal {
-		n += len(bal[i].StorageChanges) + len(bal[i].StorageReads)
-	}
+	n := balSlotCount(bal)
 	const keyLen = length.Addr + length.Hash
 	arena := make([]byte, 0, n*keyLen)
 	accs, slots = make([][]byte, len(bal)), make([][]byte, 0, n)
@@ -408,6 +436,14 @@ func balPrefetchKeys(bal types.BlockAccessList) (accs, slots [][]byte) {
 		}
 	}
 	return accs, slots
+}
+
+func balSlotCount(bal types.BlockAccessList) int {
+	n := 0
+	for i := range bal {
+		n += len(bal[i].StorageChanges) + len(bal[i].StorageReads)
+	}
+	return n
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, stats *prefetchStats) error {
