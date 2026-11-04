@@ -480,7 +480,10 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		if stateByBatch = cold.any(); stateByBatch {
 			group.Go(func() error {
 				prefetchBALState(ctx, db, bal, cold)
-				return nil
+				// The batch only reads pages; the accounts' per-key warmup also fills the state cache that exec reads.
+				accs := balAccounts(bal)
+				accTasks, accWorkers := makeBALWarmupPlan(accs, workers)
+				return bra.warmBALState(ctx, db, accs, accTasks, codeMode, txCodeDestinations, accWorkers)
 			})
 		}
 	}
@@ -490,6 +493,16 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		})
 	}
 	return group.Wait()
+}
+
+// balAccounts returns the BAL without its storage changes and reads.
+func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
+	accs := make(types.BlockAccessList, len(bal))
+	for i := range bal {
+		accs[i] = bal[i]
+		accs[i].StorageChanges, accs[i].StorageReads = nil, nil
+	}
+	return accs
 }
 
 // batchReadsState reports whether the batch prefetch reads the BAL state instead of the per-key warmup: only when the
