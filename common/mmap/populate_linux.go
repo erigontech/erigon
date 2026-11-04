@@ -31,7 +31,7 @@ import (
 )
 
 // BatchPrefetch enables probed reads (Probe) and io_uring page batches (ReadPages).
-var BatchPrefetch = dbg.EnvBool("BAL_BATCH_PREFETCH", false)
+var BatchPrefetch = dbg.BALBatchPrefetch
 
 type mapping struct {
 	start, end uintptr

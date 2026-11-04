@@ -340,14 +340,14 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	accs := make([][]byte, 0, len(bal))
 	var slots [][]byte
 	for i := range bal {
-		addr := bal[i].Address
-		accs = append(accs, bytes.Clone(addr[:]))
+		addr := bal[i].Address[:] // this is alloc-free because `bal` object is on heap
+		accs = append(accs, addr)
 		for _, sc := range bal[i].StorageChanges {
 			slot := sc.Slot.Value()
-			slots = append(slots, append(bytes.Clone(addr[:]), slot[:]...))
+			slots = append(slots, append(bytes.Clone(addr), slot[:]...))
 		}
 		for _, sr := range bal[i].StorageReads {
-			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
+			slots = append(slots, append(bytes.Clone(addr), sr[:]...))
 		}
 	}
 	var stats [3]prefetchStats
