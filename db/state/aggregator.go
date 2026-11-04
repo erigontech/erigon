@@ -2750,6 +2750,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 	tried := map[uintptr]struct{}{}
 	for waves := 0; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
+		wave := make(map[uintptr]struct{}, len(pending)) // keys sharing a page count it once
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
@@ -2762,7 +2763,10 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			if _, done := tried[page]; done {
 				continue // an earlier wave read or skipped it: leave the key to the normal read
 			}
-			cold = append(cold, page)
+			if _, dup := wave[page]; !dup {
+				wave[page] = struct{}{}
+				cold = append(cold, page)
+			}
 			next = append(next, k)
 		}
 		// A failed page goes into tried below, so the next wave goes on with the other keys.
