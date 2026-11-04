@@ -29,7 +29,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -351,18 +353,29 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
 }
 
-// balPrefetchKeys returns the account keys and the address||slot storage keys the BAL touches.
+// balPrefetchKeys returns the account keys and the address||slot storage keys the BAL touches. Account keys alias
+// bal's addresses; storage keys share one allocation, each capped at its own length so an append cannot reach the next.
 func balPrefetchKeys(bal types.BlockAccessList) (accs, slots [][]byte) {
-	accs = make([][]byte, 0, len(bal))
+	n := 0
 	for i := range bal {
-		addr := bal[i].Address
-		accs = append(accs, bytes.Clone(addr[:]))
+		n += len(bal[i].StorageChanges) + len(bal[i].StorageReads)
+	}
+	const keyLen = length.Addr + length.Hash
+	arena := make([]byte, 0, n*keyLen)
+	accs, slots = make([][]byte, len(bal)), make([][]byte, 0, n)
+	addKey := func(addr []byte, slot common.Hash) {
+		start := len(arena)
+		arena = append(append(arena, addr...), slot[:]...)
+		slots = append(slots, arena[start:len(arena):len(arena)])
+	}
+	for i := range bal {
+		addr := bal[i].Address[:]
+		accs[i] = addr
 		for _, sc := range bal[i].StorageChanges {
-			slot := sc.Slot.Value()
-			slots = append(slots, append(bytes.Clone(addr[:]), slot[:]...))
+			addKey(addr, sc.Slot.Value())
 		}
 		for _, sr := range bal[i].StorageReads {
-			slots = append(slots, append(bytes.Clone(addr[:]), sr[:]...))
+			addKey(addr, sr)
 		}
 	}
 	return accs, slots
