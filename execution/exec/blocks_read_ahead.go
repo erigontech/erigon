@@ -469,6 +469,9 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		stateByBatch = stateKeysCold(ctx, db, bal)
 		group.Go(func() error {
 			prefetchBAL(ctx, db, bal, stateByBatch)
+			if stateByBatch {
+				return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+			}
 			return nil
 		})
 	}
