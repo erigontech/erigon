@@ -203,7 +203,7 @@ func (r *Reader) InMem() bool { return r.keepInMem }
 
 // ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
 func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
-	if pr != nil {
+	if pr != nil && !r.keepInMem {
 		r.probe(v, pr)
 	}
 	return r.inner.Contains(v)

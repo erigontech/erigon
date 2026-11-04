@@ -80,8 +80,8 @@ func (b *Filter) InMem() bool {
 // ContainsHashProbe is ContainsHash with pr touching the filter pages it reads, for a mapped filter.
 func (b *Filter) ContainsHashProbe(hashedKey uint64, pr *mmap.Probe) bool {
 	switch {
-	case b.empty || b.InMem():
-		return b.ContainsHash(hashedKey)
+	case b.empty:
+		return true
 	case b.fuseReaderSharded != nil:
 		return b.fuseReaderSharded.ContainsHashProbe(hashedKey, pr)
 	case b.fuseReader != nil:
