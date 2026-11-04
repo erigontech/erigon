@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -319,4 +320,16 @@ func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
 
 	require.Positive(t, tx.calls, "a touched key's path is read")
 	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
+}
+
+type coldPagesPrefetcher struct{ coldPerKey int }
+
+func (p coldPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration) {
+	return 1, p.coldPerKey * len(keys), 0, 0
+}
+
+func TestTrieMostlyResidentSkipsAResidentTrie(t *testing.T) {
+	keys := balCommitmentWarmupKeys(threeAccountChanges())
+	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys))
+	require.False(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys))
 }
