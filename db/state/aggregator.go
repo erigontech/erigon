@@ -2740,6 +2740,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 	}()
 	pending := keys
+	tried := map[uintptr]struct{}{}
 	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		t0 := time.Now()
 		cold := make([]uintptr, 0, len(pending))
@@ -2748,15 +2749,23 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			if ctx.Err() != nil {
 				return waves, pages, plan, io
 			}
-			if page, ok := probeLatestFromFiles(dt, k); ok {
-				cold = append(cold, page)
-				next = append(next, k)
+			page, ok := probeLatestFromFiles(dt, k)
+			if !ok {
+				continue
 			}
+			if _, done := tried[page]; done {
+				continue // an earlier wave read or skipped it: leave the key to the normal read
+			}
+			cold = append(cold, page)
+			next = append(next, k)
 		}
 		t1 := time.Now()
 		err := mmap.ReadPages(cold)
 		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
 		pages += len(cold)
+		for _, page := range cold {
+			tried[page] = struct{}{}
+		}
 		if err != nil {
 			// The pages stay cold, so the next wave would only resubmit them.
 			break
