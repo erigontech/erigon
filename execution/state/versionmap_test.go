@@ -2158,8 +2158,8 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(42), val)
 }
 
-// Readers combine a destruct's flag with other cells' flags, so marking an entry with destruct
-// cells must wait for its readers.
+// Readers combine a true destruct's flag with other cells' flags, so marking an entry with one
+// must wait for its readers.
 func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
 	t.Parallel()
 
@@ -2257,6 +2257,44 @@ func TestMarkWritesCompleteWaitsForReadersOfARevivedEntry(t *testing.T) {
 		case <-done:
 			e.mu.RUnlock()
 			t.Fatal("MarkWritesComplete marked a revived entry under a reader")
+		default:
+		}
+		if !e.mu.TryRLock() {
+			break
+		}
+		e.mu.RUnlock()
+		runtime.Gosched()
+	}
+	e.mu.RUnlock()
+	<-done
+}
+
+// A created account that is then destroyed in the block holds a false marker below the true
+// destruct; marking the destruct must still wait for readers.
+func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(55)
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: false}), true)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: true},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: uint256.Int{}},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	for {
+		select {
+		case <-done:
+			e.mu.RUnlock()
+			t.Fatal("MarkWritesComplete marked a destroyed entry under a reader")
 		default:
 		}
 		if !e.mu.TryRLock() {
