@@ -787,6 +787,7 @@ type Getter struct {
 	multiPageReadThreshold     uint64
 	trace                      bool
 	residencyGate              bool
+	slowReset                  bool // residencyGate or a probe set
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -951,13 +952,23 @@ func (g *Getter) DataLen() int {
 }
 
 // SetProbe makes the next reads touch their pages through pr; nil turns probing off.
-func (g *Getter) SetProbe(pr *mmap.Probe) { g.probe = pr }
+func (g *Getter) SetProbe(pr *mmap.Probe) {
+	g.probe = pr
+	g.slowReset = g.residencyGate || pr != nil
+}
 
 func (g *Getter) Probe() *mmap.Probe { return g.probe }
 
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.slowReset {
+		g.resetSlow(offset)
+	}
+}
+
+// resetSlow keeps the probe and the residency gate out of Reset, so Reset still inlines.
+func (g *Getter) resetSlow(offset uint64) {
 	if g.probe != nil && offset < uint64(len(g.data)) {
 		g.probe.Touch(unsafe.Pointer(&g.data[offset]))
 	}
