@@ -635,7 +635,8 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			return *applyRes, err
 		}()
 
-		if result.Err == nil {
+		// With fees deferred, finalize post-processes once it credits them.
+		if result.Err == nil && calcFees {
 			result.Err = protocol.PostProcessTx(engine, chainConfig, ibs, t.Txs, t.TxIndex)
 		}
 		if result.Err == nil {
