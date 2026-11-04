@@ -1717,10 +1717,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 				} else if traceGetLatest == dt.name {
 					fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 				}
-			} else {
-				if traceGetLatest == dt.name {
-					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
-				}
+			} else if traceGetLatest == dt.name {
+				fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 			}
 		}
 
