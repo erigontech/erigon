@@ -713,3 +713,52 @@ func TestPostEnvelopeContentsMixesCachedAndRequestBundles(t *testing.T) {
 		})
 	}
 }
+
+func TestPostEnvelopeContentsConsensusModesRetryOfIgnoredEnvelope(t *testing.T) {
+	const failedColumn = 5
+	importIgnoringAfterPersisting := func(f *envelopeContentsFixture, persisted *cltypes.SignedExecutionPayloadEnvelope) {
+		f.forkchoice.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+			f.forkchoice.SetEnvelope(f.root, persisted)
+			return forkchoice.ErrIgnore
+		}
+	}
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		query := "?broadcast_validation=" + mode
+		t.Run(mode+"/a fresh claim keeps 400", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			importIgnoringAfterPersisting(f, f.signedEnvelope)
+
+			recorder := f.postContents(t.Context(), f.contents(f.blobs...), query)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.True(t, f.forkchoice.OnExecutionPayloadCalled)
+			require.Empty(t, f.eventsOf(eventEnvelopePublish))
+		})
+		t.Run(mode+"/a different persisted envelope answers 503", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failPublish = func(index uint64) error {
+				if index == failedColumn {
+					return errors.New("injected publish failure")
+				}
+				return nil
+			}
+			body := f.contents(f.blobs...)
+			first := f.postContents(t.Context(), body, query)
+			require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
+			_, retryRecorded := f.handler.executionPayloadEnvelopeRetries.Peek(executionPayloadEnvelopeGossipKey{
+				BeaconBlockRoot: f.root, BuilderIndex: f.signedEnvelope.Message.BuilderIndex,
+			})
+			require.True(t, retryRecorded)
+
+			f.failPublish = nil
+			different := &cltypes.SignedExecutionPayloadEnvelope{Message: f.signedEnvelope.Message}
+			different.Signature[0] ^= 1
+			importIgnoringAfterPersisting(f, different)
+			second := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusServiceUnavailable, second.Code, second.Body.String())
+			require.Contains(t, f.succeededIndices(eventColumnPublish), uint64(failedColumn))
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "only the first POST publishes the envelope")
+		})
+	}
+}
