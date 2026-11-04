@@ -226,13 +226,13 @@ func (g *GossipManager) defaultSyncContributionTopicParams() *pubsub.TopicScoreP
 // rateBasedTopicParams scores a topic by its expected message rate; mesh delivery stays
 // unscored, like the subnet topics.
 func (g *GossipManager) rateBasedTopicParams(topicWeight float64, messagesPerSlot uint64) *pubsub.TopicScoreParams {
-	rate := messagesPerSlot * 2 / gossip.GossipSubD
+	rate := float64(messagesPerSlot) * 2 / gossip.GossipSubD
 	if rate == 0 {
 		log.Warn("rate is 0, skipping initializing topic scoring")
 		return nil
 	}
 	firstMessageDecay := g.scoreDecay(g.oneEpochDuration())
-	firstMessageCap, err := decayLimit(firstMessageDecay, float64(rate))
+	firstMessageCap, err := decayLimit(firstMessageDecay, rate)
 	if err != nil {
 		log.Warn("Skipping initializing topic scoring", "err", err)
 		return nil

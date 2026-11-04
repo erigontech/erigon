@@ -55,6 +55,19 @@ func TestSyncSubnetScoringWithFewValidatorsPerMeshPeer(t *testing.T) {
 	}
 }
 
+func TestAggregateScoringWithFewAggregatorsPerMeshPeer(t *testing.T) {
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	beaconConfig.TargetAggregatorsPerCommittee = 1
+	topic := newScoredTopicForTest(t)
+	for _, tc := range []struct {
+		activeValidators uint64
+		rate             float64
+	}{{4096, 0.25}, {8192, 0.5}, {12288, 0.75}, {16384, 1}, {20480, 1.25}} {
+		g := &GossipManager{beaconConfig: beaconConfig, networkConfig: networkConfig, activeIndicies: tc.activeValidators}
+		requireAcceptedTopicScoreParams(t, topic, g.defaultAggregateTopicParams(), tc.activeValidators, tc.rate)
+	}
+}
+
 func newScoredTopicForTest(t *testing.T) *pubsub.Topic {
 	t.Helper()
 	h, err := libp2p.New(libp2p.NoListenAddrs)
