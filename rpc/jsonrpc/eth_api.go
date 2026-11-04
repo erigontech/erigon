@@ -486,7 +486,8 @@ const defaultUnsettledPreMergeTTL = time.Second
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
 
-// checkTxIndex accepts -1 (the whole block) and txCount (state after the last transaction).
+// checkTxIndex accepts positions from 0 through txCount and the -1 whole-block sentinel.
+// Position txCount is after the last user transaction, before the final system transaction.
 func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
 	if txIndex < -1 || txIndex > txCount {
 		return &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNum)}
@@ -494,16 +495,30 @@ func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
 	return nil
 }
 
-func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) error {
-	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return err
+// checkTxIndexInBlock validates an index and returns the txNum of the block's
+// initial system transaction. User transaction zero has pre-state at minTxNum+1.
+func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
+	if txIndex < -1 {
+		return 0, checkTxIndex(blockNum, txIndex, 0)
 	}
-	maxTxNum, err := api._txNumReader.Max(ctx, tx, blockNum)
+	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return checkTxIndex(blockNum, txIndex, int(maxTxNum-minTxNum)-1)
+	defer c.Close()
+	minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if !hasMin || !hasMax || maxTxNum <= minTxNum {
+		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
+	}
+	txCount := int(maxTxNum-minTxNum) - 1
+	return minTxNum, checkTxIndex(blockNum, txIndex, txCount)
 }
 
 // checkPruneHistory requires history from the block's first system transaction.

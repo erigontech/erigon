@@ -227,9 +227,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 	if keepStoredChainConfig {
-		sameChainID := newCfg.ChainID == storedCfg.ChainID ||
-			(newCfg.ChainID != nil && storedCfg.ChainID != nil && newCfg.ChainID.Eq(storedCfg.ChainID))
-		if genesis != nil && !sameChainID {
+		if genesis != nil && !sameUint256(newCfg.ChainID, storedCfg.ChainID) {
 			return newCfg, storedBlock, fmt.Errorf("genesis chain ID mismatch: database has %v, supplied genesis has %v", storedCfg.ChainID, newCfg.ChainID)
 		}
 		// storedCfg is the receiver of CheckCompatible below, so overriding it in
@@ -258,15 +256,59 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 				return newCfg, storedBlock, err
 			}
 		}
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
+		toleratedForks, compatibilityErr := checkCompatibleTolerating(storedCfg, newCfg, *height, headTime)
 		if compatibilityErr != nil {
 			return newCfg, storedBlock, compatibilityErr
+		}
+		if len(toleratedForks) > 0 {
+			logger.Warn("Replacing the stored chain config, tolerating PoW-era fork differences that select nothing on this chain",
+				"genesisHash", storedHash, "toleratedForkChanges", strings.Join(toleratedForks, ", "), "storedConfig", storedCfg, "newConfig", newCfg)
 		}
 	}
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
+}
+
+func sameUint256(a, b *uint256.Int) bool {
+	return a == b || (a != nil && b != nil && a.Eq(b))
+}
+
+// checkCompatibleTolerating runs CheckCompatible after the PoW-era forks that are nil in one
+// config and 0 in the other take their stored value, and lists those forks. With TTD 0 every
+// block after genesis is PoS, so DAO, the glaciers and MergeNetsplit select nothing; with London
+// at block 0 the difficulty calculation never selects Muir Glacier. The chain ID and the engine
+// setup must match too, as CheckCompatible does not fully compare them.
+func checkCompatibleTolerating(stored, next *chain.Config, height, headTime uint64) (tolerated []string, err *chain.ConfigCompatError) {
+	normalized := next.Copy()
+	tolerate := func(name string, storedFork, newFork *uint64) *uint64 {
+		switch {
+		case storedFork == nil && newFork != nil && *newFork == 0:
+			tolerated = append(tolerated, name+" nil->0")
+		case newFork == nil && storedFork != nil && *storedFork == 0:
+			tolerated = append(tolerated, name+" 0->nil")
+		default:
+			return newFork
+		}
+		return storedFork
+	}
+	if sameUint256(stored.ChainID, next.ChainID) &&
+		sameUint256(stored.TerminalTotalDifficulty, next.TerminalTotalDifficulty) &&
+		stored.TerminalTotalDifficultyPassed == next.TerminalTotalDifficultyPassed &&
+		stored.Aura == nil && next.Aura == nil && !stored.IsL2() && !next.IsL2() {
+		posFromGenesis := stored.TerminalTotalDifficulty != nil && stored.TerminalTotalDifficulty.IsZero()
+		if posFromGenesis {
+			normalized.DAOForkBlock = tolerate("daoForkBlock", stored.DAOForkBlock, next.DAOForkBlock)
+			normalized.ArrowGlacierBlock = tolerate("arrowGlacierBlock", stored.ArrowGlacierBlock, next.ArrowGlacierBlock)
+			normalized.GrayGlacierBlock = tolerate("grayGlacierBlock", stored.GrayGlacierBlock, next.GrayGlacierBlock)
+			normalized.MergeNetsplitBlock = tolerate("mergeNetsplitBlock", stored.MergeNetsplitBlock, next.MergeNetsplitBlock)
+		}
+		if posFromGenesis || stored.IsLondon(0) {
+			normalized.MuirGlacierBlock = tolerate("muirGlacierBlock", stored.MuirGlacierBlock, next.MuirGlacierBlock)
+		}
+	}
+	return tolerated, stored.CheckCompatible(normalized, height, headTime)
 }
 
 // headTimestamp reads the head header's time, falling back to the block files: kv.Headers

@@ -85,7 +85,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{
@@ -220,7 +220,7 @@ func TestBeaconBlocksByRangeHandlerStaysInRequestedRange(t *testing.T) {
 			ethClock := getEthClock(t)
 			_, beaconCfg := clparams.GetConfigsByNetwork(1)
 			c := NewConsensusHandlers(ctx, store, indiciesDB, host, &clparams.NetworkConfig{}, nil,
-				beaconCfg, ethClock, nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true)
+				beaconCfg, ethClock, nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil)
 			c.Start()
 
 			var reqBuf bytes.Buffer

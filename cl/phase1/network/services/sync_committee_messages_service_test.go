@@ -838,3 +838,46 @@ func TestSyncCommitteesEvictedSlotStaysEvictedAfterHeadRollback(t *testing.T) {
 	_, recorded := s.(*syncCommitteeMessagesService).seenSyncCommitteeMessages.Load(key)
 	require.False(t, recorded, "a different message claimed an evicted slot after the head rolled back")
 }
+
+// While the first copy of a message waits in its pool add, an identical submission is answered from the seen map and
+// published. The first copy then reports the message as already published instead of queuing it for publishing again.
+func TestSyncCommitteesClaimantIgnoresMessagePublishedWhileItWaitedForThePool(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	entered, release := make(chan struct{}, 1), make(chan struct{})
+	releasePool := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releasePool)
+	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(*state.CachingBeaconState, uint64, *cltypes.SyncCommitteeMessage) error {
+			entered <- struct{}{}
+			<-release
+			return nil
+		}).Times(1)
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	s, synced := newSyncCommitteesServiceWithPool(t, ethClock, pool)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
+	require.NoError(t, synced.OnHeadState(headState))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+
+	claimant := make(chan error, 1)
+	go func() { claimant <- s.ProcessMessage(t.Context(), new(uint64), msg) }()
+	select {
+	case <-entered:
+	case err := <-claimant:
+		t.Fatalf("the first copy finished before its pool add: %v", err)
+	}
+	duplicate := *msg
+	require.NoError(t, s.ProcessMessage(t.Context(), new(uint64), &duplicate), "the identical submission is not answered from the seen map")
+	m := msg.SyncCommitteeMessage
+	s.MarkPublished(0, m.Slot, m.ValidatorIndex, m.BeaconBlockRoot, m.Signature)
+	releasePool()
+
+	select {
+	case err := <-claimant:
+		require.ErrorIs(t, err, ErrIgnore)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first copy did not finish")
+	}
+}

@@ -3,7 +3,12 @@ package beaconevents
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/erigontech/erigon/common"
 )
+
+// Sized for every column of two blocks.
+const dataColumnStoredBufferSize = 256
 
 type EventEmitter struct {
 	stateFeed                    *stateFeed     // block state feed
@@ -12,6 +17,7 @@ type EventEmitter struct {
 	payloadAttributesSubscribers atomic.Int64
 	blockIndicesMu               sync.Mutex
 	blockIndicesChanged          chan struct{}
+	dataColumnStored             chan common.Hash
 }
 
 // BlockIndicesChanged returns a channel that closes when an import commits block
@@ -59,8 +65,26 @@ func (e *EventEmitter) WithHeadEventLock(fn func()) {
 
 func NewEventEmitter() *EventEmitter {
 	return &EventEmitter{
-		operationFeed: newOpFeed(),
-		stateFeed:     newStateFeed(),
+		operationFeed:    newOpFeed(),
+		stateFeed:        newStateFeed(),
+		dataColumnStored: make(chan common.Hash, dataColumnStoredBufferSize),
+	}
+}
+
+func (e *EventEmitter) DataColumnStored() <-chan common.Hash {
+	if e == nil {
+		return nil
+	}
+	return e.dataColumnStored
+}
+
+func (e *EventEmitter) NotifyDataColumnStored(blockRoot common.Hash) {
+	if e == nil {
+		return
+	}
+	select {
+	case e.dataColumnStored <- blockRoot:
+	default:
 	}
 }
 
