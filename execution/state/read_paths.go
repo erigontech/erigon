@@ -865,6 +865,9 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 			}
 			if base != nil {
 				acc = base
+				// The recorded value is now the resolved base, so a versioned reader over this
+				// read set (the fee calculation) can use it instead of reading the base again.
+				r.hdr.accSource = AccountFromBase
 			}
 		}
 		if r.recordVR {

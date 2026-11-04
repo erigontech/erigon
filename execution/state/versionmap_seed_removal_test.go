@@ -344,3 +344,30 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 }
+
+// TestBALMarkedAccountReadServesTheFeeReader pins that a tx's resolved read of a BAL-marked
+// account is reused by the versioned reader the fee calculation builds over the tx's read set,
+// instead of reading the committed base again.
+func TestBALMarkedAccountReadServesTheFeeReader(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xba5e"))
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Balance = *uint256.NewInt(100)
+	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
+	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(50)}}}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	startNoMaterializeTx(ibs, vm, 1)
+	exists, err := ibs.Exist(a)
+	require.NoError(t, err)
+	require.True(t, exists)
+	reads := reader.reads
+
+	got, err := NewVersionedStateReader(1, ibs.VersionedReads(), vm, reader).ReadAccountData(a)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(1), got.Nonce)
+	require.Equal(t, reads, reader.reads, "the recorded read answers the fee reader")
+}
