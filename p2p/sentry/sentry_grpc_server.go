@@ -395,6 +395,9 @@ const (
 	// Short bursts are allowed; sustained announcement floods disconnect the peer.
 	blockAnnouncementsBurst            = 30
 	blockAnnouncementsRate  rate.Limit = 10
+
+	headerRequestsBurst            = 30
+	headerRequestsRate  rate.Limit = 10
 )
 
 // newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
@@ -446,6 +449,7 @@ func runPeer(
 
 	newBlockHashesLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
 	newBlockLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	headerRequestsLimiter := rate.NewLimiter(headerRequestsRate, headerRequestsBurst)
 
 	for {
 		if !peerPrinted {
@@ -478,6 +482,12 @@ func runPeer(
 			// Status messages should never arrive after the handshake
 			return p2p.NewPeerError(p2p.PeerErrorStatusUnexpected, p2p.DiscSubprotocolError, nil, "sentry.runPeer: unexpected status message")
 		case eth.GetBlockHeadersMsg:
+			// Fast sequential downloads can exceed the rate limit.
+			// Waiting keeps the connection open but also delays later ETH messages on it.
+			if err := headerRequestsLimiter.Wait(ctx); err != nil {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, err, "sentry.runPeer: waiting for header request allowance")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}

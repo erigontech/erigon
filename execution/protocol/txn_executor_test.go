@@ -1764,3 +1764,55 @@ func TestApplyMessage_ServiceTxDecisionNotKeptOnReusedMessage(t *testing.T) {
 	require.NoError(t, apply(true))
 	require.ErrorIs(t, apply(false), ErrFeeCapTooLow)
 }
+
+type accountsReader struct {
+	*state.NoopReader
+	accounts map[accounts.Address]*accounts.Account
+}
+
+func (r accountsReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return r.accounts[addr], nil
+}
+
+// A transfer to a code-less recipient that validation credits skips the frame, but a call tracer
+// still sees its top-level CALL.
+func TestRecipientCreditedAtValidationReportsCallToTracer(t *testing.T) {
+	const blockGasLimit = 1_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	existing := accounts.NewAccount()
+	ibs := state.New(accountsReader{accounts: map[accounts.Address]*accounts.Account{recipient: &existing}})
+	defer ibs.Close()
+
+	type frame struct {
+		depth    int
+		typ      byte
+		to       accounts.Address
+		value    uint256.Int
+		exitSeen bool
+	}
+	var frames []frame
+	hooks := &tracing.Hooks{
+		OnEnter: func(depth int, typ byte, _, to accounts.Address, _ bool, _ []byte, _ uint64, value uint256.Int, _ []byte) {
+			frames = append(frames, frame{depth: depth, typ: typ, to: to, value: value})
+		},
+		OnExit: func(depth int, _ []byte, _ uint64, err error, reverted bool) {
+			require.Equal(t, 0, depth)
+			require.NoError(t, err)
+			require.False(t, reverted)
+			frames[len(frames)-1].exitSeen = true
+		},
+	}
+	evm := vm.NewEVM(evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: blockGasLimit},
+		evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true, Tracer: hooks})
+	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(5), blockGasLimit,
+		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
+
+	result, err := ApplyMessageChargeSenderAtValidation(evm, msg, NewGasPool(blockGasLimit, 0), nil)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	balance, err := ibs.GetBalance(recipient)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "the run credited the recipient; validation must do it")
+	require.Equal(t, []frame{{depth: 0, typ: byte(vm.CALL), to: recipient, value: *uint256.NewInt(5), exitSeen: true}}, frames)
+}
