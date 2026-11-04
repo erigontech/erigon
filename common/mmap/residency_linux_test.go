@@ -80,7 +80,7 @@ func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
 	defer f.Close()
 	m, err := OpenRo(f, 2*os.Getpagesize())
 	require.NoError(t, err)
-	defer m.Unmap()
+	defer func() { require.NoError(t, m.Unmap()) }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

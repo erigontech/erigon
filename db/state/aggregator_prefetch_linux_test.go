@@ -101,7 +101,7 @@ func fileMappings(t *testing.T, dir string) []fileMapping {
 	raw, err := os.ReadFile("/proc/self/maps")
 	require.NoError(t, err)
 	var maps []fileMapping
-	for _, line := range strings.Split(string(raw), "\n") {
+	for line := range strings.SplitSeq(string(raw), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 6 || !strings.HasPrefix(fields[5], dir) {
 			continue
