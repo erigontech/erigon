@@ -479,13 +479,29 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		cold = batchReadsState(codeMode, func() coldState { return stateKeysCold(ctx, db, bal) })
 	}
 	group.Go(func() error {
+		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
 		if cold.any() {
-			// The batch only reads pages; the per-key warmup after it also fills the state cache that exec reads.
 			prefetchBALState(ctx, db, bal, cold)
+			// The batch only reads pages, so the per-key warmup still fills the state cache, but not with the slots the batch
+			// read: a per-key read of them that starts after the batch only competes with exec.
+			if cold.storage {
+				warm = balAccounts(bal)
+				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
+			}
 		}
-		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+		return bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
 	})
 	return group.Wait()
+}
+
+// balAccounts returns the BAL without its storage changes and reads.
+func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
+	accs := make(types.BlockAccessList, len(bal))
+	for i := range bal {
+		accs[i] = bal[i]
+		accs[i].StorageChanges, accs[i].StorageReads = nil, nil
+	}
+	return accs
 }
 
 // batchReadsState reports which state domains the batch prefetch reads ahead of the per-key warmup: the cold ones, and

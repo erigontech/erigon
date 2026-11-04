@@ -464,7 +464,7 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 }
 
 // stateKeysCold reports which state domains a sample of the BAL's keys finds cold: the batch prefetch reads those
-// domains before the per-key warmup, so the warmup finds their pages resident.
+// domains ahead of the per-key warmup.
 func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) coldState {
 	var cold coldState
 	_ = withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
