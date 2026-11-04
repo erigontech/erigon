@@ -1033,6 +1033,37 @@ func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResu
 	require.Equal(t, "malicious-peer", pid)
 }
 
+func TestSendBeaconBlocksByRangeReqDecodesChunksAcrossForkBoundary(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = cfg.FuluForkEpoch + 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	boundarySlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+
+	var response bytes.Buffer
+	for i, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		block := cltypes.NewSignedBeaconBlock(&cfg, version)
+		block.Block.Slot = boundarySlot - 1 + uint64(i)
+		digest, err := clock.ComputeForkDigest(block.Block.Slot / cfg.SlotsPerEpoch)
+		require.NoError(t, err)
+		if i > 0 {
+			require.NoError(t, response.WriteByte(0))
+		}
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+	}
+
+	sentinel := &blockResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+	blocks, _, err := client.SendBeaconBlocksByRangeReq(t.Context(), boundarySlot-1, 2)
+	require.NoError(t, err)
+	require.Len(t, blocks, 2)
+	require.Equal(t, clparams.FuluVersion, blocks[0].Version())
+	require.Equal(t, boundarySlot-1, blocks[0].Block.Slot)
+	require.Equal(t, clparams.GloasVersion, blocks[1].Version())
+	require.Equal(t, boundarySlot, blocks[1].Block.Slot)
+	require.Empty(t, sentinel.bannedPeer)
+}
+
 // TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds pins that a client's peer refresh loop
 // stops once its ctx is cancelled: four clients, none left. A genesis of now keeps the clock at
 // Phase0, so the loop's first run returns before it asks the sentinel for anything.
