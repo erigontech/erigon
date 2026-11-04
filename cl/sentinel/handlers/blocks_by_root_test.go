@@ -233,7 +233,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
@@ -370,7 +370,7 @@ func setupBlocksByRootHandler(t *testing.T, denebForkEpoch uint64) *blocksByRoot
 	beaconCfg := *mainnetCfg
 	beaconCfg.DenebForkEpoch = denebForkEpoch
 	c := NewConsensusHandlers(ctx, store, indiciesDB, host, &clparams.NetworkConfig{}, nil, &beaconCfg, getEthClock(t),
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true)
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil)
 	c.Start()
 
 	requestRaw := func(payload []byte) []byte {

@@ -61,7 +61,7 @@ func TestPingRateLimit(t *testing.T) {
 	c := NewConsensusHandlers(
 		ctx, beaconDB, indiciesDB, server,
 		&clparams.NetworkConfig{}, testLocalNode(t), beaconCfg, ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -127,7 +127,7 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 	c := NewConsensusHandlers(
 		ctx, store, indiciesDB, server,
 		&clparams.NetworkConfig{}, nil, beaconCfg, ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -196,7 +196,7 @@ func TestByRangeRateLimitHugeCount(t *testing.T) {
 			c := NewConsensusHandlers(
 				ctx, tests.NewMockBlockReader(), indiciesDB, server,
 				&clparams.NetworkConfig{}, nil, beaconCfg, getEthClock(t),
-				nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+				nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 			)
 			c.Start()
 

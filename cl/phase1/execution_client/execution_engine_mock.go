@@ -363,6 +363,84 @@ func (c *MockExecutionEngineGetClientVersionV1Call) DoAndReturn(f func(context.C
 	return c
 }
 
+// GetHeaderByHash mocks base method.
+func (m *MockExecutionEngine) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetHeaderByHash", ctx, hash)
+	ret0, _ := ret[0].(*types.Header)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetHeaderByHash indicates an expected call of GetHeaderByHash.
+func (mr *MockExecutionEngineMockRecorder) GetHeaderByHash(ctx, hash any) *MockExecutionEngineGetHeaderByHashCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeaderByHash", reflect.TypeOf((*MockExecutionEngine)(nil).GetHeaderByHash), ctx, hash)
+	return &MockExecutionEngineGetHeaderByHashCall{Call: call}
+}
+
+// MockExecutionEngineGetHeaderByHashCall wrap *gomock.Call
+type MockExecutionEngineGetHeaderByHashCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineGetHeaderByHashCall) Return(arg0 *types.Header, arg1 error) *MockExecutionEngineGetHeaderByHashCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineGetHeaderByHashCall) Do(f func(context.Context, common.Hash) (*types.Header, error)) *MockExecutionEngineGetHeaderByHashCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineGetHeaderByHashCall) DoAndReturn(f func(context.Context, common.Hash) (*types.Header, error)) *MockExecutionEngineGetHeaderByHashCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetPayloadBodiesByHash mocks base method.
+func (m *MockExecutionEngine) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPayloadBodiesByHash", ctx, hashes)
+	ret0, _ := ret[0].([]*engine_types.ExecutionPayloadBodyV2)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPayloadBodiesByHash indicates an expected call of GetPayloadBodiesByHash.
+func (mr *MockExecutionEngineMockRecorder) GetPayloadBodiesByHash(ctx, hashes any) *MockExecutionEngineGetPayloadBodiesByHashCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPayloadBodiesByHash", reflect.TypeOf((*MockExecutionEngine)(nil).GetPayloadBodiesByHash), ctx, hashes)
+	return &MockExecutionEngineGetPayloadBodiesByHashCall{Call: call}
+}
+
+// MockExecutionEngineGetPayloadBodiesByHashCall wrap *gomock.Call
+type MockExecutionEngineGetPayloadBodiesByHashCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineGetPayloadBodiesByHashCall) Return(arg0 []*engine_types.ExecutionPayloadBodyV2, arg1 error) *MockExecutionEngineGetPayloadBodiesByHashCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineGetPayloadBodiesByHashCall) Do(f func(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error)) *MockExecutionEngineGetPayloadBodiesByHashCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineGetPayloadBodiesByHashCall) DoAndReturn(f func(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error)) *MockExecutionEngineGetPayloadBodiesByHashCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // HasBlock mocks base method.
 func (m *MockExecutionEngine) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
 	m.ctrl.T.Helper()

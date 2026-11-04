@@ -640,7 +640,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 		nil,
 		&beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, columnStorage, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, columnStorage, nil, true, nil,
 	)
 	c.Start()
 

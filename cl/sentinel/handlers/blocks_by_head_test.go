@@ -150,7 +150,7 @@ func setupBlocksByHeadTest(
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, forkChoice, nil, nil, nil, true,
+		nil, forkChoice, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
