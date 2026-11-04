@@ -278,11 +278,12 @@ func withMissingAncestors(ctx context.Context, cfg *Cfg, batch *peers.PeeredObje
 	if start >= orphan.Block.Slot {
 		return batch.Data
 	}
-	// The poll that delivers an orphan runs half a slot into a slot whose block is late; the lookup must not hold the loop into the next slot.
+	// Bound each lookup to half a slot so the loop can still react to the gossip block.
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second/2)
 	defer cancel()
-	ancestors, ok := fetchLinkedAncestors(ctx, cfg, batch.Peer, orphan, start)
-	if !ok {
+	ancestors, err := fetchLinkedAncestors(ctx, cfg, batch.Peer, orphan, start)
+	if err != nil {
+		log.Debug("[chainTipSync] ancestor lookup failed", "peer", batch.Peer, "startSlot", start, "orphanSlot", orphan.Block.Slot, "err", err)
 		cfg.ancestorLookupFailedSlot = cfg.ethClock.GetCurrentSlot()
 		return batch.Data
 	}
@@ -291,20 +292,29 @@ func withMissingAncestors(ctx context.Context, cfg *Cfg, batch *peers.PeeredObje
 
 // fetchLinkedAncestors asks the peer for the slots from start below the orphan until what it
 // returned links the orphan's parent to a known block.
-func fetchLinkedAncestors(ctx context.Context, cfg *Cfg, peer string, orphan *cltypes.SignedBeaconBlock, start uint64) ([]*cltypes.SignedBeaconBlock, bool) {
+func fetchLinkedAncestors(ctx context.Context, cfg *Cfg, peer string, orphan *cltypes.SignedBeaconBlock, start uint64) ([]*cltypes.SignedBeaconBlock, error) {
 	var fetched []*cltypes.SignedBeaconBlock
-	for next, end, requests := start, orphan.Block.Slot, 0; next < end && requests < maxAncestorLookupRequests; requests++ {
+	next, end := start, orphan.Block.Slot
+	for requests := 0; next < end && requests < maxAncestorLookupRequests; requests++ {
 		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, end-next)
-		if err != nil || len(blocks) == 0 || !slotsIncreasingWithin(blocks, next, end) {
-			return nil, false
+		switch {
+		case err != nil:
+			return nil, err
+		case len(blocks) == 0:
+			return nil, fmt.Errorf("empty response, blocks fetched before: %d", len(fetched))
+		case !slotsIncreasingWithin(blocks, next, end):
+			return nil, errors.New("response slots out of range or not increasing")
 		}
 		fetched = append(fetched, blocks...)
 		if linked, ok := linkedAncestors(cfg, fetched, orphan.Block.ParentRoot); ok {
-			return linked, true
+			return linked, nil
 		}
 		next = blocks[len(blocks)-1].Block.Slot + 1
 	}
-	return nil, false
+	if next < end {
+		return nil, fmt.Errorf("request cap of %d reached", maxAncestorLookupRequests)
+	}
+	return nil, errors.New("window does not link the orphan to a known block")
 }
 
 func slotsIncreasingWithin(blocks []*cltypes.SignedBeaconBlock, from, to uint64) bool {
