@@ -108,7 +108,9 @@ func makeFullGloasTipAndEnvelope(t *testing.T, cfg *clparams.BeaconChainConfig, 
 	return block, envelope, root
 }
 
-func acceptAnyRoot(common.Hash) bool { return true }
+func acceptAnyTip(*cltypes.SignedBeaconBlock, common.Hash, *cltypes.SignedExecutionPayloadEnvelope) bool {
+	return true
+}
 
 func requestMoreWithin(t *testing.T, downloader *ForwardBeaconDownloader) bool {
 	t.Helper()
@@ -241,22 +243,25 @@ func TestForwardBeaconDownloaderImportsHeldGloasTipWithHTTPEnvelope(t *testing.T
 	downloader := newHeldTipDownloader(t, cfg, client, tip, "http-fallback")
 	downloader.SetHTTPFallbackURL(newEnvelopeServer(t, root, envelopeBytes).URL)
 	var processedBlocks []*cltypes.SignedBeaconBlock
-	var processedEnvelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-		processedBlocks, processedEnvelopes = blocks, envelopes
+		processedBlocks = blocks
+		require.Empty(t, envelopes)
 		return blocks[len(blocks)-1].Block.Slot, nil
 	})
 
-	var acceptedRoot common.Hash
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), time.Second, func(root common.Hash) bool {
-		acceptedRoot = root
+	var importedTip *cltypes.SignedBeaconBlock
+	var importedRoot common.Hash
+	var importedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), time.Second, func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+		importedTip, importedRoot, importedEnvelope = tip, root, envelope
 		return true
 	}))
-	require.Equal(t, root, acceptedRoot)
+	require.Same(t, tip, importedTip)
+	require.Equal(t, root, importedRoot)
 	require.Zero(t, sentinel.calls.Load())
 	require.Equal(t, []*cltypes.SignedBeaconBlock{tip}, processedBlocks)
-	require.NotNil(t, processedEnvelopes[root])
-	processedEnvelopeBytes, err := processedEnvelopes[root].EncodeSSZ(nil)
+	require.NotNil(t, importedEnvelope)
+	processedEnvelopeBytes, err := importedEnvelope.EncodeSSZ(nil)
 	require.NoError(t, err)
 	require.Equal(t, envelopeBytes, processedEnvelopeBytes)
 	require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
@@ -275,7 +280,7 @@ func TestForwardBeaconDownloaderImportsHeldGloasTipWithoutEnvelope(t *testing.T)
 		return 10, nil
 	})
 
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
 	require.Equal(t, 1, processed)
 }
 
@@ -292,7 +297,7 @@ func TestForwardBeaconDownloaderBoundsHeldGloasTipEnvelopeFetch(t *testing.T) {
 
 	const budget = 200 * time.Millisecond
 	start := time.Now()
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), budget, acceptAnyRoot))
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), budget, acceptAnyTip))
 	require.Less(t, time.Since(start), budget+budget/2)
 }
 
@@ -319,7 +324,9 @@ func TestForwardBeaconDownloaderRetriesHeldGloasTipInNextSlot(t *testing.T) {
 				return test.processedSlot(highest), nil
 			})
 			importTip := func() bool {
-				return downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, func(common.Hash) bool { return test.accepted })
+				return downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, func(*cltypes.SignedBeaconBlock, common.Hash, *cltypes.SignedExecutionPayloadEnvelope) bool {
+					return test.accepted
+				})
 			}
 
 			require.False(t, importTip())
@@ -356,7 +363,7 @@ func TestForwardBeaconDownloaderDropsRejectedHeldGloasTip(t *testing.T) {
 				return highest, test.err
 			})
 
-			require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+			require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
 			require.Equal(t, test.wantBanned, banned)
 			require.Nil(t, downloader.gloasLookahead)
 			require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
@@ -380,7 +387,7 @@ func TestForwardBeaconDownloaderKeepsHeldGloasTipWhenContextIsCancelled(t *testi
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	require.False(t, downloader.ImportHeldGloasTip(ctx, 50*time.Millisecond, acceptAnyRoot))
+	require.False(t, downloader.ImportHeldGloasTip(ctx, 50*time.Millisecond, acceptAnyTip))
 	require.False(t, processed)
 	require.Empty(t, banned)
 	require.Same(t, tip, downloader.gloasLookahead)
@@ -395,15 +402,17 @@ func TestForwardBeaconDownloaderFetchesHeldGloasTipEnvelopeFromHTTPAfterP2P(t *t
 	client, sentinel := newNoPeersRPC(t, cfg)
 	downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
 	downloader.SetHTTPFallbackURL(newEnvelopeServer(t, root, envelopeBytes).URL)
-	var processedEnvelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-		processedEnvelopes = envelopes
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
 		return blocks[len(blocks)-1].Block.Slot, nil
 	})
 
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 400*time.Millisecond, acceptAnyRoot))
+	var importedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 400*time.Millisecond, func(_ *cltypes.SignedBeaconBlock, _ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+		importedEnvelope = envelope
+		return true
+	}))
 	require.NotZero(t, sentinel.calls.Load())
-	require.NotNil(t, processedEnvelopes[root])
+	require.NotNil(t, importedEnvelope)
 }
 
 // In HTTP-preferred mode every empty beacon API answer waits like a P2P retry, so a tip that cannot be imported, or a
@@ -610,7 +619,7 @@ func TestForwardBeaconDownloaderKeepsFullFrontierAfterEmptyAnswer(t *testing.T) 
 	}
 	downloader.requestBlocksByRange = answerEmpty
 	require.True(t, requestMoreWithin(t, downloader))
-	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
 
 	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 		return []*cltypes.SignedBeaconBlock{full}, "duplicate-peer", nil
@@ -618,7 +627,7 @@ func TestForwardBeaconDownloaderKeepsFullFrontierAfterEmptyAnswer(t *testing.T) 
 	require.False(t, requestMoreWithin(t, downloader))
 	downloader.requestBlocksByRange = answerEmpty
 	require.True(t, requestMoreWithin(t, downloader))
-	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
 	require.Equal(t, []uint64{9}, processed)
 	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
 
@@ -629,6 +638,130 @@ func TestForwardBeaconDownloaderKeepsFullFrontierAfterEmptyAnswer(t *testing.T) 
 	require.NotNil(t, processedEnvelopes[fullRoot])
 
 	require.True(t, requestMoreWithin(t, downloader))
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyRoot))
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
 	require.Equal(t, []uint64{9, 10, 11}, processed)
+}
+
+// A held block whose successor was downloaded is never imported as a tip, however its successor was dropped.
+func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *testing.T) {
+	const (
+		heldSlot    = 10
+		currentSlot = 13
+	)
+	tests := []struct {
+		name string
+		// drop runs while the block is held and leaves it not held; nil means the first download already did.
+		drop func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness)
+		// parentProcessed is the highest processed slot before the first download.
+		parentProcessed uint64
+	}{
+		{
+			name:            "successor re-sent while the envelope is missing",
+			parentProcessed: 8,
+			drop: func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness) {
+				h.downloadFromHTTP(t, d)
+			},
+		},
+		{
+			name:            "no processable prefix on first observation",
+			parentProcessed: 9,
+		},
+		{
+			name:            "disconnected retry while held",
+			parentProcessed: 8,
+			drop: func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness) {
+				other := makeGloasBlock(heldSlot-1, hash(0xdd), common.Hash{})
+				other.Block.ParentRoot = hash(0xee)
+				h.downloadFromPeer(t, d, other)
+			},
+		},
+		{
+			name:            "process error while held",
+			parentProcessed: 8,
+			drop: func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness) {
+				h.failNextProcess.Store(true)
+				h.downloadFromHTTP(t, d)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := gloasFromGenesisConfig()
+			a := makeGloasBlock(heldSlot-1, hash(0xa0), common.Hash{})
+			b := makeGloasBlock(heldSlot, hash(0xb0), common.Hash{})
+			c := makeGloasBlock(heldSlot+1, hash(0xc0), hash(0xb0))
+			linkBeaconBlocks(t, a, b, c)
+			encoded := map[string][]byte{}
+			for _, block := range []*cltypes.SignedBeaconBlock{a, b, c} {
+				bytes, err := block.EncodeSSZ(nil)
+				require.NoError(t, err)
+				encoded[fmt.Sprintf("/eth/v2/beacon/blocks/%d", block.Block.Slot)] = bytes
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				bytes, ok := encoded[r.URL.Path]
+				if !ok {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Eth-Consensus-Version", "gloas")
+				_, _ = w.Write(bytes)
+			}))
+			t.Cleanup(server.Close)
+
+			h := &tipRouteHarness{}
+			client, _ := newNoPeersRPC(t, cfg)
+			downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+			downloader.SetHighestProcessedSlot(test.parentProcessed)
+			downloader.SetCurrentSlotSampler(func() uint64 { return currentSlot })
+			downloader.SetHTTPFallbackURL(server.URL)
+			var processedHeld bool
+			downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+				if h.failNextProcess.CompareAndSwap(true, false) {
+					return highest, errors.New("process failed")
+				}
+				for _, block := range blocks {
+					processedHeld = processedHeld || block.Block.Slot == heldSlot
+					highest = block.Block.Slot
+				}
+				return highest, nil
+			})
+
+			h.downloadFromHTTP(t, downloader)
+			if test.drop != nil {
+				require.NotNil(t, downloader.gloasLookahead)
+				require.Equal(t, uint64(heldSlot), downloader.gloasLookahead.Block.Slot)
+				test.drop(t, downloader, h)
+			}
+			require.Nil(t, downloader.gloasLookahead)
+
+			h.downloadFromPeer(t, downloader, b)
+			require.Equal(t, uint64(heldSlot), downloader.gloasLookahead.Block.Slot)
+			downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+				return []*cltypes.SignedBeaconBlock{}, "lagging-peer", nil
+			}
+			require.True(t, requestMoreWithin(t, downloader))
+			require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+			require.False(t, processedHeld)
+			require.Equal(t, uint64(heldSlot-1), downloader.GetHighestProcessedSlot())
+		})
+	}
+}
+
+type tipRouteHarness struct {
+	failNextProcess atomic.Bool
+}
+
+func (*tipRouteHarness) downloadFromHTTP(t *testing.T, d *ForwardBeaconDownloader) {
+	t.Helper()
+	d.httpPreferred.Store(true)
+	require.False(t, requestMoreWithin(t, d))
+}
+
+func (*tipRouteHarness) downloadFromPeer(t *testing.T, d *ForwardBeaconDownloader, blocks ...*cltypes.SignedBeaconBlock) {
+	t.Helper()
+	d.httpPreferred.Store(false)
+	d.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return blocks, "peer", nil
+	}
+	require.False(t, requestMoreWithin(t, d))
 }

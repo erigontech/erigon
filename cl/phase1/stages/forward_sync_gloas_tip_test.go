@@ -92,9 +92,13 @@ type forwardSyncTipFixture struct {
 // newForwardSyncTipFixture returns a node whose peers serve a FULL Gloas tip and no block in the slotsAfterTip slots
 // after it. Its clock stays at the current slot until a test moves it.
 func newForwardSyncTipFixture(t *testing.T, slotsAfterTip uint64, tipInForkChoice bool) *forwardSyncTipFixture {
+	return newForwardSyncTipFixtureWithBlob(t, slotsAfterTip, tipInForkChoice, false)
+}
+
+func newForwardSyncTipFixtureWithBlob(t *testing.T, slotsAfterTip uint64, tipInForkChoice, withBlob bool) *forwardSyncTipFixture {
 	t.Helper()
 
-	cfg, graph, tipRoot, successor, emptyChild, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	cfg, graph, tipRoot, successor, emptyChild, _ := newChainTipBatchFixtureWithBlob(t, execution_client.PayloadStatusValidated, false, withBlob)
 	tip := graph.parents[tipRoot]
 	envelope := graph.envelopes[tipRoot]
 	delete(graph.parents, tipRoot)
@@ -162,6 +166,19 @@ func TestForwardSyncEndsAtGloasTipWithoutSuccessor(t *testing.T) {
 			})
 		}
 	}
+}
+
+// The tip has no child that built on its payload, so its envelope must pass the data availability check before it
+// takes effect; a miss queues it for the retry.
+func TestForwardSyncQueuesTipEnvelopeUntilDataIsAvailable(t *testing.T) {
+	f := newForwardSyncTipFixtureWithBlob(t, 2, false, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+	require.Equal(t, f.tipRoot, f.cfg.forwardSyncTipRoot)
+	require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+	require.Equal(t, f.tipRoot, f.head(t))
 }
 
 // The answer that brings the tip covers no slot after it, so ForwardSync asks again and finds the successor.
