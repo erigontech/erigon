@@ -324,9 +324,9 @@ func TestRejectedUnwindKeepsPooledTransaction(t *testing.T) {
 			var unwind TxnSlots
 			unwind.Append(rejected, sender[:], false)
 			err = pool.withLockedState(ctx, &unwind, func(_ kv.TemporalTx, view kvcache.CacheView) error {
-				_, err := pool.addTxnsOnNewBlock(1, view, &remoteproto.StateChangeBatch{}, pool.senders, unwind, nil,
+				_, addErr := pool.addTxnsOnNewBlock(1, view, &remoteproto.StateChangeBatch{}, pool.senders, unwind, nil,
 					pool.blockGasLimit.Load(), pool.logger)
-				return err
+				return addErr
 			})
 			require.NoError(t, err)
 			require.Zero(t, pool.totalBlobsInPool.Load())

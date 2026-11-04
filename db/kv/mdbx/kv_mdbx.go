@@ -1715,13 +1715,17 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: tx.db.buckets[bucket].Flags&mdbx.DupSort != 0, id: tx.cursorID}
+	cfg, ok := tx.db.buckets[bucket]
+	if !ok {
+		return nil, fmt.Errorf("table %s not found", bucket)
+	}
+	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: cfg.Flags&mdbx.DupSort != 0, id: tx.cursorID}
 	tx.cursorID++
 
 	if tx.tx == nil {
 		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
 	}
-	if err := c.c.Open(tx.tx, mdbx.DBI(tx.db.buckets[c.bucketName].DBI)); err != nil {
+	if err := c.c.Open(tx.tx, mdbx.DBI(cfg.DBI)); err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
 

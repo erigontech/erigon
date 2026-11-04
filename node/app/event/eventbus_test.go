@@ -135,6 +135,24 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestManagedEventBusUnregisterAllReleasesLockOnError(t *testing.T) {
+	bus := NewServiceBus(&execPool{workerpool.New(runtime.NumCPU())}).GetEventBus("key")
+	owner := &struct{}{}
+	handler := func(int) {}
+	assert.NoError(t, bus.Register(owner, handler))
+	assert.NoError(t, bus.eventBus.Unsubscribe(handler))
+	assert.Error(t, bus.UnregisterAll(owner))
+
+	done := make(chan error, 1)
+	go func() { done <- bus.Register(owner, handler) }()
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Register blocked: UnregisterAll kept registrationLock after an error")
+	}
+}
+
 func TestPublish(t *testing.T) {
 	bus := NewEventBus(&execPool{workerpool.New(runtime.NumCPU())})
 	handler := func(a int, b int) {

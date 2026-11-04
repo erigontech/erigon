@@ -204,7 +204,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 
 	callOpts := &bind.CallOpts{BlockNumber: uint256.NewInt(blockNum)}
 	if et.currentEon == nil {
-		numKeyperSets, err := et.ksmContract.GetNumKeyperSets(callOpts)
+		var numKeyperSets uint64
+		numKeyperSets, err = et.ksmContract.GetNumKeyperSets(callOpts)
 		if err != nil {
 			return Eon{}, false, fmt.Errorf("get num keyper sets: %w", err)
 		}
@@ -215,7 +216,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 			return Eon{}, false, nil
 		}
 
-		activationBlock, err := et.ksmContract.GetKeyperSetActivationBlock(callOpts, 0)
+		var activationBlock uint64
+		activationBlock, err = et.ksmContract.GetKeyperSetActivationBlock(callOpts, 0)
 		if err != nil {
 			return Eon{}, false, fmt.Errorf("initial get keyper set activation block: %w", err)
 		}
