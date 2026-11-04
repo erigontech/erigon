@@ -1393,24 +1393,80 @@ func TestSSZRESTForkchoiceStartsPayloadBuild(t *testing.T) {
 	require.Equal(t, hexutil.Bytes{1, 2, 3, 4, 5, 6, 7, 8}, *response.PayloadId)
 }
 
-// A forkchoice with payload attributes whose timestamp belongs to a different
-// fork than the Eth-Execution-Version header must be rejected with 400 unsupported-fork.
+// REST treats a mismatch between Eth-Execution-Version and the fork determined by
+// payload_attributes.timestamp as a request validation error. Known and unknown
+// heads must return 400 unsupported-fork before applying forkchoice state or
+// starting a payload build.
 func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
-	srv := newTestEngineServer(allForksConfig(), true)
-	root := common.HexToHash("0x04")
-	attrs := &engine_types.PayloadAttributes{
-		Timestamp:             150, // shanghai era
-		SuggestedFeeRecipient: common.HexToAddress("0x06"),
-		ParentBeaconBlockRoot: &root,
-	}
-	attrs.SSZVersion = clparams.DenebVersion
-	body, err := encodeForkchoiceUpdate(clparams.DenebVersion, &engine_types.ForkChoiceState{}, attrs, nil)
-	require.NoError(t, err)
+	for _, tc := range []struct {
+		name      string
+		fork      string
+		version   clparams.StateVersion
+		timestamp hexutil.Uint64
+	}{
+		{"cancun/older_header", "shanghai", clparams.CapellaVersion, 200},
+		{"cancun/newer_header", "cancun", clparams.DenebVersion, 199},
+		{"amsterdam/older_header", "osaka", clparams.FuluVersion, 500},
+		{"amsterdam/newer_header", "amsterdam", clparams.GloasVersion, 499},
+	} {
+		for _, knownHead := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/known_head=%t", tc.name, knownHead), func(t *testing.T) {
+				cfg := allForksConfig()
+				cfg.TerminalTotalDifficulty = uint256.NewInt(0)
+				state := &engine_types.ForkChoiceState{
+					HeadHash:           common.Hash{0x01},
+					SafeBlockHash:      common.Hash{0x02},
+					FinalizedBlockHash: common.Hash{0x03},
+				}
+				attrs := goldenSampleAttrs(tc.version)
+				attrs.Timestamp = tc.timestamp
+				var forkchoiceReads, forkchoiceUpdates, payloadBuilds int
+				module := &stubExecutionModule{
+					getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+						forkchoiceReads++
+						// Keep the current state different so a known head would need a forkchoice update.
+						return execmodule.ForkChoiceState{}, nil
+					},
+					getHeaderFunc: func(context.Context, *common.Hash, *uint64) (*types.Header, error) {
+						if !knownHead {
+							return nil, nil
+						}
+						return &types.Header{Time: uint64(attrs.Timestamp) - 1}, nil
+					},
+					headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+						if !knownHead {
+							return nil, nil
+						}
+						return common.NewUint64(1), nil
+					},
+					updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+						forkchoiceUpdates++
+						return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: state.HeadHash}, nil
+					},
+					assembleBlockFunc: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+						payloadBuilds++
+						return execmodule.AssembleBlockResult{PayloadID: 1}, nil
+					},
+				}
+				srv := newProposingEngineServerWithConfig(cfg, module)
+				srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(
+					t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil,
+				)
+				srv.test = true // Disable downloads when the requested head is unknown.
+				body, err := encodeForkchoiceUpdate(tc.version, state, attrs, nil)
+				require.NoError(t, err)
+				rec := httptest.NewRecorder()
+				srv.SSZRESTHandler().ServeHTTP(rec,
+					newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", tc.fork, body))
 
-	rec := httptest.NewRecorder()
-	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "cancun", body))
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+				require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+				require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+				require.Zero(t, forkchoiceUpdates, "a fork mismatch must not apply forkchoice state")
+				require.Zero(t, payloadBuilds, "a fork mismatch must not start a payload build")
+				require.Zero(t, forkchoiceReads, "a fork mismatch must be rejected before forkchoice processing")
+			})
+		}
+	}
 }
 
 func TestSSZRESTBlobsV2V3Availability(t *testing.T) {
