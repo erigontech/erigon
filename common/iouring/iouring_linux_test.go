@@ -19,6 +19,7 @@ package iouring
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -92,4 +93,26 @@ func TestBlockingBatchReadDrainsTheWaveOfAFailedCompletion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"stuv", "opqr", "klmn", "ghij", "cdef", "89ab", "4567", "0123"},
 		[]string{string(bufs[0]), string(bufs[1]), string(bufs[2]), string(bufs[3]), string(bufs[4]), string(bufs[5]), string(bufs[6]), string(bufs[7])})
+}
+
+func TestBlockingBatchReadResetsRingWithNothingInFlight(t *testing.T) {
+	r, err := New(8)
+	require.NoError(t, err)
+	defer r.Close()
+
+	path := filepath.Join(t.TempDir(), "data")
+	require.NoError(t, os.WriteFile(path, make([]byte, 4096), 0o600))
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	scratch := [][]byte{make([]byte, 4096)}
+	ringFd := r.fd
+	r.fd = -1 // io_uring_enter fails with EBADF before it submits anything
+	err = r.BlockingBatchRead(int(f.Fd()), []int64{0}, []int{4096}, scratch)
+	r.fd = ringFd
+	require.ErrorIs(t, err, ErrRingReset)
+	require.Equal(t, atomic.LoadUint32(r.sqHead), atomic.LoadUint32(r.sqTail), "the unsubmitted SQE is dropped")
+
+	require.NoError(t, r.BlockingBatchRead(int(f.Fd()), []int64{0}, []int{4096}, scratch))
 }

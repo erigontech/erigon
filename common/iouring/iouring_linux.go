@@ -129,6 +129,15 @@ func New(entries uint32) (*Ring, error) {
 	return ring, nil
 }
 
+// ErrRingReset reports a batch that failed with no read left in flight: the ring was reset and stays usable.
+var ErrRingReset = errors.New("io_uring: ring reset with nothing in flight")
+
+// reset resyncs the cached indices to the kernel's, dropping unsubmitted SQEs and unreaped CQEs.
+func (r *Ring) reset() {
+	atomic.StoreUint32(r.sqTail, atomic.LoadUint32(r.sqHead))
+	atomic.StoreUint32(r.cqHead, atomic.LoadUint32(r.cqTail))
+}
+
 func (r *Ring) Close() {
 	if r.sqRing != nil {
 		_ = unix.Munmap(r.sqRing)
@@ -161,7 +170,7 @@ var ErrReadFailed = errors.New("io_uring read failed")
 
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
 // io_uring, keeping up to the ring size in flight. It returns after all complete. After
-// ErrReadFailed the failed wave is drained, so the ring and scratch can be reused; after any
+// ErrReadFailed or ErrRingReset no read is in flight, so the ring and scratch can be reused; after any
 // other error reads may still be in flight into scratch: the caller must not reuse them.
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
@@ -210,6 +219,10 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 				continue
 			}
 			if errno != 0 {
+				if submitted == reaped { // a failed enter submits nothing, so no read is in flight
+					r.reset()
+					return fmt.Errorf("io_uring_enter: %w: %w", ErrRingReset, errno)
+				}
 				return fmt.Errorf("io_uring_enter: %w", errno)
 			}
 			submitted += int(taken)
