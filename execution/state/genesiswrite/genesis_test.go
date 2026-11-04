@@ -351,7 +351,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	require.NoError(t, err)
 }
 
-func mergedChainConfig() *chain.Config {
+func posFromGenesisConfig() *chain.Config {
 	return &chain.Config{
 		ChainID:                 uint256.NewInt(1337),
 		HomesteadBlock:          common.NewUint64(0),
@@ -435,8 +435,8 @@ func requireConfigRejected(t *testing.T, db kv.RwDB, cfg *chain.Config, what str
 	return *compatErr
 }
 
-func TestCommitGenesisBlockAcceptsDroppedPoWForkOnMergedChain(t *testing.T) {
-	stored := mergedChainConfig()
+func TestCommitGenesisBlockAcceptsDroppedPoWForkOnPoSFromGenesisChain(t *testing.T) {
+	stored := posFromGenesisConfig()
 	db := dbAtHeightOne(t, stored)
 
 	next := stored.Copy()
@@ -444,8 +444,8 @@ func TestCommitGenesisBlockAcceptsDroppedPoWForkOnMergedChain(t *testing.T) {
 	requireConfigAccepted(t, db, next)
 }
 
-func TestCommitGenesisBlockAcceptsAddedPoWForkOnMergedChain(t *testing.T) {
-	stored := mergedChainConfig()
+func TestCommitGenesisBlockAcceptsAddedPoWForkOnPoSFromGenesisChain(t *testing.T) {
+	stored := posFromGenesisConfig()
 	db := dbAtHeightOne(t, stored)
 
 	next := stored.Copy()
@@ -523,7 +523,7 @@ func TestCommitGenesisBlockAcceptsSepoliaShadowForkConfig(t *testing.T) {
 }
 
 func TestCommitGenesisBlockRejectsDroppedPoWForkWithChainIDChange(t *testing.T) {
-	spuriousDragonNotActive := mergedChainConfig()
+	spuriousDragonNotActive := posFromGenesisConfig()
 	spuriousDragonNotActive.SpuriousDragonBlock = nil
 	spuriousDragonNotActive.TangerineWhistleBlock = nil
 	spuriousDragonNotActive.ByzantiumBlock = nil
@@ -532,7 +532,7 @@ func TestCommitGenesisBlockRejectsDroppedPoWForkWithChainIDChange(t *testing.T) 
 	spuriousDragonNotActive.IstanbulBlock = nil
 
 	for name, stored := range map[string]*chain.Config{
-		"EIP-155 active":     mergedChainConfig(),
+		"EIP-155 active":     posFromGenesisConfig(),
 		"EIP-155 not active": spuriousDragonNotActive,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -564,7 +564,7 @@ func TestCommitGenesisBlockRejectsHomesteadMove(t *testing.T) {
 }
 
 func TestCommitGenesisBlockRejectsPoWForkChangeOnUnmergedChain(t *testing.T) {
-	stored := mergedChainConfig()
+	stored := posFromGenesisConfig()
 	stored.TerminalTotalDifficulty = nil
 	db := dbAtHeightOne(t, stored)
 
@@ -581,7 +581,7 @@ func TestCommitGenesisBlockRejectsNonZeroPoWForkChange(t *testing.T) {
 		"1 to nil": {common.NewUint64(1), nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			stored := mergedChainConfig()
+			stored := posFromGenesisConfig()
 			stored.MuirGlacierBlock = forks[0]
 			db := dbAtHeightOne(t, stored)
 
@@ -593,7 +593,7 @@ func TestCommitGenesisBlockRejectsNonZeroPoWForkChange(t *testing.T) {
 }
 
 func TestCommitGenesisBlockRejectsPoWForkChangeWithHistoricalPoW(t *testing.T) {
-	stored := mergedChainConfig()
+	stored := posFromGenesisConfig()
 	stored.TerminalTotalDifficulty = uint256.NewInt(17_000_000_000_000_000)
 	stored.TerminalTotalDifficultyPassed = true
 	db := dbAtHeightOne(t, stored)
@@ -603,13 +603,13 @@ func TestCommitGenesisBlockRejectsPoWForkChangeWithHistoricalPoW(t *testing.T) {
 	requireConfigRejected(t, db, next, "DAO fork block")
 }
 
-func TestCommitGenesisBlockRejectsMergeMarkerOnlyInNewConfig(t *testing.T) {
+func TestCommitGenesisBlockRejectsZeroTTDOnlyInNewConfig(t *testing.T) {
 	for name, storedTTD := range map[string]*uint256.Int{
 		"no TTD":       nil,
 		"positive TTD": uint256.NewInt(17_000_000_000_000_000),
 	} {
 		t.Run(name, func(t *testing.T) {
-			stored := mergedChainConfig()
+			stored := posFromGenesisConfig()
 			stored.TerminalTotalDifficulty = storedTTD
 			db := dbAtHeightOne(t, stored)
 
@@ -621,13 +621,13 @@ func TestCommitGenesisBlockRejectsMergeMarkerOnlyInNewConfig(t *testing.T) {
 	}
 }
 
-func TestCommitGenesisBlockRejectsMergeMarkerOnlyInStoredConfig(t *testing.T) {
+func TestCommitGenesisBlockRejectsZeroTTDOnlyInStoredConfig(t *testing.T) {
 	for name, nextTTD := range map[string]*uint256.Int{
 		"no TTD":       nil,
 		"positive TTD": uint256.NewInt(17_000_000_000_000_000),
 	} {
 		t.Run(name, func(t *testing.T) {
-			stored := mergedChainConfig()
+			stored := posFromGenesisConfig()
 			db := dbAtHeightOne(t, stored)
 
 			next := stored.Copy()
@@ -639,7 +639,7 @@ func TestCommitGenesisBlockRejectsMergeMarkerOnlyInStoredConfig(t *testing.T) {
 }
 
 func TestCommitGenesisBlockRejectsToleratedForkHidingLaterConflict(t *testing.T) {
-	stored := mergedChainConfig()
+	stored := posFromGenesisConfig()
 	stored.BerlinBlock = common.NewUint64(0)
 	db := dbAtHeightOne(t, stored)
 
@@ -650,7 +650,7 @@ func TestCommitGenesisBlockRejectsToleratedForkHidingLaterConflict(t *testing.T)
 }
 
 func TestCommitGenesisBlockRejectsToleratedForkWithTimestampConflict(t *testing.T) {
-	stored := mergedChainConfig()
+	stored := posFromGenesisConfig()
 	stored.OsakaTime = common.NewUint64(1)
 	db := dbAtHeightOne(t, stored)
 
@@ -661,8 +661,8 @@ func TestCommitGenesisBlockRejectsToleratedForkWithTimestampConflict(t *testing.
 	require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
 }
 
-func TestCommitGenesisBlockRejectsNonPoWForkNilToZeroOnMergedChain(t *testing.T) {
-	stored := mergedChainConfig()
+func TestCommitGenesisBlockRejectsNonPoWForkNilToZeroOnPoSFromGenesisChain(t *testing.T) {
+	stored := posFromGenesisConfig()
 	db := dbAtHeightOne(t, stored)
 
 	next := stored.Copy()
@@ -671,7 +671,7 @@ func TestCommitGenesisBlockRejectsNonPoWForkNilToZeroOnMergedChain(t *testing.T)
 }
 
 func TestCommitGenesisBlockRejectsMuirGlacierDropWithoutLondonAtGenesis(t *testing.T) {
-	stored := mergedChainConfig()
+	stored := posFromGenesisConfig()
 	stored.TerminalTotalDifficulty = uint256.NewInt(17_000_000_000_000_000)
 	stored.MuirGlacierBlock = common.NewUint64(0)
 	db := dbAtHeightOne(t, stored)
