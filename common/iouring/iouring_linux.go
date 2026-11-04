@@ -156,12 +156,13 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 	*(*uint64)(unsafe.Add(base, 32)) = userData                                 // user_data @32
 }
 
-// BlockingBatchRead reads each (offset,len) request into scratch buffers using
-// io_uring, keeping up to the ring size in flight. It returns after all complete. After an
-// error, reads may still be in flight into scratch: the caller must not reuse the ring or scratch.
 // ErrReadFailed marks a read that completed with an error; the ring itself still works.
 var ErrReadFailed = errors.New("io_uring read failed")
 
+// BlockingBatchRead reads each (offset,len) request into scratch buffers using
+// io_uring, keeping up to the ring size in flight. It returns after all complete. After
+// ErrReadFailed the failed wave is drained, so the ring and scratch can be reused; after any
+// other error reads may still be in flight into scratch: the caller must not reuse them.
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
