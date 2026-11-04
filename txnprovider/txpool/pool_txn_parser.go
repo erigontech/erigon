@@ -257,7 +257,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		// The hash covers only the inner tx, so a known txn is rejected before its blobs are copied.
 		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
 		if validateHash != nil {
-			if err := validateHash(slot.IDHash[:]); err != nil {
+			err = validateHash(slot.IDHash[:])
+			if err != nil {
 				return p, err
 			}
 		}
@@ -392,7 +393,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if innerTxBytes == nil {
 		slot.IDHash = crypto.Keccak256Hash(txBytes)
 		if validateHash != nil {
-			if err = validateHash(slot.IDHash[:]); err != nil {
+			err = validateHash(slot.IDHash[:])
+			if err != nil {
 				return p, err
 			}
 		}
