@@ -99,10 +99,13 @@ func BlockingRead(fd int, off int64, length int) {
 	ringPool <- pr
 }
 
-// replaceBroken abandons a failed ring and gives its slot a new one; a slot whose ring cannot be recreated stops
-// reading.
+// replaceBroken abandons a failed ring and gives its slot a new one while no more rings than the pool size are
+// abandoned; after that, or when a new ring cannot be made, the slot stops reading.
 func replaceBroken(pr *pooledRing, err error) *pooledRing {
-	pr.r.Abandon(pr.buf)
+	if pr.r.Abandon(pr.buf) > cap(ringPool) {
+		brokenLog.Do(func() { log.Warn("[iouring] read ring failed, slot falls back to mmap faults", "err", err) })
+		return &pooledRing{}
+	}
 	r, newErr := New(8)
 	if newErr != nil {
 		brokenLog.Do(func() {

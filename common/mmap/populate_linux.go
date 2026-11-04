@@ -191,14 +191,15 @@ func newBatchRing() (*batchRing, bool) {
 // errNoBatchRing reports a pool slot whose ring failed earlier, so the pages stay cold.
 var errNoBatchRing = errors.New("mmap: no io_uring ring for this batch")
 
-// replaceBrokenBatchRing abandons a failed ring and gives its slot a new one; a slot whose ring cannot be recreated
-// stops reading.
+// replaceBrokenBatchRing abandons a failed ring and gives its slot a new one while no more rings than the pool size
+// are abandoned; after that, or when a new ring cannot be made, the slot stops reading.
 func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
-	br.r.Abandon(br.bufs...)
-	if nbr, ok := newBatchRing(); ok {
-		return nbr
+	if br.r.Abandon(br.bufs...) <= cap(batchRings) {
+		if nbr, ok := newBatchRing(); ok {
+			return nbr
+		}
 	}
-	brokenBatchLog.Do(func() { log.Warn("[mmap] batch read ring failed and cannot be recreated", "err", err) })
+	brokenBatchLog.Do(func() { log.Warn("[mmap] batch read ring failed, slot stops reading", "err", err) })
 	return &batchRing{}
 }
 

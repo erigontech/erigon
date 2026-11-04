@@ -146,11 +146,13 @@ type abandonedRing struct {
 	bufs [][]byte
 }
 
-// Abandon retires a ring whose reads may still be in flight: the ring and bufs stay alive and are never reused.
-func (r *Ring) Abandon(bufs ...[]byte) {
+// Abandon retires a ring whose reads may still be in flight: the ring and bufs stay alive and are never reused. It
+// returns how many rings the process has abandoned.
+func (r *Ring) Abandon(bufs ...[]byte) int {
 	abandonedMu.Lock()
 	defer abandonedMu.Unlock()
 	abandoned = append(abandoned, abandonedRing{r, bufs})
+	return len(abandoned)
 }
 
 func (r *Ring) Close() {
