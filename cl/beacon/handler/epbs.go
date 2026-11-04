@@ -1154,7 +1154,14 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	contentsIntegrationFailed := false
 	var columnPublishErr error
 	if columnWork != nil {
-		if err := a.publishAndStoreExecutionPayloadEnvelopeColumns(workCtx, columnWork, forkDigest, envelopeFirst); err != nil {
+		publishCtx := workCtx
+		if !envelopeFirst {
+			// The columns are still published, within a slot, when the client goes away.
+			var cancelPublish context.CancelFunc
+			publishCtx, cancelPublish = context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+			defer cancelPublish()
+		}
+		if err := a.publishAndStoreExecutionPayloadEnvelopeColumns(workCtx, publishCtx, columnWork, forkDigest); err != nil {
 			if errors.Is(err, errExecutionPayloadColumnPublish) {
 				columnPublishErr = err
 			} else if !envelopeFirst && !errors.Is(err, errExecutionPayloadEnvelopeIntegration) {
@@ -1510,7 +1517,7 @@ var (
 	errExecutionPayloadEnvelopeContentsRequired = errors.New("blob data is required to repair the columns of this execution payload envelope")
 )
 
-func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(ctx context.Context, work *envelopeColumnWork, forkDigest common.Bytes4, envelopeFirst bool) error {
+func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, publishCtx context.Context, work *envelopeColumnWork, forkDigest common.Bytes4) error {
 	if work.commitments.Len() == 0 {
 		return nil
 	}
@@ -1527,13 +1534,13 @@ func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(ctx context.
 	}
 	var publishErr error
 	if a.sentinel != nil {
-		publishErr = a.publishEnvelopeColumns(ctx, envelopeFirst, forkDigest, work.slot, work.blockRoot, columns)
+		publishErr = a.publishEnvelopeColumns(publishCtx, forkDigest, work.slot, work.blockRoot, columns)
 	}
 	if len(columns) != 0 && a.columnStorage == nil {
 		return errors.Join(publishErr, fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration))
 	}
 	for _, column := range columns {
-		if err := a.columnStorage.WriteColumnSidecars(ctx, work.blockRoot, int64(column.Index), column); err != nil {
+		if err := a.columnStorage.WriteColumnSidecars(storeCtx, work.blockRoot, int64(column.Index), column); err != nil {
 			return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
 		}
 	}
@@ -1543,21 +1550,13 @@ func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(ctx context.
 	return publishErr
 }
 
-// publishEnvelopeColumns keeps publishing when the client goes away. With envelopeFirst, ctx is already
-// detached from the client and bounded by the request's one-slot deadline.
-func (a *ApiHandler) publishEnvelopeColumns(ctx context.Context, envelopeFirst bool, forkDigest common.Bytes4, slot uint64, blockRoot common.Hash, columns []*cltypes.DataColumnSidecar) error {
-	publishCtx := ctx
-	if !envelopeFirst {
-		var cancel context.CancelFunc
-		publishCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
-		defer cancel()
-	}
+func (a *ApiHandler) publishEnvelopeColumns(ctx context.Context, forkDigest common.Bytes4, slot uint64, blockRoot common.Hash, columns []*cltypes.DataColumnSidecar) error {
 	var failed []uint64
 	var firstErr error
 	for _, column := range columns {
 		encoded, err := column.EncodeSSZ(nil)
 		if err == nil {
-			err = a.gossipManager.PublishToForkDigest(publishCtx, forkDigest, gossip.TopicNameDataColumnSidecar(das.ComputeSubnetForDataColumnSidecar(column.Index)), encoded)
+			err = a.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(das.ComputeSubnetForDataColumnSidecar(column.Index)), encoded)
 		}
 		if err != nil {
 			failed = append(failed, column.Index)
