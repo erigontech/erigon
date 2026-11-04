@@ -489,7 +489,7 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	blobHashes, err := decodeHashListRequest(body, sszMaxGetBlobHashes)
+	blobHashes, err := decodeHashListRequest(body, maxGetBlobHashes)
 	if err != nil {
 		e.writeSSZDecodeProblem(w, r, err)
 		return
@@ -594,7 +594,7 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 		UnscopedEndpoints:      []string{"capabilities", "identity", "inclusion-list"},
 		Limits: map[string]uint64{
 			"bodies.max_count":           sszMaxBodiesRequest,
-			"blobs.max_versioned_hashes": sszMaxGetBlobHashes,
+			"blobs.max_versioned_hashes": maxGetBlobHashes,
 			"payload.max_bytes":          sszMaxPayloadRequestBody,
 		},
 	})

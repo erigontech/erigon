@@ -31,7 +31,7 @@ func blobsV4RequestBytes(hashes []common.Hash, mask []byte) []byte {
 
 func decodeBlobsV4TestResponse(t *testing.T, buf []byte) *solid.ListSSZ[*sszBlobV4Entry] {
 	t.Helper()
-	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](sszMaxGetBlobHashes)
+	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](maxGetBlobHashes)
 	require.NoError(t, ssz2.UnmarshalSSZStrict(buf, 0, entries))
 	return entries
 }

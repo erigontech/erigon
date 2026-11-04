@@ -61,11 +61,8 @@ func decodeForkchoiceResponse(buf []byte) (*engine_types.ForkChoiceUpdatedRespon
 }
 
 func blockValueFromHash(v common.Hash) *hexutil.U256 {
-	var be [32]byte
-	for i := range v {
-		be[i] = v[31-i]
-	}
-	u := new(uint256.Int).SetBytes(be[:])
+	u := new(uint256.Int)
+	_ = u.UnmarshalSSZ(v[:])
 	return (*hexutil.U256)(u)
 }
 
@@ -136,7 +133,7 @@ func decodeBodiesResponse(buf []byte, version clparams.StateVersion) ([]*decoded
 }
 
 func decodeBlobsV1Response(buf []byte) ([]*engine_types.BlobAndProofV1, error) {
-	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](sszMaxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
+	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](maxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
 	if err := ssz2.UnmarshalSSZ(buf, 0, entries); err != nil {
 		return nil, err
 	}
@@ -151,7 +148,7 @@ func decodeBlobsV1Response(buf []byte) ([]*engine_types.BlobAndProofV1, error) {
 }
 
 func decodeBlobsV2Response(buf []byte) ([]*engine_types.BlobAndProofV2, error) {
-	entries := solid.NewDynamicListSSZ[*sszBlobV2Entry](sszMaxGetBlobHashes)
+	entries := solid.NewDynamicListSSZ[*sszBlobV2Entry](maxGetBlobHashes)
 	if err := ssz2.UnmarshalSSZ(buf, 0, entries); err != nil {
 		return nil, err
 	}

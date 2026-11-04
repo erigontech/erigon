@@ -70,6 +70,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
+const maxGetBlobHashes = 128
+
 var (
 	caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
 	errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
@@ -1332,7 +1334,7 @@ func blobCellIndices(mask []byte) []int {
 }
 
 func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellIndices hexutil.Bytes) (any, error) {
-	if len(blobHashes) > 128 {
+	if len(blobHashes) > maxGetBlobHashes {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
 	if version == clparams.GloasVersion && len(cellIndices) != goethkzg.CellsPerExtBlob/8 {

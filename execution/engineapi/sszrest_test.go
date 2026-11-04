@@ -949,7 +949,7 @@ func TestSSZRESTBlobsUnavailableEntryByteLayout(t *testing.T) {
 
 func TestSSZRESTHashListRequestRoundTrip(t *testing.T) {
 	hashes := []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")}
-	for _, limit := range []int{sszMaxBodiesRequest, sszMaxGetBlobHashes} {
+	for _, limit := range []int{sszMaxBodiesRequest, maxGetBlobHashes} {
 		enc, err := encodeHashListRequest(hashes, limit)
 		require.NoError(t, err)
 		// single-field container: a 4-byte offset (=4) precedes the hash list body
@@ -1144,7 +1144,7 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 			case "bodies hash too many":
 				body = bytes.Repeat([]byte{0x01}, (sszMaxBodiesRequest+1)*32)
 			case "blobs too many hashes":
-				body = bytes.Repeat([]byte{0x01}, (sszMaxGetBlobHashes+1)*32)
+				body = bytes.Repeat([]byte{0x01}, (maxGetBlobHashes+1)*32)
 			}
 			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, bytes.NewReader(body))
 			if tc.contentType != "" {
@@ -1490,7 +1490,7 @@ func TestSSZRESTBlobsV2V3Availability(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					srv := newTestEngineServer(allForksConfig(), true)
 					srv.blobGetter = tc.getter
-					body, err := encodeHashListRequest(tc.hashes, sszMaxGetBlobHashes)
+					body, err := encodeHashListRequest(tc.hashes, maxGetBlobHashes)
 					require.NoError(t, err)
 					rec := httptest.NewRecorder()
 					srv.SSZRESTHandler().ServeHTTP(rec,
@@ -1529,7 +1529,7 @@ func TestSSZRESTBlobsV2V3Availability(t *testing.T) {
 
 func TestSSZRESTBlobsPoolDisabled(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), true)
-	body, err := encodeHashListRequest([]common.Hash{common.HexToHash("0x01")}, sszMaxGetBlobHashes)
+	body, err := encodeHashListRequest([]common.Hash{common.HexToHash("0x01")}, maxGetBlobHashes)
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/blobs/v1", "", body))
@@ -1760,8 +1760,8 @@ func TestSSZRESTRejectsOversizedContentLengthBeforeRead(t *testing.T) {
 		{"payload", "/engine/v1/payloads", "cancun", 64 << 20},
 		{"forkchoice", "/engine/v1/forkchoice", "amsterdam", 1 << 10},
 		{"bodies", "/engine/v1/bodies/hash", "cancun", 4 + sszMaxBodiesRequest*32},
-		{"blobs", "/engine/v1/blobs/v1", "", 4 + sszMaxGetBlobHashes*32},
-		{"blob cells", "/engine/v1/blobs/v4", "", 4 + 16 + sszMaxGetBlobHashes*32},
+		{"blobs", "/engine/v1/blobs/v1", "", 4 + maxGetBlobHashes*32},
+		{"blob cells", "/engine/v1/blobs/v4", "", 4 + 16 + maxGetBlobHashes*32},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path, iotest.ErrReader(errors.New("body must not be read")))

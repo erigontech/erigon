@@ -132,10 +132,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	}
 	block.Transactions = solid.NewTransactionsSSZFromTransactions(txs)
 	if version >= clparams.CapellaVersion {
-		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
-		for _, w := range p.Withdrawals {
-			block.Withdrawals.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
-		}
+		block.Withdrawals = newWithdrawalList(p.Withdrawals)
 	}
 	if p.BlobGasUsed != nil {
 		block.BlobGasUsed = uint64(*p.BlobGasUsed)

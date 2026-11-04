@@ -29,7 +29,6 @@ import (
 )
 
 const (
-	sszMaxGetBlobHashes            = 128
 	sszMaxBodiesRequest            = 32
 	sszMaxPayloadRequestBody       = 64 << 20 // MAX_REQUEST_BODY_SIZE = 2**26
 	sszMaxForkchoiceRequestBody    = 1 << 10
@@ -37,7 +36,7 @@ const (
 	sszContainerOffsetBytes        = 4
 	sszHashBytes                   = 32
 	sszMaxBodiesRequestBody        = sszContainerOffsetBytes + sszMaxBodiesRequest*sszHashBytes
-	sszMaxBlobsRequestBody         = sszContainerOffsetBytes + sszMaxGetBlobHashes*sszHashBytes
+	sszMaxBlobsRequestBody         = sszContainerOffsetBytes + maxGetBlobHashes*sszHashBytes
 	sszBlobBytes                   = 0x20000
 	sszCellBytes                   = 2048
 	sszKZGBytes                    = 48
@@ -220,12 +219,8 @@ func encodeForkchoiceResponse(resp *engine_types.ForkChoiceUpdatedResponse) ([]b
 
 func blockValueHash(v *hexutil.U256) common.Hash {
 	var out common.Hash
-	if v == nil {
-		return out
-	}
-	b := (*uint256.Int)(v).Bytes32()
-	for i := range b {
-		out[i] = b[31-i]
+	if v != nil {
+		_, _ = (*uint256.Int)(v).MarshalSSZAppend(out[:0])
 	}
 	return out
 }
@@ -448,7 +443,7 @@ func (*sszBlobV2Entry) Clone() clonable.Clonable { return &sszBlobV2Entry{} }
 // BlobsV1Response wraps List[BlobV1Entry, MAX_BLOBS_REQUEST] in a container.
 // Missing blobs keep their positions with available=false and zero-valued contents.
 func encodeBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error) {
-	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](sszMaxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
+	entries := solid.NewStaticListSSZ[*sszBlobV1Entry](maxGetBlobHashes, 1+sszBlobBytes+sszKZGBytes)
 	for _, blob := range blobs {
 		entry := &sszBlobV1Entry{}
 		if blob != nil {
@@ -462,7 +457,7 @@ func encodeBlobsV1Response(blobs []*engine_types.BlobAndProofV1) ([]byte, error)
 }
 
 func encodeBlobsV2Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error) {
-	entries := solid.NewDynamicListSSZ[*sszBlobV2Entry](sszMaxGetBlobHashes)
+	entries := solid.NewDynamicListSSZ[*sszBlobV2Entry](maxGetBlobHashes)
 	for _, blob := range blobs {
 		entries.Append(&sszBlobV2Entry{Available: blob != nil, Contents: blob})
 	}
@@ -470,12 +465,12 @@ func encodeBlobsV2Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error)
 }
 
 func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCustodyBitvectorBytes]byte, error) {
-	hashes := solid.NewHashList(sszMaxGetBlobHashes)
+	hashes := solid.NewHashList(maxGetBlobHashes)
 	var cellMask [sszCustodyBitvectorBytes]byte
 	if err := ssz2.UnmarshalSSZStrict(buf, 0, hashes, cellMask[:]); err != nil {
 		return nil, cellMask, err
 	}
-	if hashes.Length() > sszMaxGetBlobHashes {
+	if hashes.Length() > maxGetBlobHashes {
 		return nil, cellMask, fmt.Errorf("too many blob hashes: %d", hashes.Length())
 	}
 	return hashListValues(hashes), cellMask, nil
@@ -530,11 +525,11 @@ func (*sszBlobV4Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 func (*sszBlobV4Entry) Clone() clonable.Clonable { return &sszBlobV4Entry{} }
 
 func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, cellMask [sszCustodyBitvectorBytes]byte) ([]byte, error) {
-	if len(blobs) > sszMaxGetBlobHashes {
+	if len(blobs) > maxGetBlobHashes {
 		return nil, fmt.Errorf("too many blob entries: %d", len(blobs))
 	}
 	indices := blobCellIndices(cellMask[:])
-	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](sszMaxGetBlobHashes)
+	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](maxGetBlobHashes)
 	for _, blob := range blobs {
 		var cells, proofs [][]byte
 		if blob != nil {
