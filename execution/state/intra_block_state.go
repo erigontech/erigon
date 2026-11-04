@@ -180,17 +180,7 @@ type IntraBlockState struct {
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
 	// at the block level.
-	versionMap *VersionMap
-	// waitCommit blocks a read that observes an in-flight (estimate) predecessor
-	// write until that predecessor commits, so execution pauses in place instead
-	// of aborting via ErrDependency. Returns false on shutdown.
-	waitCommit func(depTxIndex int) bool
-	// wakeGen counts resumes from a dep-wait pause. A lower-txIndex writer may
-	// commit a new value while this worker sleeps in waitCommit, so any frame
-	// read cached before the pause can be stale on wake. ReadStamp folds wakeGen
-	// in, so a resume invalidates the vm's frame caches on the next lookup — what
-	// makes those caches safe under the dep-wait executor.
-	wakeGen         uint64
+	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
@@ -325,11 +315,6 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 // retune a per-task overlay (PrevBlockReader.SetBlock) without rebuilding the IBS.
 func (ibs *IntraBlockState) StateReader() StateReader {
 	return ibs.stateReader
-}
-
-// SetWaitCommit installs the mid-flow dep-pause hook (self-loop). See waitCommit.
-func (ibs *IntraBlockState) SetWaitCommit(f func(depTxIndex int) bool) {
-	ibs.waitCommit = f
 }
 
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
@@ -587,12 +572,18 @@ func (ibs *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	return ibs.logs.forTx(txIndex).Copy()
 }
 
-func (ibs *IntraBlockState) Logs() types.Logs {
-	if len(ibs.logs.entries) == 0 {
+func (ibs *IntraBlockState) LogCount() int { return len(ibs.logs.entries) }
+
+// LogsSince deep-copies entries added after a saved LogCount.
+func (ibs *IntraBlockState) LogsSince(first int) types.Logs {
+	logs := ibs.logs.entries[first:]
+	if len(logs) == 0 {
 		return nil
 	}
-	return ibs.logs.entries.Copy()
+	return logs.Copy()
 }
+
+func (ibs *IntraBlockState) Logs() types.Logs { return ibs.LogsSince(0) }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (ibs *IntraBlockState) LogsRlpHash() common.Hash {
@@ -2935,6 +2926,14 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 			}
 			continue
 		}
+		// See updateAccount: the account write of a recreate below the original incarnation clears
+		// the old code and storage, so it must land before the new ones.
+		downRev := original.Incarnation > account.Incarnation
+		if downRev {
+			if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+				return err
+			}
+		}
 		if code, ok := writes.GetCode(addr); ok {
 			if err := stateWriter.UpdateAccountCode(addr, account.Incarnation, account.CodeHash, code.Val.Bytes); err != nil {
 				return err
@@ -2950,8 +2949,10 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 				return err
 			}
 		}
-		if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
-			return err
+		if !downRev {
+			if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -961,7 +961,9 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
-	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	var lastK, lastV []byte
+	var hasLast bool
+	write := func(k, v []byte) error {
 		if d.LargeValues {
 			bareKey := k[:len(k)-8]
 			val := v
@@ -994,7 +996,22 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 			}
 		}
 		return nil
+	}
+	err = wal.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if hasLast && !bytes.Equal(k, lastK) {
+			if err := write(lastK, lastV); err != nil {
+				return err
+			}
+		}
+		lastK, lastV, hasLast = append(lastK[:0], k...), append(lastV[:0], v...), true
+		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err == nil && hasLast {
+		err = write(lastK, lastV)
+	}
+	if err != nil {
+		return coll, err
+	}
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
@@ -2220,11 +2237,6 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	} else {
 		dc.History.Accumulate(other.History)
 	}
-}
-
-func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	txTo = min(txTo, dt.files.EndTxNum())
-	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {

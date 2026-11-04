@@ -37,10 +37,13 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -150,6 +153,54 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		BlockTimestamp: &stampedAt,
 	}
 	assert.Equal(expectedLog, actual[0])
+}
+
+func TestGetLatestLogsFrameFeeAccounting(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	const initialBalance = 1_000_000_000_000_000_000
+	topic := common.HexToHash("0x42")
+
+	// Skipping the fee debit leaves the payer's full balance and takes the revert branch.
+	code := program.New().Push(sender).Op(vm.BALANCE).Push(initialBalance).Op(vm.EQ)
+	revertJump := code.Size()
+	code.Push(0).Op(vm.JUMPI).Push(topic).Push0().Push0().Op(vm.LOG1, vm.STOP)
+	_, revertPC := code.Jumpdest()
+	require.Less(t, revertPC, uint64(256))
+	code.Bytes()[revertJump+1] = byte(revertPC)
+	code.Push0().Push0().Op(vm.REVERT)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(initialBalance),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			target: {Code: code.Bytes()},
+		},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{2}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	require.Len(t, pack.Receipts[0][0].Logs, 1)
+
+	block := pack.Blocks[0]
+	want := types.StampedLog(pack.Receipts[0][0].Logs[0], block.Time())
+	want.BlockHash = block.Hash()
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &want.BlockHash}, filters.LogFilterOptions{LogCount: 1})
+	require.NoError(t, err)
+	require.Equal(t, types.Logs{want}, logs)
 }
 
 func TestGetLatestLogsStopsBeforePrunedBlocks(t *testing.T) {
@@ -793,4 +844,30 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 		}
 	}
 	require.NotZero(t, seen)
+}
+
+func TestErigonGetLogsFromLatest(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	logOnCreate := []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // PUSH1 0 PUSH1 0 LOG0 STOP
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	latest := big.NewInt(rpc.LatestBlockNumber.Int64())
+	logs, err := NewErigonAPI(newBaseApiForTest(m), m.DB, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: latest, ToBlock: latest})
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, hexutil.Uint64(2), logs[0].BlockNumber)
 }

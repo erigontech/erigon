@@ -29,6 +29,7 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -49,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -208,7 +210,7 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		txCount       int
 		txGasLimit    uint64
 		cfg           *chain.Config
-		allowAA       bool
+		frame         bool
 		noWithdrawals bool
 		nilBlobHashes bool
 		prague        bool
@@ -220,7 +222,8 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		{name: "4 txs", txCount: 4, cfg: preCancunChainConfig(), wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs", txCount: 5, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "1 tx above the gas limit", txCount: 1, txGasLimit: gasLimit + 1, cfg: preCancunChainConfig(), wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached"},
-		{name: "5 txs with AllowAA", txCount: 5, cfg: preCancunChainConfig(), allowAA: true, wantStatus: engine_types.SyncingStatus},
+		{name: "5 frame txs on Bogota", txCount: 5, cfg: allForksChainConfig(), frame: true, amsterdam: true, wantStatus: engine_types.SyncingStatus},
+		{name: "6 frame txs on Bogota", txCount: 6, cfg: allForksChainConfig(), frame: true, amsterdam: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 6 transactions use at least 12000 gas each"},
 		{name: "4 txs on Prague", txCount: 4, cfg: preOsakaChainConfig(), prague: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 21000 gas each"},
 		{name: "5 txs on Amsterdam", txCount: 5, cfg: allForksChainConfig(), amsterdam: true, wantStatus: engine_types.SyncingStatus},
 		{name: "5 txs without withdrawals", txCount: 5, cfg: preCancunChainConfig(), noWithdrawals: true, wantErrCode: -32602},
@@ -230,11 +233,19 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			test.cfg.AllowAA = test.allowAA
+			if test.frame {
+				test.cfg.BogotaTime = common.NewUint64(0)
+			}
 			to := common.Address{0x1}
 			txs := make(types.Transactions, test.txCount)
 			for i := range txs {
 				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: cmp.Or(test.txGasLimit, 21_000)}}
+				if test.frame {
+					txs[i] = &types.FrameTransaction{
+						ChainID: *test.cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(i), SenderAddress: to,
+						Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: gasLimit}}},
+					}
+				}
 			}
 			header := makeParentHeader(1001)
 			header.ParentHash = common.Hash{0x1}
@@ -294,6 +305,50 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
+	t.Parallel()
+
+	cfg := prePragueChainConfig()
+	header := makeParentHeader(1001)
+	header.ParentHash = common.Hash{0x1}
+	blobHashes := make([]common.Hash, cfg.GetMaxBlobsPerBlock(header.Time)+1)
+	for i := range blobHashes {
+		blobHashes[i] = common.Hash{kzg.BlobCommitmentVersionKZG, byte(i)}
+	}
+	txs := types.Transactions{&types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x1}},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(1),
+		BlobVersionedHashes: blobHashes,
+	}}
+	header.UncleHash = empty.UncleHash
+	header.TxHash = types.DeriveSha(txs)
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	downloader.ReportBadHeader(header.ParentHash, common.Hash{}, "invalid block")
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	status, err := srv.NewPayloadV3(t.Context(), payload, blobHashes, header.ParentBeaconBlockRoot)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
 }
 
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {

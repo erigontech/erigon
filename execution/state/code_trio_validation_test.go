@@ -24,31 +24,26 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Code, CodeHash and CodeSize always co-write (one code change bumps all three)
-// but validate in different classes: CodeHash is a value path (carries a
-// tiebreaker) while Code and CodeSize are noValueRead (version/status only).
-//
-// The split shows up wherever the tiebreaker can run: on a StorageRead-sourced
-// read — a cold read that saw no VersionMap entry at execution time but now
-// collides with a concurrent worker's Done flush — and on a MapRead whose
-// recorded version no longer matches the live cell. In the StorageRead collision (no BAL): a CodeHash
-// read whose value still matches survives via the tiebreaker, while the
-// co-written Code/CodeSize reads invalidate. The divergence is benign — the hash
-// is unchanged so the read is accurate; the version/status checks are
-// conservative, never wrong — and the tiebreaker is what lets an EXTCODEHASH-only
-// tx avoid a re-execution on such a collision. A rationalization that unifies the
-// trio's validation class must do so deliberately (extend the tiebreaker to
-// Code/CodeSize to save re-execs, not drop it from CodeHash).
-func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
+// Code, CodeHash and CodeSize always co-write (one code change bumps all three) and
+// validate uniformly on version. A StorageRead-sourced read carrying a concrete version
+// that collides with a concurrent worker's Done flush at a different version invalidates
+// on all three paths, regardless of the shadowing cell's valStatus — including a
+// CodeHash cell stamped net-zero (ValueUnchanged). One value per version makes the
+// version check value-exact, so no value-path exemption is needed.
+func TestCodeTrio_UniformVersionValidation(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(80)
 	code := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3})
 
 	vm := NewVersionMap(nil)
-	// A concurrent worker's Done flush of the trio lands at tx1.
-	vm.WriteCode(addr, Version{TxIndex: 1}, code, true)
-	vm.WriteCodeHash(addr, Version{TxIndex: 1}, code.Hash, true)
-	vm.WriteCodeSize(addr, Version{TxIndex: 1}, code.Len(), true)
+	// A concurrent worker's Done flush of the trio lands at tx1. The code-hash is a
+	// net-zero re-publication of the committed origin (ValueUnchanged); code and
+	// code-size are stamped as real changes (ValueChanged).
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: code})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: Version{TxIndex: 1}, valStatus: ValueUnchanged}, Val: code.Hash})
+	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: code.Len()})
+	vm.FlushVersionedWrites(ws, true)
 
 	// tx3's reads were served from storage (cold) and now collide with the flush.
 	readStorage := ReadHeader{Source: StorageRead, Version: Version{TxIndex: 3}}
@@ -57,8 +52,8 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 	rsHash := ReadSet{}
 	rsHash.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: readStorage, Val: code.Hash})
 	ioHash.RecordReads(Version{TxIndex: 3}, rsHash)
-	require.Equal(t, VersionValid, vm.ValidateVersion(3, ioHash, validateEqualVersion, false, ""),
-		"CodeHash value-path tiebreaker: the flushed value matches, so the cold read stays valid")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioHash, validateEqualVersion, false, ""),
+		"CodeHash: a version-mismatched read invalidates even under a net-zero (ValueUnchanged) shadow")
 
 	ioCode := NewVersionedIO(4)
 	rsCode := ReadSet{}
