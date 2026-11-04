@@ -557,12 +557,39 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	if body == nil {
 		return nil, nil
 	}
-	var err error
-	body.Transactions, err = CanonicalTransactions(db, firstTxId, txCount)
-	if err != nil {
+	body.Transactions = make([]types.Transaction, 0, txCount)
+	complete, err := readBodyTransactions(db, firstTxId, txCount, func(v []byte) error {
+		txn, err := types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */)
+		if err != nil {
+			return err
+		}
+		body.Transactions = append(body.Transactions, txn)
+		return nil
+	})
+	if err != nil || !complete {
 		return nil, err
 	}
 	return body, nil
+}
+
+var errMissingBodyTransaction = errors.New("missing body transaction")
+
+func readBodyTransactions(db kv.Getter, firstTxID uint64, txCount uint32, readTxn func([]byte) error) (bool, error) {
+	var count uint32
+	err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(firstTxID), txCount, func(k, v []byte) error {
+		if len(k) != 8 || binary.BigEndian.Uint64(k) != firstTxID+uint64(count) {
+			return errMissingBodyTransaction
+		}
+		if err := readTxn(v); err != nil {
+			return err
+		}
+		count++
+		return nil
+	})
+	if errors.Is(err, errMissingBodyTransaction) {
+		return false, nil
+	}
+	return count == txCount, err
 }
 
 // ReadRawBody is ReadBodyWithTransactions without decoding the transactions: each is returned in
@@ -573,14 +600,15 @@ func ReadRawBody(db kv.Getter, hash common.Hash, number uint64) (*types.RawBody,
 		return nil, nil
 	}
 	txs := make([][]byte, 0, txCount)
-	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(firstTxId), txCount, func(_, v []byte) error {
+	complete, err := readBodyTransactions(db, firstTxId, txCount, func(v []byte) error {
 		txn, err := types.BinaryFromStoredTxn(v)
 		if err != nil {
 			return err
 		}
 		txs = append(txs, bytes.Clone(txn))
 		return nil
-	}); err != nil {
+	})
+	if err != nil || !complete {
 		return nil, err
 	}
 	return &types.RawBody{Transactions: txs, Uncles: body.Uncles, Withdrawals: body.Withdrawals}, nil
