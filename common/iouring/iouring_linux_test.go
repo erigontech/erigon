@@ -64,3 +64,32 @@ func TestBlockingBatchReadReportsAFailedCompletion(t *testing.T) {
 	require.NoError(t, r.BlockingBatchRead(int(f.Fd()), []int64{0}, []int{4}, [][]byte{buf}))
 	require.Equal(t, "abcd", string(buf))
 }
+
+func TestBlockingBatchReadDrainsTheWaveOfAFailedCompletion(t *testing.T) {
+	r, err := New(8)
+	require.NoError(t, err)
+	defer r.Close()
+	p := filepath.Join(t.TempDir(), "f")
+	require.NoError(t, os.WriteFile(p, []byte("0123456789abcdefghijklmnopqrstuv"), 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	defer f.Close()
+	read := func(offsets []int64) ([][]byte, error) {
+		lens, bufs := make([]int, len(offsets)), make([][]byte, len(offsets))
+		for i := range offsets {
+			lens[i], bufs[i] = 4, make([]byte, 4)
+		}
+		return bufs, r.BlockingBatchRead(int(f.Fd()), offsets, lens, bufs)
+	}
+
+	// A negative offset completes with -EINVAL while the other reads of its wave succeed.
+	_, err = read([]int64{-2, 0, 4, 8, 12, 16, 20, 24})
+	require.ErrorIs(t, err, unix.EINVAL)
+	require.ErrorIs(t, err, ErrReadFailed)
+
+	// A completion left over from the failed wave would end the next wave before its reads land.
+	bufs, err := read([]int64{28, 24, 20, 16, 12, 8, 4, 0})
+	require.NoError(t, err)
+	require.Equal(t, []string{"stuv", "opqr", "klmn", "ghij", "cdef", "89ab", "4567", "0123"},
+		[]string{string(bufs[0]), string(bufs[1]), string(bufs[2]), string(bufs[3]), string(bufs[4]), string(bufs[5]), string(bufs[6]), string(bufs[7])})
+}
