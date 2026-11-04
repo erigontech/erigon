@@ -17,6 +17,7 @@
 package receipts_test
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -191,7 +192,15 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 // replay folding every key the block has changed so far.
 func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
-	dbg.CallNoMaterialize = true
+	for _, noMaterialize := range []bool{true, false} {
+		t.Run(fmt.Sprintf("noMaterialize=%t", noMaterialize), func(t *testing.T) {
+			dbg.CallNoMaterialize = noMaterialize
+			testPreByzantiumPostStateFromCommitmentHistory(t)
+		})
+	}
+}
+
+func testPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
 	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil

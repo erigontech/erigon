@@ -1,12 +1,10 @@
 package receipts
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -804,16 +802,16 @@ type blockWrites struct {
 	sd         *execctx.SharedDomains
 	tx         kv.TemporalTx
 	blockStart uint64
-	keys       map[kv.Domain]map[string][]byte
+	keys       map[kv.Domain]map[string]struct{}
 }
 
 func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	w.record(domain, k, v)
+	w.record(domain, k)
 	return w.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
 func (w *blockWrites) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	w.record(domain, k, nil)
+	w.record(domain, k)
 	if domain == kv.AccountsDomain {
 		if err := w.recordStorageDeleted(k); err != nil {
 			return err
@@ -829,14 +827,9 @@ func (w *blockWrites) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uin
 	return w.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 }
 
-// recordStorageDeleted records the account's block-start and in-block slots as deleted: the
-// shared domains' own storage cascade reads latest state, which misses the block-start slots.
+// recordStorageDeleted records the account's block-start slots: the shared domains' own storage
+// cascade reads latest state, which misses them.
 func (w *blockWrites) recordStorageDeleted(addr []byte) error {
-	for k := range w.keys[kv.StorageDomain] {
-		if strings.HasPrefix(k, string(addr)) {
-			w.keys[kv.StorageDomain][k] = nil
-		}
-	}
 	to, ok := kv.NextSubtree(addr)
 	if !ok {
 		to = nil
@@ -852,26 +845,26 @@ func (w *blockWrites) recordStorageDeleted(addr []byte) error {
 			return err
 		}
 		if len(v) > 0 {
-			w.record(kv.StorageDomain, k, nil)
+			w.record(kv.StorageDomain, k)
 		}
 	}
 	return nil
 }
 
-func (w *blockWrites) record(domain kv.Domain, k, v []byte) {
+func (w *blockWrites) record(domain kv.Domain, k []byte) {
 	if w.keys == nil {
-		w.keys = map[kv.Domain]map[string][]byte{}
+		w.keys = map[kv.Domain]map[string]struct{}{}
 	}
 	if w.keys[domain] == nil {
-		w.keys[domain] = map[string][]byte{}
+		w.keys[domain] = map[string]struct{}{}
 	}
-	w.keys[domain][string(k)] = bytes.Clone(v)
+	w.keys[domain][string(k)] = struct{}{}
 }
 
 func (w *blockWrites) touchAll() {
 	for domain, keys := range w.keys {
-		for k, v := range keys {
-			w.sd.GetCommitmentContext().TouchKey(domain, k, v)
+		for k := range keys {
+			w.sd.GetCommitmentContext().TouchKey(domain, k, nil)
 		}
 	}
 }
