@@ -1,6 +1,7 @@
 package receipts
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -816,7 +817,7 @@ func (w *blockWrites) record(domain kv.Domain, k, v []byte) {
 	if w.keys[domain] == nil {
 		w.keys[domain] = map[string][]byte{}
 	}
-	w.keys[domain][string(k)] = common.Copy(v)
+	w.keys[domain][string(k)] = bytes.Clone(v)
 }
 
 func (w *blockWrites) touchAll() {
