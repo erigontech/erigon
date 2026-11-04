@@ -24,8 +24,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/mmap"
-
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -65,22 +63,17 @@ func (b *Filter) AddHash(hash uint64) error {
 	return b.fuseWriterSharded.AddHash(hash)
 }
 
-// ContainsHashProbe is ContainsHash with pr touching the fuse filter pages it reads.
-func (b *Filter) ContainsHashProbe(hashedKey uint64, pr *mmap.Probe) bool {
+func (b *Filter) ContainsHash(hashedKey uint64) bool {
 	if b.empty {
 		return true
 	}
 	if b.fuseReaderSharded != nil {
-		return b.fuseReaderSharded.ContainsHashProbe(hashedKey, pr)
+		return b.fuseReaderSharded.ContainsHash(hashedKey)
 	}
 	if b.fuseReader != nil {
-		return b.fuseReader.ContainsHashProbe(hashedKey, pr)
+		return b.fuseReader.ContainsHash(hashedKey)
 	}
 	return b.filter.ContainsHash(hashedKey)
-}
-
-func (b *Filter) ContainsHash(hashedKey uint64) bool {
-	return b.ContainsHashProbe(hashedKey, nil)
 }
 
 func (b *Filter) Contains(v hash.Hash64) bool {
