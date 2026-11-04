@@ -40,6 +40,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/transition"
@@ -1036,7 +1037,10 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 					if !lookupRequired {
 						persisted = a.persistedExecutionPayloadEnvelope(gossipKey.BeaconBlockRoot)
 					}
-					if signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
+					// Fork choice keeps the persisted envelope of a payload that it marks invalid.
+					payloadStatus, known := a.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(gossipKey.BeaconBlockRoot)
+					invalidated := known && payloadStatus == execution_client.PayloadStatusInvalidated
+					if !invalidated && signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
 						w.WriteHeader(http.StatusOK)
 						return
 					}

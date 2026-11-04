@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 )
@@ -596,6 +597,32 @@ func TestPostEnvelopeContentsGossipModeRepostOfUnimportedEnvelopeAnswersAccepted
 		watch.requireIdle()
 		f.requireClaimReleased()
 	})
+
+	for _, tc := range []struct {
+		name      string
+		importErr error
+		status    int
+	}{
+		{name: "after a 200", status: http.StatusOK},
+		{name: "after an interrupted import that sync finished", importErr: forkchoice.ErrPayloadValidationInterrupted, status: http.StatusAccepted},
+	} {
+		t.Run("the persisted payload was then marked invalid, "+tc.name, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			if tc.importErr != nil {
+				f.failImport(tc.importErr)
+			}
+			first := f.postAllBlobs(false, "")
+			require.Equal(t, tc.status, first.Code, first.Body.String())
+			f.forkchoice.SetEnvelope(f.root, f.signedEnvelope)
+			f.forkchoice.PayloadStatusByRootMap[f.root] = execution_client.PayloadStatusInvalidated
+			watch := f.watchWork()
+
+			recorder := f.postAllBlobs(false, "")
+
+			require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+			watch.requireIdle()
+		})
+	}
 
 	for _, tc := range unavailablePersistedEnvelopeCases() {
 		t.Run("seen, with a persisted envelope that is unusable: "+tc.name, func(t *testing.T) {
@@ -1366,6 +1393,13 @@ func TestPostEnvelopeContentsRepostNotAnsweredFromStateKeepsItsStatus(t *testing
 		require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
 		f.requireContentsRequiredRecord(true)
 		requireRepost(t, f, http.StatusServiceUnavailable, func() *httptest.ResponseRecorder { return f.postAllBlobs(false, "") })
+	})
+
+	t.Run("an envelope imported by sync whose payload was then marked invalid, and no POST before", func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 2)
+		f.forkchoice.SetEnvelope(f.root, f.signedEnvelope)
+		f.forkchoice.PayloadStatusByRootMap[f.root] = execution_client.PayloadStatusInvalidated
+		requireRepost(t, f, http.StatusBadRequest, func() *httptest.ResponseRecorder { return f.postAllBlobs(false, "") })
 	})
 
 	t.Run("the anchor envelope", func(t *testing.T) {
