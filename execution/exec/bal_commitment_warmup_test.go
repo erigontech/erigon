@@ -372,3 +372,10 @@ func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, nil))
 }
+
+func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys, keys))
+	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil))
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil), "no state keys: nothing to batch")
+}

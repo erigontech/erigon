@@ -337,20 +337,49 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages the block's BAL reads touch: accounts,
 // storage, and the commitment trie level by level, since a branch decides whether the next level exists.
-func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
+// prefetchBAL reads into the page cache the file pages of the BAL's commitment trie and, when state is set, of its
+// accounts and storage.
+func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, accs, slots [][]byte, state bool) {
 	started := time.Now()
-	accs, slots := balPrefetchKeys(bal)
 	var stats [3]prefetchStats
 	var g errgroup.Group
-	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
-	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	if state {
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
+		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
+	}
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
 	err := g.Wait()
-	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
+	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "state", state,
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
 		"slot", fmt.Sprintf("%d/%d plan=%s io=%s", stats[1].waves, stats[1].pages, stats[1].plan, stats[1].io),
 		"trie", fmt.Sprintf("%d/%d plan=%s io=%s branchChk=%s", stats[2].waves, stats[2].pages, stats[2].plan, stats[2].io, stats[2].branchChk),
 		"flatDepth", prefetchFlatDepth, "par", prefetchPar, "elapsed", time.Since(started), "err", err)
+}
+
+// stateKeysCold reports whether a sample of the BAL's account or storage keys hit cold pages: then the batch prefetch
+// reads the state instead of the per-key warmup, which would read the same pages again.
+func stateKeysCold(ctx context.Context, db kv.RoDB, accs, slots [][]byte) bool {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return false
+	}
+	defer tx.Rollback()
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return false
+	}
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok {
+		return false
+	}
+	return stateSampleCold(ctx, p, accs, slots)
+}
+
+func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte) bool {
+	cold := func(domain kv.Domain, keys [][]byte) bool {
+		return len(keys) > 0 && !mostlyResident(ctx, p, domain, sampleEvenly(keys))
+	}
+	return cold(kv.AccountsDomain, accs) || cold(kv.StorageDomain, slots)
 }
 
 // balPrefetchKeys returns the account keys and the address||slot storage keys the BAL touches. Account keys alias
@@ -393,9 +422,6 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	}
 	p, ok := ttx.AggTx().(latestPrefetcher)
 	if !ok {
-		return nil
-	}
-	if mostlyResident(ctx, p, domain, sampleEvenly(keys)) {
 		return nil
 	}
 	prefetchKeys(ctx, db, p, domain, keys, stats)

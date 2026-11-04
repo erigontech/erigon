@@ -464,15 +464,20 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
+	stateByBatch := false
 	if mmap.BatchPrefetch {
+		accs, slots := balPrefetchKeys(bal)
+		stateByBatch = stateKeysCold(ctx, db, accs, slots)
 		group.Go(func() error {
-			prefetchBAL(ctx, db, bal)
+			prefetchBAL(ctx, db, bal, accs, slots, stateByBatch)
 			return nil
 		})
 	}
-	group.Go(func() error {
-		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
-	})
+	if !stateByBatch {
+		group.Go(func() error {
+			return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+		})
+	}
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
