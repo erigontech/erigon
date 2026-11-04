@@ -1321,7 +1321,7 @@ func TestStreamResetAfterBytesStream(t *testing.T) {
 
 // TestStreamResetSliceRdrCoherency pins the invariant readFull's fast path
 // relies on: after any Reset, sliceRdr is non-nil if and only if s.r points at
-// it, so the field and the reader can never be different cursors.
+// it. s.r is never read while sliceRdr is non-nil; reads advance off.
 func TestStreamResetSliceRdrCoherency(t *testing.T) {
 	data := []byte{0x82, 0xaa, 0xbb}
 	check := func(t *testing.T, s *Stream, wantSlice bool) {

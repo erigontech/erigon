@@ -650,7 +650,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 			limit--
 
 			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				next, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -806,7 +810,11 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			limit--
 
 			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: k, Limit: int64(limit)})
+				nextK, _, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -821,42 +829,20 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 }
 
 func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remoteproto.Pairs, error) {
-	from, limit := req.FromPrefix, int(req.Limit)
-	if req.PageToken != "" {
-		var pagination remoteproto.PairsPagination
-		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
-			return nil, err
-		}
-		from, limit = pagination.NextKey, int(pagination.Limit)
-	}
-	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
-		req.PageSize = PageSizeLimit
-	}
-
 	reply := &remoteproto.Pairs{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		it, err := tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
+		it, err := tx.Range(req.Table, req.FromPrefix, req.ToPrefix, order.FromBool(req.OrderAscend), int(req.Limit))
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
 				return err
 			}
-			reply.Keys = append(reply.Keys, k)
-			reply.Values = append(reply.Values, v)
-			limit--
-		}
-		if len(reply.Keys) == PageSizeLimit && it.HasNext() {
-			nextK, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-			if err != nil {
-				return err
-			}
+			reply.Keys = append(reply.Keys, bytes.Clone(k))
+			reply.Values = append(reply.Values, bytes.Clone(v))
 		}
 		return nil
 	}); err != nil {

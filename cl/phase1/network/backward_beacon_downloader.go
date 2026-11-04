@@ -144,7 +144,11 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
 		b.requestBlocksByRoot = rpc.SendBeaconBlocksByRootReq
 		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-			return requestEnvelopesFranticallyWithValidator(ctx, rpc, roots, newEnvelopeValidator(blocks, b.validateGloasEnvelope), rpc.BanPeerForInvalidData, blocks...)
+			blockByRoot := blockLookup(blocks)
+			return RequestEnvelopesFrantically(ctx, rpc, roots, func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+				block, _ := blockByRoot(envelope.Message.BeaconBlockRoot)
+				return b.validateGloasEnvelope(block, envelope)
+			}, rpc.BanPeerForInvalidData, blocks...)
 		}
 	}
 	return b
@@ -180,63 +184,6 @@ func NewGloasSuccessorValidator(anchorState *state.CachingBeaconState, anchorRoo
 	}
 }
 
-func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, blockRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if beaconCfg == nil {
-		return errors.New("nil beacon chain config")
-	}
-	if bid == nil {
-		return errors.New("nil execution payload bid")
-	}
-	if env == nil || env.Message == nil || env.Message.Payload == nil {
-		return errors.New("nil execution payload envelope")
-	}
-	envelope := env.Message
-	payload := envelope.Payload
-	if envelope.BeaconBlockRoot != blockRoot {
-		return fmt.Errorf("beacon block root mismatch: envelope=%v block=%v", envelope.BeaconBlockRoot, blockRoot)
-	}
-	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
-		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
-	}
-	if envelope.BuilderIndex != bid.BuilderIndex {
-		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
-	}
-	if payload.BlockHash != bid.BlockHash {
-		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
-	}
-	if payload.ParentHash != bid.ParentBlockHash {
-		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
-	}
-	if payload.PrevRandao != bid.PrevRandao {
-		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
-	}
-	if payload.GasLimit != bid.GasLimit {
-		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
-	}
-	if payload.SlotNumber != bid.Slot {
-		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
-	}
-	if envelope.ExecutionRequests == nil {
-		return errors.New("nil execution requests")
-	}
-	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("execution requests root: %w", err)
-	}
-	if requestsRoot != bid.ExecutionRequestsRoot {
-		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
-	}
-	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
-	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
-	if err != nil {
-		return fmt.Errorf("payload header: %w", err)
-	}
-	if header.Hash() != payload.BlockHash {
-		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
-	}
-	return nil
-}
-
 func ValidateDownloadedGloasEnvelope(beaconCfg *clparams.BeaconChainConfig, block *cltypes.SignedBeaconBlock, env *cltypes.SignedExecutionPayloadEnvelope) error {
 	if block == nil || block.Block == nil || block.Block.Body == nil {
 		return errors.New("nil Gloas beacon block")
@@ -249,7 +196,7 @@ func ValidateDownloadedGloasEnvelope(beaconCfg *clparams.BeaconChainConfig, bloc
 	if err != nil {
 		return fmt.Errorf("beacon block root: %w", err)
 	}
-	return ValidateGloasEnvelopeAgainstBid(beaconCfg, blockRoot, signedBid.Message, env)
+	return cltypes.ValidateGloasEnvelopeAgainstBid(beaconCfg, blockRoot, signedBid.Message, env)
 }
 
 func backfilledGloasEnvelopeSigningKey(anchorState *state.CachingBeaconState, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (common.Bytes48, bool, error) {
