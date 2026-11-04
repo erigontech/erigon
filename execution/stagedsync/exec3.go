@@ -106,6 +106,12 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+// blockReadsHistory reports whether a block's tasks read history. A block that starts at or before
+// the last frozen txNum reads it for every task, so all tasks seed origins from one pinned base.
+func blockReadsHistory(lastFrozenTxNum, blockStartTxNum uint64) bool {
+	return lastFrozenTxNum > 0 && blockStartTxNum <= lastFrozenTxNum
+}
+
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
 }
@@ -801,7 +807,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
 					// use history reader instead of state reader to catch up to the tx where we left off
-					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
+					HistoryExecution: blockReadsHistory(lastFrozenTxNum, blockStartTxNum),
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
 					Trace:            dbg.TraceTx(blockNum, txIndex),

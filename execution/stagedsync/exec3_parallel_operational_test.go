@@ -353,3 +353,13 @@ func TestHistoryTaskSeedsTheFirstTaskOrigin(t *testing.T) {
 		require.Equal(t, c.want, read(1), "%+v: txIndex 1 read the origin a later tx published", c)
 	}
 }
+
+// Every task of a block that crosses the last frozen txNum reads history, so the suffix tasks
+// seed origins from the same pinned base as the prefix.
+func TestBlockCrossingTheLastFrozenTxNumReadsHistoryForEveryTask(t *testing.T) {
+	const lastFrozen = 105
+	require.True(t, blockReadsHistory(lastFrozen, 100), "a block that crosses the last frozen txNum")
+	require.True(t, blockReadsHistory(lastFrozen, lastFrozen), "a block that starts at the last frozen txNum")
+	require.False(t, blockReadsHistory(lastFrozen, lastFrozen+1), "a block after the frozen files")
+	require.False(t, blockReadsHistory(0, 100), "no frozen files")
+}
