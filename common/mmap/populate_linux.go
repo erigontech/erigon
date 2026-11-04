@@ -17,6 +17,7 @@
 package mmap
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -201,8 +202,9 @@ func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
 var brokenBatchLog sync.Once
 
 // ReadPages reads the given mapped pages into the page cache with io_uring, up to 8 rings of 256 reads in flight; a
-// page outside the registered file mappings is skipped. It returns the first failed batch's error.
-func ReadPages(pages []uintptr) error {
+// page outside the registered file mappings is skipped. It returns the first failed batch's error. Once ctx is done no
+// further batch starts.
+func ReadPages(ctx context.Context, pages []uintptr) error {
 	if len(pages) == 0 || !BatchPrefetch {
 		return nil
 	}
@@ -230,8 +232,18 @@ func ReadPages(pages []uintptr) error {
 			chunk := offs[:n]
 			offs = offs[n:]
 			wg.Go(func() {
-				br := <-batchRings
+				var br *batchRing
+				select {
+				case br = <-batchRings:
+				case <-ctx.Done():
+					errOnce.Do(func() { firstErr = ctx.Err() })
+					return
+				}
 				defer func() { batchRings <- br }()
+				if err := ctx.Err(); err != nil {
+					errOnce.Do(func() { firstErr = err })
+					return
+				}
 				if br.r == nil {
 					errOnce.Do(func() { firstErr = errNoBatchRing })
 					return
