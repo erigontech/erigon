@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"slices"
@@ -70,8 +71,9 @@ type ForwardBeaconDownloader struct {
 	gloasLookaheadPeer string
 	gloasNextUnscanned uint64
 	gloasTipRetrySlot  uint64
-	// gloasHighestDownloadedSlot is the highest slot of any accepted response; a held block below it has a successor.
-	gloasHighestDownloadedSlot uint64
+	// gloasDownloadedParents maps the parent root of each downloaded, unprocessed block to its highest child slot; a
+	// held block found in it has a downloaded child.
+	gloasDownloadedParents map[common.Hash]uint64
 }
 
 const forwardRequestRetryInterval = 300 * time.Millisecond
@@ -535,7 +537,13 @@ Process:
 	f.mu.Lock()
 	lookahead := f.gloasLookahead
 	lookaheadPeer := f.gloasLookaheadPeer
-	f.gloasHighestDownloadedSlot = max(f.gloasHighestDownloadedSlot, processBlocks[len(processBlocks)-1].Block.Slot)
+	if f.gloasDownloadedParents == nil {
+		f.gloasDownloadedParents = map[common.Hash]uint64{}
+	}
+	for _, block := range processBlocks {
+		f.gloasDownloadedParents[block.Block.ParentRoot] = max(f.gloasDownloadedParents[block.Block.ParentRoot], block.Block.Slot)
+	}
+	maps.DeleteFunc(f.gloasDownloadedParents, func(_ common.Hash, slot uint64) bool { return slot <= f.highestSlotProcessed })
 	f.mu.Unlock()
 	if lookahead != nil {
 		processBlocks = mergeGloasLookahead(processBlocks, lookahead)
@@ -768,17 +776,23 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 
 // ImportHeldGloasTip processes the held Gloas block, then passes it to importTip with the envelope that arrives within
 // envelopeTimeout (nil if none), and reports whether both succeeded. A tip that processing rejects is dropped; any other
-// tip that is not imported is tried again in the next slot. A held block below the highest downloaded slot has a
+// tip that is not imported is tried again in the next slot. A held block that is the parent of a downloaded block has a
 // successor and is left to the batch path.
 func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, importTip func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool) bool {
 	f.mu.Lock()
-	tip, tipPeer, retrySlot, highestDownloaded := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot, f.gloasHighestDownloadedSlot
+	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
 	f.mu.Unlock()
-	if tip == nil || tip.Block.Slot < highestDownloaded {
+	if tip == nil {
 		return false
 	}
 	root, err := tip.Block.HashSSZ()
 	if err != nil || f.currentSlot != nil && f.currentSlot() < retrySlot {
+		return false
+	}
+	f.mu.Lock()
+	_, hasDownloadedChild := f.gloasDownloadedParents[root]
+	f.mu.Unlock()
+	if hasDownloadedChild {
 		return false
 	}
 

@@ -211,7 +211,6 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 	return newChainTipBatchFixtureWithBlob(t, replayStatus, recordStatus, false)
 }
 
-// newChainTipBatchFixtureWithBlob also makes the parent's bid commit to one blob when withBlob is set.
 func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus, withBlob bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
 	t.Helper()
 

@@ -26,11 +26,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
@@ -172,13 +174,28 @@ func TestForwardSyncEndsAtGloasTipWithoutSuccessor(t *testing.T) {
 // takes effect; a miss queues it for the retry.
 func TestForwardSyncQueuesTipEnvelopeUntilDataIsAvailable(t *testing.T) {
 	f := newForwardSyncTipFixtureWithBlob(t, 2, false, true)
+	var available atomic.Bool
+	peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(gomock.Any(), gomock.Any()).DoAndReturn(func(uint64, common.Hash) (bool, error) {
+		return available.Load(), nil
+	}).AnyTimes()
+	peerDas.EXPECT().SyncColumnDataLater(gomock.Any()).Return(nil).AnyTimes()
+	peerDas.EXPECT().BackfillCustodyColumns(gomock.Any(), gomock.Any()).AnyTimes()
+	f.cfg.forkChoice.InitPeerDas(peerDas)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
 	require.Equal(t, f.tipRoot, f.cfg.forwardSyncTipRoot)
 	require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+	require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
 	require.Equal(t, f.tipRoot, f.head(t))
+
+	available.Store(true)
+	require.Eventually(t, func() bool {
+		f.cfg.forkChoice.RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx, f.tip.Block.Slot)
+		return f.cfg.forkChoice.HasEnvelope(f.tipRoot)
+	}, 3*time.Second, 50*time.Millisecond)
 }
 
 // The answer that brings the tip covers no slot after it, so ForwardSync asks again and finds the successor.

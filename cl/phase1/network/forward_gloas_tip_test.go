@@ -651,15 +651,14 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 	tests := []struct {
 		name string
 		// drop runs while the block is held and leaves it not held; nil means the first download already did.
-		drop func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness)
-		// parentProcessed is the highest processed slot before the first download.
+		drop            func(t *testing.T, d *ForwardBeaconDownloader, failNextProcess *atomic.Bool)
 		parentProcessed uint64
 	}{
 		{
 			name:            "successor re-sent while the envelope is missing",
 			parentProcessed: 8,
-			drop: func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness) {
-				h.downloadFromHTTP(t, d)
+			drop: func(t *testing.T, d *ForwardBeaconDownloader, failNextProcess *atomic.Bool) {
+				downloadFromHTTP(t, d)
 			},
 		},
 		{
@@ -669,18 +668,18 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 		{
 			name:            "disconnected retry while held",
 			parentProcessed: 8,
-			drop: func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness) {
+			drop: func(t *testing.T, d *ForwardBeaconDownloader, failNextProcess *atomic.Bool) {
 				other := makeGloasBlock(heldSlot-1, hash(0xdd), common.Hash{})
 				other.Block.ParentRoot = hash(0xee)
-				h.downloadFromPeer(t, d, other)
+				downloadFromPeer(t, d, other)
 			},
 		},
 		{
 			name:            "process error while held",
 			parentProcessed: 8,
-			drop: func(t *testing.T, d *ForwardBeaconDownloader, h *tipRouteHarness) {
-				h.failNextProcess.Store(true)
-				h.downloadFromHTTP(t, d)
+			drop: func(t *testing.T, d *ForwardBeaconDownloader, failNextProcess *atomic.Bool) {
+				failNextProcess.Store(true)
+				downloadFromHTTP(t, d)
 			},
 		},
 	}
@@ -708,7 +707,7 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 			}))
 			t.Cleanup(server.Close)
 
-			h := &tipRouteHarness{}
+			var failNextProcess atomic.Bool
 			client, _ := newNoPeersRPC(t, cfg)
 			downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
 			downloader.SetHighestProcessedSlot(test.parentProcessed)
@@ -716,7 +715,7 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 			downloader.SetHTTPFallbackURL(server.URL)
 			var processedHeld bool
 			downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-				if h.failNextProcess.CompareAndSwap(true, false) {
+				if failNextProcess.CompareAndSwap(true, false) {
 					return highest, errors.New("process failed")
 				}
 				for _, block := range blocks {
@@ -726,15 +725,15 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 				return highest, nil
 			})
 
-			h.downloadFromHTTP(t, downloader)
+			downloadFromHTTP(t, downloader)
 			if test.drop != nil {
 				require.NotNil(t, downloader.gloasLookahead)
 				require.Equal(t, uint64(heldSlot), downloader.gloasLookahead.Block.Slot)
-				test.drop(t, downloader, h)
+				test.drop(t, downloader, &failNextProcess)
 			}
 			require.Nil(t, downloader.gloasLookahead)
 
-			h.downloadFromPeer(t, downloader, b)
+			downloadFromPeer(t, downloader, b)
 			require.Equal(t, uint64(heldSlot), downloader.gloasLookahead.Block.Slot)
 			downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 				return []*cltypes.SignedBeaconBlock{}, "lagging-peer", nil
@@ -747,21 +746,169 @@ func TestForwardBeaconDownloaderDoesNotImportTipAfterSuccessorWasDropped(t *test
 	}
 }
 
-type tipRouteHarness struct {
-	failNextProcess atomic.Bool
-}
-
-func (*tipRouteHarness) downloadFromHTTP(t *testing.T, d *ForwardBeaconDownloader) {
+func downloadFromHTTP(t *testing.T, d *ForwardBeaconDownloader) {
 	t.Helper()
 	d.httpPreferred.Store(true)
 	require.False(t, requestMoreWithin(t, d))
 }
 
-func (*tipRouteHarness) downloadFromPeer(t *testing.T, d *ForwardBeaconDownloader, blocks ...*cltypes.SignedBeaconBlock) {
+func downloadFromPeer(t *testing.T, d *ForwardBeaconDownloader, blocks ...*cltypes.SignedBeaconBlock) {
 	t.Helper()
 	d.httpPreferred.Store(false)
 	d.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 		return blocks, "peer", nil
 	}
 	require.False(t, requestMoreWithin(t, d))
+}
+
+func newBlocksServer(t *testing.T, blocks ...*cltypes.SignedBeaconBlock) *httptest.Server {
+	t.Helper()
+	encoded := map[string][]byte{}
+	for _, block := range blocks {
+		bytes, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		encoded[fmt.Sprintf("/eth/v2/beacon/blocks/%d", block.Block.Slot)] = bytes
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bytes, ok := encoded[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		_, _ = w.Write(bytes)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func answerEmpty(t *testing.T, d *ForwardBeaconDownloader) {
+	t.Helper()
+	d.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return []*cltypes.SignedBeaconBlock{}, "lagging-peer", nil
+	}
+	require.True(t, requestMoreWithin(t, d))
+}
+
+// A higher block that does not descend from the held block is no successor, so the held block is still a tip.
+func TestForwardBeaconDownloaderImportsTipAfterUnrelatedHigherBlock(t *testing.T) {
+	for _, heldWhenUnrelatedArrives := range []bool{true, false} {
+		name := "before the block is held"
+		if heldWhenUnrelatedArrives {
+			name = "while the block is held"
+		}
+		t.Run(name, func(t *testing.T) {
+			a := makeGloasBlock(9, hash(0xa0), common.Hash{})
+			b := makeGloasBlock(10, hash(0xb0), common.Hash{})
+			linkBeaconBlocks(t, a, b)
+			unrelated := makeGloasBlock(12, hash(0xdd), common.Hash{})
+			unrelated.Block.ParentRoot = hash(0xee)
+
+			cfg := gloasFromGenesisConfig()
+			client, _ := newNoPeersRPC(t, cfg)
+			downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+			downloader.SetHighestProcessedSlot(9)
+			downloader.SetCurrentSlotSampler(func() uint64 { return 13 })
+			var processedHeld bool
+			downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+				for _, block := range blocks {
+					processedHeld = processedHeld || block == b
+					highest = block.Block.Slot
+				}
+				return highest, nil
+			})
+
+			if heldWhenUnrelatedArrives {
+				downloadFromPeer(t, downloader, b)
+				require.Same(t, b, downloader.gloasLookahead)
+			}
+			downloadFromPeer(t, downloader, unrelated)
+			if !heldWhenUnrelatedArrives {
+				require.Same(t, unrelated, downloader.gloasLookahead)
+			}
+			downloadFromPeer(t, downloader, b)
+			if !heldWhenUnrelatedArrives {
+				downloadFromPeer(t, downloader, b)
+			}
+			require.Same(t, b, downloader.gloasLookahead)
+			answerEmpty(t, downloader)
+			require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+			require.True(t, processedHeld)
+		})
+	}
+}
+
+// An unvalidated block naming the held block as parent must not displace the real child's record.
+func TestForwardBeaconDownloaderKeepsChildRecordAfterForgedChildAtLowSlot(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	a := makeGloasBlock(9, hash(0xa0), common.Hash{})
+	b := makeGloasBlock(10, hash(0xb0), common.Hash{})
+	c := makeGloasBlock(11, hash(0xc0), hash(0xb0))
+	linkBeaconBlocks(t, a, b, c)
+	rootB, err := b.Block.HashSSZ()
+	require.NoError(t, err)
+	forged := makeGloasBlock(9, hash(0xdd), common.Hash{})
+	forged.Block.ParentRoot = rootB
+	server := newBlocksServer(t, a, b, c)
+
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 13 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	var processedHeld bool
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processedHeld = processedHeld || block.Block.Slot == 10
+			highest = block.Block.Slot
+		}
+		return highest, nil
+	})
+
+	downloadFromHTTP(t, downloader)
+	require.Equal(t, uint64(10), downloader.gloasLookahead.Block.Slot)
+	downloadFromPeer(t, downloader, forged)
+	require.Nil(t, downloader.gloasLookahead)
+	downloadFromPeer(t, downloader, b)
+	require.Equal(t, uint64(10), downloader.gloasLookahead.Block.Slot)
+	answerEmpty(t, downloader)
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+	require.False(t, processedHeld)
+}
+
+// Every block of a response marks its parent as having a downloaded child, not only the last block.
+func TestForwardBeaconDownloaderRecordsParentOfEveryDownloadedBlock(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	a := makeGloasBlock(9, hash(0xa0), common.Hash{})
+	b := makeGloasBlock(10, hash(0xb0), common.Hash{})
+	c := makeGloasBlock(11, hash(0xc0), hash(0xb0))
+	d := makeGloasBlock(12, hash(0xd0), hash(0xc0))
+	linkBeaconBlocks(t, a, b, c, d)
+	other := makeGloasBlock(9, hash(0xdd), common.Hash{})
+	other.Block.ParentRoot = hash(0xee)
+	server := newBlocksServer(t, a, b, c, d)
+
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 14 })
+	downloader.SetHTTPFallbackURL(server.URL)
+	var processedHeld bool
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processedHeld = processedHeld || block.Block.Slot == 10
+			highest = block.Block.Slot
+		}
+		return highest, nil
+	})
+
+	downloadFromHTTP(t, downloader)
+	require.Equal(t, uint64(10), downloader.gloasLookahead.Block.Slot)
+	downloadFromPeer(t, downloader, other)
+	require.Nil(t, downloader.gloasLookahead)
+	downloadFromPeer(t, downloader, b)
+	require.Equal(t, uint64(10), downloader.gloasLookahead.Block.Slot)
+	answerEmpty(t, downloader)
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+	require.False(t, processedHeld)
 }

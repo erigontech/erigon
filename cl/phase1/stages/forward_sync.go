@@ -187,10 +187,9 @@ func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, stor
 	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
 		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
 	if err != nil && !persisted {
-		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			return err
+		if !errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
 		}
-		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
 		return err
 	}
 	if shouldInsert {
@@ -321,7 +320,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return true
 		}
 		err := processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
-		return err == nil || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
+			return true
+		}
+		return err == nil
 	}
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
