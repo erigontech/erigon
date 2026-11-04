@@ -482,13 +482,19 @@ func syncDirectory(path string) error {
 
 // saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a
 // later restart can resume from a locally-provable, reorg-immune anchor. It reuses the head-state
-// save cadence. Fetching the finalized state is best-effort: a miss or error is non-fatal.
-func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64) error {
+// save cadence and skips a finalized root that is already saved. Fetching the finalized state is
+// best-effort: a miss or error is non-fatal and leaves savedRoot unchanged, so the next save on the
+// cadence retries.
+func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64, savedRoot *common.Hash) error {
 	epochFrequency := uint64(5)
 	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
 		return nil
 	}
-	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root)
+	finalizedRoot := fc.FinalizedCheckpoint().Root
+	if finalizedRoot == *savedRoot {
+		return nil
+	}
+	st, err := fc.GetStateAtBlockRoot(finalizedRoot)
 	if err != nil {
 		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
 		return nil
@@ -496,44 +502,60 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 	if st == nil {
 		return nil
 	}
-	return writeFinalizedStateFile(dirs, st)
+	if err := writeFinalizedStateFile(dirs, st); err != nil {
+		return err
+	}
+	*savedRoot = finalizedRoot
+	return nil
 }
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	headEventEmitted := emitHeadEventBeforeStateCopy(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot)
-	// Retrieve the head state.
-	headState, err := cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot)
-	if err != nil {
-		return fmt.Errorf("failed to get state at block root: %w", err)
-	}
-	// fail-safe check§
-	if headState == nil {
-		return nil
-	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
-	// First emit events that depend on the head state.
-	if !headEventEmitted {
-		if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
-			logger.Warn("failed to emit head event", "err", err)
-		}
-	}
-	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
-		logger.Warn("failed to emit next payload attributes event", "err", err)
-	}
-
-	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
-		logger.Warn("failed to produce and cache attestation data", "err", err)
-	}
 	if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 		return err
 	}
+	var headState *state.CachingBeaconState
+	if !headEventEmitted || !gloasHeadStatePublished(cfg, headSlot, headRoot) {
+		// Retrieve the head state.
+		var err error
+		if headState, err = cfg.forkChoice.GetOwnedStateAtBlockRoot(headRoot); err != nil {
+			return fmt.Errorf("failed to get state at block root: %w", err)
+		}
+		// fail-safe check§
+		if headState == nil {
+			return nil
+		}
+		// First emit events that depend on the head state.
+		if !headEventEmitted {
+			if err := emitHeadEvent(cfg.beaconCfg, cfg.forkChoice, cfg.emitter, headSlot, headRoot, headState); err != nil {
+				logger.Warn("failed to emit head event", "err", err)
+			}
+		}
+		if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
+			logger.Warn("failed to emit next payload attributes event", "err", err)
+		}
+
+		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
+			logger.Warn("failed to produce and cache attestation data", "err", err)
+		}
+	} else if _, cached, _ := cfg.attestationDataProducer.CachedAttestationData(headSlot); !cached {
+		if err := cfg.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			_, err := cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, root, headState.Slot())
+			return err
+		}); err != nil {
+			logger.Warn("failed to produce and cache attestation data", "err", err)
+		}
+	}
 	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
-	// Update the head state with the new head state
-	if err := cfg.syncedData.OnOwnedHeadStateWithBlockRoot(headState, headRoot); err != nil {
-		return fmt.Errorf("failed to set head state: %w", err)
+	if headState != nil {
+		// Update the head state with the new head state
+		if err := cfg.syncedData.OnOwnedHeadStateWithBlockRoot(headState, headRoot); err != nil {
+			return fmt.Errorf("failed to set head state: %w", err)
+		}
 	}
 	defer func() {
 		logger.Debug("Post forkchoice operations", "duration", time.Since(start))
@@ -551,10 +573,20 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 	}); err != nil {
 		return err
 	}
-	if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headSlot); err != nil {
+	if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headSlot, &cfg.savedFinalizedRoot); err != nil {
 		return fmt.Errorf("failed to save finalized state on disk: %w", err)
 	}
 	return nil
+}
+
+// gloasHeadStatePublished reports whether the synced head state is already the state of this Gloas head. A payload
+// envelope does not change the beacon state, so that state stays valid when the head's payload status changes.
+func gloasHeadStatePublished(cfg *Cfg, headSlot uint64, headRoot common.Hash) bool {
+	if cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
+		return false
+	}
+	root, slot, ok := cfg.syncedData.StateHead()
+	return ok && root == headRoot && slot == headSlot
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
