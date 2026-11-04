@@ -57,8 +57,10 @@ func (p *ExecutionPayload) decodeSSZ(buf []byte, version int, strict bool) error
 	p.SSZVersion = clparams.StateVersion(version)
 	block := cltypes.NewEth1Block(p.SSZVersion, mainnetBeaconCfg)
 	block.Extra = solid.NewExtraData()
-	// Engine API transaction limits apply to every fork. The Gloas consensus decoder
-	// caps the whole transaction list at the network chunk size.
+	// Decode the schema directly to preserve Engine API transaction limits on every fork.
+	// Eth1Block.DecodeSSZ replaces the transaction list and, from Gloas onward, caps its
+	// total size at the consensus network chunk limit. Keep this field order aligned
+	// with Eth1Block's payload schema.
 	block.Transactions = solid.NewTransactionsSSZWithLimits(mainnetBeaconCfg.MaxTransactionsPerPayload, sszMaxBytesPerTransaction)
 	block.Withdrawals = newWithdrawalList(nil)
 	schema := []any{

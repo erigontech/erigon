@@ -351,6 +351,8 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		e.writeSSZDecodeProblem(w, r, err)
 		return
 	}
+	// Custody columns are decoded and validated, but are not applied: the current
+	// blob backend stores full blobs and does not track custody.
 	if custodyColumns != nil {
 		e.logger.Debug("[SSZ-REST] ignoring custody columns update", "fork", forkName)
 	}
@@ -612,6 +614,7 @@ func (e *EngineServer) handleSSZIdentity(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, versions)
 }
 
+// handleSSZGetInclusionList returns a bare SSZ transaction list without a container wrapper.
 func (e *EngineServer) handleSSZGetInclusionList(w http.ResponseWriter, r *http.Request) {
 	resp, err := e.GetInclusionListV1(r.Context())
 	if err != nil {

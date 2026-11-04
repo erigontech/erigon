@@ -45,14 +45,8 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// ---------------------------------------------------------------------------
-// Minimal stub implementing execmodule.ExecutionModule for unit tests.
-// The methods called by BuildBlockV1 and CommitBlockV1 (GetHeader,
-// AssembleBlock, GetAssembledBlock, CurrentHeader, InsertBlocks,
-// ValidateChain, UpdateForkChoice, GetForkChoice) are wired to configurable
-// closures; everything else is a no-op that satisfies the interface.
-// ---------------------------------------------------------------------------
-
+// stubExecutionModule supplies default responses for ExecutionModule methods.
+// Tests can override individual methods by setting the corresponding callbacks.
 type stubExecutionModule struct {
 	getHeaderFunc          func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
 	getHeadersByRangeFunc  func(ctx context.Context, start, count uint64) ([]*types.Header, error)
@@ -105,8 +99,6 @@ func (s *stubExecutionModule) AddSendersRecovery(blockHash common.Hash, recovery
 		s.addSendersRecoveryFunc(blockHash, recovery)
 	}
 }
-
-// --- No-op implementations for the rest of the interface ---
 
 func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
 	if s.insertBlocksFunc != nil {
