@@ -1781,9 +1781,41 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	return s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 
-func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, chainConfig *chain.Config, logger log.Logger) error {
-	var newIdxBuilt bool
+type indexJob struct {
+	t            snaptype.Enum
+	from, to     uint64
+	info         snaptype.FileInfo
+	indexBuilder snaptype.IndexBuilder
+}
 
+func (s *BaseRoSnapshots) claimIndexJobs() []indexJob {
+	s.dirtyLock.Lock()
+	defer s.dirtyLock.Unlock()
+
+	var jobs []indexJob
+	for _, t := range s.enums {
+		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
+			for _, segment := range segs {
+				if segment.IsIndexed() {
+					continue
+				}
+				// Skip if a merge/dump/another recovery is already building this
+				// (type, range); otherwise claim it so we don't double-build.
+				from, to := segment.From(), segment.To()
+				if !s.TryAcquireRange(t, from, to) {
+					continue
+				}
+				info := segment.FileInfo(s.dir)
+				segment.closeIdx()
+				jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
+			}
+			return true
+		})
+	}
+	return jobs
+}
+
+func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir string, chainConfig *chain.Config, logger log.Logger) error {
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	ps := background.NewProgressSet()
@@ -1814,38 +1846,8 @@ func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir str
 
 	var fmu sync.Mutex
 	failedIndexes := make(map[string]error, 0)
-	type indexJob struct {
-		t            snaptype.Enum
-		from, to     uint64
-		info         snaptype.FileInfo
-		indexBuilder snaptype.IndexBuilder
-	}
-	var jobs []indexJob
-
-	s.dirtyLock.Lock()
-	for _, t := range s.enums {
-		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
-			for _, segment := range segs {
-				if segment.IsIndexed() {
-					continue
-				}
-				// Skip if a merge/dump/another recovery is already building this
-				// (type, range); otherwise claim it so we don't double-build.
-				from, to := segment.From(), segment.To()
-				if !s.TryAcquireRange(t, from, to) {
-					continue
-				}
-				info := segment.FileInfo(s.dir)
-
-				newIdxBuilt = true
-
-				segment.closeIdx()
-				jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
-			}
-			return true
-		})
-	}
-	s.dirtyLock.Unlock()
+	jobs := s.claimIndexJobs()
+	newIdxBuilt := len(jobs) > 0
 
 	for i := range jobs {
 		job := jobs[i]
