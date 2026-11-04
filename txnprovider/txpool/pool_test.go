@@ -702,6 +702,34 @@ func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 	}
 }
 
+func TestPoolBlockGasLimitEquality(t *testing.T) {
+	for _, updateSender := range []bool{false, true} {
+		name := "block limit update"
+		if updateSender {
+			name = "sender state update"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 100_000)
+			change := &remoteproto.StateChangeBatch{
+				PendingBlockBaseFee: 200_000, BlockGasLimit: 100_000,
+				ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+			}
+			if updateSender {
+				account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+				change.ChangeBatch[0].Changes = []*remoteproto.AccountChange{{
+					Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(common.Address{1}), Data: accounts.SerialiseV3(&account),
+				}}
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Equal(t, 1, pool.pending.Len(), "a transaction may use the full block gas limit")
+			txns, err := pool.ProvideTxns(ctx, txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, 1, "a pending transaction at the gas limit must be selectable")
+		})
+	}
+}
+
 func TestOnNewBlockKeepsTxnAtBlockGasLimitPending(t *testing.T) {
 	ctx := t.Context()
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, 40_000_000)
@@ -740,13 +768,13 @@ func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
 	}
 }
 
-func TestProvideTxnsRejectsAAAboveExecutionGasTarget(t *testing.T) {
+func TestProvideTxnsRejectsFrameAboveExecutionGasTarget(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
-	aaTxn := &types.AccountAbstractionTransaction{
-		SenderAddress: accounts.InternAddress(common.Address{1}),
-		GasLimit:      100_000 - params.TxAAGas,
+	frameTxn := &types.FrameTransaction{
+		NonceKeys:     []uint256.Int{{}},
+		SenderAddress: common.Address{1}, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 87_525}}},
 	}
-	pool.pending.best.ms[0].TxnSlot.Txn = aaTxn
+	pool.pending.best.ms[0].TxnSlot.Txn = frameTxn
 	txns, err := pool.ProvideTxns(t.Context(),
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
 	require.NoError(t, err)
@@ -982,7 +1010,7 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 					if _, _, admissionErr := pool.AddRemoteTxns(ctx, txns, nil, nil, nil); admissionErr != nil {
 						t.Fatal(admissionErr)
 					}
-					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err = pool.processRemoteBatch(ctx)
 				}
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
@@ -3642,7 +3670,7 @@ func TestPrecheckRejectionsPreserveDiscardHistory(t *testing.T) {
 				submitted, _, err := pool.AddRemoteTxns(ctx, remote, nil, nil, nil)
 				require.NoError(t, err)
 				require.Equal(t, Hashes(cheap.IDHash[:]), submitted)
-				reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+				reasons, err = pool.processRemoteBatch(ctx)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnderPriced}, reasons)
 			}
@@ -3883,6 +3911,26 @@ func TestCachedOrdinaryRetrySkipsStillDistantTransaction(t *testing.T) {
 	require.Equal(t, []*TxnSlot{near}, pool.unprocessedRemoteTxns.Txns)
 }
 
+func TestKeyedFrameDoesNotAdvanceP2PRetryNonceFrontier(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	target := newTestTxnSlot(pool.cfg.MaxNonceGap+1, 0, 1, 2, 21_000)
+	target.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(target, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+
+	var frames TxnSlots
+	frames.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, frames)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	_, retry := p2pRetryForTest(t, pool, target.IDHash[:], 0)
+	require.False(t, retry, "the keyed nonce cannot fill a gap in the account nonce sequence")
+}
+
 func TestCachedRetryPreservesPerHashRevisionsAfterIndexing(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	require.NoError(t, pool.start(ctx))
@@ -4032,7 +4080,7 @@ func TestCachedPacketRetriesNonceGapSkippedByAnotherPacket(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, Hashes(good.IDHash[:]), submitted)
 	entry := bodyCacheEntry{hashes: append(bytes.Clone(completed.IDHash[:]), good.IDHash[:]...), revision: revision, result: goodFlag}
-	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NonceTooDistant}, reasons)
 	require.True(t, badFlag.invalidSidecar.Load())

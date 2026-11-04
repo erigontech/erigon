@@ -232,11 +232,15 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
+	badPeerFrame := framePoolSlot(t, common.Address(a0), 300_000, 300_000)
+	fromAttacker.Append(badPeerFrame, a0[:], false)
 	if _, _, admissionErr := pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient, nil); admissionErr != nil {
 		t.Fatal(admissionErr)
 	}
 
 	var fromHonest TxnSlots
+	honestFrame := framePoolSlot(t, common.Address(a1), 300_000, 300_000)
+	fromHonest.Append(honestFrame, a1[:], false)
 	fromHonest.Append(&good, a1[:], false)
 	if _, _, admissionErr := pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient, nil); admissionErr != nil {
 		t.Fatal(admissionErr)
@@ -249,6 +253,11 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	}
 
 	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Len(t, pool.remoteFrames.ready, 1, "do not simulate frames from a peer whose KZG proof failed")
+	queued := <-pool.remoteFrames.ready
+	require.Same(t, honestFrame, queued.txn)
+	require.Equal(t, PeerID(honestPeerID), queued.source.peerID)
+	require.NotContains(t, pool.remoteFrames.pending, string(badPeerFrame.IDHash[:]))
 
 	select {
 	case <-kicked:
@@ -296,7 +305,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 		t.Fatal(admissionErr)
 	}
 
-	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
@@ -327,7 +336,7 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 				t.Fatal(admissionErr)
 			}
 
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 		})
@@ -360,7 +369,7 @@ func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
 	if _, _, admissionErr := pool.AddRemoteTxns(ctx, remote, nil, nil, nil); admissionErr != nil {
 		t.Fatal(admissionErr)
 	}
-	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Len(t, pool.byHash, 2)
 	require.Equal(t, txpoolcfg.BlobSlotsOverflow, reasons[0])

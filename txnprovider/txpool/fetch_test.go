@@ -297,7 +297,8 @@ func TestOnNewBlock(t *testing.T) {
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, request *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+			assert.True(t, request.WithStorage, "frame nonce revalidation needs changed storage slots")
 			return stream, nil
 		})
 
@@ -386,6 +387,52 @@ func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentry
 	}
 }
 
+func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	require.NoError(t, frame.Validate())
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	ordinary := tpEncodeTests[1].txns
+	txns := [][]byte{ordinary[0], encoded.Bytes(), ordinary[1]}
+
+	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66} {
+		t.Run(id.String(), func(t *testing.T) {
+			ctx := t.Context()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+			pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil).
+				DoAndReturn(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient, _ *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error) {
+					require.Len(t, slots.Txns, len(ordinary))
+					var handled Hashes
+					for i, txn := range slots.Txns {
+						require.Equal(t, ordinary[i], txn.Rlp)
+						handled = append(handled, txn.IDHash[:]...)
+					}
+					return handled, nil, nil
+				})
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+			require.NoError(t, err)
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			payload := EncodeTransactions(txns, nil)
+			if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
+				payload = EncodePooledTransactions66(txns, 1, nil)
+			}
+			entry, err := fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id: id, Data: payload, PeerId: peerID,
+			}, sentryClient, nil)
+			require.NoError(t, err)
+			require.Empty(t, entry.unsubmitted, "a frame rejected by static policy must not trigger a packet retry")
+		})
+	}
+}
+
 func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -394,6 +441,10 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	for i := range oversizedTxns {
 		oversizedTxns[i] = txn
 	}
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
+	var invalidFrame bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&invalidFrame))
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -410,6 +461,16 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "malformed PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "invalid frame signature Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions([][]byte{invalidFrame.Bytes()}, nil),
+		},
+		{
+			name: "invalid frame signature PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
 		},
 		{
 			name: "oversized Transactions66",
@@ -446,6 +507,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			sentryServer := sentryproto.NewMockSentryServer(ctrl)
 			pool := NewMockPool(ctrl)
 			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 
 			// Expect PenalizePeer to be called exactly once with a Kick penalty.
 			sentryServer.EXPECT().
@@ -829,7 +891,7 @@ func TestFetchRepeatedHashesShareAdmissionAttempt(t *testing.T) {
 				return entry
 			}
 			handle(signed[0])
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			sender := gointerfaces.ConvertH160toAddress(change.ChangeBatch[0].Changes[0].Address)
@@ -846,7 +908,7 @@ func TestFetchRepeatedHashesShareAdmissionAttempt(t *testing.T) {
 			entry.revision = revision
 			require.Len(t, entry.hashes, 32*len(order))
 			require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
-			reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err = pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnderPriced, txpoolcfg.UnderPriced}, reasons)
 			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
@@ -1116,7 +1178,7 @@ func TestFetchSuppressesIdenticalRejectedTransactions(t *testing.T) {
 					func() *sentryproto.InboundMessage { return reply },
 					func() *sentryproto.InboundMessage {
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 						require.Empty(t, pool.byHash)
@@ -1148,44 +1210,46 @@ func TestFetchSuppressesIdenticalRejectedTransactions(t *testing.T) {
 }
 
 func TestFetchRetriesAfterSameBlockNonceGapCloses(t *testing.T) {
-	ctx := t.Context()
-	pool, db, signed, _ := newFetchTestTransactions(t, 65, 0)
-	hash := signed[0].Hash()
-	body := EncodePooledTransactions66(encodeFetchTestTransactions(t, signed[0]), 1, nil)
-	client, sent, penalties := newFetchTestClient(t)
-	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
-	parses := countFetchTestParses(fetch)
-	block := pool.lastSeenBlock.Load()
-	reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
-	receiveFetchTestMessages(t, fetch, client,
-		func() *sentryproto.InboundMessage { return reply },
-		func() *sentryproto.InboundMessage {
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
-			addFetchTestLocalTransactions(t, pool, signed[1])
-			require.Equal(t, block, pool.lastSeenBlock.Load())
-			return reply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-			require.NoError(t, pool.processRemoteTxns(ctx))
-			require.Contains(t, pool.byHash, string(hash[:]))
-			pending, baseFee, queued := pool.CountContent()
-			require.Equal(t, 1, pending)
-			require.Zero(t, baseFee)
-			require.Equal(t, 1, queued)
-			return reply
-		},
-		func() *sentryproto.InboundMessage {
-			require.Empty(t, pool.unprocessedRemoteTxns.Txns)
-			return nil
-		},
-	)
-	require.Equal(t, int64(2), parses())
-	require.Empty(t, sent)
-	require.Empty(t, penalties)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		pool, db, signed, _ := newFetchTestTransactions(t, 65, 0)
+		hash := signed[0].Hash()
+		body := EncodePooledTransactions66(encodeFetchTestTransactions(t, signed[0]), 1, nil)
+		client, sent, penalties := newFetchTestClient(t)
+		var wg sync.WaitGroup
+		fetch := NewFetch(ctx, nil, pool, nil, db, pool.chainID, log.New(), WithP2PFetcherWg(&wg))
+		parses := countFetchTestParses(fetch)
+		block := pool.lastSeenBlock.Load()
+		reply := &sentryproto.InboundMessage{Id: sentryproto.MessageId_POOLED_TRANSACTIONS_66, Data: body, PeerId: peerID}
+		receiveFetchTestMessages(t, fetch, client,
+			func() *sentryproto.InboundMessage { return reply },
+			func() *sentryproto.InboundMessage {
+				reasons, err := pool.processRemoteBatch(ctx)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
+				addFetchTestLocalTransactions(t, pool, signed[1])
+				require.Equal(t, block, pool.lastSeenBlock.Load())
+				return reply
+			},
+			func() *sentryproto.InboundMessage {
+				require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
+				require.NoError(t, pool.processRemoteTxns(ctx))
+				require.Contains(t, pool.byHash, string(hash[:]))
+				pending, baseFee, queued := pool.CountContent()
+				require.Equal(t, 1, pending)
+				require.Zero(t, baseFee)
+				require.Equal(t, 1, queued)
+				return reply
+			},
+			func() *sentryproto.InboundMessage {
+				require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+				return nil
+			},
+		)
+		require.Equal(t, int64(2), parses())
+		require.Empty(t, sent)
+		require.Empty(t, penalties)
+	})
 }
 
 func TestFetchHonestPeerAfterBadAnnouncementInSameBatch(t *testing.T) {
@@ -1372,19 +1436,19 @@ func newFetchBlobRetryFixture(t *testing.T, nonce uint64) (*TxPool, *types.BlobT
 }
 
 func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
-	for _, wrongVersion := range []bool{false, true} {
-		name := "corrupted blob"
-		if wrongVersion {
-			name = "wrong wrapper version"
-		}
-		t.Run(name, func(t *testing.T) {
-			expectedReason := txpoolcfg.UnmatchedBlobTxExt
-			if wrongVersion {
-				expectedReason = txpoolcfg.UnequalBlobTxExt
-			}
+	for _, tc := range []struct {
+		name                  string
+		queuedFailure         txpoolcfg.DiscardReason
+		rejectLocalCommitment bool
+	}{
+		{"corrupted blob", txpoolcfg.UnmatchedBlobTxExt, false},
+		{"wrong wrapper version", txpoolcfg.UnequalBlobTxExt, false},
+		{"local commitment mismatch", txpoolcfg.UnmatchedBlobTxExt, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			pool, good, badWire, goodWire, _ := newFetchBlobRetryFixture(t, 0)
-			if wrongVersion {
+			if tc.queuedFailure == txpoolcfg.UnequalBlobTxExt {
 				var err error
 				badWire, err = good.ConvertToV1()
 				require.NoError(t, err)
@@ -1418,21 +1482,34 @@ func TestFetchRetriesHonestSidecarAfterQueuedSidecarFails(t *testing.T) {
 				},
 				func() *sentryproto.InboundMessage {
 					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err := pool.processRemoteBatch(ctx)
 					require.NoError(t, err)
-					require.Equal(t, []txpoolcfg.DiscardReason{expectedReason}, reasons)
+					require.Equal(t, []txpoolcfg.DiscardReason{tc.queuedFailure}, reasons)
 					require.Empty(t, pool.unprocessedRemoteTxns.Txns)
 					require.Empty(t, pool.byHash)
 					return badReply
 				},
 				func() *sentryproto.InboundMessage {
 					require.Empty(t, pool.unprocessedRemoteTxns.Txns, "the invalid sidecar must stay suppressed")
+					if tc.rejectLocalCommitment {
+						var slot TxnSlot
+						var sender common.Address
+						_, err := parse.ParseTransaction(goodWire, 0, &slot, sender[:], false, true, nil)
+						require.NoError(t, err)
+						require.Equal(t, [32]byte(hash), slot.IDHash)
+						slot.BlobBundles[0].Commitment[0] ^= 1
+						var local TxnSlots
+						local.Append(&slot, sender[:], true)
+						reasons, err := pool.AddLocalTxns(ctx, local)
+						require.NoError(t, err)
+						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.BlobHashCheckFail}, reasons)
+					}
 					return goodReply
 				},
 				func() *sentryproto.InboundMessage {
 					require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "the honest sidecar must be retried after the queued sidecar is rejected")
 					require.Equal(t, byte(1), pool.unprocessedRemoteTxns.Txns[0].BlobBundles[0].Blob[31])
-					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err := pool.processRemoteBatch(ctx)
 					require.NoError(t, err)
 					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 					require.Contains(t, pool.byHash, string(hash[:]))
@@ -1479,7 +1556,7 @@ func TestFetchRetainsPendingSidecarVerdictAcrossRetries(t *testing.T) {
 					return err
 				}
 				if duringParse && parses() == 3 {
-					validationReasons, validationErr = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					validationReasons, validationErr = pool.processRemoteBatch(ctx)
 				}
 				return nil
 			})
@@ -1509,7 +1586,7 @@ func TestFetchRetainsPendingSidecarVerdictAcrossRetries(t *testing.T) {
 					} else {
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
 						require.Equal(t, [32]byte(hash), pool.unprocessedRemoteTxns.Txns[1].IDHash)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success}, reasons)
 						require.Contains(t, pool.byHash, string(hash[:]))
@@ -1536,7 +1613,7 @@ func TestFetchRetainsPendingSidecarVerdictAcrossRetries(t *testing.T) {
 					last := pool.unprocessedRemoteTxns.Txns[len(expectedReasons)-1]
 					require.Equal(t, [32]byte(blobHash), last.IDHash)
 					require.Equal(t, byte(1), last.BlobBundles[0].Blob[31])
-					reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+					reasons, err := pool.processRemoteBatch(ctx)
 					require.NoError(t, err)
 					require.Equal(t, expectedReasons, reasons)
 					require.Contains(t, pool.byHash, string(blobHash[:]))
@@ -1603,7 +1680,7 @@ func TestFetchRetriesMixedHonestPacketAfterNonceProgressAndQueuedSidecarFailure(
 		func() *sentryproto.InboundMessage {
 			require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
 			require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[1].IDHash)
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success}, reasons)
 			require.NotContains(t, pool.byHash, string(hash[:]))
@@ -1617,7 +1694,7 @@ func TestFetchRetriesMixedHonestPacketAfterNonceProgressAndQueuedSidecarFailure(
 			require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "a mixed honest packet must retain the retry opportunity for its previously queued blob")
 			require.Equal(t, [32]byte(hash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
 			require.Equal(t, byte(1), pool.unprocessedRemoteTxns.Txns[0].BlobBundles[0].Blob[31])
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 			require.Contains(t, pool.byHash, string(hash[:]))
@@ -1707,7 +1784,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 				receiveFetchTestMessages(t, fetch, client,
 					func() *sentryproto.InboundMessage { return reply },
 					func() *sentryproto.InboundMessage {
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.NonceTooDistant}, reasons)
 						require.Contains(t, pool.byHash, string(blobHash[:]))
@@ -1728,7 +1805,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 					func() *sentryproto.InboundMessage {
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "unrelated sender progress must not requeue the cached blob")
 						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 						return reply
@@ -1743,7 +1820,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 					func() *sentryproto.InboundMessage {
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
 						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 						updateP2PRetryNonce(t, pool, otherSender, 3, 6)
@@ -1766,7 +1843,7 @@ func TestFetchFiltersCachedBlobRetriesBySenderProgress(t *testing.T) {
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2, "owner progress during parsing must retain the blob retry")
 						require.Equal(t, [32]byte(blobHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
 						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[1].IDHash)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.NonceTooDistant}, reasons)
 						require.Contains(t, pool.byHash, string(blobHash[:]))
@@ -1874,7 +1951,7 @@ func TestFetchRevalidatesBodiesAfterRejectionHistoryEviction(t *testing.T) {
 	processRejected := func() {
 		t.Helper()
 		require.Len(t, pool.unprocessedRemoteTxns.Txns, 1)
-		reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+		reasons, err := pool.processRemoteBatch(ctx)
 		require.NoError(t, err)
 		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnderPriced}, reasons)
 		require.Empty(t, pool.unprocessedRemoteTxns.Txns)
@@ -2225,7 +2302,7 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 					func() *sentryproto.InboundMessage { return reply },
 					func() *sentryproto.InboundMessage {
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						want := []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.NonceTooDistant}
 						if mode == "fee_precheck" {
@@ -2258,7 +2335,7 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 					steps = append(steps, func() *sentryproto.InboundMessage {
 						require.NoError(t, handoffErr)
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 2)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow, txpoolcfg.NonceTooDistant}, reasons)
 						if mode == "parse_progress" {
@@ -2276,7 +2353,7 @@ func TestFetchMixedBlobRetryEligibility(t *testing.T) {
 						require.False(t, handoff)
 						require.Len(t, pool.unprocessedRemoteTxns.Txns, 1, "only the other sender may retry")
 						require.Equal(t, [32]byte(otherHash), pool.unprocessedRemoteTxns.Txns[0].IDHash)
-						reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+						reasons, err := pool.processRemoteBatch(ctx)
 						require.NoError(t, err)
 						want := txpoolcfg.NonceTooDistant
 						if mode == "evicted_precheck" {

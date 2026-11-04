@@ -834,6 +834,10 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
 // Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
+	NonceKeys            types.FrameNonceKeys    `json:"nonceKeys,omitempty" ethjson:"objects"`
+	Sender               *common.Address         `json:"sender,omitempty" ethjson:"data"`
+	Frames               types.Frames            `json:"frames,omitempty" ethjson:"objects"`
+	Signatures           *types.FrameSignatures  `json:"signatures,omitempty" ethjson:"objects"`
 	BlockHash            *common.Hash            `json:"blockHash" ethjson:"data"`
 	BlockNumber          *hexutil.U256           `json:"blockNumber" ethjson:"quantity"`
 	BlockTimestamp       *hexutil.Uint64         `json:"blockTimestamp" ethjson:"quantity"`
@@ -884,9 +888,7 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 		To:    txn.GetTo(),
 		Value: (*hexutil.U256)(txn.GetValue()),
 	}
-	if t, ok := txn.(*types.BlobTxWrapper); ok {
-		txn = &t.Tx
-	}
+	txn = txn.Unwrap()
 
 	v, r, s := txn.RawSignatureValues()
 	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);
@@ -927,11 +929,25 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
 
-		if txn.Type() == types.BlobTxType {
+		switch txn.Type() {
+		case types.BlobTxType:
 			blobTx := txn.(*types.BlobTx)
 			result.MaxFeePerBlobGas = (*hexutil.U256)(&blobTx.MaxFeePerBlobGas)
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
-		} else if txn.Type() == types.SetCodeTxType {
+		case types.FrameTxType:
+			frame := txn.(*types.FrameTransaction)
+			result.Sender = &frame.SenderAddress
+			result.NonceKeys = frame.NonceKeys
+			result.Frames = frame.Frames
+			signatures := types.FrameSignatures(frame.Signatures)
+			if signatures == nil {
+				signatures = types.FrameSignatures{}
+			}
+			result.Signatures = &signatures
+			result.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
+			result.BlobVersionedHashes = frame.BlobVersionedHashes
+			result.Accesses, result.YParity, result.V, result.R, result.S = nil, nil, nil, nil, nil
+		case types.SetCodeTxType:
 			setCodeTx := txn.(*types.SetCodeTransaction)
 			auths := setCodeTx.GetAuthorizations()
 			ats := make(types.AuthorizationList, len(auths))
