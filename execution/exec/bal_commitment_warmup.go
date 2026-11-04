@@ -18,10 +18,12 @@ package exec
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -344,7 +346,7 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	var g errgroup.Group
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs, &stats[0]) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots, &stats[1]) })
-	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), &stats[2]) })
+	g.Go(func() error { return prefetchCommitmentInTxOrder(ctx, db, bal, &stats[2]) })
 	err := g.Wait()
 	log.Info("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots),
 		"acc", fmt.Sprintf("%d/%d plan=%s io=%s", stats[0].waves, stats[0].pages, stats[0].plan, stats[0].io),
@@ -444,6 +446,58 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 		}
 	}
 	return mostlyResident(ctx, p, kv.CommitmentDomain, prefixes)
+}
+
+// dbg: BAL_TRIE_PREFETCH_SEGMENTS > 1 prefetches the trie in that many groups of keys ordered by the first tx that
+// touches them, so mid-block step checkpoints of early txs find their branches resident sooner.
+var trieTxOrderSegments = dbg.EnvInt("BAL_TRIE_PREFETCH_SEGMENTS", 1)
+
+func prefetchCommitmentInTxOrder(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, stats *prefetchStats) error {
+	if trieTxOrderSegments <= 1 {
+		return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal), stats)
+	}
+	type keyAt struct {
+		key   []byte
+		first uint32
+	}
+	var keys []keyAt
+	for i := range bal {
+		a := &bal[i]
+		first := uint32(math.MaxUint32)
+		for _, c := range a.BalanceChanges {
+			first = min(first, c.Index)
+		}
+		for _, c := range a.NonceChanges {
+			first = min(first, c.Index)
+		}
+		for _, c := range a.CodeChanges {
+			first = min(first, c.Index)
+		}
+		if first != math.MaxUint32 {
+			keys = append(keys, keyAt{commitment.KeyToHexNibbleHash(a.Address[:]), first})
+		}
+		for _, sc := range a.StorageChanges {
+			slotFirst := uint32(math.MaxUint32)
+			for _, c := range sc.Changes {
+				slotFirst = min(slotFirst, c.Index)
+			}
+			slot := sc.Slot.Value()
+			keys = append(keys, keyAt{commitment.KeyToHexNibbleHash(append(bytes.Clone(a.Address[:]), slot[:]...)), slotFirst})
+		}
+	}
+	slices.SortStableFunc(keys, func(x, y keyAt) int { return cmp.Compare(x.first, y.first) })
+	per := (len(keys) + trieTxOrderSegments - 1) / trieTxOrderSegments
+	for from := 0; from < len(keys) && ctx.Err() == nil; from += per {
+		group := make([][]byte, 0, per)
+		for _, k := range keys[from:min(from+per, len(keys))] {
+			group = append(group, k.key)
+		}
+		slices.SortFunc(group, bytes.Compare)
+		if err := prefetchCommitment(ctx, db, group, stats); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, stats *prefetchStats) error {
