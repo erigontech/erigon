@@ -2768,7 +2768,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	if txn := txTask.Tx(); txn != nil {
 		limits, err := protocol.TransactionGasLimits(txn, txTask.Rules().IsAmsterdam)
 		if err != nil {
-			return be.invalidBlockResult(fmt.Errorf("%w: invalid transaction gas limits: %w", rules.ErrInvalidBlock, err)), nil
+			return be.invalidBlockResult(fmt.Errorf("%w: invalid transaction gas limits at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 		}
 		if err := protocol.CheckBlockGasInclusion(be.gasPool, limits.Execution, limits.State, txn.GetBlobGas()); err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
