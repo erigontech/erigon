@@ -478,7 +478,15 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		if stateByBatch = batchReadsState(codeMode, func() bool { return stateKeysCold(ctx, db, bal) }); stateByBatch {
 			group.Go(func() error {
 				prefetchBALState(ctx, db, bal)
-				return nil
+				// dbg: fill the state cache with the accounts from the pages the batch read
+				accOnly := make(types.BlockAccessList, len(bal))
+				for i := range bal {
+					a := bal[i]
+					a.StorageChanges, a.StorageReads = nil, nil
+					accOnly[i] = a
+				}
+				accTasks, accWorkers := makeBALWarmupPlan(accOnly, workers)
+				return bra.warmBALState(ctx, db, accOnly, accTasks, codeMode, txCodeDestinations, accWorkers)
 			})
 		}
 	}
