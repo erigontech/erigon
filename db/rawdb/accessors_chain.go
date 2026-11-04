@@ -929,6 +929,34 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 	return nil
 }
 
+// DeleteBlock removes stored block data without changing transaction ID sequences.
+func DeleteBlock(tx kv.GetPut, hash common.Hash, number uint64) error {
+	key := dbutils.BlockBodyKey(number, hash)
+	body, ok, err := ReadBodyOnlyTxnByKey(tx, key)
+	if err != nil {
+		return err
+	}
+	if ok {
+		end := body.BaseTxnID.U64() + uint64(body.TxCount)
+		if body.TxCount < 2 || end <= body.BaseTxnID.U64() {
+			return fmt.Errorf("invalid transaction range for block %d: base=%d count=%d", number, body.BaseTxnID, body.TxCount)
+		}
+		txIDBytes := make([]byte, 8)
+		for txID := body.BaseTxnID.U64(); txID < end; txID++ {
+			binary.BigEndian.PutUint64(txIDBytes, txID)
+			if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
+				return err
+			}
+		}
+	}
+	for _, table := range []string{kv.BlockBody, kv.BlockAccessList, kv.Senders, kv.HeaderTD, kv.Headers} {
+		if err := tx.Delete(table, key); err != nil {
+			return err
+		}
+	}
+	return tx.Delete(kv.HeaderNumber, hash[:])
+}
+
 // PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx

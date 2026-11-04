@@ -183,7 +183,7 @@ func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 	require.Equal(t, []string{"AAAA", "CAAA", "CCAA"}, keys)
 }
 
-func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
+func TestReadViewIterationIsSafeAgainstConcurrentDelete(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbNonDupSort(t, rwTx)
 	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
@@ -209,6 +209,10 @@ func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range rounds {
+			if err := view.ForAmount(kv.HeaderNumber, nil, 4, func(_, _ []byte) error { return nil }); err != nil {
+				readErr = err
+				return
+			}
 			it, err := view.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				readErr = err

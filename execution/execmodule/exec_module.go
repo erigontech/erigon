@@ -18,7 +18,6 @@ package execmodule
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -710,11 +709,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
 				return ValidationResult{}, err
 			}
-			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, blockHash); err != nil {
-					return ValidationResult{}, err
-				}
-			}
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
@@ -737,46 +731,46 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
-	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	chainTx := tx
+	var overlay *membatchwithdb.MemoryMutation
+	if e.currentContext != nil {
+		overlay = e.currentContext.BlockOverlay()
+		if overlay != nil {
+			chainTx = overlay
+		}
+	}
+	tip, err := e.blockReader.HeaderNumber(ctx, chainTx, headHash)
 	if err != nil {
 		return err
 	}
 	if tip == nil {
-		// Block is not in tx — nothing to purge.
 		return nil
 	}
 
 	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
+	canonicalHeadHash := rawdb.ReadHeadBlockHash(chainTx)
 
 	currentHash := headHash
 	currentNumber := *tip
 	for currentHash != latestValidHash {
-		currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
-		if err != nil {
-			return err
-		}
-
-		// TODO: find a better way to handle this
-		if currentHash == dbHeadHash {
-			// We can't delete the head block stored in the database as that is our canonical reconnection point.
+		if currentHash == dbHeadHash || currentHash == canonicalHeadHash {
 			return nil
 		}
-
-		body, ok, err := rawdb.ReadBodyOnlyTxnByKey(tx, dbutils.BlockBodyKey(currentNumber, currentHash))
+		currentHeader, err := e.getHeader(ctx, chainTx, currentHash, currentNumber)
 		if err != nil {
 			return err
 		}
-		if ok {
-			txIDBytes := make([]byte, 8)
-			for txID := body.BaseTxnID.U64(); txID <= body.BaseTxnID.LastSystemTx(body.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return err
-				}
+		if currentHeader == nil {
+			return makeErrMissingChainSegment(currentHash)
+		}
+		if err := rawdb.DeleteBlock(tx, currentHash, currentNumber); err != nil {
+			return err
+		}
+		if overlay != nil {
+			if err := rawdb.DeleteBlock(overlay, currentHash, currentNumber); err != nil {
+				return err
 			}
 		}
-		rawdb.DeleteBody(tx, currentHash, currentNumber)
-		rawdb.DeleteHeader(tx, currentHash, currentNumber)
 		currentHash = currentHeader.ParentHash
 		currentNumber--
 	}

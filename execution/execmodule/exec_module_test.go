@@ -3256,11 +3256,13 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 
 func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		blocks int
+		name      string
+		blocks    int
+		persisted int
 	}{
 		{name: "overlay", blocks: 1},
-		{name: "database", blocks: 17},
+		{name: "database", blocks: 17, persisted: 17},
+		{name: "database_and_overlay", blocks: 18, persisted: 17},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -3282,14 +3284,21 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 				badBlocks[i] = types.NewBlockFromNetwork(header, block.Body(), block.BlockAccessListSidecar())
 				parentHash = badBlocks[i].Hash()
 			}
-			insRes, err := m.InsertBlocks(ctx, badBlocks)
-			require.NoError(t, err)
-			require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			if tc.persisted > 0 {
+				insRes, err := m.InsertBlocks(ctx, badBlocks[:tc.persisted])
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			}
+			if tc.persisted < len(badBlocks) {
+				insRes, err := m.InsertBlocks(ctx, badBlocks[tc.persisted:])
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			}
 			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-				for _, block := range badBlocks {
+				for i, block := range badBlocks {
 					exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
 					require.NoError(t, err)
-					require.Equal(t, tc.name == "database", exists)
+					require.Equal(t, i < tc.persisted, exists)
 				}
 				return nil
 			}))
@@ -3302,7 +3311,7 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 			}
 
 			sibling := chainPack.Blocks[1]
-			insRes, err = m.InsertBlocks(ctx, []*types.Block{sibling})
+			insRes, err := m.InsertBlocks(ctx, []*types.Block{sibling})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
@@ -3312,9 +3321,11 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 			require.Equal(t, parent.Hash(), validation.LatestValidHash)
 			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 				for _, block := range badBlocks {
-					exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
-					require.NoError(t, err)
-					require.False(t, exists, "rejected body must be removed before the next forkchoice update")
+					for _, table := range []string{kv.BlockBody, kv.HeaderTD} {
+						exists, err := tx.Has(table, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+						require.NoError(t, err)
+						require.False(t, exists, "%s must be removed before the next forkchoice update", table)
+					}
 				}
 				count, err := tx.Count(kv.EthTx)
 				require.NoError(t, err)
@@ -3340,15 +3351,20 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 			m.ExecModule.WaitIdle(ctx)
 			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 				for _, block := range badBlocks {
-					exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
-					require.NoError(t, err)
-					require.False(t, exists, "rejected body must not be committed later")
+					for _, table := range []string{kv.BlockBody, kv.HeaderTD} {
+						exists, err := tx.Has(table, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+						require.NoError(t, err)
+						require.False(t, exists, "rejected %s must not be committed later", table)
+					}
 				}
 				for _, block := range []*types.Block{parent, sibling} {
 					stored := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
 					require.NotNil(t, stored)
 					require.Len(t, stored.Transactions(), 1)
 					require.Equal(t, block.Transactions()[0].Hash(), stored.Transactions()[0].Hash())
+					td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+					require.NoError(t, err)
+					require.NotNil(t, td)
 				}
 				count, err := tx.Count(kv.EthTx)
 				require.NoError(t, err)

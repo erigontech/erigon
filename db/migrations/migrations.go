@@ -60,6 +60,7 @@ var migrations = map[kv.Label][]Migration{
 		createPtcWindowEpochTable,
 		createExecutionPayloadEnvelopeSignaturesTable,
 		dropCodeCacheTable,
+		removeOrphanedBlockBodies,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

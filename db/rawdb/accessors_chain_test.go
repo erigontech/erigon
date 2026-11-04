@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 
@@ -617,6 +618,31 @@ func TestBlockStorage(t *testing.T) {
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
+}
+
+func TestDeleteBlockRejectsInvalidTransactionRange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		base  types.BaseTxnID
+		count uint32
+	}{
+		{name: "zero count", base: 10},
+		{name: "missing system transaction", base: 10, count: 1},
+		{name: "overflow", base: math.MaxUint64 - 1, count: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			hash := common.Hash{1}
+			require.NoError(t, rawdb.WriteBodyForStorage(tx, hash, 1, &types.BodyForStorage{
+				BaseTxnID: tc.base,
+				TxCount:   tc.count,
+			}))
+			require.Error(t, rawdb.DeleteBlock(tx, hash, 1))
+			exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(1, hash))
+			require.NoError(t, err)
+			require.True(t, exists)
+		})
+	}
 }
 
 // Tests that partial block contents don't get reassembled into full blocks.
