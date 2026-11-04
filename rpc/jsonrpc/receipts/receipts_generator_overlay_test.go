@@ -190,6 +190,8 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 // one destroys a contract whose storage predates the block, so each root depends on the
 // replay folding every key the block has changed so far.
 func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
+	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
+	dbg.CallNoMaterialize = true
 	statecfg.EnableHistoricalCommitment()
 	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil
@@ -212,6 +214,7 @@ func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 				types.NewTransaction(nonce+2, inBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
 				types.NewTransaction(nonce+3, preBlock, uint256.NewInt(0), 100_000, uint256.NewInt(1), []byte{0x01}),
 				types.NewTransaction(nonce+4, common.Address{0x02}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+				types.NewTransaction(nonce+5, preBlock, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), // funds the destroyed contract again
 			}
 		}
 		for _, txn := range txns {
@@ -229,7 +232,7 @@ func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
 	txns := block.Transactions()
-	require.Len(t, txns, 5)
+	require.Len(t, txns, 6)
 	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
 

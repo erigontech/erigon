@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -356,6 +358,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}()
 
 		var stateWriter state.StateWriter
+		var written *blockWrites
 
 		if calculatePostState && postState.CommitmentHistory {
 			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
@@ -380,7 +383,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
+			written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains, tx: tx, blockStart: minTxNum}
+			stateWriter = state.NewWriter(written, nil, latestTxNum)
 
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
@@ -438,6 +442,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				if err != nil {
 					return nil, err
 				}
+				written.touchAll()
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 				if err != nil {
 					return nil, err
@@ -603,7 +608,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			if err != nil {
 				return nil, err
 			}
-			written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains}
+			written = &blockWrites{TemporalPutDel: sharedDomains.AsPutDel(tx), sd: sharedDomains, tx: tx, blockStart: minTxNum}
 			stateWriter = state.NewWriter(written, nil, latestTxNum)
 		} else {
 			stateWriter = genEnv.noopWriter
@@ -796,8 +801,10 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 // block-start trie, so it must fold the keys of the block's earlier txs too.
 type blockWrites struct {
 	kv.TemporalPutDel
-	sd   *execctx.SharedDomains
-	keys map[kv.Domain]map[string][]byte
+	sd         *execctx.SharedDomains
+	tx         kv.TemporalTx
+	blockStart uint64
+	keys       map[kv.Domain]map[string][]byte
 }
 
 func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
@@ -807,7 +814,48 @@ func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, pre
 
 func (w *blockWrites) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	w.record(domain, k, nil)
+	if domain == kv.AccountsDomain {
+		if err := w.recordStorageDeleted(k); err != nil {
+			return err
+		}
+	}
 	return w.TemporalPutDel.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (w *blockWrites) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	if err := w.recordStorageDeleted(prefix); err != nil {
+		return err
+	}
+	return w.TemporalPutDel.DomainDelPrefix(domain, prefix, txNum)
+}
+
+// recordStorageDeleted records the account's block-start and in-block slots as deleted: the
+// shared domains' own storage cascade reads latest state, which misses the block-start slots.
+func (w *blockWrites) recordStorageDeleted(addr []byte) error {
+	for k := range w.keys[kv.StorageDomain] {
+		if strings.HasPrefix(k, string(addr)) {
+			w.keys[kv.StorageDomain][k] = nil
+		}
+	}
+	to, ok := kv.NextSubtree(addr)
+	if !ok {
+		to = nil
+	}
+	it, err := w.tx.RangeAsOf(kv.StorageDomain, addr, to, w.blockStart, order.Asc, kv.Unlim)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			w.record(kv.StorageDomain, k, nil)
+		}
+	}
+	return nil
 }
 
 func (w *blockWrites) record(domain kv.Domain, k, v []byte) {
