@@ -480,10 +480,8 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		if stateByBatch = cold.any(); stateByBatch {
 			group.Go(func() error {
 				prefetchBALState(ctx, db, bal, cold)
-				// The batch only reads pages; the accounts' per-key warmup also fills the state cache that exec reads.
-				accs := balAccounts(bal)
-				accTasks, accWorkers := makeBALWarmupPlan(accs, workers)
-				return bra.warmBALState(ctx, db, accs, accTasks, codeMode, txCodeDestinations, accWorkers)
+				// The batch only reads pages; the per-key warmup also fills the state cache that exec reads.
+				return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
 			})
 		}
 	}
