@@ -464,7 +464,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
-	if mmap.BatchPrefetch {
+	if mmap.NewProbe() != nil {
 		group.Go(func() error {
 			prefetchBAL(ctx, db, bal)
 			return nil
