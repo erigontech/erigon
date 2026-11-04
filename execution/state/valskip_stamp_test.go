@@ -149,12 +149,12 @@ func TestQuietBelow_FlushBumpsStampOfWriterSlot(t *testing.T) {
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	stamp := vm.WriteSeq()
-	flushLifecycle(vm, addr, 2, BalancePath)
+	flushPath(vm, addr, 2, BalancePath)
 	require.False(t, vm.QuietBelow(3, stamp), "flush by tx 2 blocks tx 3")
 	require.True(t, vm.QuietBelow(2, stamp), "flush by tx 2 does not block tx 2")
 }
 
-func flushLifecycle(vm *VersionMap, addr accounts.Address, tx int, path AccountPath) *WriteSet {
+func flushPath(vm *VersionMap, addr accounts.Address, tx int, path AccountPath) *WriteSet {
 	h := WriteHeader{Address: addr, Version: Version{TxIndex: tx}, Path: path}
 	var ws *WriteSet
 	switch path {
@@ -179,7 +179,7 @@ func TestValSkip_LifecyclePromotionBumpsStamp(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			vm := newStampedMap(32)
-			ws := flushLifecycle(vm, addr, 3, path)
+			ws := flushPath(vm, addr, 3, path)
 			stamp := vm.WriteSeq()
 			require.True(t, vm.QuietBelow(5, stamp))
 			vm.MarkWritesValidated(ws, nil)
@@ -198,7 +198,7 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 	}
 	for name, promote := range promotions {
 		vm := newStampedMap(32)
-		flushLifecycle(vm, addr, 1, SelfDestructPath)
+		flushPath(vm, addr, 1, SelfDestructPath)
 		ws := newWriteSet(&VersionedWrite[uint256.Int]{
 			WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
 			Val:         *uint256.NewInt(1),
@@ -214,14 +214,14 @@ func TestQuietBelow_FlushInFlightBeforeEntryLock(t *testing.T) {
 	t.Parallel()
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x0c"))
-	flushLifecycle(vm, addr, 1, BalancePath)
+	flushPath(vm, addr, 1, BalancePath)
 	stamp := vm.WriteSeq()
 	e := vm.load(addr)
 	e.mu.Lock()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		flushLifecycle(vm, addr, 3, BalancePath)
+		flushPath(vm, addr, 3, BalancePath)
 	}()
 	require.Eventually(t, func() bool { return !vm.QuietBelow(5, stamp) }, time.Second, time.Millisecond,
 		"the stamp bracket must open before the flush takes the entry lock")
@@ -233,7 +233,7 @@ func TestValSkip_CompleteOnLifecycleCellBumps(t *testing.T) {
 	t.Parallel()
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x03"))
-	ws := flushLifecycle(vm, addr, 3, SelfDestructPath)
+	ws := flushPath(vm, addr, 3, SelfDestructPath)
 	vm.MarkWritesValidated(ws, nil)
 	stamp := vm.WriteSeq()
 	require.True(t, vm.QuietBelow(5, stamp))
@@ -245,7 +245,7 @@ func TestValSkip_PromotionWithoutLifecycleCellDoesNotBump(t *testing.T) {
 	t.Parallel()
 	vm := newStampedMap(32)
 	addr := accounts.InternAddress(common.HexToAddress("0x04"))
-	ws := flushLifecycle(vm, addr, 3, BalancePath)
+	ws := flushPath(vm, addr, 3, BalancePath)
 	stamp := vm.WriteSeq()
 	vm.MarkWritesValidated(ws, nil)
 	require.True(t, vm.QuietBelow(5, stamp), "Estimate->Validated on a plain account must not bump")
@@ -266,7 +266,7 @@ func TestQuietBelow_DeleteBumpsStamp(t *testing.T) {
 			quiet bool
 		}{{3, false}, {4, false}, {5, true}, {9, true}} {
 			vm := newStampedMap(32)
-			flushLifecycle(vm, addr, tc.j, BalancePath)
+			flushPath(vm, addr, tc.j, BalancePath)
 			stamp := vm.WriteSeq()
 			op(vm, tc.j)
 			require.Equal(t, tc.quiet, vm.QuietBelow(5, stamp), "%s by j=%d against i=5", name, tc.j)
@@ -287,7 +287,7 @@ func TestQuietBelow_NoOpDeleteDoesNotBump(t *testing.T) {
 		op(vm, 3)
 		require.True(t, vm.QuietBelow(5, stamp), "%s of an absent account must not stamp", name)
 
-		flushLifecycle(vm, addr, 2, BalancePath)
+		flushPath(vm, addr, 2, BalancePath)
 		stamp = vm.WriteSeq()
 		op(vm, 3)
 		require.True(t, vm.QuietBelow(5, stamp), "%s with no cell at j must not stamp", name)
@@ -311,7 +311,7 @@ func TestQuietBelow_NoOpBALFlushDoesNotBump(t *testing.T) {
 	vm.HasBAL = true
 	vm.InitStamps(32)
 	stamp := vm.WriteSeq()
-	flushLifecycle(vm, addr, 3, BalancePath)
+	flushPath(vm, addr, 3, BalancePath)
 	require.True(t, vm.QuietBelow(5, stamp), "a flush that changes no cell must not stamp")
 }
 
