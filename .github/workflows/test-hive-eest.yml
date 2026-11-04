@@ -398,7 +398,13 @@ jobs:
           consumer_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].consumer_ref // empty' erigon-full/test-fixtures.json)
           if [ -n "$consumer_ref" ]; then
             # Consumer fixes require a source build independent of the fixture release.
-            jq -n --arg sim 'ethereum/eels/${{ matrix.sim }}' --arg ref "$consumer_ref" --arg fixtures "$eels_ref" \
+            # Keep fixtures compressed in the image to avoid a large Docker layer.
+            # Hive extracts only this simulator's tests when the container starts.
+            sim_dir='hive/simulators/ethereum/eels/${{ matrix.sim }}'
+            bash erigon-full/tools/test-fixtures.sh --download-only \
+              erigon-full/test-fixtures.json "$sim_dir" '${{ matrix.fixtures-tarball }}'
+            mv "$sim_dir/${{ matrix.fixtures-tarball }}.tar.gz" "$sim_dir/fixtures.tar.gz"
+            jq -n --arg sim 'ethereum/eels/${{ matrix.sim }}' --arg ref "$consumer_ref" --arg fixtures /fixtures \
               '[{simulator: $sim, dockerfile: "git", build_args: {branch: $ref, fixtures: $fixtures}}]' > hive/eels-config.json
             eels_args=(--config eels-config.json)
           fi
