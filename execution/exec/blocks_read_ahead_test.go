@@ -116,6 +116,9 @@ func (db *singleTxRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	return db.tx, nil
 }
 
+// Rollback is a no-op: singleTxRoDB hands this one tx to every warmup goroutine, and the test rolls back the base tx.
+func (*firstAccountReadErrorTx) Rollback() {}
+
 func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
 		tx.accountReads++
