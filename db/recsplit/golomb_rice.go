@@ -23,7 +23,6 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon/common/bitutil"
-	"github.com/erigontech/erigon/common/mmap"
 )
 
 // Optimal Golomb-Rice parameters for leaves
@@ -125,8 +124,6 @@ func (g *GolombRiceReader) ReadReset(bitPos, unaryOffset int) {
 	g.currFixedOffset = bitPos
 	unaryPos := bitPos + unaryOffset
 	g.currPtrUnary = unaryPos / 64
-	g.probe.Touch(unsafe.Pointer(&g.data[bitPos/64]))
-	g.probe.Touch(unsafe.Pointer(&g.data[g.currPtrUnary]))
 	g.currWindowUnary = g.data[g.currPtrUnary] >> (unaryPos & 63)
 	g.currPtrUnary++
 	g.validLowerBitsUnary = 64 - (unaryPos & 63)
@@ -210,5 +207,4 @@ type GolombRiceReader struct {
 	currWindowUnary     uint64
 	currPtrUnary        int
 	validLowerBitsUnary int
-	probe               *mmap.Probe
 }

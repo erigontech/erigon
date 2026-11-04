@@ -24,7 +24,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -327,8 +327,8 @@ type coldPagesPrefetcher struct {
 	err        error
 }
 
-func (p coldPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration, error) {
-	return 1, p.coldPerKey * len(keys), 0, 0, p.err
+func (p coldPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	return p.coldPerKey * len(keys), p.err
 }
 
 func TestTrieMostlyResidentSkipsAResidentTrie(t *testing.T) {
@@ -374,11 +374,11 @@ func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
 	require.Empty(t, slots)
 }
 
-func TestTrieMostlyResidentWithoutKeysWalksNothing(t *testing.T) {
-	require.False(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, nil))
+func TestTrieMostlyResidentWithoutKeysSkipsTheWalk(t *testing.T) {
+	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil))
 }
 
-func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
+func TestSampleColdCountsColdPagesPerSampledKey(t *testing.T) {
 	keys := make([][]byte, 10_000)
 	for i := range keys {
 		keys[i] = []byte{byte(i >> 8), byte(i)}
@@ -388,21 +388,27 @@ func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
 	require.Equal(t, keys[0], sample[0])
 	require.Len(t, sampleEvenly(keys[:2*residencySampleKeys-1], residencySampleKeys), residencySampleKeys)
 	require.Len(t, sampleEvenly(keys[:100], residencySampleKeys), 100)
-	require.True(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, sample))
-	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, kv.StorageDomain, sample))
-	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, nil))
+	for _, c := range []struct {
+		coldPerKey int
+		sample     [][]byte
+		want       bool
+	}{{0, sample, false}, {1, sample, true}, {1, nil, false}} {
+		got, err := sampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: c.coldPerKey}, kv.StorageDomain, c.sample)
+		require.NoError(t, err)
+		require.Equal(t, c.want, got, "coldPerKey=%d keys=%d", c.coldPerKey, len(c.sample))
+	}
 }
 
 // sharedPagesPrefetcher finds cold pages only on its first call: pages that all keys share,
 // which the first probe reads.
 type sharedPagesPrefetcher struct{ calls *int }
 
-func (p sharedPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration, error) {
+func (p sharedPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
 	*p.calls++
 	if *p.calls == 1 {
-		return 1, len(keys), 0, 0, nil
+		return len(keys), nil
 	}
-	return 1, 0, 0, 0, nil
+	return 0, nil
 }
 
 func TestStateSampleColdIgnoresPagesTheFirstProbeRead(t *testing.T) {
@@ -424,11 +430,11 @@ func TestStateSampleColdKeepsThePerKeyWarmupWhenTheSampleReadEveryKey(t *testing
 // domainErrPrefetcher reports every page cold and fails its reads in one domain.
 type domainErrPrefetcher struct{ failing kv.Domain }
 
-func (p domainErrPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration, error) {
+func (p domainErrPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
 	if domain == p.failing {
-		return 1, len(keys), 0, 0, errors.New("read failed")
+		return len(keys), errors.New("read failed")
 	}
-	return 1, len(keys), 0, 0, nil
+	return len(keys), nil
 }
 
 func TestStateSampleColdKeepsThePerKeyWarmupWhenOneDomainCannotRead(t *testing.T) {
@@ -451,8 +457,41 @@ func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {
 	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil, 0, 0), "no state keys: nothing to batch")
 }
 
+// prefetcherTx hands p to the code under test as its AggTx.
+type prefetcherTx struct {
+	kv.TemporalTx
+	p latestPrefetcher
+}
+
+func (t prefetcherTx) AggTx() any { return t.p }
+
 func TestPrefetchKeysKeepsTheFirstReadError(t *testing.T) {
-	var stats prefetchStats
-	prefetchKeys(context.Background(), nil, domainErrPrefetcher{failing: kv.CommitmentDomain}, kv.CommitmentDomain, [][]byte{{1}}, &stats)
-	require.Error(t, stats.err)
+	err := prefetchKeys(context.Background(), nil, prefetcherTx{p: domainErrPrefetcher{failing: kv.CommitmentDomain}}, kv.CommitmentDomain, [][]byte{{1}})
+	require.Error(t, err)
+}
+
+// branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.
+type branchTx struct {
+	kv.TemporalTx
+	children map[string]uint16
+}
+
+func (t branchTx) AggTx() any { return t }
+
+func (t branchTx) GetLatestBranchRaw(prefix []byte, _ kv.Tx) ([]byte, bool, error) {
+	bits, ok := t.children[string(prefix)]
+	if !ok {
+		return nil, false, nil
+	}
+	return []byte{0, 0, byte(bits >> 8), byte(bits)}, true, nil
+}
+
+func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
+	compact := func(path ...byte) string { return string(nibbles.HexToCompactInto(nil, path)) }
+	tx := branchTx{children: map[string]uint16{
+		compact(1): 1 << 2, // branch 1 has only child 2
+	}}
+	keys := [][]byte{{1, 2, 0}, {1, 5, 0}, {3, 0, 0}, {4}}
+	got := keysWithChild(context.Background(), nil, tx, keys, 1)
+	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
 }

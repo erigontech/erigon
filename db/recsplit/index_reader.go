@@ -79,8 +79,12 @@ func (r *IndexReader) twoLayerLookupByHash(hi, lo uint64, pr *mmap.Probe) (offse
 	if !ok {
 		return 0, 0, false
 	}
+	if pr == nil {
+		return r.index.OrdinalLookup(ordinal), ordinal, true
+	}
 	return r.index.offsetEf.GetProbe(ordinal, pr), ordinal, true
 }
+func (r *IndexReader) BaseDataID() uint64 { return r.index.BaseDataID() }
 
 // TwoLayerLookupByHash high-level methods. allow to turn-off `enum` in future
 func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {

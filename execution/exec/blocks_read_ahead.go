@@ -471,11 +471,16 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	stateByBatch := false
 	if mmap.NewProbe() != nil {
-		stateByBatch = batchReadsState(codeMode, func() bool { return stateKeysCold(ctx, db, bal) })
 		group.Go(func() error {
-			prefetchBAL(ctx, db, bal, stateByBatch)
+			prefetchBALCommitment(ctx, db, bal)
 			return nil
 		})
+		if stateByBatch = batchReadsState(codeMode, func() bool { return stateKeysCold(ctx, db, bal) }); stateByBatch {
+			group.Go(func() error {
+				prefetchBALState(ctx, db, bal)
+				return nil
+			})
+		}
 	}
 	if !stateByBatch {
 		group.Go(func() error {

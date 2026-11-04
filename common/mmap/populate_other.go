@@ -19,6 +19,7 @@
 package mmap
 
 import (
+	"context"
 	"os"
 	"unsafe"
 )
@@ -37,4 +38,6 @@ func NewProbe() *Probe { return nil }
 
 func (*Probe) Touch(unsafe.Pointer) {}
 
-func ReadPages([]uintptr) error { return nil }
+func (*Probe) MarkResident([]uintptr) {}
+
+func ReadPages(context.Context, []uintptr) error { return nil }

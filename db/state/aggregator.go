@@ -17,6 +17,7 @@
 package state
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -2724,12 +2725,12 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
 // Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
 // stay correct without it.
-func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (waves, pages int, plan, io time.Duration, err error) {
+func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (pages int, err error) {
 	dt := at.d[domain]
 	dt.probe = mmap.NewProbe()
 	if dt.probe == nil || len(keys) == 0 {
 		dt.probe = nil
-		return 0, 0, 0, 0, nil
+		return 0, nil
 	}
 	defer func() {
 		dt.probe = nil
@@ -2747,13 +2748,12 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 	}
 	tried := map[uintptr]struct{}{}
-	for ; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
-		t0 := time.Now()
+	for waves := 0; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
-				return waves, pages, plan, io, nil
+				return pages, err
 			}
 			page, ok := probeLatestFromFiles(dt, k)
 			if !ok {
@@ -2765,18 +2765,19 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			cold = append(cold, page)
 			next = append(next, k)
 		}
-		t1 := time.Now()
-		if rerr := mmap.ReadPages(cold); rerr != nil && err == nil {
-			err = rerr // failed pages are in tried, so the next wave goes on with the other keys
+		// A failed page goes into tried below, so the next wave goes on with the other keys.
+		if rerr := mmap.ReadPages(ctx, cold); rerr != nil {
+			err = cmp.Or(err, rerr)
+		} else {
+			dt.probe.MarkResident(cold)
 		}
-		plan, io = plan+t1.Sub(t0), io+time.Since(t1)
 		pages += len(cold)
 		for _, page := range cold {
 			tried[page] = struct{}{}
 		}
 		pending = next
 	}
-	return waves, pages, plan, io, err
+	return pages, err
 }
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
@@ -2826,6 +2827,12 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)
 	}
 	return v, step, found, err
+}
+
+// GetLatestBranchRaw returns the latest commitment branch at prefix as stored, without resolving its shortened keys.
+func (at *AggregatorRoTx) GetLatestBranchRaw(prefix []byte, tx kv.Tx) ([]byte, bool, error) {
+	v, _, ok, err := at.d[kv.CommitmentDomain].GetLatest(prefix, tx)
+	return v, ok, err
 }
 
 func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {

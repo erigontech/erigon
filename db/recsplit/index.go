@@ -453,11 +453,14 @@ func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (u
 
 	var gr GolombRiceReader
 	gr.data = idx.grData
-	gr.probe = pr
 
 	bucket := remap(bucketHash, idx.bucketCount)
 	cumKeys, cumKeysNext, bitPos := idx.ef.Get3Probe(bucket, pr)
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
+	if pr != nil {
+		pr.Touch(unsafe.Pointer(&gr.data[bitPos/64]))
+		pr.Touch(unsafe.Pointer(&gr.data[(int(bitPos)+int(idx.skipBits(m)))/64]))
+	}
 	gr.ReadReset(int(bitPos), idx.skipBits(m))
 	var level int
 	for m > idx.secondaryAggrBound { // fanout = 2

@@ -17,6 +17,7 @@
 package mmap
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -123,6 +124,13 @@ func (pr *Probe) Touch(p unsafe.Pointer) {
 	}
 }
 
+// MarkResident records pages that were just read, so later touches skip their mincore.
+func (pr *Probe) MarkResident(pages []uintptr) {
+	for _, page := range pages {
+		pr.resident[page] = struct{}{}
+	}
+}
+
 func (pr *Probe) touch(p unsafe.Pointer) {
 	page := uintptr(p) &^ (osPageSize - 1)
 	if _, ok := pr.resident[page]; ok {
@@ -137,6 +145,10 @@ func (pr *Probe) touch(p unsafe.Pointer) {
 }
 
 const batchRingEntries = 256
+
+// batchReadSize is the length of one page read: reading any part of a page fills the whole page-cache page, so 4 KiB
+// scratch serves kernels with larger pages too.
+const batchReadSize = 4096
 
 type batchRing struct {
 	r    *iouring.Ring
@@ -171,7 +183,7 @@ func newBatchRing() (*batchRing, bool) {
 	}
 	br := &batchRing{r: r, bufs: make([][]byte, batchRingEntries)}
 	for i := range br.bufs {
-		br.bufs[i] = make([]byte, osPageSize)
+		br.bufs[i] = make([]byte, batchReadSize)
 	}
 	return br, true
 }
@@ -179,18 +191,10 @@ func newBatchRing() (*batchRing, bool) {
 // errNoBatchRing reports a pool slot whose ring failed earlier, so the pages stay cold.
 var errNoBatchRing = errors.New("mmap: no io_uring ring for this batch")
 
-// brokenBatchRings keeps failed rings and their buffers alive: the kernel may still write into them.
-var (
-	brokenMu         sync.Mutex
-	brokenBatchRings []*batchRing
-)
-
-// replaceBrokenBatchRing parks a failed ring and gives its slot a new one; a slot whose ring cannot be
-// recreated stops reading, so parked rings stay bounded by the pool size.
+// replaceBrokenBatchRing abandons a failed ring and gives its slot a new one; a slot whose ring cannot be recreated
+// stops reading.
 func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
-	brokenMu.Lock()
-	brokenBatchRings = append(brokenBatchRings, br)
-	brokenMu.Unlock()
+	br.r.Abandon(br.bufs...)
 	if nbr, ok := newBatchRing(); ok {
 		return nbr
 	}
@@ -201,8 +205,9 @@ func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
 var brokenBatchLog sync.Once
 
 // ReadPages reads the given mapped pages into the page cache with io_uring, up to 8 rings of 256 reads in flight; a
-// page outside the registered file mappings is skipped. It returns the first failed batch's error.
-func ReadPages(pages []uintptr) error {
+// page outside the registered file mappings is skipped. It returns the first failed batch's error. Once ctx is done no
+// further batch starts.
+func ReadPages(ctx context.Context, pages []uintptr) error {
 	if len(pages) == 0 || !BatchPrefetch {
 		return nil
 	}
@@ -230,15 +235,25 @@ func ReadPages(pages []uintptr) error {
 			chunk := offs[:n]
 			offs = offs[n:]
 			wg.Go(func() {
-				br := <-batchRings
+				var br *batchRing
+				select {
+				case br = <-batchRings:
+				case <-ctx.Done():
+					errOnce.Do(func() { firstErr = ctx.Err() })
+					return
+				}
 				defer func() { batchRings <- br }()
+				if err := ctx.Err(); err != nil {
+					errOnce.Do(func() { firstErr = err })
+					return
+				}
 				if br.r == nil {
 					errOnce.Do(func() { firstErr = errNoBatchRing })
 					return
 				}
 				lens := make([]int, len(chunk))
 				for i := range lens {
-					lens[i] = int(osPageSize)
+					lens[i] = batchReadSize
 				}
 				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
 					errOnce.Do(func() { firstErr = err })

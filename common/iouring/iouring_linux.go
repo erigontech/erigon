@@ -25,6 +25,7 @@ package iouring
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -136,6 +137,24 @@ var ErrRingReset = errors.New("io_uring: ring reset with nothing in flight")
 func (r *Ring) reset() {
 	atomic.StoreUint32(r.sqTail, atomic.LoadUint32(r.sqHead))
 	atomic.StoreUint32(r.cqHead, atomic.LoadUint32(r.cqTail))
+}
+
+// abandoned keeps failed rings and their read buffers alive: the kernel may still write into them.
+var (
+	abandonedMu sync.Mutex
+	abandoned   []abandonedRing
+)
+
+type abandonedRing struct {
+	r    *Ring
+	bufs [][]byte
+}
+
+// Abandon retires a ring whose reads may still be in flight: the ring and bufs stay alive and are never reused.
+func (r *Ring) Abandon(bufs ...[]byte) {
+	abandonedMu.Lock()
+	defer abandonedMu.Unlock()
+	abandoned = append(abandoned, abandonedRing{r, bufs})
 }
 
 func (r *Ring) Close() {
