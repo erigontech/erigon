@@ -60,6 +60,11 @@ const (
 	FrameSignatureP256
 )
 
+var (
+	p256N     = elliptic.P256().Params().N
+	p256HalfN = new(big.Int).Rsh(p256N, 1)
+)
+
 var FrameExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c577D57FfFf")
 
 var FrameNonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
@@ -177,8 +182,7 @@ func (sig *FrameSignature) validate(sender common.Address, hash common.Hash) err
 		}
 		r := new(big.Int).SetBytes(sig.Signature[:32])
 		s := new(big.Int).SetBytes(sig.Signature[32:64])
-		n := elliptic.P256().Params().N
-		if r.Sign() == 0 || r.Cmp(n) >= 0 || s.Sign() == 0 || s.Cmp(new(big.Int).Rsh(new(big.Int).Set(n), 1)) > 0 {
+		if r.Sign() == 0 || r.Cmp(p256N) >= 0 || s.Sign() == 0 || s.Cmp(p256HalfN) > 0 {
 			return errors.New("signature verification failed")
 		}
 		if common.BytesToAddress(crypto.Keccak256(sig.Signature[64:])[12:]) != sig.ResolvedSigner(sender) {
