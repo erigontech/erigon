@@ -167,3 +167,84 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 	require.Equal(t, want, root(true, false), "prefetched branches must yield the same root as direct reads")
 	root(true, true)
 }
+
+// The first-touch base cache must not change a root. Block 3 writes only balances, so
+// its fold takes each nonce block 2 committed from the base; both blocks straddle step
+// edges. Per-block mode (base cached at first touch) must give batch mode's root (base
+// read at the fold).
+func TestCalculatorRootSameWithFirstTouchBaseCache(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BatchCommitments = true
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+
+	addrs := make([]common.Address, 32)
+	for i := range addrs {
+		addrs[i] = common.Address{0: byte(i * 37), 19: byte(i + 1)}
+	}
+	putAccount := func(doms *execctx.SharedDomains, tx kv.TemporalTx, addr common.Address, nonce, bal, txNum uint64) {
+		acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(bal), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), txNum, nil))
+	}
+	func() {
+		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+		require.NoError(t, err)
+		defer tx.Rollback()
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+		require.NoError(t, err)
+		defer doms.Close()
+		for _, addr := range addrs {
+			putAccount(doms, tx, addr, 1, 10, 1)
+		}
+		_, err = doms.ComputeCommitment(ctx, tx, true, 0, 1, "", nil)
+		require.NoError(t, err)
+		require.NoError(t, doms.Flush(ctx, tx))
+		require.NoError(t, tx.Commit())
+	}()
+
+	root := func(perBlock bool) []byte {
+		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+		require.NoError(t, err)
+		defer tx.Rollback()
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+		require.NoError(t, err)
+		defer doms.Close()
+		doms.SetDisableInlineTouchKey(true)
+
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, perBlock, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+
+		txNum := uint64(1)
+		for blockNum := uint64(2); blockNum <= 3; blockNum++ {
+			vm := newRawViewVM(txNum + 1)
+			for _, addr := range addrs {
+				txNum++
+				a := accounts.InternAddress(addr)
+				ws := &state.WriteSet{}
+				ws.SetBalance(a, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: a, Path: state.BalancePath}, Val: *uint256.NewInt(txNum)})
+				if blockNum == 2 {
+					ws.SetNonce(a, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: a, Path: state.NoncePath}, Val: 2})
+				}
+				putAccount(doms, tx, addr, 2, txNum, txNum)
+				cc.handleMessage(ctx, recordTx(vm, blockNum, common.Hash{byte(blockNum)}, txNum, &chain.Rules{}, ws))
+			}
+			cc.handleMessage(ctx, newTestBlockResult(blockNum, common.Hash{byte(blockNum)}, txNum, false))
+		}
+		if !perBlock {
+			cc.handleMessage(ctx, &commitComputeRequest{})
+		}
+		cc.Stop()
+		var last []byte
+		for len(out) > 0 {
+			last = (<-out).rootHash
+		}
+		return last
+	}
+
+	want := root(false)
+	require.NotEmpty(t, want)
+	require.Equal(t, want, root(true))
+}
