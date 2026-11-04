@@ -34,6 +34,8 @@ type blockResponseSentinel struct {
 	softBannedPeer   string
 	maxResponseBytes []uint64
 	requestData      [][]byte
+	askedPeers       []string
+	topics           []string
 	calls            int
 }
 
@@ -455,6 +457,15 @@ func (s *blockResponseSentinel) SendRequest(_ context.Context, req *sentinelprot
 		Data: s.response,
 		Peer: &sentinelproto.Peer{Pid: "malicious-peer"},
 	}, nil
+}
+
+func (s *blockResponseSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.calls++
+	s.askedPeers = append(s.askedPeers, req.Pid)
+	s.topics = append(s.topics, req.Topic)
+	s.maxResponseBytes = append(s.maxResponseBytes, req.MaxResponseBytes)
+	s.requestData = append(s.requestData, bytes.Clone(req.Data))
+	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
 }
 
 func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
@@ -1031,6 +1042,71 @@ func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResu
 	require.Error(t, err)
 	require.Nil(t, blocks)
 	require.Equal(t, "malicious-peer", pid)
+}
+
+func TestSendBeaconBlocksByRangeReqToPeerUsesThatPeer(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	slot := (cfg.FuluForkEpoch + 1) * cfg.SlotsPerEpoch
+	fuluBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	fuluBlock.Block.Slot = slot
+	gloasBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	gloasBlock.Block.Slot = slot
+	newClient := func(response []byte) (*BeaconRpcP2P, *blockResponseSentinel) {
+		sentinel := &blockResponseSentinel{response: response}
+		return &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}, sentinel
+	}
+
+	t.Run("asks the given peer for the range", func(t *testing.T) {
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, fuluBlock, fuluDigest[:]...))
+		client, sentinel := newClient(response.Bytes())
+
+		blocks, err := client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "directed-peer", slot, 5)
+
+		require.NoError(t, err)
+		require.Len(t, blocks, 1)
+		require.Equal(t, slot, blocks[0].Block.Slot)
+		require.Equal(t, []string{"directed-peer"}, sentinel.askedPeers)
+		require.Equal(t, []string{blocksByRangeTopic}, sentinel.topics)
+		require.Equal(t, []uint64{communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), 5)}, sentinel.maxResponseBytes)
+		require.Len(t, sentinel.requestData, 1)
+		wireRequest := &cltypes.BeaconBlocksByRangeRequest{}
+		require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(sentinel.requestData[0]), wireRequest, clparams.FuluVersion))
+		require.Equal(t, &cltypes.BeaconBlocksByRangeRequest{StartSlot: slot, Count: 5, Step: 1}, wireRequest)
+	})
+
+	t.Run("rejects a block whose fork schema disagrees with its slot", func(t *testing.T) {
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, gloasBlock, gloasDigest[:]...))
+		client, sentinel := newClient(response.Bytes())
+
+		blocks, err := client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "directed-peer", slot, 1)
+
+		require.ErrorIs(t, err, errBlockForkSchemaSlotMismatch)
+		require.Nil(t, blocks)
+		require.Equal(t, "directed-peer", sentinel.bannedPeer)
+	})
+
+	t.Run("rejects more chunks than requested", func(t *testing.T) {
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, fuluBlock, fuluDigest[:]...))
+		require.NoError(t, response.WriteByte(0))
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, fuluBlock, fuluDigest[:]...))
+		client, sentinel := newClient(response.Bytes())
+
+		blocks, err := client.SendBeaconBlocksByRangeReqToPeer(t.Context(), "directed-peer", slot, 1)
+
+		require.ErrorIs(t, err, ErrInvalidResponse)
+		require.ErrorContains(t, err, "more chunks than requested")
+		require.Nil(t, blocks)
+		require.Equal(t, "directed-peer", sentinel.softBannedPeer)
+	})
 }
 
 // TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds pins that a client's peer refresh loop
