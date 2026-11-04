@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unsafe"
@@ -44,14 +45,17 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 		collateAndMerge(t, tx, d, txs)
 		return nil
 	}))
-	// The domain keeps the mappings it touched while building, so page them out where they are mapped.
 	maps := fileMappings(t, d.dirs.SnapDomain)
 	require.NotEmpty(t, maps)
+	pageOut(t, d.dirs.SnapDomain, maps)
+	var kvMaps []fileMapping
 	for _, m := range maps {
-		_, _, errno := unix.Syscall(unix.SYS_MADVISE, m.start, m.end-m.start, unix.MADV_PAGEOUT)
-		require.Zero(t, errno)
+		if strings.HasSuffix(m.path, ".kv") {
+			kvMaps = append(kvMaps, m)
+		}
 	}
-	before := residentPages(t, maps)
+	require.NotEmpty(t, kvMaps)
+	before, kvBefore := residentPages(t, maps), residentPages(t, kvMaps)
 
 	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
@@ -66,6 +70,7 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 	at.d[kv.AccountsDomain] = dt
 	at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
 	require.Greater(t, residentPages(t, maps), before, "the batch read cold file pages")
+	require.Greater(t, residentPages(t, kvMaps), kvBefore, "the batch read cold .kv pages")
 	require.Nil(t, dt.probe)
 	for _, r := range dt.dataReaders {
 		if r != nil {
@@ -85,7 +90,10 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 	}
 }
 
-type fileMapping struct{ start, end uintptr }
+type fileMapping struct {
+	start, end uintptr
+	path       string
+}
 
 // fileMappings returns this process's mappings of the files under dir.
 func fileMappings(t *testing.T, dir string) []fileMapping {
@@ -98,7 +106,7 @@ func fileMappings(t *testing.T, dir string) []fileMapping {
 		if len(fields) < 6 || !strings.HasPrefix(fields[5], dir) {
 			continue
 		}
-		var m fileMapping
+		m := fileMapping{path: fields[5]}
 		_, err := fmt.Sscanf(fields[0], "%x-%x", &m.start, &m.end)
 		require.NoError(t, err)
 		maps = append(maps, m)
@@ -119,4 +127,22 @@ func residentPages(t *testing.T, maps []fileMapping) int {
 		}
 	}
 	return n
+}
+
+// pageOut writes the domain files back, since the fixture skips fsync and dirty pages stay resident, then pages out
+// this process's mappings of them, which the domain keeps from building its files.
+func pageOut(t *testing.T, dir string, maps []fileMapping) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		f, err := os.OpenFile(filepath.Join(dir, e.Name()), os.O_RDWR, 0)
+		require.NoError(t, err)
+		require.NoError(t, f.Sync())
+		require.NoError(t, f.Close())
+	}
+	for _, m := range maps {
+		_, _, errno := unix.Syscall(unix.SYS_MADVISE, m.start, m.end-m.start, unix.MADV_PAGEOUT)
+		require.Zero(t, errno)
+	}
 }
