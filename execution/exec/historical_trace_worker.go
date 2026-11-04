@@ -200,7 +200,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
-			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
+			rw.taskGasPool.Reset(txTask.InclusionGas(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
@@ -389,7 +389,11 @@ func doHistoryReduce(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs,
 	}
 	defer tx.Rollback()
 
-	var resultProcessor historicalResultProcessor
+	// Re-runs a result that took other gas than its block left.
+	replay := NewHistoricalTraceWorker(ctx, consumer, nil, nil, false, cfg, logger)
+	replay.ResetTx(tx)
+	defer replay.ibs.Close()
+	resultProcessor := historicalResultProcessor{replay: replay}
 
 	for outputTxNum.Load() <= toTxNum {
 		closed, err := out.AwaitDrain(ctx, 10*time.Millisecond)
@@ -439,6 +443,8 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 
 type historicalResultProcessor struct {
 	blockResult BlockResult
+	blockGas    uint64 // gas the block counts so far, which from Amsterdam is not its receipts'
+	replay      *HistoricalTraceWorker
 }
 
 func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *ExecArgs, rws *ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool, logger log.Logger) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
@@ -461,6 +467,22 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			prev = p.blockResult.Receipts[txTask.TxIndex-1]
 		} else { //nolint:staticcheck
 			// TODO get the previous reciept from the DB
+		}
+
+		if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			left := txTask.BlockGasLimit()
+			left -= min(left, p.blockGas)
+			stale, err := txTask.BindBlockGas(left)
+			if err != nil {
+				return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, err)
+			}
+			if stale {
+				if result = p.replay.RunTxTask(txTask); result.Err != nil {
+					hooks.EmitTxEnd(nil, result.ExecutionResult.TxnGasUsage, result.Err)
+					return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
+				}
+			}
+			p.blockGas += result.ExecutionResult.BlockExecutionGasUsed
 		}
 
 		receipt, err := result.CreateNextReceipt(prev)
@@ -506,6 +528,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			p.blockResult = BlockResult{}
+			p.blockGas = 0
 			stopedAtBlockEnd = true
 			if forceStopAtBlockEnd {
 				break
