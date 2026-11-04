@@ -270,9 +270,9 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
-// foldTx applies one published tx's versionMap view and indexes to sd.mem. The
-// finalize tx skips ApplyTxIndexes' receipt-cache write: it shares the last regular
-// tx's txNum, so a write here would clobber that entry.
+// foldTx applies one published tx's versionMap view and indexes to sd.mem.
+// Finalize logs share the final virtual task's txNum. That task has already
+// handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
@@ -1691,9 +1691,8 @@ type txResult struct {
 	// balTxs carries the sealed reads and writes of txs before the block's final one,
 	// so the apply loop builds the block access list while the block runs.
 	balTxs []balTx
-	// isFinalize marks the block-end result. It shares the last regular tx's txNum,
-	// so its indexing skips the receipt cache; its logs are the block-end syscall
-	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
+	// isFinalize marks block-end writes and logs, which have no receipt.
+	// The apply loop indexes these logs without changing the receipt cache.
 	isFinalize bool
 }
 
@@ -3527,10 +3526,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// without a net state change).
 		if (finalizeWrites != nil && !finalizeWrites.IsEmpty()) || len(blockEndLogs) > 0 {
 			lastResult := be.results[len(be.results)-1]
-			// The finalize result carries the block-end syscall logs (no receipt, no
-			// per-tx traces — the last tx's own result already indexed those). The
-			// apply loop indexes them with skipReceiptCache, since finalize shares the
-			// last regular tx's txNum.
+			// The final virtual task has already published its receipt-cache update.
+			// Keep the block-end logs separate so folding them does not write receipts.
 			if err := be.sendResult(ctx, &txResult{
 				blockNum:   be.blockNum,
 				blockHash:  be.blockHash,

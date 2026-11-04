@@ -165,7 +165,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 // Remote cursor operations can renew the database view, even on Close.
 // Discard results and errors from reads that crossed a renewal.
 func readWithStableTxView[T any](ctx context.Context, tx kv.Tx, read func() (T, error)) (T, error) {
-	for {
+	for range 3 {
 		if err := ctx.Err(); err != nil {
 			var zero T
 			return zero, err
@@ -176,6 +176,11 @@ func readWithStableTxView[T any](ctx context.Context, tx kv.Tx, read func() (T, 
 			return result, err
 		}
 	}
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	return zero, errors.New("database view changed repeatedly during read; retry the request")
 }
 
 func (api *DebugAPIImpl) storageRangeAt(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
@@ -196,6 +201,9 @@ func (api *DebugAPIImpl) storageRangeAt(ctx context.Context, tx kv.TemporalTx, b
 	}
 	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, blockNumber, int(min(txIndex, math.MaxInt)))
 	if err != nil {
+		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNumber)}
+		}
 		return StorageRangeResult{}, err
 	}
 
@@ -635,6 +643,9 @@ func (api *DebugAPIImpl) accountAt(ctx context.Context, tx kv.TemporalTx, blockH
 	}
 	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, *blockNumber, int(min(txIndex, math.MaxInt)))
 	if err != nil {
+		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, *blockNumber)}
+		}
 		return nil, err
 	}
 

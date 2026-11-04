@@ -42,6 +42,76 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
+func TestReadWithStableTxViewRetryLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		renewals int
+		wantErr  bool
+	}{
+		{"stable_on_last_attempt", 2, false},
+		{"keeps_renewing", 3, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := &stableViewTestTx{}
+			calls := 0
+			result, err := readWithStableTxView(t.Context(), tx, func() (int, error) {
+				calls++
+				if calls <= tc.renewals {
+					tx.viewID++
+				}
+				return 42, nil
+			})
+			require.Equal(t, 3, calls)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "database view changed")
+				require.Zero(t, result)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, 42, result)
+			}
+		})
+	}
+}
+
+func TestReadWithStableTxViewCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		cancelAfter int
+	}{
+		{"before_read", 0},
+		{"during_retry", 1},
+		{"on_last_attempt", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancelAfter == 0 {
+				cancel()
+			}
+			tx := &stableViewTestTx{}
+			calls := 0
+			result, err := readWithStableTxView(ctx, tx, func() (int, error) {
+				calls++
+				tx.viewID++
+				if calls == tc.cancelAfter {
+					cancel()
+				}
+				return 42, nil
+			})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Zero(t, result)
+			require.Equal(t, tc.cancelAfter, calls)
+		})
+	}
+}
+
+type stableViewTestTx struct {
+	kv.Tx
+	viewID uint64
+}
+
+func (tx *stableViewTestTx) ViewID() uint64 { return tx.viewID }
+
 func TestIndexedStateReadUsesPinnedCanonicalBlock(t *testing.T) {
 	for _, endpoint := range []string{"account", "storage", "traceCall", "traceCallMany"} {
 		for _, requested := range []string{"original", "replacement", "missing_canonical_mapping"} {

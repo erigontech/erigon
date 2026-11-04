@@ -347,10 +347,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = beaconConfig.ConfigName
 	csn := freezeblocks.NewCaplinSnapshots(freezeCfg, beaconConfig, dirs, logger)
-	// Nothing else sweeps caplin's .tmp: CaplinSnapshots never calls RemoveOverlaps, and each
-	// interrupted compression leaves a differently-suffixed multi-GB file behind. Swept here
-	// rather than in NewCaplinSnapshots because read-only tools construct that against a live
-	// node's datadir, and only this path runs before the antiquary compresses anything.
 	if err := csn.RemoveOwnTmpFiles(); err != nil {
 		logger.Warn("[CaplinSnapshots] could not sweep leftover .tmp files", "err", err)
 	}
@@ -605,7 +601,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				return
 			case <-time.After(10 * time.Second):
 				if err := antiq.Loop(); err != nil {
-					logger.Debug("Antiquary failed", "err", err)
+					logger.Warn("Antiquary failed", "err", err)
 				} else {
 					keepGoing = false
 				}

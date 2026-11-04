@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -310,7 +311,7 @@ type traceCallState struct {
 
 // Resolve and validate again if setup renews the remote view. Only setup may be
 // retried: tracing writes to the response stream and cannot be safely replayed.
-func (api *DebugAPIImpl) prepareTraceCallState(ctx context.Context, tx kv.TemporalTx, block rpc.BlockNumberOrHash, txIndex *int) (traceCallState, error) {
+func prepareTraceCallState[I int | hexutil.Uint](ctx context.Context, api *DebugAPIImpl, tx kv.TemporalTx, block rpc.BlockNumberOrHash, txIndex *I) (traceCallState, error) {
 	return readWithStableTxView(ctx, tx, func() (traceCallState, error) {
 		var result traceCallState
 		blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, block, tx, canonicalViewReader{api._blockReader})
@@ -321,17 +322,22 @@ func (api *DebugAPIImpl) prepareTraceCallState(ctx context.Context, tx kv.Tempor
 			return result, err
 		}
 		var minTxNum uint64
+		var index int
 		if txIndex != nil {
-			minTxNum, err = api.checkTxIndexInBlock(ctx, tx, blockNumber, *txIndex)
+			index = int(min(*txIndex, I(math.MaxInt)))
+			minTxNum, err = api.checkTxIndexInBlock(ctx, tx, blockNumber, index)
 			if err != nil {
+				if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+					err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", *txIndex, blockNumber)}
+				}
 				return result, err
 			}
 		}
-		postState := txIndex == nil || *txIndex == -1 || isLatest
+		postState := txIndex == nil || index == -1 || isLatest
 		if postState {
 			err = api.checkPruneState(ctx, tx, blockNumber)
 		} else {
-			err = api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, uint64(*txIndex))
+			err = api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, uint64(index))
 		}
 		if err != nil {
 			return result, err
@@ -340,7 +346,7 @@ func (api *DebugAPIImpl) prepareTraceCallState(ctx context.Context, tx kv.Tempor
 			result.reader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, isLatest, -1, api._txNumReader)
 		} else {
 			// User transaction zero reads just after the initial system transaction.
-			result.reader = state.NewHistoryReaderV3(tx, minTxNum+uint64(*txIndex)+1)
+			result.reader = state.NewHistoryReaderV3(tx, minTxNum+uint64(index)+1)
 		}
 		if err != nil {
 			return result, err
@@ -374,11 +380,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	engine := api.engine()
 
-	var txIndex *int
-	if config != nil && config.TxIndex != nil {
-		txIndex = new(int(min(*config.TxIndex, math.MaxInt)))
+	var txIndex *hexutil.Uint
+	if config != nil {
+		txIndex = config.TxIndex
 	}
-	prepared, err := api.prepareTraceCallState(ctx, dbtx, blockNrOrHash, txIndex)
+	prepared, err := prepareTraceCallState(ctx, api, dbtx, blockNrOrHash, txIndex)
 	if err != nil {
 		return err
 	}
@@ -463,7 +469,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	prepared, err := api.prepareTraceCallState(ctx, tx, simulateContext.BlockNumber, simulateContext.TransactionIndex)
+	prepared, err := prepareTraceCallState(ctx, api, tx, simulateContext.BlockNumber, simulateContext.TransactionIndex)
 	if err != nil {
 		return err
 	}
