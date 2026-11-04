@@ -147,13 +147,16 @@ func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 			}
 			var encoded bytes.Buffer
 			require.NoError(t, frame.MarshalBinary(&encoded))
-			t.Run("gossip", func(t *testing.T) {
-				fetch := NewFetch(t.Context(), nil, nil, nil, nil, frame.ChainID, log.New())
-				var slot TxnSlot
-				var sender common.Address
-				_, err := fetch.pooledTxnsParseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, sender[:], false, true, nil)
-				require.ErrorContains(t, err, tc.want)
-			})
+			for _, withSender := range []bool{false, true} {
+				t.Run(fmt.Sprintf("gossip/withSender=%t", withSender), func(t *testing.T) {
+					fetch := NewFetch(t.Context(), nil, nil, nil, nil, frame.ChainID, log.New())
+					fetch.pooledTxnsParseCtx.WithSender(withSender)
+					var slot TxnSlot
+					var sender common.Address
+					_, err := fetch.pooledTxnsParseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, sender[:], false, true, nil)
+					require.ErrorContains(t, err, tc.want)
+				})
+			}
 			t.Run("RPC", func(t *testing.T) {
 				pool := &addMockTxPool{}
 				server := NewGrpcServer(t.Context(), pool, mdbxtest.NewTestPoolDB(t), nil, frame.ChainID, log.New())
@@ -169,18 +172,31 @@ func TestFramePoolPrecheckBeforeSignatures(t *testing.T) {
 }
 
 func TestFramePoolDirectAdmissionChecksSignatures(t *testing.T) {
-	ctx, pool, sender := keyedFramePoolEnv(t)
-	slot := framePoolSlot(t, sender, 1, 2)
-	frame := slot.Txn.(*types.FrameTransaction)
-	frame.Signatures = []types.FrameSignature{{Signature: []byte{1}}}
-	require.NoError(t, frame.Validate())
-	frame.Signatures = append(frame.Signatures, types.FrameSignature{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)})
-	var txns TxnSlots
-	txns.Append(slot, sender[:], true)
-	reasons, err := pool.AddLocalTxns(ctx, txns)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
-	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+	for _, name := range []string{"constructed", "replaced parsed transaction"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			slot := framePoolSlot(t, sender, 1, 2)
+			frame := slot.Txn.(*types.FrameTransaction)
+			if name == "replaced parsed transaction" {
+				parser := NewTxnParseContext(frame.ChainID)
+				var parsed TxnSlot
+				var parsedSender common.Address
+				_, err := parser.ParseTransaction(slot.Rlp, 0, &parsed, parsedSender[:], false, true, nil)
+				require.NoError(t, err)
+				parsed.Txn = frame
+				slot = &parsed
+			}
+			frame.Signatures = []types.FrameSignature{{Signature: []byte{1}}}
+			require.NoError(t, frame.Validate())
+			frame.Signatures = append(frame.Signatures, types.FrameSignature{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)})
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidFrame}, reasons)
+			require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+		})
+	}
 }
 
 func TestFramePoolPrecheckPanicReleasesLock(t *testing.T) {

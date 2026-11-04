@@ -143,9 +143,9 @@ func TestFrameTransactionConstraints(t *testing.T) {
 	}
 }
 
-func signedFrameTransaction(t testing.TB, scheme uint8) (*FrameTransaction, []byte) {
+func signedFrameTransaction(t testing.TB, scheme uint8, data []byte) (*FrameTransaction, []byte) {
 	t.Helper()
-	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []Frame{{}}, Signatures: []FrameSignature{{Scheme: scheme}}}
+	tx := &FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), Frames: []Frame{{Data: data}}, Signatures: []FrameSignature{{Scheme: scheme}}}
 	var highS []byte
 	if scheme == FrameSignatureSecp256k1 {
 		key, err := crypto.GenerateKey()
@@ -187,7 +187,7 @@ func TestFrameTransactionSignatureValidation(t *testing.T) {
 	rules := &chain.Rules{IsBogota: true, ChainID: uint256.NewInt(1)}
 	for _, scheme := range []uint8{FrameSignatureSecp256k1, FrameSignatureP256} {
 		t.Run(string(rune('0'+scheme)), func(t *testing.T) {
-			tx, highS := signedFrameTransaction(t, scheme)
+			tx, highS := signedFrameTransaction(t, scheme, nil)
 			tx.Hash()
 			_, err := tx.AsMessage(Signer{}, nil, rules)
 			require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestFrameTransactionSignatureValidationAfterMutation(t *testing.T) {
 		"message": func(tx *FrameTransaction) { tx.Signatures[0].Message = bytes.Repeat([]byte{1}, 32) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			tx, _ := signedFrameTransaction(t, FrameSignatureSecp256k1)
+			tx, _ := signedFrameTransaction(t, FrameSignatureSecp256k1, nil)
 			tx.Hash()
 			require.NoError(t, tx.Validate())
 			mutate(tx)
@@ -224,7 +224,7 @@ func TestFrameTransactionSignatureValidationAfterMutation(t *testing.T) {
 func TestFrameTransactionConcurrentValidation(t *testing.T) {
 	for _, scheme := range []uint8{FrameSignatureSecp256k1, FrameSignatureP256} {
 		t.Run(string(rune('0'+scheme)), func(t *testing.T) {
-			tx, _ := signedFrameTransaction(t, scheme)
+			tx, _ := signedFrameTransaction(t, scheme, nil)
 			for range 8 {
 				t.Run("reader", func(t *testing.T) {
 					t.Parallel()
@@ -385,6 +385,24 @@ func TestFrameTransactionSigner(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFrameTransactionSenderDoesNotValidateSignatures(t *testing.T) {
+	t.Parallel()
+	tx, highS := signedFrameTransaction(t, FrameSignatureSecp256k1, nil)
+	tx.Signatures[0].Signature = highS
+	signer := LatestSignerForChainID(&tx.ChainID)
+
+	from, err := tx.Sender(*signer)
+	require.NoError(t, err)
+	require.Equal(t, tx.SenderAddress, from.Value())
+	from, err = signer.Sender(tx)
+	require.NoError(t, err)
+	require.Equal(t, tx.SenderAddress, from.Value())
+
+	require.ErrorContains(t, tx.Validate(), "invalid frame signature 0")
+	_, err = tx.AsMessage(*signer, nil, &chain.Rules{IsBogota: true, ChainID: &tx.ChainID})
+	require.ErrorContains(t, err, "invalid frame signature 0")
 }
 
 func TestFrameTransactionJSON(t *testing.T) {

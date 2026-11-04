@@ -399,6 +399,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Wrapped transactions include the type byte and inner body in the hash, but no sidecar.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
+	slot.validatedFrame = nil
 	hashInput := txBytes
 	if innerTxBytes != nil {
 		hashInput = innerTxBytes
@@ -425,6 +426,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err := frame.Validate(); err != nil {
 			return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
 		}
+		slot.validatedFrame = frame
 		if wrappedWithBlobs && frame.GetBlobGas() > 0 && !wrapped {
 			return 0, fmt.Errorf("%w: missing frame blob sidecar", ErrParseTxn)
 		}
@@ -486,6 +488,9 @@ type TxnSlot struct {
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
 	AuthAndNonces []AuthAndNonce
+	// Parsed transactions are immutable. Admission reuses their stateless checks;
+	// directly constructed or replaced transactions still require validation.
+	validatedFrame *types.FrameTransaction
 	// A pooled frame without a validation result is restored and parked. It has
 	// no payer reservation until its first successful validation.
 	frameValidation *protocol.FrameValidation

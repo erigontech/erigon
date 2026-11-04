@@ -161,8 +161,10 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 	if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
 		return txpoolcfg.InvalidFrame
 	}
-	if err := frame.Validate(); err != nil {
-		return txpoolcfg.InvalidFrame
+	if txn.validatedFrame != frame {
+		if err := frame.Validate(); err != nil {
+			return txpoolcfg.InvalidFrame
+		}
 	}
 	if frame.GetFeeCap().Lt(frame.GetTipCap()) {
 		return txpoolcfg.TipAboveFeeCap
