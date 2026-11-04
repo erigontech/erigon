@@ -17,22 +17,27 @@
 package receipts_test
 
 import (
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -177,4 +182,63 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 	require.Equal(t, materialized.GasUsed, nm.GasUsed)
 	require.Equal(t, materialized.CumulativeGasUsed, nm.CumulativeGasUsed)
 	require.Equal(t, materialized.Logs, nm.Logs)
+}
+
+// TestPreByzantiumPostStateFromCommitmentHistory pins the per-tx root that the
+// commitment-history replay writes into a pre-Byzantium receipt against the root
+// rebuilt from state history. The block's later txs read the earlier txs' writes,
+// so each root depends on the replay carrying state from one tx to the next.
+func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	cfg := chain.TestChainBerlinConfig.Copy()
+	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil
+
+	signer := types.LatestSignerForChainID(nil)
+	runtime := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xa0, 0x00} // SSTORE(0, 1) LOG0 STOP
+	initCode := append([]byte{0x60, byte(len(runtime)), 0x60, 0x0c, 0x60, 0x00, 0x39, 0x60, byte(len(runtime)), 0x60, 0x00, 0xf3}, runtime...)
+	contract := types.CreateAddress(testAddr, 1)
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		if i == 0 {
+			return
+		}
+		for _, txn := range []types.Transaction{
+			types.NewTransaction(block.TxNonce(testAddr), common.Address{0x01}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+			types.NewContractCreation(block.TxNonce(testAddr)+1, uint256.NewInt(0), 100_000, uint256.NewInt(1), initCode),
+			types.NewTransaction(block.TxNonce(testAddr)+2, contract, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil),
+		} {
+			signed, err := types.SignTx(txn, *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(signed)
+		}
+	}, execmoduletester.WithGenesisSpec(&types.Genesis{Config: cfg, Alloc: types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}}}))
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const blockNum = uint64(2)
+	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+	txns := block.Transactions()
+	require.Len(t, txns, 3)
+	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)
+	require.NoError(t, err)
+
+	receipt := func(index int, commitmentHistory bool) *types.Receipt {
+		gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+		r, err := gen.GetReceipt(m.Ctx, cfg, tx, block.HeaderNoCopy(), txns[index], index, minTxNum+1+uint64(index), &receipts.PostStateInfo{Txns: txns, CommitmentHistory: commitmentHistory})
+		require.NoError(t, err)
+		return r
+	}
+	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
+	blockReceipts, err := gen.GetReceipts(m.Ctx, cfg, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: true})
+	require.NoError(t, err)
+	for i := range txns {
+		want := receipt(i, false)
+		require.Equal(t, types.ReceiptStatusSuccessful, want.Status, "tx %d", i)
+		require.Len(t, want.PostState, 32, "tx %d", i)
+		require.Equal(t, want.PostState, receipt(i, true).PostState, "GetReceipt tx %d", i)
+		require.Equal(t, want.PostState, blockReceipts[i].PostState, "GetReceipts tx %d", i)
+	}
+	require.Len(t, blockReceipts[2].Logs, 1)
 }

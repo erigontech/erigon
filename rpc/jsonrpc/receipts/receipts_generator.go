@@ -366,6 +366,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
+			transactions.VersionedBlockState(genEnv.ibs)
 
 			minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 			if err != nil {
@@ -398,8 +399,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 					return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
 				}
 
-				if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-					return nil, fmt.Errorf("CommitBlock failed: %w", err)
+				if err := sharedreceipts.EndTx(genEnv.ibs, evm.ChainRules(), stateWriter); err != nil {
+					return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
 				}
 			}
 
@@ -424,8 +425,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 
 		if calculatePostState {
-			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-				return nil, fmt.Errorf("CommitBlock failed: %w", err)
+			if err := sharedreceipts.EndTx(genEnv.ibs, evm.ChainRules(), stateWriter); err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 			}
 
 			// calculate state root after tx identified by txNum (txNim+1)
@@ -605,6 +606,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			stateWriter = genEnv.noopWriter
 		}
 
+		transactions.VersionedBlockState(genEnv.ibs)
 		for i, txn := range block.Transactions() {
 			select {
 			case <-ctx.Done():
@@ -626,8 +628,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 			txNum := minTxNum + 1 + uint64(i)
 
-			if err := genEnv.ibs.CommitBlock(evm.ChainRules(), stateWriter); err != nil {
-				return nil, fmt.Errorf("CommitBlock failed: %w", err)
+			if err := sharedreceipts.EndTx(genEnv.ibs, evm.ChainRules(), stateWriter); err != nil {
+				return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, i, err)
 			}
 
 			var stateRoot []byte
@@ -635,6 +637,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
 				if err != nil {
+					return nil, err
+				}
+				// The seek restores the block-start trie, and EndTx touched only this tx's keys.
+				if _, _, err := sharedDomains.TouchChangedKeysFromHistory(tx, minTxNum, txNum); err != nil {
 					return nil, err
 				}
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
