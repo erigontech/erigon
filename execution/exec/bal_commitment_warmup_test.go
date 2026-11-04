@@ -450,3 +450,9 @@ func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {
 	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil, 1000, 0))
 	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil, 0, 0), "no state keys: nothing to batch")
 }
+
+func TestPrefetchKeysKeepsTheFirstReadError(t *testing.T) {
+	var stats prefetchStats
+	prefetchKeys(context.Background(), nil, domainErrPrefetcher{failing: kv.CommitmentDomain}, kv.CommitmentDomain, [][]byte{{1}}, &stats)
+	require.Error(t, stats.err)
+}

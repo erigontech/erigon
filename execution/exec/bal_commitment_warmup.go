@@ -18,6 +18,7 @@ package exec
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -232,10 +233,12 @@ type latestPrefetcher interface {
 type prefetchStats struct {
 	waves, pages        int
 	plan, io, branchChk time.Duration
+	err                 error // first read error
 }
 
-func (s *prefetchStats) add(waves, pages int, plan, io time.Duration, _ error) {
+func (s *prefetchStats) add(waves, pages int, plan, io time.Duration, err error) {
 	s.waves, s.pages, s.plan, s.io = s.waves+waves, s.pages+pages, s.plan+plan, s.io+io
+	s.err = cmp.Or(s.err, err)
 }
 
 var (
@@ -324,15 +327,16 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, p latestPrefetcher, domain kv
 					return
 				}
 			}
-			waves, pages, plan, io, _ := pp.PrefetchLatest(ctx, domain, keys)
+			waves, pages, plan, io, err := pp.PrefetchLatest(ctx, domain, keys)
 			mu.Lock()
 			defer mu.Unlock()
 			part.waves, part.pages = max(part.waves, waves), part.pages+pages
 			part.plan, part.io = max(part.plan, plan), max(part.io, io)
+			part.err = cmp.Or(part.err, err)
 		})
 	}
 	wg.Wait()
-	stats.add(part.waves, part.pages, part.plan, part.io, nil)
+	stats.add(part.waves, part.pages, part.plan, part.io, part.err)
 }
 
 // prefetchBAL reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie, level by
@@ -479,7 +483,7 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 		return nil
 	}
 	prefetchKeys(ctx, db, p, domain, keys, stats)
-	return nil
+	return stats.err
 }
 
 // sampleEvenly returns min(len(keys), n) evenly spaced keys.
@@ -566,7 +570,9 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte, st
 				}
 			}
 		}
-		prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats)
+		if prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); stats.err != nil {
+			return stats.err
+		}
 	}
 	var storageKeys [][]byte
 	for _, k := range hashedKeys {
@@ -605,7 +611,9 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, p late
 					prefixes = append(prefixes, []byte(pfx))
 				}
 			}
-			prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats)
+			if prefetchKeys(ctx, db, p, kv.CommitmentDomain, prefixes, stats); stats.err != nil {
+				return stats.err
+			}
 		}
 		t0 := time.Now()
 		next := active
