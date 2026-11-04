@@ -464,9 +464,14 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
+	if dbg.TrieBALWarmupers > 0 {
+		group.Go(func() error {
+			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
+		})
+	}
 	stateByBatch := false
 	if mmap.NewProbe() != nil {
-		stateByBatch = stateKeysCold(ctx, db, bal)
+		stateByBatch = batchReadsState(codeMode, func() bool { return stateKeysCold(ctx, db, bal) })
 		group.Go(func() error {
 			prefetchBAL(ctx, db, bal, stateByBatch)
 			return nil
@@ -477,12 +482,13 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 			return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
 		})
 	}
-	if dbg.TrieBALWarmupers > 0 {
-		group.Go(func() error {
-			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
-		})
-	}
 	return group.Wait()
+}
+
+// batchReadsState reports whether the batch prefetch reads the BAL state instead of the per-key warmup: only when the
+// state is cold and no code warmup is asked for, since code is warmed only by the per-key warmup.
+func batchReadsState(codeMode balCodeWarmupMode, stateCold func() bool) bool {
+	return codeMode == balCodeWarmupNone && stateCold()
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
