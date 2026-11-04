@@ -54,7 +54,6 @@ type gloasWeightTree struct {
 
 	nodes      map[common.Hash]*gloasWeightNode
 	applied    []gloasVoteContribution
-	dirty      map[uint64]struct{}
 	allDirty   bool
 	checkpoint solid.Checkpoint
 	state      *checkpointState
@@ -74,19 +73,23 @@ func newGloasWeightTree(f *ForkChoiceStore) *gloasWeightTree {
 	return &gloasWeightTree{
 		f:        f,
 		nodes:    make(map[common.Hash]*gloasWeightNode),
-		dirty:    make(map[uint64]struct{}),
 		allDirty: true,
 	}
 }
 
-// markDirty records a validator whose vote changed since the last prepare.
-// Without an applied baseline (t.state == nil) there is no delta to maintain:
-// marks are dropped and the next prepare's full rebuild covers every validator.
-func (t *gloasWeightTree) markDirty(validatorIndex uint64) {
-	if t == nil || t.state == nil {
+// update recounts one validator's vote. Without an applied baseline (t.state == nil) or
+// with a full rebuild pending, the next prepare's rebuild covers every validator.
+func (t *gloasWeightTree) update(validatorIndex uint64) {
+	if t == nil || t.state == nil || t.allDirty {
 		return
 	}
-	t.dirty[validatorIndex] = struct{}{}
+	vi := int(validatorIndex)
+	if vi >= t.state.validatorSetSize || vi >= len(t.state.balances) {
+		return
+	}
+	t.applied = growGloasContributions(t.applied, vi+1)
+	t.removeAppliedContribution(validatorIndex)
+	t.addValidatorContribution(validatorIndex, t.state)
 }
 
 func (t *gloasWeightTree) markAllDirty() {
@@ -94,9 +97,6 @@ func (t *gloasWeightTree) markAllDirty() {
 		return
 	}
 	t.allDirty = true
-	for vi := range t.dirty {
-		delete(t.dirty, vi)
-	}
 }
 
 func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointState) WeightStore {
@@ -114,8 +114,6 @@ func (t *gloasWeightTree) prepare(justified solid.Checkpoint, cs *checkpointStat
 	t.ensureTopology(justified.Root)
 	if t.allDirty {
 		t.rebuildDirectWeights(cs)
-	} else {
-		t.applyDirtyValidators(cs)
 	}
 	t.recompute(justified.Root)
 	return t
@@ -140,7 +138,7 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 		if !ok {
 			node = &gloasWeightNode{parentPayloadStatus: cltypes.PayloadStatusPending}
 			t.nodes[current] = node
-			t.markMissingRootDirty(current)
+			t.updateMissingRootVotes(current)
 		}
 
 		parentBlock, hasParentBlock := t.f.forkGraph.GetBlock(current)
@@ -164,7 +162,7 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 			if !ok {
 				childNode = &gloasWeightNode{}
 				t.nodes[child] = childNode
-				t.markMissingRootDirty(child)
+				t.updateMissingRootVotes(child)
 			}
 			if !hasParentBlock || parentBlock == nil {
 				childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
@@ -194,34 +192,6 @@ func (t *gloasWeightTree) rebuildDirectWeights(cs *checkpointState) {
 		t.addValidatorContribution(uint64(i), cs)
 	}
 	t.allDirty = false
-	for vi := range t.dirty {
-		delete(t.dirty, vi)
-	}
-}
-
-func (t *gloasWeightTree) applyDirtyValidators(cs *checkpointState) {
-	if len(t.dirty) == 0 {
-		return
-	}
-	maxIndex := -1
-	for vi := range t.dirty {
-		if int(vi) >= cs.validatorSetSize || int(vi) >= len(cs.balances) {
-			delete(t.dirty, vi)
-			continue
-		}
-		if int(vi) > maxIndex {
-			maxIndex = int(vi)
-		}
-	}
-	if maxIndex < 0 {
-		return
-	}
-	t.applied = growGloasContributions(t.applied, maxIndex+1)
-	for vi := range t.dirty {
-		t.removeAppliedContribution(vi)
-		t.addValidatorContribution(vi, cs)
-		delete(t.dirty, vi)
-	}
 }
 
 func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVoteContribution {
@@ -318,15 +288,12 @@ func (t *gloasWeightTree) untrackMissingRootVote(root common.Hash, validatorInde
 	}
 }
 
-func (t *gloasWeightTree) markMissingRootDirty(root common.Hash) {
+func (t *gloasWeightTree) updateMissingRootVotes(root common.Hash) {
 	votes := t.missingRootVotes[root]
-	if votes == nil {
-		return
-	}
-	for validatorIndex := range votes {
-		t.dirty[validatorIndex] = struct{}{}
-	}
 	delete(t.missingRootVotes, root)
+	for validatorIndex := range votes {
+		t.update(validatorIndex)
+	}
 }
 
 func applyWeightDelta(weight, delta uint64, add bool) uint64 {

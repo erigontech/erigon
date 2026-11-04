@@ -159,6 +159,7 @@ type ForkChoiceStore struct {
 	targetStateBuilds     map[solid.Checkpoint]*targetStateBuild
 
 	latestMessages    *latestMessagesStore
+	voteTally         voteTally
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[common.Hash, common.Hash] // ETH2 root -> ETH1 hash
