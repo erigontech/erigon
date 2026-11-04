@@ -101,6 +101,9 @@ func (e *ExecModule) resolveSegment(ctx context.Context, tx kv.Tx, blockHash *co
 		// Only number: resolve canonical hash
 		hash, err := e.canonicalHash(ctx, tx, *blockNumber)
 		if err != nil {
+			return common.Hash{}, 0, err
+		}
+		if hash == (common.Hash{}) {
 			return common.Hash{}, 0, errNotFound
 		}
 		return hash, *blockNumber, nil
