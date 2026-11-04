@@ -1323,21 +1323,21 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func blobCellIndices(mask []byte) []int {
-	indices := make([]int, 0, goethkzg.CellsPerExtBlob)
-	for i := range goethkzg.CellsPerExtBlob {
-		if mask[i/8]&(1<<(i%8)) != 0 {
-			indices = append(indices, i)
+func blobCellIndices(cellMask []byte) []int {
+	cellIndices := make([]int, 0, goethkzg.CellsPerExtBlob)
+	for cellIndex := range goethkzg.CellsPerExtBlob {
+		if cellMask[cellIndex/8]&(1<<(cellIndex%8)) != 0 {
+			cellIndices = append(cellIndices, cellIndex)
 		}
 	}
-	return indices
+	return cellIndices
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellIndices hexutil.Bytes) (any, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellMask hexutil.Bytes) (any, error) {
 	if len(blobHashes) > maxGetBlobHashes {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	if version == clparams.GloasVersion && len(cellIndices) != goethkzg.CellsPerExtBlob/8 {
+	if version == clparams.GloasVersion && len(cellMask) != goethkzg.CellsPerExtBlob/8 {
 		return nil, &rpc.InvalidParamsError{Message: "indices_bitarray must be 16 bytes"}
 	}
 	if e.blobGetter == nil {
@@ -1353,7 +1353,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 
 	switch version {
 	case clparams.GloasVersion:
-		indices := blobCellIndices(cellIndices)
+		cellIndices := blobCellIndices(cellMask)
 		ret := make([]*engine_types.BlobCellsAndProofsV1, len(blobHashes))
 		for i, bundle := range bundles {
 			if err := ctx.Err(); err != nil {
@@ -1363,19 +1363,19 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 				continue
 			}
 			ret[i] = &engine_types.BlobCellsAndProofsV1{
-				BlobCells: make([]*hexutil.Bytes, len(indices)),
-				Proofs:    make([]*hexutil.Bytes, len(indices)),
+				BlobCells: make([]*hexutil.Bytes, len(cellIndices)),
+				Proofs:    make([]*hexutil.Bytes, len(cellIndices)),
 			}
-			if len(indices) == 0 {
+			if len(cellIndices) == 0 {
 				continue
 			}
 			cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
 			if err != nil {
 				return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
 			}
-			for j, index := range indices {
-				cell := hexutil.Bytes(cells[index][:])
-				proof := hexutil.Bytes(bundle.Proofs[index][:])
+			for j, cellIndex := range cellIndices {
+				cell := hexutil.Bytes(cells[cellIndex][:])
+				proof := hexutil.Bytes(bundle.Proofs[cellIndex][:])
 				ret[i].BlobCells[j] = &cell
 				ret[i].Proofs[j] = &proof
 			}

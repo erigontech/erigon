@@ -41,7 +41,7 @@ const (
 	sszCellBytes                   = 2048
 	sszKZGBytes                    = 48
 	sszCellsPerExtBlob             = 128
-	sszCustodyBitvectorBytes       = sszCellsPerExtBlob / 8
+	sszCellBitvectorBytes          = sszCellsPerExtBlob / 8
 	sszMaxBALBytes                 = 0x40000000
 	sszMaxWithdrawals              = 16
 	sszWithdrawalBytes             = 44
@@ -184,14 +184,14 @@ func forkchoiceUpdateSchema(version clparams.StateVersion, state *engine_types.F
 func decodeForkchoiceUpdate(buf []byte, version clparams.StateVersion) (engine_types.ForkChoiceState, *engine_types.PayloadAttributes, []byte, error) {
 	state := engine_types.ForkChoiceState{}
 	attrsList := newOptionalPayloadAttributes(version)
-	custodyList := solid.NewByteListSSZ(sszCustodyBitvectorBytes)
+	custodyList := solid.NewByteListSSZ(sszCellBitvectorBytes)
 	if err := ssz2.UnmarshalSSZStrict(buf, int(version), forkchoiceUpdateSchema(version, &state, attrsList, custodyList)...); err != nil {
 		return state, nil, nil, err
 	}
 	var custody []byte
 	if l := len(custodyList.Bytes()); l != 0 {
-		if l != sszCustodyBitvectorBytes {
-			return state, nil, nil, fmt.Errorf("custody columns bitvector length %d, want %d", l, sszCustodyBitvectorBytes)
+		if l != sszCellBitvectorBytes {
+			return state, nil, nil, fmt.Errorf("custody columns bitvector length %d, want %d", l, sszCellBitvectorBytes)
 		}
 		custody = custodyList.Bytes()
 	}
@@ -217,7 +217,7 @@ func encodeForkchoiceResponse(resp *engine_types.ForkChoiceUpdatedResponse) ([]b
 	return ssz2.MarshalSSZ(nil, resp.PayloadStatus, payloadID)
 }
 
-func blockValueHash(v *hexutil.U256) common.Hash {
+func encodeBlockValue(v *hexutil.U256) common.Hash {
 	var out common.Hash
 	if v != nil {
 		_, _ = (*uint256.Int)(v).MarshalSSZAppend(out[:0])
@@ -240,7 +240,7 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) ([]byte, error) {
 	payload := resp.ExecutionPayload
 	payload.SSZVersion = version
-	blockValue := blockValueHash(resp.BlockValue)
+	blockValue := encodeBlockValue(resp.BlockValue)
 	blobsBundle := newBlobsBundleSSZ(resp.BlobsBundle, version)
 	requests := newTransactionsSSZ(resp.ExecutionRequests)
 	switch {
@@ -464,9 +464,9 @@ func encodeBlobsV2Response(blobs []*engine_types.BlobAndProofV2) ([]byte, error)
 	return ssz2.MarshalSSZ(nil, entries)
 }
 
-func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCustodyBitvectorBytes]byte, error) {
+func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCellBitvectorBytes]byte, error) {
 	hashes := solid.NewHashList(maxGetBlobHashes)
-	var cellMask [sszCustodyBitvectorBytes]byte
+	var cellMask [sszCellBitvectorBytes]byte
 	if err := ssz2.UnmarshalSSZStrict(buf, 0, hashes, cellMask[:]); err != nil {
 		return nil, cellMask, err
 	}
@@ -524,32 +524,32 @@ func (*sszBlobV4Entry) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 
 func (*sszBlobV4Entry) Clone() clonable.Clonable { return &sszBlobV4Entry{} }
 
-func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, cellMask [sszCustodyBitvectorBytes]byte) ([]byte, error) {
+func encodeBlobsV4Response(blobs engine_types.BlobsBundleV3, cellMask [sszCellBitvectorBytes]byte) ([]byte, error) {
 	if len(blobs) > maxGetBlobHashes {
 		return nil, fmt.Errorf("too many blob entries: %d", len(blobs))
 	}
-	indices := blobCellIndices(cellMask[:])
+	cellIndices := blobCellIndices(cellMask[:])
 	entries := solid.NewDynamicListSSZ[*sszBlobV4Entry](maxGetBlobHashes)
 	for _, blob := range blobs {
 		var cells, proofs [][]byte
 		if blob != nil {
-			if len(blob.BlobCells) != len(indices) || len(blob.Proofs) != len(indices) {
-				return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), len(indices))
+			if len(blob.BlobCells) != len(cellIndices) || len(blob.Proofs) != len(cellIndices) {
+				return nil, fmt.Errorf("blob cells/proofs length %d/%d, want %d", len(blob.BlobCells), len(blob.Proofs), len(cellIndices))
 			}
 			// Available SSZ blobs retain all 128 positions; unrequested or missing
 			// cell/proof pairs stay empty.
 			cells = make([][]byte, sszCellsPerExtBlob)
 			proofs = make([][]byte, sszCellsPerExtBlob)
-			for selectedIndex, index := range indices {
+			for selectedIndex, cellIndex := range cellIndices {
 				cell, proof := blob.BlobCells[selectedIndex], blob.Proofs[selectedIndex]
 				if cell == nil && proof == nil {
 					continue
 				}
 				if cell == nil || proof == nil || len(*cell) != sszCellBytes || len(*proof) != sszKZGBytes {
-					return nil, fmt.Errorf("invalid cell or proof at index %d", index)
+					return nil, fmt.Errorf("invalid cell or proof at index %d", cellIndex)
 				}
-				cells[index] = *cell
-				proofs[index] = *proof
+				cells[cellIndex] = *cell
+				proofs[cellIndex] = *proof
 			}
 		}
 		entries.Append(&sszBlobV4Entry{

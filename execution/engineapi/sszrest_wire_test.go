@@ -36,7 +36,7 @@ func encodeForkchoiceUpdate(version clparams.StateVersion, state *engine_types.F
 		attrs.SSZVersion = version
 		attrsList.Append(attrs)
 	}
-	custodyList := solid.NewByteListSSZ(sszCustodyBitvectorBytes)
+	custodyList := solid.NewByteListSSZ(sszCellBitvectorBytes)
 	if err := custodyList.SetBytes(custody); err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func decodeForkchoiceResponse(buf []byte) (*engine_types.ForkChoiceUpdatedRespon
 	return resp, nil
 }
 
-func blockValueFromHash(v common.Hash) *hexutil.U256 {
+func decodeBlockValue(v common.Hash) *hexutil.U256 {
 	u := new(uint256.Int)
 	_ = u.UnmarshalSSZ(v[:])
 	return (*hexutil.U256)(u)
@@ -86,7 +86,7 @@ func decodeBuiltPayload(buf []byte, version clparams.StateVersion) (*engine_type
 	}
 	resp := &engine_types.GetPayloadResponse{
 		ExecutionPayload:      payload,
-		BlockValue:            blockValueFromHash(blockValue),
+		BlockValue:            decodeBlockValue(blockValue),
 		ShouldOverrideBuilder: shouldOverride,
 	}
 	if version >= clparams.DenebVersion {

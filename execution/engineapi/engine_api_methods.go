@@ -285,9 +285,9 @@ func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash)
 	return ret, nil
 }
 
-func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
+func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellMask hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
 	e.logger.Debug("[GetBlobsV4] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellIndices)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellMask)
 	if err != nil {
 		return nil, err
 	}

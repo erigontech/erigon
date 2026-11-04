@@ -546,7 +546,7 @@ func (e *EngineServer) handleSSZGetBlobsV4(w http.ResponseWriter, r *http.Reques
 	if !checkSSZContentType(w, r) {
 		return
 	}
-	body, ok := readSSZBody(w, r, sszMaxBlobsRequestBody+sszCustodyBitvectorBytes)
+	body, ok := readSSZBody(w, r, sszMaxBlobsRequestBody+sszCellBitvectorBytes)
 	if !ok {
 		return
 	}

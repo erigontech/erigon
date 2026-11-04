@@ -1812,7 +1812,7 @@ func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
 		SlotNumber:            &slot,
 		TargetGasLimit:        &targetGasLimit,
 	}
-	custody := bytes.Repeat([]byte{0xff}, sszCustodyBitvectorBytes)
+	custody := bytes.Repeat([]byte{0xff}, sszCellBitvectorBytes)
 
 	enc, err := encodeForkchoiceUpdate(clparams.GloasVersion, &engine_types.ForkChoiceState{}, attrs, custody)
 	require.NoError(t, err)
