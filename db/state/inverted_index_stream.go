@@ -90,14 +90,18 @@ func (it *InvertedIdxStreamFiles) before(v uint64) bool {
 	return it.err == nil && it.hasNext && (asc && it.nextN < v || !asc && it.nextN > v)
 }
 
-// near estimates from the density of the current file whether v is at most seekLinearSteps elements ahead.
+// near estimates from the density of the current file whether v is at most seekLinearSteps elements
+// ahead. A v past the file is never near: stepping there would look the key up in files Seek drops.
 func (it *InvertedIdxStreamFiles) near(v uint64) bool {
 	if it.seqIt == nil {
 		return false
 	}
+	lo, hi := it.seq.Min(), it.seq.Max()
+	if it.orderAscend && v > hi || !it.orderAscend && v < lo {
+		return false
+	}
 	dist := max(v, it.nextN) - min(v, it.nextN)
-	span := it.seq.Max() - it.seq.Min() + 1
-	return dist <= seekLinearSteps*span/it.seq.Count()
+	return dist <= seekLinearSteps*(hi-lo+1)/it.seq.Count()
 }
 
 // Seek drops the files that end before v without looking the key up in them, then seeks inside the current file.
