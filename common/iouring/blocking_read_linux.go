@@ -23,6 +23,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -99,10 +100,13 @@ func BlockingRead(fd int, off int64, length int) {
 	ringPool <- pr
 }
 
+var abandonedPooled atomic.Int32 // rings this pool abandoned
+
 // replaceBroken abandons a failed ring and gives its slot a new one while no more rings than the pool size are
 // abandoned; after that, or when a new ring cannot be made, the slot stops reading.
 func replaceBroken(pr *pooledRing, err error) *pooledRing {
-	if pr.r.Abandon(pr.buf) > cap(ringPool) {
+	pr.r.Abandon(pr.buf)
+	if abandonedPooled.Add(1) > int32(cap(ringPool)) {
 		brokenLog.Do(func() { log.Warn("[iouring] read ring failed, slot falls back to mmap faults", "err", err) })
 		return &pooledRing{}
 	}

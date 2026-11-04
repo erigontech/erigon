@@ -342,6 +342,9 @@ func (ef *EliasFano) getProbe(i uint64, pr *mmap.Probe) (val uint64, window uint
 
 // GetProbe is Get with pr touching the pages it reads.
 func (ef *EliasFano) GetProbe(i uint64, pr *mmap.Probe) uint64 {
+	if pr == nil {
+		return ef.Get(i)
+	}
 	val, _, _, _, _ := ef.getProbe(i, pr)
 	return val
 }

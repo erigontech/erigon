@@ -63,7 +63,7 @@ func registerMapping(m []byte, f *os.File) {
 }
 
 func unregisterMapping(m []byte) {
-	if !BatchPrefetch || len(m) == 0 {
+	if len(m) == 0 {
 		return
 	}
 	mappingsMu.Lock()
@@ -191,10 +191,13 @@ func newBatchRing() (*batchRing, bool) {
 // errNoBatchRing reports a pool slot whose ring failed earlier, so the pages stay cold.
 var errNoBatchRing = errors.New("mmap: no io_uring ring for this batch")
 
+var abandonedBatch atomic.Int32 // rings this pool abandoned
+
 // replaceBrokenBatchRing abandons a failed ring and gives its slot a new one while no more rings than the pool size
 // are abandoned; after that, or when a new ring cannot be made, the slot stops reading.
 func replaceBrokenBatchRing(br *batchRing, err error) *batchRing {
-	if br.r.Abandon(br.bufs...) <= cap(batchRings) {
+	br.r.Abandon(br.bufs...)
+	if abandonedBatch.Add(1) <= int32(cap(batchRings)) {
 		if nbr, ok := newBatchRing(); ok {
 			return nbr
 		}
