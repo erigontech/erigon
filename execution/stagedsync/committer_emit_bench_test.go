@@ -49,6 +49,7 @@ func BenchmarkEmitTouched(b *testing.B) {
 		cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, tx), nil)
 	}
 	u := commitment.NewUpdates(commitment.ModeParallel, b.TempDir(), commitment.KeyToHexNibbleHash)
+	defer u.Close()
 	b.ReportAllocs()
 	for b.Loop() {
 		u.Reset()
