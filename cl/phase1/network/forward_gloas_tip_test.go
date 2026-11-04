@@ -912,3 +912,102 @@ func TestForwardBeaconDownloaderRecordsParentOfEveryDownloadedBlock(t *testing.T
 	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
 	require.False(t, processedHeld)
 }
+
+// A child outside the requested range that decides the held block is FULL also counts as a downloaded child.
+func TestForwardBeaconDownloaderRecordsChildOutsideRequestedRange(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	requestEnvelopeBatchExpiration = 10 * time.Millisecond
+	t.Cleanup(func() { requestEnvelopeBatchExpiration = previousExpiration })
+	cfg := gloasFromGenesisConfig()
+	a := makeGloasBlock(9, hash(0xa0), common.Hash{})
+	b := makeGloasBlock(10, hash(0xb0), common.Hash{})
+	c := makeGloasBlock(30, hash(0xc0), hash(0xb0))
+	linkBeaconBlocks(t, a, b, c)
+	other := makeGloasBlock(9, hash(0xdd), common.Hash{})
+	other.Block.ParentRoot = hash(0xee)
+
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 14 })
+	var processedHeld bool
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processedHeld = processedHeld || block.Block.Slot == 10
+			highest = block.Block.Slot
+		}
+		return highest, nil
+	})
+
+	downloadFromPeer(t, downloader, a, b, c)
+	require.Equal(t, uint64(10), downloader.gloasLookahead.Block.Slot)
+	downloadFromPeer(t, downloader, other)
+	require.Nil(t, downloader.gloasLookahead)
+	downloadFromPeer(t, downloader, b)
+	require.Equal(t, uint64(10), downloader.gloasLookahead.Block.Slot)
+	answerEmpty(t, downloader)
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+	require.False(t, processedHeld)
+}
+
+// Only the blocks that one response can use are recorded as children, so a peer cannot grow the record without bound.
+func TestForwardBeaconDownloaderRecordsChildrenOnlyOfUsableBlocks(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	blocks := make([]*cltypes.SignedBeaconBlock, 0, 100)
+	for slot := uint64(9); slot < 109; slot++ {
+		blocks = append(blocks, makeGloasBlock(slot, hash(byte(slot)), common.Hash{}))
+	}
+	linkBeaconBlocks(t, blocks...)
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 13 })
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			highest = block.Block.Slot
+		}
+		return highest, nil
+	})
+	downloader.requestBlocksByRange = func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+		return blocks, "peer", nil
+	}
+
+	requestMoreWithin(t, downloader)
+	require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 34)
+}
+
+// In a response longer than a batch, the block after the held block is its downloaded child.
+func TestForwardBeaconDownloaderRecordsChildOfHeldBlockInLongResponse(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	blocks := make([]*cltypes.SignedBeaconBlock, 0, 42)
+	for slot := uint64(9); slot < 51; slot++ {
+		blocks = append(blocks, makeGloasBlock(slot, hash(byte(slot)), common.Hash{}))
+	}
+	linkBeaconBlocks(t, blocks...)
+	held := blocks[32]
+	other := makeGloasBlock(9, hash(0xdd), common.Hash{})
+	other.Block.ParentRoot = hash(0xee)
+
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+	downloader.SetHighestProcessedSlot(8)
+	downloader.SetCurrentSlotSampler(func() uint64 { return 60 })
+	var processedHeld bool
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processedHeld = processedHeld || block == held
+			highest = block.Block.Slot
+		}
+		return highest, nil
+	})
+
+	downloadFromPeer(t, downloader, blocks...)
+	require.Same(t, held, downloader.gloasLookahead)
+	downloadFromPeer(t, downloader, other)
+	require.Nil(t, downloader.gloasLookahead)
+	downloadFromPeer(t, downloader, held)
+	require.Same(t, held, downloader.gloasLookahead)
+	answerEmpty(t, downloader)
+	require.False(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+	require.False(t, processedHeld)
+}

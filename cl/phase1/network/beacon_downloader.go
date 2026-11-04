@@ -540,7 +540,8 @@ Process:
 	if f.gloasDownloadedParents == nil {
 		f.gloasDownloadedParents = map[common.Hash]uint64{}
 	}
-	for _, block := range processBlocks {
+	// A response processes or holds at most its first count+1 blocks, so the next block is the last child that matters.
+	for _, block := range processBlocks[:min(len(processBlocks), int(count)+2)] {
 		f.gloasDownloadedParents[block.Block.ParentRoot] = max(f.gloasDownloadedParents[block.Block.ParentRoot], block.Block.Slot)
 	}
 	maps.DeleteFunc(f.gloasDownloadedParents, func(_ common.Hash, slot uint64) bool { return slot <= f.highestSlotProcessed })
