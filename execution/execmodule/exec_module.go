@@ -706,7 +706,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		defer purgeTx.Rollback()
 		if (lvh != common.Hash{}) && lvh != blockHash {
-			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
+			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash, blockNumber); err != nil {
 				return ValidationResult{}, err
 			}
 		}
@@ -730,7 +730,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	return result, nil
 }
 
-func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
+func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash, headNumber uint64) error {
 	chainTx := tx
 	var overlay *membatchwithdb.MemoryMutation
 	if e.currentContext != nil {
@@ -739,19 +739,11 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 			chainTx = overlay
 		}
 	}
-	tip, err := e.blockReader.HeaderNumber(ctx, chainTx, headHash)
-	if err != nil {
-		return err
-	}
-	if tip == nil {
-		return nil
-	}
-
 	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
 	canonicalHeadHash := rawdb.ReadHeadBlockHash(chainTx)
 
 	currentHash := headHash
-	currentNumber := *tip
+	currentNumber := headNumber
 	for currentHash != latestValidHash {
 		if currentHash == dbHeadHash || currentHash == canonicalHeadHash {
 			return nil

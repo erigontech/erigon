@@ -969,12 +969,8 @@ func DeleteBlock(tx kv.GetPut, hash common.Hash, number uint64) error {
 		if body.TxCount < 2 || end <= body.BaseTxnID.U64() {
 			return fmt.Errorf("invalid transaction range for block %d: base=%d count=%d", number, body.BaseTxnID, body.TxCount)
 		}
-		txIDBytes := make([]byte, 8)
-		for txID := body.BaseTxnID.U64(); txID < end; txID++ {
-			binary.BigEndian.PutUint64(txIDBytes, txID)
-			if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-				return err
-			}
+		if err := deleteBodyTransactions(tx, body); err != nil {
+			return err
 		}
 	}
 	for _, table := range []string{kv.BlockBody, kv.BlockAccessList, kv.Senders, kv.HeaderTD, kv.Headers} {
@@ -983,6 +979,17 @@ func DeleteBlock(tx kv.GetPut, hash common.Hash, number uint64) error {
 		}
 	}
 	return tx.Delete(kv.HeaderNumber, hash[:])
+}
+
+func deleteBodyTransactions(tx kv.Putter, body types.BodyOnlyTxn) error {
+	txIDBytes := make([]byte, 8)
+	for txID := body.BaseTxnID.U64(); txID <= body.BaseTxnID.LastSystemTx(body.TxCount); txID++ {
+		binary.BigEndian.PutUint64(txIDBytes, txID)
+		if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
@@ -1028,12 +1035,8 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		if !ok {
 			log.Debug("PruneBlocks: block body not found", "height", n)
 		} else {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return deleted, err
-				}
+			if err := deleteBodyTransactions(tx, b); err != nil {
+				return deleted, err
 			}
 		}
 		// Copying k because otherwise the same memory will be reused
@@ -1079,12 +1082,8 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			return err
 		}
 		if ok {
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
-					return err
-				}
+			if err := deleteBodyTransactions(tx, b); err != nil {
+				return err
 			}
 		}
 		// Copying k because otherwise the same memory will be reused
