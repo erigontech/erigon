@@ -69,8 +69,9 @@ type byteLRUEvictions[V any] struct {
 	onEvict atomic.Pointer[func(uint64, V)]
 }
 
-// otterEntryOverheadBytes is the size of otter's node for one entry, with the
-// uint64 key and the value struct inline; bytes the value points to come on top.
+// otterEntryOverheadBytes is otter's whole node for one entry (96 B for an
+// entry[[]byte]). Weighers also add the key and the inline value, so an entry
+// is overcounted by those bytes: the budget errs on the small side.
 const otterEntryOverheadBytes = 96
 
 // ByteLRUEntryOverheadBytes is what an entry costs beyond its value's own bytes:
@@ -211,9 +212,13 @@ func (b *ByteLRU[V]) growLocked() {
 	for lim < ceil && b.resident.Load() > lim {
 		chunk := min(byteLRUChunkBytes, ceil-lim)
 		if !cachebudget.Global.Reserve(chunk) {
-			b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
-			b.c.SetMaximum(uint64(lim))
-			return
+			// Take what is left of the envelope; only an empty one pins the limit.
+			chunk = min(chunk, cachebudget.Global.Limit()-cachebudget.Global.Used())
+			if chunk <= 0 || !cachebudget.Global.Reserve(chunk) {
+				b.ceiling.Store(lim) // envelope full: stop asking until Purge/Close frees it
+				b.c.SetMaximum(uint64(lim))
+				return
+			}
 		}
 		lim += chunk
 		b.limit.Store(lim)

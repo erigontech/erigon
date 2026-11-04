@@ -211,7 +211,7 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	defer g.Close()
 	startCap := g.curCap.Load()
 
-	const warmup = genericCacheStartCapacity / 2
+	const warmup = growLRUStartCapacity / 2
 	for i := range uint64(warmup) {
 		g.Add(key(i), i)
 	}
@@ -222,7 +222,7 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	var oldKeys, oldVals []uint64
 	var trigger uint64
 	grew := false
-	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
+	for i := uint64(warmup); i < 8*growLRUStartCapacity && !grew; i++ {
 		old := g.cur.Load()
 		if g.curCap.Load() < g.maxCap && old.Len() >= int(g.curCap.Load()) {
 			oldKeys = old.Keys() // snapshot the generation this add is about to retire

@@ -57,17 +57,17 @@ const freelruShardBytes = 512
 
 func shardChargeBytes(elemBytes int64) int64 { return freelruShardBytes + elemBytes }
 
-// maxCacheSlots caps the slot array whatever the byte budget says.
+// maxCacheSlots caps the slot array whatever the entry ceiling says.
 const maxCacheSlots = 16_000_000
 
 func u64identity(k uint64) uint32 { return uint32(k) }
 
 const (
-	// genericCacheStartCapacity is the slot count a jump-grow cache is born with.
-	// A cache whose working set never exceeds it (a test fixture) stays this small
-	// regardless of its configured byte budget.
-	genericCacheStartCapacity = 1024
-	genericCacheGrowFactor    = 4
+	// growLRUStartCapacity is the slot count a growLRU is born with. A cache whose
+	// working set never exceeds it (a test fixture) stays this small whatever its
+	// entry ceiling.
+	growLRUStartCapacity = 1024
+	growLRUGrowFactor    = 4
 )
 
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
@@ -142,7 +142,7 @@ func (g *growLRU[V]) generationBytes(capacity uint32) int64 {
 func newGrowLRUWith[V any](maxCap uint32, payloadBytes int64, procs uint32, onEvict func(uint64, V)) *growLRU[V] {
 	// Start small (bounded by the ceiling); the floor is on the start size, not
 	// the ceiling -- a tiny configured budget yields a tiny, still-evicting cap.
-	start := min(uint32(genericCacheStartCapacity), maxCap)
+	start := min(uint32(growLRUStartCapacity), maxCap)
 	g := &growLRU[V]{
 		onEvict:   onEvict,
 		avgBytes:  payloadBytes,
@@ -193,7 +193,7 @@ func (g *growLRU[V]) maybeGrow() {
 	if g.closed || curCap >= g.maxCap || old.Len() < int(curCap) {
 		return
 	}
-	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
+	newCap := min(curCap*growLRUGrowFactor, g.maxCap)
 	delta := g.generationBytes(newCap) - g.generationBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
 		return

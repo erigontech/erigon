@@ -222,7 +222,7 @@ func TestGrowLRU_ByteBudgetHoldsAcrossShardCountChanges(t *testing.T) {
 		}
 		settled("construction")
 
-		fill(g, 4*genericCacheStartCapacity)
+		fill(g, 4*growLRUStartCapacity)
 		settled("grow")
 
 		runtime.GOMAXPROCS(to)
@@ -262,7 +262,7 @@ func TestGrowLRU_CloseStopsFurtherReservations(t *testing.T) {
 	g.Close()
 	require.Zero(t, cachebudget.Global.Used())
 
-	for i := range 4 * genericCacheStartCapacity {
+	for i := range 4 * growLRUStartCapacity {
 		g.Add(spreadKey(uint64(i)), codeSizeEntry{})
 	}
 	require.Zero(t, cachebudget.Global.Used(), "a grow after Close charged the envelope")

@@ -401,3 +401,20 @@ func TestByteLRUWriteAfterCloseIsNotResident(t *testing.T) {
 	require.Zero(t, b.Len())
 	require.Zero(t, b.SizeBytes())
 }
+
+// When less than a full chunk is free, growth takes what is left instead of pinning at the floor.
+func TestByteLRUGrowsIntoAPartialChunk(t *testing.T) {
+	prev := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prev })
+	cachebudget.Global = cachebudget.New(byteLRUFloorBytes + 8*int64(datasize.MB))
+
+	val := make([]byte, 64*1024)
+	b := newByteLRU(256*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	for key := range uint64(64) { // 4 MB: past the floor, less than the free 8 MB
+		b.Add(key, val)
+	}
+	b.c.CleanUp()
+	require.Equal(t, byteLRUFloorBytes+8*int64(datasize.MB), b.limit.Load(), "growth must take the partial chunk left in the envelope")
+	require.Equal(t, 64, b.Len())
+}
