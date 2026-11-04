@@ -221,7 +221,7 @@ func TestScheduledBlockRetriesWhenCustodyColumnsAreStored(t *testing.T) {
 
 		require.Equal(t, start, time.Now(), "the ticker must not have fired")
 		require.Equal(t, int32(2), processing.calls.Load())
-		_, queued := service.blocksScheduledForLaterExecution.Load(root)
+		_, queued := service.blocksScheduledForLaterExecution.Load([32]byte(root))
 		require.False(t, queued)
 	})
 }
