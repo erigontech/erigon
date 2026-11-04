@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,9 +42,15 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // ---------------------------------------------------------------------------
@@ -885,29 +893,54 @@ func TestBuildBlockV1(t *testing.T) {
 func TestStaticTxnProvider(t *testing.T) {
 	t.Parallel()
 
-	// stubTx is a minimal unsigned transaction; its content is irrelevant for
-	// testing the atomic "consumed" semantics of staticTxnProvider.
+	// No signature is needed here: the provider selects transactions without validating them.
 	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	stubTx := types.NewTransaction(0, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
 
-	t.Run("returns transactions on first call", func(t *testing.T) {
+	t.Run("returns transactions without a filter", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
-		txns, err := p.ProvideTxns(context.Background())
-		require.NoError(t, err)
-		require.Len(t, txns, 1)
+		for range 2 {
+			txns, err := p.ProvideTxns(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, []types.Transaction{stubTx}, txns)
+		}
 	})
 
-	t.Run("returns nil on second call (consumed)", func(t *testing.T) {
+	t.Run("retries transactions removed from the filter", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
-		_, _ = p.ProvideTxns(context.Background()) // first call consumes
-		txns, err := p.ProvideTxns(context.Background())
+		filter := mapset.NewSet[[32]byte]()
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{stubTx}, txns)
+		require.True(t, filter.Contains(stubTx.Hash()))
+		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
 		require.NoError(t, err)
 		require.Nil(t, txns)
+		filter.Remove(stubTx.Hash())
+		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{stubTx}, txns)
 	})
 
-	t.Run("empty provider returns empty slice then nil", func(t *testing.T) {
+	t.Run("honors batch size and filter", func(t *testing.T) {
+		t.Parallel()
+		second := types.NewTransaction(1, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx, second}}
+		filter := mapset.NewSet[[32]byte]()
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(0), txnprovider.WithTxnIdsFilter(filter))
+		require.NoError(t, err)
+		require.Empty(t, txns)
+		require.True(t, filter.IsEmpty())
+		for _, want := range p.txns {
+			txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(1), txnprovider.WithTxnIdsFilter(filter))
+			require.NoError(t, err)
+			require.Equal(t, []types.Transaction{want}, txns)
+		}
+	})
+
+	t.Run("empty provider returns no transactions", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{}}
 		txns, err := p.ProvideTxns(context.Background())
@@ -919,9 +952,10 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.Nil(t, txns)
 	})
 
-	t.Run("concurrent callers: exactly one consumes the transactions", func(t *testing.T) {
+	t.Run("concurrent callers sharing a filter yield each transaction once", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		filter := mapset.NewSet[[32]byte]()
 		const goroutines = 32
 		var nonEmpty atomic.Int32
 		var wg sync.WaitGroup
@@ -931,7 +965,7 @@ func TestStaticTxnProvider(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				txns, err := p.ProvideTxns(context.Background())
+				txns, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
 				assert.NoError(t, err)
 				if len(txns) > 0 {
 					nonEmpty.Add(1)
@@ -940,7 +974,7 @@ func TestStaticTxnProvider(t *testing.T) {
 		}
 		close(start)
 		wg.Wait()
-		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must consume the transactions")
+		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must yield the transaction")
 	})
 }
 
@@ -1129,6 +1163,77 @@ func TestDecodeTxnProviderFrameNonces(t *testing.T) {
 				require.NoError(t, tx.MarshalBinary(&encoded))
 				require.Equal(t, []byte(tc.txs[i]), encoded.Bytes())
 			}
+		})
+	}
+}
+
+func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		key          uint64
+		otherCreator bool
+	}{
+		{name: "legacy"},
+		{name: "keyed", key: 5},
+		{name: "other creator", otherCreator: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			sender := common.HexToAddress("0x1000")
+			creator := sender
+			if tc.otherCreator {
+				creator = common.HexToAddress("0x2000")
+			}
+			create := program.New().Push0().Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+			code := append([]byte{byte(vm.CALLDATASIZE), byte(vm.PUSH1), byte(4 + len(create)), byte(vm.JUMPI)}, create...)
+			code = append(code, program.New().Op(vm.JUMPDEST).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()...)
+			genesis := &types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:                  {Balance: big.NewInt(common.Ether), Code: code},
+					types.FrameNonceManager: {Nonce: 1, Code: common.FromHex("60006000fd")},
+				},
+			}
+			genesis.Alloc[creator] = types.GenesisAccount{Balance: big.NewInt(common.Ether), Code: code}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			parentChain, err := m.GenerateChain(1, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(parentChain))
+			parent := parentChain.TopBlock
+			approval := types.Frame{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}
+			first := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{*uint256.NewInt(tc.key)}, SenderAddress: sender,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+				Frames: []types.Frame{
+					{Mode: types.FrameDefault, Target: &creator, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+					approval,
+				},
+			}
+			// CREATE increments the creator's nonce, and legacy approval increments
+			// it once more when the creator is also the transaction sender.
+			secondNonce := uint64(1)
+			if tc.key == 0 && creator == sender {
+				secondNonce++
+			}
+			second := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: creator, Nonce: secondNonce,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: []types.Frame{approval},
+			}
+			txs := make([]hexutil.Bytes, 0, 2)
+			for _, tx := range []*types.FrameTransaction{first, second} {
+				var encoded bytes.Buffer
+				require.NoError(t, tx.MarshalBinary(&encoded))
+				txs = append(txs, encoded.Bytes())
+			}
+			server := NewEngineServer(m.Log, cfg, m.ExecModule, nil, false, false, true, true, nil, nil, 0, 0)
+			api := NewTestingImpl(server, m.Log, m.DB)
+			attrs := validPayloadAttrs(parent.Time())
+			slot := hexutil.Uint64(parent.NumberU64() + 1)
+			attrs.SlotNumber = &slot
+			response, err := api.BuildBlockV1(t.Context(), parent.Hash(), attrs, &txs, nil)
+			require.NoError(t, err)
+			require.Equal(t, txs, response.ExecutionPayload.Transactions)
 		})
 	}
 }
