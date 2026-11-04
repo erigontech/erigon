@@ -364,8 +364,8 @@ func TestBALPrefetchSampleIsTheEvenSampleOfAllKeys(t *testing.T) {
 	}
 	accs, slots := balPrefetchKeys(bal)
 	sampleAccs, sampleSlots := balPrefetchSample(bal)
-	require.Equal(t, sampleEvenly(accs), sampleAccs)
-	require.Equal(t, sampleEvenly(slots), sampleSlots)
+	require.Equal(t, sampleEvenly(accs, 2*residencySampleKeys), sampleAccs)
+	require.Equal(t, sampleEvenly(slots, 2*residencySampleKeys), sampleSlots)
 }
 
 func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
@@ -383,14 +383,35 @@ func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
 	for i := range keys {
 		keys[i] = []byte{byte(i >> 8), byte(i)}
 	}
-	sample := sampleEvenly(keys)
+	sample := sampleEvenly(keys, residencySampleKeys)
 	require.Len(t, sample, residencySampleKeys)
 	require.Equal(t, keys[0], sample[0])
-	require.Len(t, sampleEvenly(keys[:2*residencySampleKeys-1]), residencySampleKeys)
-	require.Len(t, sampleEvenly(keys[:100]), 100)
+	require.Len(t, sampleEvenly(keys[:2*residencySampleKeys-1], residencySampleKeys), residencySampleKeys)
+	require.Len(t, sampleEvenly(keys[:100], residencySampleKeys), 100)
 	require.True(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, nil))
+}
+
+// sharedPagesPrefetcher finds cold pages only on its first call: pages that all keys share,
+// which the first probe reads.
+type sharedPagesPrefetcher struct{ calls *int }
+
+func (p sharedPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, int, time.Duration, time.Duration, error) {
+	*p.calls++
+	if *p.calls == 1 {
+		return 1, len(keys), 0, 0, nil
+	}
+	return 1, 0, 0, 0, nil
+}
+
+func TestStateSampleColdIgnoresPagesTheFirstProbeRead(t *testing.T) {
+	keys := make([][]byte, 2*residencySampleKeys)
+	for i := range keys {
+		keys[i] = []byte{byte(i >> 8), byte(i)}
+	}
+	calls := 0
+	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys))
 }
 
 func TestStateSampleColdKeepsThePerKeyWarmupWhenTheBatchCannotRead(t *testing.T) {

@@ -375,18 +375,29 @@ func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) b
 	return stateSampleCold(ctx, p, accs, slots)
 }
 
+// stateSampleCold decides on every second key of the sample, after probing the others: pages that all keys share are
+// read by the first probe and would make a resident domain look cold.
 func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]byte) bool {
 	cold := func(domain kv.Domain, sample [][]byte) bool {
-		return len(sample) > 0 && !mostlyResident(ctx, p, domain, sample)
+		first, second := make([][]byte, 0, (len(sample)+1)/2), make([][]byte, 0, len(sample)/2)
+		for i, k := range sample {
+			if i%2 == 0 {
+				first = append(first, k)
+			} else {
+				second = append(second, k)
+			}
+		}
+		mostlyResident(ctx, p, domain, first)
+		return len(second) > 0 && !mostlyResident(ctx, p, domain, second)
 	}
 	return cold(kv.AccountsDomain, accs) || cold(kv.StorageDomain, slots)
 }
 
-// balPrefetchSample returns sampleEvenly of balPrefetchKeys without building all keys, so the residency check does
+// balPrefetchSample returns the 2*residencySampleKeys sampleEvenly of balPrefetchKeys without building all keys, so the residency check does
 // not delay the per-key warmup on a large BAL.
 func balPrefetchSample(bal types.BlockAccessList) (accs, slots [][]byte) {
 	nAcc, nSlot := len(bal), balSlotCount(bal)
-	kAcc, kSlot := min(nAcc, residencySampleKeys), min(nSlot, residencySampleKeys)
+	kAcc, kSlot := min(nAcc, 2*residencySampleKeys), min(nSlot, 2*residencySampleKeys)
 	for j := range kAcc {
 		accs = append(accs, bal[j*nAcc/kAcc].Address[:])
 	}
@@ -464,9 +475,9 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	return nil
 }
 
-// sampleEvenly returns min(len(keys), residencySampleKeys) evenly spaced keys.
-func sampleEvenly(keys [][]byte) [][]byte {
-	k := min(len(keys), residencySampleKeys)
+// sampleEvenly returns min(len(keys), n) evenly spaced keys.
+func sampleEvenly(keys [][]byte, n int) [][]byte {
+	k := min(len(keys), n)
 	sample := make([][]byte, k)
 	for j := range sample {
 		sample[j] = keys[j*len(keys)/k]
@@ -496,7 +507,7 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 	compact := make([]byte, 0, 128)
 	seen := map[string]struct{}{}
 	var prefixes [][]byte
-	for _, k := range sampleEvenly(hashedKeys) {
+	for _, k := range sampleEvenly(hashedKeys, residencySampleKeys) {
 		for depth := 0; depth <= min(max(prefetchFlatDepth, 0), len(k)); depth++ {
 			pfx := string(nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]))
 			if _, ok := seen[pfx]; !ok {
