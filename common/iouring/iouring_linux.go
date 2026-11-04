@@ -124,14 +124,6 @@ func New(entries uint32) (*Ring, error) {
 	return ring, nil
 }
 
-// reset resyncs the cached indices to the kernel's, discarding any half-submitted
-// SQE or pending CQE left by a failed io_uring_enter so the ring is reusable. A
-// dropped completion only moves the read to the following mmap access.
-func (r *Ring) reset() {
-	atomic.StoreUint32(r.sqTail, atomic.LoadUint32(r.sqHead))
-	atomic.StoreUint32(r.cqHead, atomic.LoadUint32(r.cqTail))
-}
-
 func (r *Ring) Close() {
 	if r.sqRing != nil {
 		_ = unix.Munmap(r.sqRing)
@@ -160,7 +152,8 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 }
 
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
-// io_uring, keeping up to the ring size in flight. It returns after all complete.
+// io_uring, keeping up to the ring size in flight. It returns after all complete. After an
+// error, reads may still be in flight into scratch: the caller must not reuse the ring or scratch.
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
@@ -182,13 +175,9 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 		// visible to the kernel before it observes the advanced tail.
 		atomic.StoreUint32(r.sqTail, tail)
 
-		_, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(wave), uintptr(wave), enterGetevents, 0, 0)
-		if errno != 0 {
-			return fmt.Errorf("io_uring_enter: %w", errno)
-		}
-
-		// Reap `wave` completions.
-		reaped := 0
+		// The kernel may take only part of the wave and then returns without waiting, so each
+		// wait also submits what is still queued.
+		submitted, reaped := 0, 0
 		for reaped < wave {
 			ch := atomic.LoadUint32(r.cqHead)
 			ct := atomic.LoadUint32(r.cqTail)
@@ -199,12 +188,17 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 				reaped++
 			}
 			atomic.StoreUint32(r.cqHead, ch)
-			if reaped < wave {
-				_, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), 0, uintptr(wave-reaped), enterGetevents, 0, 0)
-				if errno != 0 {
-					return fmt.Errorf("io_uring_enter(wait): %w", errno)
-				}
+			if reaped == wave {
+				break
 			}
+			taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(wave-submitted), uintptr(wave-reaped), enterGetevents, 0, 0)
+			if errno == unix.EINTR {
+				continue
+			}
+			if errno != 0 {
+				return fmt.Errorf("io_uring_enter: %w", errno)
+			}
+			submitted += int(taken)
 		}
 		done += wave
 	}
