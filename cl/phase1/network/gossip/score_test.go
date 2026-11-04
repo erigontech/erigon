@@ -64,7 +64,7 @@ func TestAggregateScoringWithFewAggregatorsPerMeshPeer(t *testing.T) {
 		rate             float64
 	}{{4096, 0.25}, {8192, 0.5}, {12288, 0.75}, {16384, 1}, {20480, 1.25}} {
 		g := &GossipManager{beaconConfig: beaconConfig, networkConfig: networkConfig, activeIndicies: tc.activeValidators}
-		requireAcceptedTopicScoreParams(t, topic, g.defaultAggregateTopicParams(), tc.activeValidators, tc.rate)
+		requireAcceptedTopicScoreParams(t, topic, g.topicScoreParams(gossipnames.TopicNameBeaconAggregateAndProof), tc.activeValidators, tc.rate)
 	}
 }
 
@@ -97,24 +97,6 @@ func requireAcceptedTopicScoreParams(t *testing.T, topic *pubsub.Topic, params *
 	require.InDelta(t, rate, params.FirstMessageDeliveriesCap*(1-params.FirstMessageDeliveriesDecay), 1e-9, "active validators %d", activeValidators)
 }
 
-func TestTopicScoreParamsCoverEverySubscribedTopic(t *testing.T) {
-	mainnet := clparams.NetworkConfigs[chainspec.MainnetChainID]
-	g := &GossipManager{beaconConfig: &clparams.MainnetBeaconConfig, networkConfig: &mainnet, activeIndicies: 1_000_000}
-	for _, name := range []string{
-		gossipnames.TopicNameBeaconAggregateAndProof,
-		gossipnames.TopicNameSyncCommitteeContributionAndProof,
-		gossipnames.TopicNameAttesterSlashing,
-		gossipnames.TopicNameProposerSlashing,
-		gossipnames.TopicNameBlsToExecutionChange,
-		gossipnames.TopicNameDataColumnSidecar(7),
-	} {
-		params := g.topicScoreParams(name)
-		require.NotNil(t, params, name)
-		require.Negative(t, params.InvalidMessageDeliveriesWeight, name)
-		require.Positive(t, params.TopicWeight, name)
-	}
-}
-
 func TestTopicScoreParamsAreAcceptedByGossipsub(t *testing.T) {
 	topic := newScoredTopicForTest(t)
 
@@ -131,6 +113,7 @@ func TestTopicScoreParamsAreAcceptedByGossipsub(t *testing.T) {
 		gossipnames.TopicNameBeaconAttestation(0),
 		gossipnames.TopicNameSyncCommittee(0),
 		gossipnames.TopicNameDataColumnSidecar(0),
+		gossipnames.TopicNameDataColumnSidecar(7),
 		gossipnames.TopicNameExecutionPayload,
 		gossipnames.TopicNameExecutionPayloadBid,
 		gossipnames.TopicNamePayloadAttestation,
@@ -138,6 +121,8 @@ func TestTopicScoreParamsAreAcceptedByGossipsub(t *testing.T) {
 	} {
 		params := g.topicScoreParams(name)
 		require.NotNil(t, params, name)
+		require.Negative(t, params.InvalidMessageDeliveriesWeight, name)
+		require.Positive(t, params.TopicWeight, name)
 		require.NoError(t, topic.SetScoreParams(params), name)
 	}
 }

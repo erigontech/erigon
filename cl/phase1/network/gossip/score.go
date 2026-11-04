@@ -65,9 +65,11 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	case topic == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(topic) || gossip.IsTopicDataColumnSidecar(topic):
 		return g.defaultBlockTopicParams()
 	case topic == gossip.TopicNameBeaconAggregateAndProof:
-		return g.defaultAggregateTopicParams()
+		aggregatorsPerSlot := g.committeeCountPerSlot() * g.beaconConfig.TargetAggregatorsPerCommittee
+		return g.rateBasedTopicParams(aggregateWeight, aggregatorsPerSlot)
 	case topic == gossip.TopicNameSyncCommitteeContributionAndProof:
-		return g.defaultSyncContributionTopicParams()
+		aggregatorsPerSlot := g.beaconConfig.SyncCommitteeSubnetCount * g.beaconConfig.TargetAggregatorsPerSyncSubcommittee
+		return g.rateBasedTopicParams(syncContributionWeight, aggregatorsPerSlot)
 	case topic == gossip.TopicNameAttesterSlashing:
 		return g.staticTopicParams(attesterSlashingWeight, 36, 1)
 	case topic == gossip.TopicNameProposerSlashing:
@@ -211,16 +213,6 @@ func (g *GossipManager) staticTopicParams(topicWeight, firstMessageWeight, first
 		InvalidMessageDeliveriesWeight: -2000,
 		InvalidMessageDeliveriesDecay:  g.scoreDecay(50 * g.oneEpochDuration()),
 	}
-}
-
-func (g *GossipManager) defaultAggregateTopicParams() *pubsub.TopicScoreParams {
-	aggregatorsPerSlot := g.committeeCountPerSlot() * g.beaconConfig.TargetAggregatorsPerCommittee
-	return g.rateBasedTopicParams(aggregateWeight, aggregatorsPerSlot)
-}
-
-func (g *GossipManager) defaultSyncContributionTopicParams() *pubsub.TopicScoreParams {
-	aggregatorsPerSlot := g.beaconConfig.SyncCommitteeSubnetCount * g.beaconConfig.TargetAggregatorsPerSyncSubcommittee
-	return g.rateBasedTopicParams(syncContributionWeight, aggregatorsPerSlot)
 }
 
 // rateBasedTopicParams scores a topic by its expected message rate; mesh delivery stays
