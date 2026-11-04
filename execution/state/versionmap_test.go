@@ -2226,4 +2226,45 @@ func TestMarkWritesCompleteRunsUnderReadersOfACreatedEntry(t *testing.T) {
 		t.Fatal("MarkWritesComplete waited for a reader of a created entry")
 	}
 	e.mu.RUnlock()
+	_, res, _ := readFor(vm, addr, SelfDestructPath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res.Status())
+	_, res, _ = readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res.Status())
+}
+
+// A revived account carries an earlier destruct, so marking its creation marker must wait for readers.
+func TestMarkWritesCompleteWaitsForReadersOfARevivedEntry(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(54)
+	vm := NewVersionMap(nil)
+	vm.FlushVersionedWrites(newWriteSet(&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 1, Incarnation: 1}}, Val: true}), true)
+	writes := newWriteSet(
+		&VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: false},
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 3, Incarnation: 1}}, Val: *uint256.NewInt(5)},
+	)
+	vm.FlushVersionedWrites(writes, false)
+
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesComplete(writes)
+	}()
+	for {
+		select {
+		case <-done:
+			e.mu.RUnlock()
+			t.Fatal("MarkWritesComplete marked a revived entry under a reader")
+		default:
+		}
+		if !e.mu.TryRLock() {
+			break
+		}
+		e.mu.RUnlock()
+		runtime.Gosched()
+	}
+	e.mu.RUnlock()
+	<-done
 }
