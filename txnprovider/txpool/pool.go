@@ -459,7 +459,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.restoreFramesLocked(block, unwindFrames)
 
 	var announcements Announcements
-	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
+	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, unwindTxns, /* newTxns */
 		stateChanges.BlockGasLimit, p.logger)
 	if err != nil {
 		return frames, err
@@ -473,7 +473,6 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, p.logger); err != nil {
 		return frames, err
 	}
-	p.pending.EnforceBestInvariants()
 	p.notifyPendingTxns(announcements)
 
 	p.publishDepthMetrics()
@@ -1642,7 +1641,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			reasons = validatedReasons
 			p.kickKZGOffenders(ctx, reasons, sources)
 
-			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
+			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns,
 				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 			if err != nil {
 				return err
@@ -1675,7 +1674,7 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 	return p._chainDB, p._stateCache
 }
 
-func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
+func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
@@ -1722,24 +1721,20 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		if _, ok := p.senderLastActivity[senderID]; !ok {
 			p.senderLastActivity[senderID] = blockNum
 		}
-		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
-		if err != nil {
+		if err := p.refreshSender(cacheView, senderID, blockGasLimit, logger); err != nil {
 			return announcements, discardReasons, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	if err := p.promote(cacheView, pendingBaseFee, pendingBlobFee, &announcements, logger); err != nil {
 		return announcements, discardReasons, err
 	}
-	p.pending.EnforceBestInvariants()
-
 	return announcements, discardReasons, nil
 }
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, blockGasLimit uint64, logger log.Logger,
+	newTxns TxnSlots, blockGasLimit uint64, logger log.Logger,
 ) (Announcements, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1774,7 +1769,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 					continue
 				}
 				addr := gointerfaces.ConvertH160toAddress(change.Address)
-				id, ok := senders.getID(addr)
+				id, ok := p.senders.getID(addr)
 				if !ok {
 					continue
 				}
@@ -1802,21 +1797,17 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for senderID := range sendersWithChangedState {
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
-		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
-		if err != nil {
+		if err := p.refreshSender(cacheView, senderID, blockGasLimit, logger); err != nil {
 			return announcements, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	// Don't touch senderLastActivity for queuedSenders — these senders did not
 	// change state on-chain, so the dormancy timer should not be reset.
 	for senderID := range queuedSenders {
-		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
-		if err != nil {
+		if err := p.refreshSender(cacheView, senderID, blockGasLimit, logger); err != nil {
 			return announcements, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	return announcements, nil
@@ -2285,6 +2276,15 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 	}
 }
 
+func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID, blockGasLimit uint64, logger log.Logger) error {
+	nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
+	if err != nil {
+		return err
+	}
+	p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
+	return nil
+}
+
 // onSenderStateChange refreshes pool eligibility and ordering for one sender.
 // Transactions using account nonces depend on earlier nonces and cumulative sender costs.
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
@@ -2447,6 +2447,7 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 		// Eviction can release payer funds or break a sender's nonce chain.
 		// Refresh affected accounts before finishing promotion.
 		if len(p.frameAccountsToRefresh) == 0 {
+			p.pending.EnforceBestInvariants()
 			return nil
 		}
 	}
@@ -3038,7 +3039,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 	if err != nil {
 		return err
 	}
-	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, txns,
+	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns,
 		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}

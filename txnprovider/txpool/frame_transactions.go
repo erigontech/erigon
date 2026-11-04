@@ -481,11 +481,9 @@ func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
 				delete(p.frameAccountsToRefresh, address)
 				continue
 			}
-			nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
-			if err != nil {
+			if err := p.refreshSender(cacheView, senderID, p.blockGasLimit.Load(), p.logger); err != nil {
 				return err
 			}
-			p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load(), p.logger)
 		}
 	}
 	return nil
@@ -633,7 +631,6 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements, p.logger); err != nil {
 			return err
 		}
-		p.pending.EnforceBestInvariants()
 		p.notifyPendingTxns(announcements)
 		return nil
 	})
