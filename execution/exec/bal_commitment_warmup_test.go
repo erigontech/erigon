@@ -359,3 +359,16 @@ func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
 func TestTrieMostlyResidentWithoutKeysWalksNothing(t *testing.T) {
 	require.False(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, nil))
 }
+
+func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
+	keys := make([][]byte, 10_000)
+	for i := range keys {
+		keys[i] = []byte{byte(i >> 8), byte(i)}
+	}
+	sample := sampleEvenly(keys)
+	require.LessOrEqual(t, len(sample), residencySampleKeys+1)
+	require.Equal(t, keys[0], sample[0])
+	require.True(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, sample))
+	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, kv.StorageDomain, sample))
+	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, nil))
+}
