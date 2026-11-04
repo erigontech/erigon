@@ -42,9 +42,10 @@ import (
 )
 
 type Generator struct {
-	stateCache    kvcache.Cache
-	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	stateCache      kvcache.Cache
+	receiptsCache   *lru.Cache[common.Hash, types.Receipts]
+	receiptCache    *cache.ByteLRU[*types.Receipt]  // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	frozenCanonical *lru.Cache[uint64, common.Hash] // a remote block reader asks the backend for each frozen height
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -87,6 +88,11 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		panic(err)
 	}
 
+	frozenCanonical, err := lru.New[uint64, common.Hash](receiptsCacheLimit)
+	if err != nil {
+		panic(err)
+	}
+
 	txNumReader := blockReader.TxnumReader()
 
 	var f *rpchelper.Filters
@@ -97,6 +103,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 	return &Generator{
 		stateCache:         stateCache,
 		receiptsCache:      receiptsCache,
+		frozenCanonical:    frozenCanonical,
 		blockReader:        blockReader,
 		txNumReader:        txNumReader,
 		engine:             engine,
@@ -228,8 +235,13 @@ func (g *Generator) canonicalInView(ctx context.Context, view kv.TemporalTx, hea
 	}
 	if hash == (common.Hash{}) { // frozen blocks have their mapping only in snapshots
 		var ok bool
-		if hash, ok, err = g.blockReader.CanonicalHash(ctx, view, n); err != nil || !ok {
-			return false
+		if hash, ok = g.frozenCanonical.Get(n); !ok {
+			if hash, ok, err = g.blockReader.CanonicalHash(ctx, view, n); err != nil || !ok {
+				return false
+			}
+			if n < g.blockReader.FrozenBlocks() {
+				g.frozenCanonical.Add(n, hash)
+			}
 		}
 	}
 	return hash == header.Hash()

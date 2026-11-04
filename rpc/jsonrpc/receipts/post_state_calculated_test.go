@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -110,4 +111,37 @@ func TestGetReceiptsAnswersAnEmptyBlockWithoutAnExecSlot(t *testing.T) {
 	cached, ok := g.GetCachedReceipts(t.Context(), block.Hash())
 	require.True(t, ok, "the next request must be answered by the cache")
 	require.Empty(t, cached)
+}
+
+type countingCanonicalReader struct {
+	dbservices.FullBlockReader
+	hash  common.Hash
+	calls int
+}
+
+func (r *countingCanonicalReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	r.calls++
+	return r.hash, true, nil
+}
+
+func (r *countingCanonicalReader) FrozenBlocks() uint64 { return 10 }
+
+// A frozen height has no canonical marker in the db; its snapshot hash cannot change, so the
+// block reader, which is a backend round trip on a remote rpcdaemon, is asked once.
+func TestCanonicalInViewAsksBlockReaderOncePerFrozenHeight(t *testing.T) {
+	t.Parallel()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	header := &types.Header{Number: *uint256.NewInt(5)}
+	r := &countingCanonicalReader{hash: header.Hash()}
+	g := newTestGenerator(t)
+	g.blockReader = r
+	for range 3 {
+		require.True(t, g.canonicalInView(t.Context(), tx, header))
+	}
+	require.Equal(t, 1, r.calls)
 }
