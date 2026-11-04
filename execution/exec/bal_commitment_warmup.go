@@ -241,11 +241,17 @@ var (
 	prefetchPar       = dbg.EnvInt("BAL_PREFETCH_PAR", 4)
 )
 
+type rawBranchReader interface {
+	GetLatestBranchRaw(prefix []byte, tx kv.Tx) ([]byte, bool, error)
+}
+
 // keysWithChild keeps the keys whose branch at depth has their next nibble, checked by prefetchPar goroutines.
 // A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
 func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) [][]byte {
 	keep := make([]bool, len(keys))
 	check := func(tx kv.TemporalTx, from, to int) {
+		// Only the child bitmap is needed: a raw branch skips the reads that resolve shortened keys.
+		raw, rawOK := tx.AggTx().(rawBranchReader)
 		compact := make([]byte, 0, 128)
 		// Keys are sorted, so keys sharing a branch are adjacent: read it once.
 		var lastPrefix []byte
@@ -256,7 +262,14 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 				continue
 			}
 			if lastPrefix == nil || !bytes.Equal(lastPrefix, k[:depth]) {
-				branch, _, err := tx.GetLatest(kv.CommitmentDomain, nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth]), kv.GetLatestOptions{})
+				prefix := nibbles.HexToCompactInto(compact[:cap(compact)], k[:depth])
+				var branch []byte
+				var err error
+				if rawOK {
+					branch, _, err = raw.GetLatestBranchRaw(prefix, tx)
+				} else {
+					branch, _, err = tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+				}
 				bits = 0
 				if err == nil && len(branch) >= 4 {
 					bits = binary.BigEndian.Uint16(branch[2:4])

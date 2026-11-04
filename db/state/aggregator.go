@@ -2820,6 +2820,12 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	return v, step, found, err
 }
 
+// GetLatestBranchRaw returns the latest commitment branch at prefix as stored, without resolving its shortened keys.
+func (at *AggregatorRoTx) GetLatestBranchRaw(prefix []byte, tx kv.Tx) ([]byte, bool, error) {
+	v, _, ok, err := at.d[kv.CommitmentDomain].GetLatest(prefix, tx)
+	return v, ok, err
+}
+
 func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {
 	return at.d[domain].GetLatestValSize(k, tx)
 }
