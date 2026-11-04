@@ -227,7 +227,8 @@ jobs:
     permissions:
       contents: read
       actions: write
-    runs-on: ${{ matrix.runner == 'ubuntu-latest' && 'ubuntu-latest' || fromJSON('{"group":"hive"}') }}
+    # The self-hosted hive group fails jobs after they pass (#25753).
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.commitment_mode }})
     strategy:
