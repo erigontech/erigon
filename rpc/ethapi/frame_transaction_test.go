@@ -21,20 +21,40 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFrameRPCTransaction(t *testing.T) {
-	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: 1, Flags: 3}}, Signatures: []types.FrameSignature{{Signature: []byte{1}}}}
+	target := common.HexToAddress("0x1234")
+	tx := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: 3, Limits: mdgas.MdGas{Execution: 100, State: 200}},
+			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 300, State: 400}, Value: *uint256.NewInt(5), Data: []byte{0xab}},
+		},
+		Signatures: []types.FrameSignature{{Signature: []byte{1}}},
+	}
 	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &fields))
 	require.JSONEq(t, `["0x0"]`, string(fields["nonceKeys"]))
-	require.Contains(t, fields, "frames")
+	require.JSONEq(t, `[
+		{"mode":"0x1","flags":"0x3","target":null,"executionGas":"0x64","stateGas":"0xc8","value":"0x0","data":"0x"},
+		{"mode":"0x2","flags":"0x0","target":"0x0000000000000000000000000000000000001234","executionGas":"0x12c","stateGas":"0x190","value":"0x5","data":"0xab"}
+	]`, string(fields["frames"]))
+	require.NotContains(t, fields, "sender")
+	require.JSONEq(t, `"0x0100000000000000000000000000000000000000"`, string(fields["from"]))
 	require.Contains(t, fields, "signatures")
 	require.JSONEq(t, `"0x0"`, string(fields["maxFeePerBlobGas"]))
+	require.Equal(t, string(data), fastJSON(t, result))
+	var decoded RPCTransaction
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	roundTrip, err := json.Marshal(&decoded)
+	require.NoError(t, err)
+	require.JSONEq(t, string(data), string(roundTrip))
 }

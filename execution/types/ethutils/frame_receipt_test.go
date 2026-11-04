@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -30,14 +31,34 @@ import (
 func TestFrameRPCReceipt(t *testing.T) {
 	payer := common.Address{1}
 	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, SenderAddress: payer, Frames: []types.Frame{{}}}
-	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: types.Logs{}}}}
+	receipt := &types.Receipt{
+		Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1),
+		FrameReceipts: []types.FrameReceipt{
+			{Status: types.ReceiptStatusSuccessful, GasUsed: mdgas.MdGas{Execution: 100, State: 200}},
+			{Status: types.ReceiptStatusFailed, GasUsed: mdgas.MdGas{Execution: 50}},
+			{Status: types.ReceiptStatusSkipped},
+		},
+	}
 	result := MarshalReceipt(receipt, tx, chain.AllProtocolChanges, &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(0)}, true, false)
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &fields))
 	require.Contains(t, fields, "payer")
-	require.Contains(t, fields, "frameReceipts")
+	require.JSONEq(t, `[
+		{"status":"0x1","gasUsed":"0x12c","executionGasUsed":"0x64","stateGasUsed":"0xc8","logs":[]},
+		{"status":"0x0","gasUsed":"0x32","executionGasUsed":"0x32","stateGasUsed":"0x0","logs":[]},
+		{"status":"0x2","gasUsed":"0x0","executionGasUsed":"0x0","stateGasUsed":"0x0","logs":[]}
+	]`, string(fields["frameReceipts"]))
+	require.JSONEq(t, `null`, string(fields["to"]))
+	requireFastJSONMatches(t, result)
+	var decoded types.Receipt
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Len(t, decoded.FrameReceipts, len(receipt.FrameReceipts))
+	for i, frame := range receipt.FrameReceipts {
+		require.Equal(t, frame.Status, decoded.FrameReceipts[i].Status)
+		require.Equal(t, frame.GasUsed, decoded.FrameReceipts[i].GasUsed)
+	}
 }
 
 func TestFrameRPCReceiptLogTimestamps(t *testing.T) {

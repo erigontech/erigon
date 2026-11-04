@@ -38,21 +38,21 @@ import (
 
 // RPCReceipt is the RPC form of a receipt.
 type RPCReceipt struct {
-	Payer             *common.Address     `json:"payer,omitempty" ethjson:"data"`
-	FrameReceipts     types.FrameReceipts `json:"frameReceipts,omitempty" ethjson:"objects"`
-	BlockHash         common.Hash         `json:"blockHash" ethjson:"data"`
-	BlockNumber       hexutil.Uint64      `json:"blockNumber" ethjson:"quantity"`
-	TransactionHash   common.Hash         `json:"transactionHash" ethjson:"data"`
-	TransactionIndex  hexutil.Uint64      `json:"transactionIndex" ethjson:"quantity"`
-	From              *common.Address     `json:"from" ethjson:"data"`
-	To                *common.Address     `json:"to" ethjson:"data"`
-	Type              hexutil.Uint        `json:"type" ethjson:"quantity"`
-	GasUsed           hexutil.Uint64      `json:"gasUsed" ethjson:"quantity"`
-	CumulativeGasUsed hexutil.Uint64      `json:"cumulativeGasUsed" ethjson:"quantity"`
-	ContractAddress   *common.Address     `json:"contractAddress" ethjson:"data"`
-	Logs              types.Logs          `json:"logs" ethjson:"objects"`
-	LogsBloom         *types.Bloom        `json:"logsBloom" ethjson:"data"`
-	EffectiveGasPrice *hexutil.U256       `json:"effectiveGasPrice" ethjson:"quantity"`
+	Payer             *common.Address  `json:"payer,omitempty" ethjson:"data"`
+	FrameReceipts     RPCFrameReceipts `json:"frameReceipts,omitempty" ethjson:"objects"`
+	BlockHash         common.Hash      `json:"blockHash" ethjson:"data"`
+	BlockNumber       hexutil.Uint64   `json:"blockNumber" ethjson:"quantity"`
+	TransactionHash   common.Hash      `json:"transactionHash" ethjson:"data"`
+	TransactionIndex  hexutil.Uint64   `json:"transactionIndex" ethjson:"quantity"`
+	From              *common.Address  `json:"from" ethjson:"data"`
+	To                *common.Address  `json:"to" ethjson:"data"`
+	Type              hexutil.Uint     `json:"type" ethjson:"quantity"`
+	GasUsed           hexutil.Uint64   `json:"gasUsed" ethjson:"quantity"`
+	CumulativeGasUsed hexutil.Uint64   `json:"cumulativeGasUsed" ethjson:"quantity"`
+	ContractAddress   *common.Address  `json:"contractAddress" ethjson:"data"`
+	Logs              types.Logs       `json:"logs" ethjson:"objects"`
+	LogsBloom         *types.Bloom     `json:"logsBloom" ethjson:"data"`
+	EffectiveGasPrice *hexutil.U256    `json:"effectiveGasPrice" ethjson:"quantity"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty" ethjson:"quantity"`
 	Root         hexutil.Bytes   `json:"root,omitempty" ethjson:"data"`

@@ -74,7 +74,7 @@ func (r *ReceiptForStorage) decodeFrameStorage(s *rlp.Stream) error {
 
 type FrameReceipts []FrameReceipt
 
-type frameReceiptJSON struct {
+type frameReceiptFixtureJSON struct {
 	Status  hexutil.Uint64    `json:"status"`
 	GasUsed [2]hexutil.Uint64 `json:"gasUsed"`
 	Logs    Logs              `json:"logs"`
@@ -85,15 +85,34 @@ func (r FrameReceipt) MarshalJSON() ([]byte, error) {
 	if logs == nil {
 		logs = Logs{}
 	}
-	return json.Marshal(frameReceiptJSON{hexutil.Uint64(r.Status), [2]hexutil.Uint64{hexutil.Uint64(r.GasUsed.Execution), hexutil.Uint64(r.GasUsed.State)}, logs})
+	return json.Marshal(frameReceiptFixtureJSON{hexutil.Uint64(r.Status), [2]hexutil.Uint64{hexutil.Uint64(r.GasUsed.Execution), hexutil.Uint64(r.GasUsed.State)}, logs})
 }
 
 func (r *FrameReceipt) UnmarshalJSON(input []byte) error {
-	var dec frameReceiptJSON
+	var dec struct {
+		Status           hexutil.Uint64  `json:"status"`
+		GasUsed          json.RawMessage `json:"gasUsed"`
+		ExecutionGasUsed *hexutil.Uint64 `json:"executionGasUsed"`
+		StateGasUsed     *hexutil.Uint64 `json:"stateGasUsed"`
+		Logs             Logs            `json:"logs"`
+	}
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
-	*r = FrameReceipt{uint64(dec.Status), mdgas.MdGas{Execution: uint64(dec.GasUsed[0]), State: uint64(dec.GasUsed[1])}, dec.Logs}
+	// RPC clients decode into Receipt too. RPC uses separate gas fields; fixtures use a pair.
+	var gas [2]hexutil.Uint64
+	if dec.ExecutionGasUsed != nil && dec.StateGasUsed != nil {
+		var total hexutil.Uint64
+		if err := json.Unmarshal(dec.GasUsed, &total); err != nil {
+			return err
+		}
+		gas = [2]hexutil.Uint64{*dec.ExecutionGasUsed, *dec.StateGasUsed}
+	} else if dec.GasUsed != nil {
+		if err := json.Unmarshal(dec.GasUsed, &gas); err != nil {
+			return err
+		}
+	}
+	*r = FrameReceipt{uint64(dec.Status), mdgas.MdGas{Execution: uint64(gas[0]), State: uint64(gas[1])}, dec.Logs}
 	return nil
 }
 

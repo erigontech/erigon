@@ -835,8 +835,7 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 // Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
 	NonceKeys            types.FrameNonceKeys    `json:"nonceKeys,omitempty" ethjson:"objects"`
-	Sender               *common.Address         `json:"sender,omitempty" ethjson:"data"`
-	Frames               types.Frames            `json:"frames,omitempty" ethjson:"objects"`
+	Frames               RPCFrames               `json:"frames,omitempty" ethjson:"objects"`
 	Signatures           *types.FrameSignatures  `json:"signatures,omitempty" ethjson:"objects"`
 	BlockHash            *common.Hash            `json:"blockHash" ethjson:"data"`
 	BlockNumber          *hexutil.U256           `json:"blockNumber" ethjson:"quantity"`
@@ -936,7 +935,6 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
 		case types.FrameTxType:
 			frame := txn.(*types.FrameTransaction)
-			result.Sender = &frame.SenderAddress
 			result.NonceKeys = frame.NonceKeys
 			result.Frames = frame.Frames
 			signatures := types.FrameSignatures(frame.Signatures)
