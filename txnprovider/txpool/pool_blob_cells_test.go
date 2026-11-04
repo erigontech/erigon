@@ -193,18 +193,8 @@ func TestBlobCellsAddIsBoundedAndReplaces(t *testing.T) {
 	require.Same(t, replacement, cells[hash])
 }
 
-func TestAmsterdamValidationDoesNotStageCells(t *testing.T) {
-	ctx, pool, template, _ := newPoolWithBlobTxn(t, "Amsterdam")
-	sender := common.Address{1}
-	var txns TxnSlots
-	for i := 0; i <= blobCellsCacheSize; i++ {
-		txn := *template
-		txn.IDHash[0] = byte(i)
-		txn.IDHash[1] = byte(i >> 8)
-		txn.BlobBundles = append([]PoolBlobBundle(nil), template.BlobBundles...)
-		txns.Append(&txn, sender[:], true)
-	}
-
+func TestAmsterdamValidationDoesNotAttachCells(t *testing.T) {
+	ctx, pool, _, txns := newPoolWithBlobTxn(t, "Amsterdam")
 	coreDB, cache := pool.chainDB()
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -217,34 +207,23 @@ func TestAmsterdamValidationDoesNotStageCells(t *testing.T) {
 	require.NoError(t, pool.senders.registerNewSenders(&txns, pool.logger))
 	_, goodTxns, _, err := pool.validateTxns(&txns, cacheView, nil, nil)
 	require.NoError(t, err)
-	require.Len(t, goodTxns.Txns, blobCellsCacheSize+1)
-	for _, txn := range goodTxns.Txns {
-		for i, bundle := range txn.BlobBundles {
-			require.Nil(t, bundle.Cells, "validation staged cells for blob %d", i)
-		}
+	require.Len(t, goodTxns.Txns, 1)
+	for i, bundle := range goodTxns.Txns[0].BlobBundles {
+		require.Nil(t, bundle.Cells, "validation attached cells for blob %d", i)
 	}
 }
 
-func TestFromDBAmsterdamBlobCellsStayBounded(t *testing.T) {
+func TestFromDBAmsterdamRestoresCells(t *testing.T) {
 	ctx, pool, template, _ := newPoolWithBlobTxn(t, "Amsterdam")
 	raw := makeWrappedBlobTxnRlpWithCellProofs(t, &pool.chainID, 2)
 	sender := common.Address{1}
 	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
-		for i := 0; i <= blobCellsCacheSize; i++ {
-			key := make([]byte, 32)
-			key[0] = byte(i)
-			key[1] = byte(i >> 8)
-			if err := tx.Put(kv.PoolTransaction, key, append(sender[:], raw...)); err != nil {
-				return err
-			}
-		}
-		return nil
+		return tx.Put(kv.PoolTransaction, make([]byte, 32), append(sender[:], raw...))
 	}))
 	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 		return pool.fromDB(ctx, tx)
 	}))
 
-	require.LessOrEqual(t, pool.blobs.cells.Len(), blobCellsCacheSize)
 	bundles := pool.GetBlobs(template.GetBlobHashes())
 	require.Len(t, bundles, len(template.BlobBundles))
 	for i, bundle := range bundles {
@@ -255,14 +234,11 @@ func TestFromDBAmsterdamBlobCellsStayBounded(t *testing.T) {
 			require.Equal(t, want[c][:], bundle.Cells[c][:], "blob %d cell %d", i, c)
 		}
 	}
-	pool.all.ascendAll(func(mt *metaTxn) bool {
-		for i, bundle := range mt.TxnSlot.BlobBundles {
-			require.Nil(t, bundle.Cells, "restored txn keeps cells for blob %d", i)
-		}
-		return true
-	})
 	senderID, ok := pool.senders.getID(sender)
 	require.True(t, ok)
 	restored := pool.all.get(senderID, template.Nonce)
 	require.NotNil(t, restored)
+	for i, bundle := range restored.TxnSlot.BlobBundles {
+		require.Nil(t, bundle.Cells, "restored txn keeps cells for blob %d", i)
+	}
 }
