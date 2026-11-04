@@ -1814,7 +1814,15 @@ func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir str
 
 	var fmu sync.Mutex
 	failedIndexes := make(map[string]error, 0)
+	type indexJob struct {
+		t            snaptype.Enum
+		from, to     uint64
+		info         snaptype.FileInfo
+		indexBuilder snaptype.IndexBuilder
+	}
+	var jobs []indexJob
 
+	s.dirtyLock.Lock()
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
@@ -1832,25 +1840,28 @@ func (s *BaseRoSnapshots) IndexMissed(ctx context.Context, logPrefix, tmpDir str
 				newIdxBuilt = true
 
 				segment.closeIdx()
-
-				indexBuilder := s.IndexBuilder(t.Type())
-
-				g.Go(func() error {
-					defer s.ReleaseRange(t, from, to)
-					p := &background.Progress{}
-					ps.Add(p)
-					defer notifySegmentIndexingFinished(info.Name())
-					defer ps.Delete(p)
-					if err := t.BuildIndexes(gCtx, info, indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
-						// unsuccessful indexing should allow other indexing to finish
-						fmu.Lock()
-						failedIndexes[info.Name()] = err
-						fmu.Unlock()
-					}
-					return nil
-				})
+				jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
 			}
 			return true
+		})
+	}
+	s.dirtyLock.Unlock()
+
+	for i := range jobs {
+		job := jobs[i]
+		g.Go(func() error {
+			defer s.ReleaseRange(job.t, job.from, job.to)
+			p := &background.Progress{}
+			ps.Add(p)
+			defer notifySegmentIndexingFinished(job.info.Name())
+			defer ps.Delete(p)
+			if err := job.t.BuildIndexes(gCtx, job.info, job.indexBuilder, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+				// unsuccessful indexing should allow other indexing to finish
+				fmu.Lock()
+				failedIndexes[job.info.Name()] = err
+				fmu.Unlock()
+			}
+			return nil
 		})
 	}
 
