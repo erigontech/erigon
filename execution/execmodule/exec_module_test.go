@@ -3310,6 +3310,17 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 			require.Equal(t, parent.Hash(), validation.LatestValidHash)
+			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+				for _, block := range badBlocks {
+					exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+					require.NoError(t, err)
+					require.False(t, exists, "rejected body must be removed before the next forkchoice update")
+				}
+				count, err := tx.Count(kv.EthTx)
+				require.NoError(t, err)
+				require.Equal(t, uint64(1), count, "only the committed parent transaction should remain")
+				return nil
+			}))
 			for _, block := range badBlocks {
 				hash, number := block.Hash(), block.NumberU64()
 				header, err := m.ExecModule.GetHeader(ctx, &hash, &number)
