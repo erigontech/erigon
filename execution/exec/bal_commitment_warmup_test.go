@@ -381,8 +381,10 @@ func TestMostlyResidentSkipsResidentStateKeys(t *testing.T) {
 		keys[i] = []byte{byte(i >> 8), byte(i)}
 	}
 	sample := sampleEvenly(keys)
-	require.LessOrEqual(t, len(sample), residencySampleKeys+1)
+	require.Len(t, sample, residencySampleKeys)
 	require.Equal(t, keys[0], sample[0])
+	require.Len(t, sampleEvenly(keys[:2*residencySampleKeys-1]), residencySampleKeys)
+	require.Len(t, sampleEvenly(keys[:100]), 100)
 	require.True(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, kv.StorageDomain, sample))
 	require.False(t, mostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, kv.StorageDomain, nil))

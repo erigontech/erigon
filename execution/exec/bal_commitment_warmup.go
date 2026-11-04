@@ -384,24 +384,25 @@ func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]by
 // balPrefetchSample returns sampleEvenly of balPrefetchKeys without building all keys, so the residency check does
 // not delay the per-key warmup on a large BAL.
 func balPrefetchSample(bal types.BlockAccessList) (accs, slots [][]byte) {
-	accStep, slotStep := max(1, len(bal)/residencySampleKeys), max(1, balSlotCount(bal)/residencySampleKeys)
-	for i := 0; i < len(bal); i += accStep {
-		accs = append(accs, bal[i].Address[:])
+	nAcc, nSlot := len(bal), balSlotCount(bal)
+	kAcc, kSlot := min(nAcc, residencySampleKeys), min(nSlot, residencySampleKeys)
+	for j := range kAcc {
+		accs = append(accs, bal[j*nAcc/kAcc].Address[:])
 	}
 	idx := 0
+	take := func(addr []byte, slot common.Hash) {
+		if len(slots) < kSlot && idx == len(slots)*nSlot/kSlot {
+			slots = append(slots, slotKey(addr, slot))
+		}
+		idx++
+	}
 	for i := range bal {
 		addr := bal[i].Address[:]
 		for _, sc := range bal[i].StorageChanges {
-			if idx%slotStep == 0 {
-				slots = append(slots, slotKey(addr, sc.Slot.Value()))
-			}
-			idx++
+			take(addr, sc.Slot.Value())
 		}
 		for _, sr := range bal[i].StorageReads {
-			if idx%slotStep == 0 {
-				slots = append(slots, slotKey(addr, sr))
-			}
-			idx++
+			take(addr, sr)
 		}
 	}
 	return accs, slots
@@ -462,12 +463,12 @@ func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]
 	return nil
 }
 
-// sampleEvenly returns about residencySampleKeys evenly spaced keys.
+// sampleEvenly returns min(len(keys), residencySampleKeys) evenly spaced keys.
 func sampleEvenly(keys [][]byte) [][]byte {
-	step := max(1, len(keys)/residencySampleKeys)
-	sample := make([][]byte, 0, len(keys)/step+1)
-	for i := 0; i < len(keys); i += step {
-		sample = append(sample, keys[i])
+	k := min(len(keys), residencySampleKeys)
+	sample := make([][]byte, k)
+	for j := range sample {
+		sample[j] = keys[j*len(keys)/k]
 	}
 	return sample
 }
