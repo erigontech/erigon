@@ -58,7 +58,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
-		_, ok := vm.View(1, reader).GetAccount(addr)
+		_, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "a destroyed pre-existing contract must project as absent")
 	})
 
@@ -79,7 +79,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
-		_, ok := vm.View(1, reader).GetAccount(addr)
+		_, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.False(t, ok, "an account created and destroyed in one tx must project as absent")
 	})
 
@@ -107,7 +107,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
 		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
 
-		acc, ok := vm.View(2, reader).GetAccount(addr)
+		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
 		require.True(t, ok, "a recreated account must project as live after the recreate tx")
 		require.Equal(t, crypto.Keccak256Hash(code), acc.CodeHash.Value(),
 			"the recreated account carries the new code hash")
@@ -126,7 +126,7 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 		writes := finalizedWrites(t, ibs, sd)
 		vm.FlushVersionedWrites(writes, true)
 
-		acc, ok := vm.View(1, reader).GetAccount(addr)
+		acc, ok, _ := vm.View(1, reader).GetAccount(addr)
 		require.True(t, ok, "a funded account must project as live")
 		require.True(t, acc.Balance.Eq(uint256.NewInt(150)), "live account carries its final balance")
 	})
@@ -145,14 +145,14 @@ func TestVersionMapView_GetAccountCrossBlockExistence(t *testing.T) {
 	t.Run("no cell and absent base projects absent", func(t *testing.T) {
 		vm := NewVersionMap(nil)
 		base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
-		_, ok := vm.View(1, base).GetAccount(addr)
+		_, ok, _ := vm.View(1, base).GetAccount(addr)
 		require.False(t, ok, "no version-map cell and no base account must project as absent")
 	})
 
 	t.Run("no cell and present base projects present", func(t *testing.T) {
 		vm := NewVersionMap(nil)
 		base := newAccountStateReader(addr) // balance 100
-		acc, ok := vm.View(1, base).GetAccount(addr)
+		acc, ok, _ := vm.View(1, base).GetAccount(addr)
 		require.True(t, ok, "an account the base still carries must project as present")
 		require.True(t, acc.Balance.Eq(uint256.NewInt(100)), "present account takes its value from the base")
 	})
@@ -168,11 +168,6 @@ type getAccountBase struct {
 func (r *getAccountBase) ReadAccountData(accounts.Address) (*accounts.Account, error) {
 	r.reads++
 	return r.acc, r.err
-}
-
-func getAccount(view *VersionMapView, addr accounts.Address) (accounts.Account, bool, bool) {
-	acc, ok := view.GetAccount(addr)
-	return acc, ok, view.WasDestroyed(addr)
 }
 
 // TestVersionMapView_GetAccountTable pins the composed account, the presence and
@@ -315,7 +310,7 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			}
 			view := vm.View(2, base)
 
-			acc, ok, destroyed := getAccount(view, addr)
+			acc, ok, destroyed := view.GetAccount(addr)
 			require.Equal(t, tc.acc, acc, "account")
 			require.Equal(t, tc.ok, ok, "present")
 			require.Equal(t, tc.destroyed, destroyed, "destroyed")

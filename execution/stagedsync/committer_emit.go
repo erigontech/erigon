@@ -118,7 +118,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
 		var u commitment.Update
-		acc, ok := view.GetAccount(addr)
+		acc, ok, wasDestroyed := view.GetAccount(addr)
 		if ok {
 			u = commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
@@ -132,7 +132,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		} else {
 			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
 		}
-		if _, ok := cc.destructed[addr]; ok || view.WasDestroyed(addr) {
+		if _, ok := cc.destructed[addr]; ok || wasDestroyed {
 			u.DeleteStorageSubtree = true
 		}
 		updates.TouchPlainKeyDirectHashed(string(address[:]), hashed, &u)

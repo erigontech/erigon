@@ -52,6 +52,44 @@ func (view *VersionMapView) txIdx() int {
 	return int(view.txNum - view.vm.baseTxNum.Load())
 }
 
+type accountFloors struct {
+	fields                                accounts.Account
+	balance, nonce, incarnation, codeHash bool
+	balanceStatus                         valueStatus
+	addressCell                           bool
+	address                               *accounts.Account
+	life                                  AccountLifecycleState
+}
+
+func (vm *VersionMap) accountFloors(addr accounts.Address, txIdx int) (f accountFloors) {
+	e := vm.load(addr)
+	if e == nil {
+		return f
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if _, c := floorCell(e.Balance, txIdx); c != nil {
+		f.fields.Balance, f.balance, f.balanceStatus = c.Value, true, c.valStatus
+	}
+	if _, c := floorCell(e.Nonce, txIdx); c != nil {
+		f.fields.Nonce, f.nonce = c.Value, true
+	}
+	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
+		f.fields.Incarnation, f.incarnation = c.Value, true
+	}
+	if _, c := floorCell(e.CodeHash, txIdx); c != nil {
+		f.fields.CodeHash, f.codeHash = c.Value, true
+	}
+	if _, c := floorCell(e.Address, txIdx); c != nil {
+		f.addressCell = true
+		if c.accSource != AccountFromBAL {
+			f.address = c.Value
+		}
+	}
+	f.life, _, _, _ = accountLifecycleLocked(e, txIdx, false)
+	return f
+}
+
 // GetAccount composes addr's final account at the view's txNum from the version map
 // cells over base and reports whether it belongs in the trie. The add/remove verdict is
 // read straight off the state: a ValueDeleted balance cell is a removal — exec already
@@ -61,21 +99,43 @@ func (view *VersionMapView) txIdx() int {
 // accounts removed in an earlier block; the base resolves them as absent). Otherwise the
 // composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
 // the read; it is the why-free add/remove projection.
-func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account, bool) {
-	txIdx := view.txIdx()
-	if _, balRes, balOk := view.vm.ReadBalance(addr, txIdx); balOk && balRes.ValStatus() == ValueDeleted {
-		return accounts.Account{}, false
+func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDestroyed bool) {
+	f := view.vm.accountFloors(addr, view.txIdx())
+	wasDestroyed = f.life != LifecycleLive
+	if f.balance && f.balanceStatus == ValueDeleted {
+		return accounts.Account{}, false, wasDestroyed
 	}
-	av := VersionedAccountView{addr: addr, txIdx: txIdx, vm: view.vm, base: view.base}
-	exists := av.recordExists()
-	if err := av.Err(); err != nil {
-		view.err = cmp.Or(view.err, err)
-		return accounts.Account{}, false
+	base := f.address
+	if !f.addressCell {
+		base, _ = view.vm.LoadOriginAccount(addr)
 	}
-	if !exists {
-		return accounts.Account{}, false
+	if base == nil && view.base != nil {
+		var err error
+		if base, err = view.base.ReadAccountData(addr); err != nil {
+			view.err = cmp.Or(view.err, err)
+			return accounts.Account{}, false, wasDestroyed
+		}
 	}
-	return av.compose(), true
+	if base == nil && !f.balance && !f.nonce && !f.incarnation && !f.codeHash {
+		return accounts.Account{}, false, wasDestroyed
+	}
+	acc = accounts.NewAccount()
+	if base != nil {
+		acc = *base
+	}
+	if f.balance {
+		acc.Balance = f.fields.Balance
+	}
+	if f.nonce {
+		acc.Nonce = f.fields.Nonce
+	}
+	if f.incarnation {
+		acc.Incarnation = f.fields.Incarnation
+	}
+	if f.codeHash {
+		acc.CodeHash = f.fields.CodeHash
+	}
+	return acc, true, wasDestroyed
 }
 
 // GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok
@@ -97,14 +157,6 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 		}
 	}
 	return uint256.Int{}, false
-}
-
-// WasDestroyed reports whether addr was destroyed or removed (self-destruct or EIP-161
-// touched-empty removal) at or below the view's txNum — the lifecycle verdict the
-// commitment uses to delete the account's whole storage subtree.
-func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
-	state, _, _, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
-	return state != LifecycleLive
 }
 
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {

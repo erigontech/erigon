@@ -150,10 +150,6 @@ func (v *VersionedAccountView) exists() bool {
 	return v.recordExists()
 }
 
-// recordExists reports whether any record of the account is present in the
-// cascade — a version-map field cell, the version-map address cell, or the base —
-// ignoring lifecycle. It is the data-only existence the commitment read uses;
-// exists() layers the lifecycle destroyed() verdict on top for execution reads.
 func (v *VersionedAccountView) recordExists() bool {
 	if v.vm != nil {
 		if _, ok := versionedUpdateBalance(v.vm, v.addr, v.txIdx); ok {
