@@ -666,7 +666,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// every cell a published tx wrote is in the versionMap, so later txs
 					// resolve it there and never read it from sd.mem.
 					if !finalized && foldErr == nil {
+						foldStart := time.Now()
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
+						spApplyFold += time.Since(foldStart)
 					}
 					for _, t := range applyResult.balTxs {
 						if t.index == -1 {
@@ -684,6 +686,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					if logNpPhases && !applyResult.execEndedAt.IsZero() {
+						pe.logger.Info("[np-phase] apply", "blk", applyResult.BlockNum, "applyFold", spApplyFold, "applyLagAfterExec", time.Since(applyResult.execEndedAt))
+					}
+					spApplyFold = 0
 					built := balBuilder
 					balBuilder = nil
 					if finalized {
@@ -3731,3 +3737,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 	dispatch()
 }
+
+// probe: apply-loop fold time for the current block.
+var spApplyFold time.Duration
