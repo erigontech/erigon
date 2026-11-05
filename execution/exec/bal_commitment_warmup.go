@@ -346,7 +346,7 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots) })
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal)) })
-	if err := g.Wait(); !errors.Is(err, context.Canceled) {
+	if err := g.Wait(); ctx.Err() == nil && !errors.Is(err, context.Canceled) {
 		log.Debug("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "elapsed", time.Since(started), "err", err)
 	}
 }
