@@ -169,39 +169,47 @@ func (sd *TemporalMemBatch) runlockDomain(domain kv.Domain) {
 }
 
 func (sd *TemporalMemBatch) lockAllDomains() {
-	sd.storageLock.Lock()
 	for d := range sd.latest {
-		for i := range sd.latest[d] {
-			sd.latest[d][i].Lock()
-		}
+		sd.lockDomain(kv.Domain(d))
 	}
 }
 
 func (sd *TemporalMemBatch) unlockAllDomains() {
 	for d := range sd.latest {
-		for i := range sd.latest[d] {
-			sd.latest[d][i].Unlock()
-		}
+		sd.unlockDomain(kv.Domain(d))
 	}
-	sd.storageLock.Unlock()
 }
 
 func (sd *TemporalMemBatch) rlockAllDomains() {
-	sd.storageLock.RLock()
 	for d := range sd.latest {
-		for i := range sd.latest[d] {
-			sd.latest[d][i].RLock()
-		}
+		sd.rlockDomain(kv.Domain(d))
 	}
 }
 
 func (sd *TemporalMemBatch) runlockAllDomains() {
 	for d := range sd.latest {
-		for i := range sd.latest[d] {
-			sd.latest[d][i].RUnlock()
-		}
+		sd.runlockDomain(kv.Domain(d))
 	}
-	sd.storageLock.RUnlock()
+}
+
+func (sd *TemporalMemBatch) lockDomain(domain kv.Domain) {
+	if domain == kv.StorageDomain {
+		sd.storageLock.Lock()
+		return
+	}
+	for i := range sd.latest[domain] {
+		sd.latest[domain][i].Lock()
+	}
+}
+
+func (sd *TemporalMemBatch) unlockDomain(domain kv.Domain) {
+	if domain == kv.StorageDomain {
+		sd.storageLock.Unlock()
+		return
+	}
+	for i := range sd.latest[domain] {
+		sd.latest[domain][i].Unlock()
+	}
 }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
