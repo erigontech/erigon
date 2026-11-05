@@ -400,7 +400,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// commitment .kv inconsistent. If a late-consumed blockRequest leaves
 		// computedAhead[n] unset and both paths checkpoint the same edge, that is
 		// benign — both emit identical values at the same txNum.
-		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
+		if !skipStepCheckpoint && !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			// Checkpoint commitment at a mid-block step edge without advancing
 			// lastComputedBlock or resetting block flags — the block-end fold still
 			// needs the pre-edge dirty keys.
@@ -1044,3 +1044,6 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed
 // tx, so every read resolves on the worker's own tx and the fold need not serialize.
 func (r *asOfStateReader) BindsWorkerTx() bool { return true }
+
+// skipStepCheckpoint is a bound probe: no mid-block step checkpoint fold.
+var skipStepCheckpoint = dbg.EnvBool("SKIP_STEP_CHECKPOINT", false)
