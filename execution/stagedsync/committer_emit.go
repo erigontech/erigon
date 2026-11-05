@@ -73,7 +73,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			}
 			address, slot := a.Value(), k.Value()
 			plainKey := slices.Concat(address[:], slot[:])
-			m[k] = cc.updates.HashKey(plainKey)
+			m[k] = cc.touchHash(plainKey)
 			if cc.prefetchFn != nil {
 				cc.prefetchFn(plainKey)
 			}
@@ -81,12 +81,19 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 	}
 }
 
+func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
+	if cc.hashAtFold {
+		return nil
+	}
+	return cc.updates.HashKey(plainKey)
+}
+
 func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state.StateReader) {
 	if _, seen := cc.touchedAccounts[a]; seen {
 		return
 	}
 	address := a.Value()
-	cc.touchedAccounts[a] = cc.updates.HashKey(address[:])
+	cc.touchedAccounts[a] = cc.touchHash(address[:])
 	if base != nil {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc

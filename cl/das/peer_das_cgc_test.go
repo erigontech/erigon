@@ -19,8 +19,6 @@ package das
 import (
 	"bytes"
 	"context"
-	"maps"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -172,7 +170,10 @@ func TestPeerDasCustodyRaiseAfterClockStepsBackIsAboveForkChoiceSlot(t *testing.
 	oldColumns, err := state.GetMyCustodyColumns()
 	require.NoError(t, err)
 	columnStorage := peerDas.(*peerdas).columnStorage.(*blob_storage_mock_services.MockDataColumnStorage)
-	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1001), gomock.Any()).Return(slices.Collect(maps.Keys(oldColumns)), nil).AnyTimes()
+	columnStorage.EXPECT().ColumnSidecarExists(gomock.Any(), uint64(1001), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ uint64, _ common.Hash, column int64) (bool, error) {
+			return oldColumns[cltypes.CustodyIndex(column)], nil
+		}).AnyTimes()
 	available, err := peerDas.IsDataAvailable(1001, common.Hash{1})
 	require.NoError(t, err)
 	require.True(t, available)

@@ -71,6 +71,7 @@ type Cfg struct {
 	attestationDataProducer      attestation_producer.AttestationDataProducer
 	caplinConfig                 clparams.CaplinConfig
 	hasDownloaded                bool
+	savedFinalizedRoot           common.Hash
 	gloasPayloadRetryOffset      atomic.Uint32
 	gloasEnvelopeRecoveryCursor  common.Hash
 	gloasEnvelopeRecoveryHead    common.Hash
@@ -94,6 +95,7 @@ type Cfg struct {
 	forkChoiceWaitingForIndices bool
 	forkChoiceIndicesChanged    <-chan struct{}
 	chainTipRejections          *chainTipRejections
+	ancestorLookupFailedSlot    uint64
 	pendingBlockWrite           *pendingBlockWrite
 }
 
@@ -370,7 +372,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					return ChainTipSync
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, cfg.state.Slot()); err != nil {
+					if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, cfg.state.Slot(), &cfg.savedFinalizedRoot); err != nil {
 						return err
 					}
 					// We only download historical blocks once
