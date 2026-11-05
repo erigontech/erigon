@@ -2640,6 +2640,10 @@ type blockExecutor struct {
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
+	// wakeValidated maps a task to the named re-runs waiting for it to validate;
+	// validatedTasks holds the tasks validated since their last re-exec signal.
+	wakeValidated  map[int][]*poolTask
+	validatedTasks map[int]bool
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -3019,7 +3023,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
 	waiters := be.wakeAt[tx]
+	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
+	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3029,6 +3035,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+	be.wakeMu.Lock()
+	delete(be.validatedTasks, tx)
+	be.wakeMu.Unlock()
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3059,6 +3068,38 @@ func (be *blockExecutor) finishTask(tx int) {
 	}
 }
 
+// signalValidated wakes the named re-runs waiting for tx: its writes are now
+// Validated, which a reader continues on.
+func (be *blockExecutor) signalValidated(tx int) {
+	be.wakeMu.Lock()
+	if be.validatedTasks == nil {
+		be.validatedTasks = map[int]bool{}
+	}
+	be.validatedTasks[tx] = true
+	waiters := be.wakeValidated[tx]
+	delete(be.wakeValidated, tx)
+	be.wakeMu.Unlock()
+	for _, pt := range waiters {
+		be.pool.push(pt)
+	}
+}
+
+// requeueAtValidated registers pt to be re-queued when target validates or commits.
+// Returns false when target already did; the caller then continues in place.
+func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
+	be.checkWaitTarget(tx, target)
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target || be.validatedTasks[target] {
+		return false
+	}
+	if be.wakeValidated == nil {
+		be.wakeValidated = map[int][]*poolTask{}
+	}
+	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
+	return true
+}
+
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
 }
@@ -3066,6 +3107,17 @@ func (be *blockExecutor) frontier() int {
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
 // false when the frontier is already there; the caller then continues in place.
 func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
+	be.checkWaitTarget(tx, target)
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target {
+		return false
+	}
+	be.wakeAt[target] = append(be.wakeAt[target], pt)
+	return true
+}
+
+func (be *blockExecutor) checkWaitTarget(tx, target int) {
 	// A target beyond the last task can never be signalled — the worker would park
 	// forever. That means a versionMap (block-TxIndex) dependency reached here
 	// without a taskIndexOf translation; fail loud at the exact site.
@@ -3080,13 +3132,6 @@ func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
 	}
-	be.wakeMu.Lock()
-	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target {
-		return false
-	}
-	be.wakeAt[target] = append(be.wakeAt[target], pt)
-	return true
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
@@ -3237,6 +3282,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
 				be.validateTasks.markComplete(tx)
+				be.signalValidated(tx)
 				// Validated against current state; only a later write to one of its
 				// read cells (markReadersDirty) re-flags it for finalize re-validation.
 				delete(be.revalidate, tx)
@@ -3660,6 +3706,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			be.runInc[i].Store(-1)
 		}
 		be.wakeAt = map[int][]*poolTask{}
+		be.wakeValidated = map[int][]*poolTask{}
+		be.validatedTasks = map[int]bool{}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
