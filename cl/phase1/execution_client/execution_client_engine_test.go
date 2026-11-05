@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/engineadapter"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -325,7 +326,7 @@ func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 		block.Transactions = &solid.TransactionsSSZ{}
 		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
 
-		ep := engine_types.ExecutionPayloadFromSSZBlock(block, block.Version())
+		ep := engineadapter.ExecutionPayloadFromSSZBlock(block, block.Version())
 
 		raw, err := json.Marshal(ep)
 		require.NoError(t, err)
@@ -365,7 +366,7 @@ func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 
 	for _, tt := range gloasTests {
 		t.Run(tt.name, func(t *testing.T) {
-			ep := engine_types.ExecutionPayloadFromSSZBlock(tt.block, tt.block.Version())
+			ep := engineadapter.ExecutionPayloadFromSSZBlock(tt.block, tt.block.Version())
 
 			raw, err := json.Marshal(ep)
 			require.NoError(t, err)
@@ -401,7 +402,7 @@ func TestExecutionPayloadFromSSZBlock_TransactionsAreJSONArray(t *testing.T) {
 			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
 			require.NoError(t, payload.Transactions.UnmarshalJSON([]byte(tt.json)))
 
-			raw, err := json.Marshal(engine_types.ExecutionPayloadFromSSZBlock(payload, tt.version))
+			raw, err := json.Marshal(engineadapter.ExecutionPayloadFromSSZBlock(payload, tt.version))
 			require.NoError(t, err)
 
 			var decoded map[string]any

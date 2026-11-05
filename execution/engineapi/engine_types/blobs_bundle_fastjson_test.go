@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -119,23 +120,23 @@ func worstCaseBlobsBundle() *BlobsBundle {
 	const blobs = 21
 	bundle := &BlobsBundle{
 		Commitments: make([]hexutil.Bytes, blobs),
-		Proofs:      make([]hexutil.Bytes, blobs*sszCellsPerExtBlob),
+		Proofs:      make([]hexutil.Bytes, blobs*params.CellsPerExtBlob),
 		Blobs:       make([]hexutil.Bytes, blobs),
 	}
 	for i := range bundle.Blobs {
-		blob := make(hexutil.Bytes, sszBlobBytes)
+		blob := make(hexutil.Bytes, params.BlobSize)
 		for j := range blob {
 			blob[j] = byte(i + j)
 		}
 		bundle.Blobs[i] = blob
-		commitment := make(hexutil.Bytes, sszKZGBytes)
+		commitment := make(hexutil.Bytes, len(types.KZGCommitment{}))
 		for j := range commitment {
 			commitment[j] = byte(i + j)
 		}
 		bundle.Commitments[i] = commitment
 	}
 	for i := range bundle.Proofs {
-		proof := make(hexutil.Bytes, sszKZGBytes)
+		proof := make(hexutil.Bytes, len(types.KZGProof{}))
 		for j := range proof {
 			proof[j] = byte(i + j)
 		}
