@@ -2024,6 +2024,8 @@ func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
 	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
 }
 
+func (sd *SharedDomains) DeferCommitmentUpdates() bool { return sd.sdCtx.DeferCommitmentUpdates() }
+
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
 func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (int, int, error) {
 	var accountChanges, storageChanges int

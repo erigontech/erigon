@@ -837,6 +837,14 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	var rh []byte
 	var flushOwn func() error
 	var err error
+	if stepFoldIncremental && os.Getenv("SF_NODEFER_MID") != "" && (m.midBlock || sfMidBlock == t.blockNum) {
+		if m.midBlock {
+			sfMidBlock = t.blockNum
+		}
+		was := cc.doms.DeferCommitmentUpdates()
+		cc.doms.SetDeferCommitmentUpdates(false)
+		defer cc.doms.SetDeferCommitmentUpdates(was)
+	}
 	if !cc.ownsChangeset(t.blockNum) {
 		rh, flushOwn, err = cc.computeIsolated(ctx, t)
 	} else {
@@ -850,6 +858,16 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 
+	if m.midBlock && stepFoldIncremental && os.Getenv("SF_FLUSH_MID") != "" {
+		if ferr := func() error {
+			cc.doms.LockChangesetAccumulator()
+			defer cc.doms.UnlockChangesetAccumulator()
+			return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
+		}(); ferr != nil {
+			cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum, err: fmt.Errorf("commitmentCalculator: %sflush failed: %w", m.label, ferr)})
+			return
+		}
+	}
 	mismatch := m.checkRoot && !bytes.Equal(rh, t.stateRoot[:])
 	if os.Getenv("STEP_FOLD_TRACE") != "" {
 		fmt.Printf("SFTRACE blk=%d txNum=%d mid=%v owns=%v perBlockFrom=%d root=%x mismatch=%v\n", t.blockNum, t.lastTxNum, m.midBlock, cc.ownsChangeset(t.blockNum), cc.perBlockFrom, rh[:4], mismatch)
@@ -1109,3 +1127,5 @@ type sfSlot struct {
 }
 
 var sfLastSlot = map[sfSlot]uint64{}
+
+var sfMidBlock uint64

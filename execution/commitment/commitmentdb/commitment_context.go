@@ -164,6 +164,8 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 	sdc.deferCommitmentUpdates = defer_
 }
 
+func (sdc *SharedDomainsCommitmentContext) DeferCommitmentUpdates() bool { return sdc.deferCommitmentUpdates }
+
 // TakePendingUpdate returns the pending update and clears the field.
 // Caller takes ownership of the returned value.
 func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.PendingCommitmentUpdate {
