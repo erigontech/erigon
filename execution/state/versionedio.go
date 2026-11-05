@@ -69,9 +69,10 @@ const (
 // that produced the value and the tier it came from.  Shared by every
 // per-path read via embedding in VersionedRead.
 type ReadHeader struct {
-	Source   ReadSource
-	Version  Version
-	internal bool // conflict-detection only; excluded from the block access list
+	Source    ReadSource
+	Version   Version
+	internal  bool // conflict-detection only; excluded from the block access list
+	accSource AccountSource
 }
 
 // VersionedRead is a single versioned read.  The per-path map it lives in fixes
@@ -1336,10 +1337,6 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 	return out
 }
 
-// SetEmptyRemoval replaces addr's writes with an EIP-161 removal: a self-destruct
-// and a balance delete. The balance write makes a reader that saw the account empty
-// depend on the removal; its delete stamp keeps the leaf deleted downstream, where an
-// unstamped balance would read as the account surviving its destruct.
 func (ws *WriteSet) SetEmptyRemoval(addr accounts.Address, version Version) {
 	ws.deleteAddr(addr)
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
@@ -1348,6 +1345,19 @@ func (ws *WriteSet) SetEmptyRemoval(addr accounts.Address, version Version) {
 	})
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
 		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: version, valStatus: ValueDeleted},
+	})
+}
+
+// SetContractRemoval is SetEmptyRemoval for a destroyed contract rather than a
+// touched-empty EOA. It additionally stamps the CodeHash ValueDeleted — the "code now
+// removed" signal that survives the footprint clear, letting the fee calc tell a
+// destroyed contract (burn the delayed fee, stay removed) from an EIP-161 empty EOA
+// (credit the fee, revive).
+func (ws *WriteSet) SetContractRemoval(addr accounts.Address, version Version) {
+	ws.SetEmptyRemoval(addr, version)
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{
+		WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version, valStatus: ValueDeleted},
+		Val:         accounts.EmptyCodeHash,
 	})
 }
 
@@ -1671,11 +1681,13 @@ func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[acc
 	return maps.All(ws.codeHash)
 }
 
-// StoragesChanged has nothing to filter: a plain WriteSet carries no version map
+// StorageChanges has nothing to filter: a plain WriteSet carries no version map
 // to compare a write against, so its writes are already the changed ones.
-func (ws *WriteSet) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+func (ws *WriteSet) StorageChanges() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return ws.Storages()
 }
+
+func (ws *WriteSet) AccountChanges() iter.Seq[accounts.Address] { return accountChangeAddrs(ws) }
 
 func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if ws == nil {
@@ -1861,10 +1873,19 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 
 // updateBalance, updateNonce etc. are typed in-place mutations on the
 // existing per-path entry.  No-op when no entry exists for addr.
-func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int) {
+func (ws *WriteSet) updateBalance(addr accounts.Address, val uint256.Int, deleted bool) {
 	if vw, ok := ws.balance[addr]; ok {
 		vw.Val = val
+		vw.valStatus = ValueChanged
+		if deleted {
+			vw.valStatus = ValueDeleted
+		}
 	}
+}
+
+func (ws *WriteSet) balanceDeleted(addr accounts.Address) bool {
+	vw, ok := ws.GetBalance(addr)
+	return ok && vw.Deletes()
 }
 
 func (ws *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
@@ -1965,7 +1986,7 @@ func (vr *versionedStateReader) TracePrefix() string {
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
 		account := r.Val.Account()
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -2045,6 +2066,9 @@ func (vr *versionedStateReader) HasAccount(address common.Address) (bool, error)
 func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
 	val, res, ok := vm.ReadAddress(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
+		if res.accSource == AccountFromBAL {
+			return nil, false
+		}
 		return val, true
 	}
 	return nil, false
@@ -2105,7 +2129,7 @@ func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int)
 }
 
 func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
-	val, res, ok := vm.ReadStorage(addr, key, txIndex)
+	val, res, ok := liveStorageValue(vm, addr, key, txIndex)
 	if ok && res.Status() != MVReadResultNone {
 		return val, true
 	}
@@ -2119,7 +2143,7 @@ func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, a
 }
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
 		account := r.Val.Account()
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -2221,7 +2245,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 }
 
 func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() && r.accSource != AccountFromBAL {
 		return r.Val.Account().Incarnation, nil
 	}
 
