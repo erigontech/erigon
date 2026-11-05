@@ -71,19 +71,19 @@ func NewL2(t testing.TB) (*execmoduletester.ExecModuleTester, *deriver.ExecChain
 
 // NewL2Of returns the EEZ network spec at genesis in a fresh execution
 // module, and the Chain derivation drives it through.
-func NewL2Of(t testing.TB, spec chainspec.Spec) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
+func NewL2Of(t testing.TB, spec chainspec.Spec, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
 	t.Helper()
 	eez.Register()
 	genesis := *spec.Genesis
 	engine, err := eezrules.New(genesis.Config)
 	require.NoError(t, err)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(t, append([]execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(&genesis),
 		execmoduletester.WithChainConfig(genesis.Config),
 		execmoduletester.WithEngine(engine),
 		execmoduletester.WithKey(UserKey),
 		execmoduletester.WithoutSystemContracts(),
-	)
+	}, opts...)...)
 	return m, deriver.NewExecChain(m.ExecModule, m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig)
 }
 

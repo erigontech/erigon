@@ -76,7 +76,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/tracing"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -313,6 +313,13 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+// WithBALSink passes every BAL the execution pipeline derives to sink.
+func WithBALSink(sink func(blockNum uint64, bal types.BlockAccessList)) Option {
+	return func(opts *options) {
+		opts.balSink = sink
+	}
+}
+
 // WithoutExperimentalBAL disables experimental BAL (and the parallel executor
 // it forces) for tests that exercise patterns the parallel executor doesn't
 // yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
@@ -424,6 +431,7 @@ type options struct {
 	stepSize                 *uint64
 	e2RetireStep             *uint64
 	experimentalBAL          bool
+	balSink                  func(blockNum uint64, bal types.BlockAccessList)
 	genesis                  *types.Genesis
 	chainConfig              *chain.Config
 	key                      *ecdsa.PrivateKey
@@ -747,7 +755,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			mock.BlockReader,
 			gspec,
 			cfg.Sync,
-			false, /*experimentalBAL*/
+			cfg.ExperimentalBAL,
 			readAheader,
 		),
 		nil, /*notifier*/
@@ -796,16 +804,25 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stages.ModeApplyingBlocks,
 	)
 
-	var tracer *tracers.Tracer
+	var tracingHooks *tracing.Hooks
 	if dir, ok := os.LookupEnv("MOCK_SENTRY_DEBUG_TRACER_OUTPUT_DIR"); ok {
-		tracer = debugtracer.New(dir, debugtracer.WithRecordOptions(debugtracer.RecordOptions{
+		tracingHooks = debugtracer.New(dir, debugtracer.WithRecordOptions(debugtracer.RecordOptions{
 			DisableOnOpcodeStackRecording:  true,
 			DisableOnOpcodeMemoryRecording: true,
-		}))
+		})).Hooks
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
+	executeCfg := stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, mock.ChainConfig, mock.Engine, &vm.Config{Tracer: tracingHooks}, mock.Notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, mock.BlockReader, gspec, cfg.Sync, cfg.ExperimentalBAL, readAheader)
+	executeCfg.SetBALSink(opt.balSink)
+	pipelineStages := stagedsync.PipelineStages(
+		mock.Ctx,
+		stagedsync.StageSnapshotsCfg(db, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, nil, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSendersCfg(mock.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, mock.BlockReader, readAheader),
+		executeCfg,
+		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, mock.BlockReader),
+		stagedsync.StageFinishCfg(),
+	)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.

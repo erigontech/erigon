@@ -73,10 +73,11 @@ func SetGasUsed(h *types.Header, gu *GasUsed) {
 // applyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
-// indicating the block was invalid.
+// indicating the block was invalid. A non-nil postProcess runs on the state the
+// transaction left, before its finalization.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
-	evm *vm.EVM, cfg vm.Config,
+	evm *vm.EVM, cfg vm.Config, postProcess func() error,
 ) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
@@ -115,6 +116,12 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
+	if postProcess != nil {
+		err = postProcess()
+		if err != nil {
+			return nil, err
+		}
+	}
 	err = ibs.FinalizeTx(rules, stateWriter)
 	if err != nil {
 		return nil, err
@@ -140,11 +147,21 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed *GasUsed, cfg vm.Config,
 ) (*types.Receipt, error) {
+	return ApplyTransactionPostProcessed(config, blockHashFunc, engine, author, gp, ibs, stateWriter, header, txn, gasUsed, cfg, nil)
+}
+
+// ApplyTransactionPostProcessed is ApplyTransaction with postProcess run on the
+// state txn left, before its finalization: finalized, a versioned state answers
+// a read with what the transaction read, not what it wrote.
+func ApplyTransactionPostProcessed(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
+	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
+	header *types.Header, txn types.Transaction, gasUsed *GasUsed, cfg vm.Config, postProcess func() error,
+) (*types.Receipt, error) {
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, postProcess)
 }
 
 func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader, author accounts.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
@@ -158,7 +175,7 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
 	cfg vm.Config, vmenv *vm.EVM,
 ) (*types.Receipt, error) {
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, nil)
 }
 
 func MakeReceipt(

@@ -304,12 +304,15 @@ func (ba *BlockAssembler) AddTransactions(
 		// Snapshot cumulative gas so we can restore on tx failure.
 		gasSnapshot := *gasUsed
 
-		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
-		if p, ok := ba.cfg.Engine.(rules.TxPostProcessor); ok && err == nil {
-			// txn takes the spare slot AddTxn fills next; Txns is the assembler's own.
-			err = p.PostProcessTx(chainConfig, ibs, append(current.Txns, txn), len(current.Txns))
+		var postProcess func() error
+		if p, ok := ba.cfg.Engine.(rules.TxPostProcessor); ok {
+			postProcess = func() error {
+				// txn takes the spare slot AddTxn fills next; Txns is the assembler's own.
+				return p.PostProcessTx(chainConfig, ibs, append(current.Txns, txn), len(current.Txns))
+			}
 		}
+		receipt, err := protocol.ApplyTransactionPostProcessed(chainConfig, protocol.GetHashFn(header, getHeader),
+			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig, postProcess)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot

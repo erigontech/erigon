@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/systemtx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -91,10 +93,11 @@ func (c *groupEndChain) nativeTx(selector [4]byte, value uint64) types.Transacti
 	return tx
 }
 
-// serial builds block 1 with txs and coinbase without the parallel executor.
-func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction) (*deriver.ExecChain, *types.BlockWithReceipts) {
+// serial builds block 1 with txs and coinbase without the parallel executor,
+// unless opts ask for block access lists.
+func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction, opts ...execmoduletester.Option) (*deriver.ExecChain, *types.BlockWithReceipts) {
 	dbg.Exec3Parallel = false
-	_, chain := derivertest.NewL2Of(c.t, c.spec)
+	_, chain := derivertest.NewL2Of(c.t, c.spec, opts...)
 	parent, err := chain.HeaderByNumber(c.t.Context(), 0)
 	require.NoError(c.t, err)
 	built, err := chain.Extend(c.t.Context(), parent, deriver.HeaderInputs{
@@ -111,10 +114,10 @@ func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction)
 }
 
 // parallel imports block into a fresh chain with the parallel executor.
-func (c *groupEndChain) parallel(t *testing.T, workers int, block *types.Block) *deriver.ExecChain {
+func (c *groupEndChain) parallel(t *testing.T, workers int, block *types.Block, opts ...execmoduletester.Option) *deriver.ExecChain {
 	dbg.Exec3Parallel = true
 	ethconfig.Defaults.Sync.ExecWorkerCount = workers
-	m, chain := derivertest.NewL2Of(t, c.spec)
+	m, chain := derivertest.NewL2Of(t, c.spec, opts...)
 	require.NoError(t, m.InsertChain(&blockgen.ChainPack{Blocks: []*types.Block{block}, Headers: []*types.Header{block.Header()}, TopBlock: block}))
 	return chain
 }
@@ -131,6 +134,61 @@ func storeOf(code []byte, target common.Address, op vm.OpCode, slot byte) []byte
 	return append(code, byte(op), byte(vm.PUSH1), slot, byte(vm.SSTORE))
 }
 
+// groupEndCase is block 1 of a chain whose genesis adds alloc.
+type groupEndCase struct {
+	name     string
+	alloc    types.GenesisAlloc
+	coinbase common.Address
+	txs      func(c *groupEndChain) []types.Transaction
+}
+
+var (
+	groupEndRich = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)}
+	// groupEndReader keeps EEZL2's balance in slot 0 and the native system
+	// address's code hash, zero while it does not exist, in slot 1.
+	groupEndReader = common.HexToAddress("0x8ead")
+)
+
+// afterFeesCase has EEZL2 as coinbase and a reader after the group end.
+type afterFeesCase struct {
+	groupEndCase
+	// tipped is the user transaction whose tip reaches EEZL2 before the
+	// reader, -1 for none; burnt says a group ends between them.
+	tipped int
+	burnt  bool
+}
+
+func afterFeesCases() []afterFeesCase {
+	eezl2, native := protocol.RollupXEEZL2Address, protocol.NativeSystemAddress
+	readerCode := append(storeOf(storeOf(nil, eezl2, vm.BALANCE, 0), native, vm.EXTCODEHASH, 1), byte(vm.STOP))
+	recipient := common.HexToAddress("0x7ec1")
+	user := derivertest.UserKey
+	alloc := func(fundNative bool) types.GenesisAlloc {
+		a := types.GenesisAlloc{derivertest.UserAddress(): groupEndRich, groupEndReader: {Code: readerCode}}
+		if fundNative {
+			a[native] = types.GenesisAccount{Balance: big.NewInt(common.GWei)}
+		}
+		return a
+	}
+	return []afterFeesCase{
+		{groupEndCase{"user transaction after a load", alloc(true), eezl2, func(c *groupEndChain) []types.Transaction {
+			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(user, 0, recipient, 0, 21_000), c.userTx(user, 1, groupEndReader, 0, 100_000)}
+		}}, 1, true},
+		{groupEndCase{"user transaction after a load pays the native system address", alloc(true), eezl2, func(c *groupEndChain) []types.Transaction {
+			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(user, 0, native, 1, 21_000), c.userTx(user, 1, groupEndReader, 0, 100_000)}
+		}}, 1, true},
+		{groupEndCase{"user transaction after a load creates the native system address", alloc(false), eezl2, func(c *groupEndChain) []types.Transaction {
+			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(user, 0, native, 1, 21_000), c.userTx(user, 1, groupEndReader, 0, 100_000)}
+		}}, 1, true},
+		{groupEndCase{"delivery", alloc(true), eezl2, func(c *groupEndChain) []types.Transaction {
+			return []types.Transaction{c.nativeTx(protocol.ExecuteIncomingCrossChainCallSelector, 0), c.userTx(user, 0, groupEndReader, 0, 100_000)}
+		}}, -1, true},
+		{groupEndCase{"no group end", alloc(true), eezl2, func(c *groupEndChain) []types.Transaction {
+			return []types.Transaction{c.userTx(user, 0, recipient, 0, 21_000), c.userTx(user, 1, groupEndReader, 0, 100_000)}
+		}}, 0, false},
+	}
+}
+
 // TestGroupEndBurnAfterFees checks that under rollupX v0.1 the group-end burn
 // follows the fees of the transaction ending the group. With EEZL2 as
 // coinbase, the tip of the user transaction after a load is burnt before the
@@ -139,46 +197,11 @@ func storeOf(code []byte, target common.Address, op vm.OpCode, slot byte) []byte
 // end both stay. Parallel import must accept the block serial assembly built
 // and read the same state.
 func TestGroupEndBurnAfterFees(t *testing.T) {
-	eezl2, native := protocol.RollupXEEZL2Address, protocol.NativeSystemAddress
-	reader := common.HexToAddress("0x8ead")
-	readerCode := append(storeOf(storeOf(nil, eezl2, vm.BALANCE, 0), native, vm.EXTCODEHASH, 1), byte(vm.STOP))
-	recipient := common.HexToAddress("0x7ec1")
-	rich := types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)}
-	user := derivertest.UserKey
-
-	for _, tc := range []struct {
-		name       string
-		fundNative bool
-		txs        func(c *groupEndChain) []types.Transaction
-		// tipped is the user transaction whose tip reaches EEZL2 before
-		// the reader, -1 for none.
-		tipped int
-		burnt  bool
-	}{
-		{"user transaction after a load", true, func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(user, 0, recipient, 0, 21_000), c.userTx(user, 1, reader, 0, 100_000)}
-		}, 1, true},
-		{"user transaction after a load pays the native system address", true, func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(user, 0, native, 1, 21_000), c.userTx(user, 1, reader, 0, 100_000)}
-		}, 1, true},
-		{"user transaction after a load creates the native system address", false, func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(user, 0, native, 1, 21_000), c.userTx(user, 1, reader, 0, 100_000)}
-		}, 1, true},
-		{"delivery", true, func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.nativeTx(protocol.ExecuteIncomingCrossChainCallSelector, 0), c.userTx(user, 0, reader, 0, 100_000)}
-		}, -1, true},
-		{"no group end", true, func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.userTx(user, 0, recipient, 0, 21_000), c.userTx(user, 1, reader, 0, 100_000)}
-		}, 0, false},
-	} {
+	for _, tc := range afterFeesCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			alloc := types.GenesisAlloc{derivertest.UserAddress(): rich, reader: {Code: readerCode}}
-			if tc.fundNative {
-				alloc[native] = types.GenesisAccount{Balance: big.NewInt(common.GWei)}
-			}
-			c := newGroupEndChain(t, alloc)
-			serial, built := c.serial(eezl2, tc.txs(c))
-			wantBalance, wantCodeHash := storageAt(t, serial, reader, 0), storageAt(t, serial, reader, 1)
+			c := newGroupEndChain(t, tc.alloc)
+			serial, built := c.serial(tc.coinbase, tc.txs(c))
+			wantBalance, wantCodeHash := storageAt(t, serial, groupEndReader, 0), storageAt(t, serial, groupEndReader, 1)
 			if tc.tipped >= 0 {
 				require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[tc.tipped].Status)
 			}
@@ -194,20 +217,23 @@ func TestGroupEndBurnAfterFees(t *testing.T) {
 			for _, workers := range []int{1, 2, 4, 8} {
 				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
 					parallel := c.parallel(t, workers, built.Block)
-					require.Equal(t, wantBalance, storageAt(t, parallel, reader, 0))
-					require.Equal(t, wantCodeHash, storageAt(t, parallel, reader, 1))
+					require.Equal(t, wantBalance, storageAt(t, parallel, groupEndReader, 0))
+					require.Equal(t, wantCodeHash, storageAt(t, parallel, groupEndReader, 1))
 				})
 			}
 		})
 	}
 }
 
-// TestGroupEndBurnRevalidatesReaders checks that a transaction that read what
-// the group end wrote before its burn re-executes. A slow first transaction
-// lets the group end validate, and the readers after it run, before the
-// in-order finalize burns; the readers send from their own accounts and leave
-// the coinbase alone, so nothing else orders them after the burn.
-func TestGroupEndBurnRevalidatesReaders(t *testing.T) {
+// readersCase has a slow first transaction, then the group end at index ended,
+// then two transactions calling reader.
+type readersCase struct {
+	groupEndCase
+	ended  int
+	reader common.Address
+}
+
+func readersCases(t *testing.T) []readersCase {
 	eezl2, native := protocol.RollupXEEZL2Address, protocol.NativeSystemAddress
 	burner := common.HexToAddress("0xb0b0")
 	nativeBalance, nativeCodeHash, eezl2Balance := common.HexToAddress("0x8ea1"), common.HexToAddress("0x8ea2"), common.HexToAddress("0x8ea3")
@@ -217,56 +243,59 @@ func TestGroupEndBurnRevalidatesReaders(t *testing.T) {
 		require.NoError(t, err)
 		keys[i] = key
 	}
-	rich := types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)}
-
+	// stopEEZL2 replaces EEZL2's code so a payment to it succeeds.
+	alloc := func(fundNative, stopEEZL2 bool) types.GenesisAlloc {
+		a := types.GenesisAlloc{
+			derivertest.UserAddress(): groupEndRich,
+			burner:                    {Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
+			nativeBalance:             {Code: append(storeOf(nil, native, vm.BALANCE, 0), byte(vm.STOP))},
+			nativeCodeHash:            {Code: append(storeOf(nil, native, vm.EXTCODEHASH, 0), byte(vm.STOP))},
+			eezl2Balance:              {Code: append(storeOf(nil, eezl2, vm.BALANCE, 0), byte(vm.STOP))},
+		}
+		for _, key := range keys {
+			a[crypto.PubkeyToAddress(key.PublicKey)] = groupEndRich
+		}
+		if fundNative {
+			a[native] = types.GenesisAccount{Balance: big.NewInt(common.GWei)}
+		}
+		if stopEEZL2 {
+			a[eezl2] = types.GenesisAccount{Code: []byte{byte(vm.STOP)}}
+		}
+		return a
+	}
+	around := func(c *groupEndChain, reader common.Address, groupEnd ...types.Transaction) []types.Transaction {
+		return append(append([]types.Transaction{c.userTx(keys[0], 0, burner, 0, 10_000_000)}, groupEnd...),
+			c.userTx(keys[1], 0, reader, 0, 100_000), c.userTx(keys[2], 0, reader, 0, 100_000))
+	}
 	// payAfterLoad ends a group with a user transaction paying to.
-	payAfterLoad := func(to common.Address, value uint64) func(c *groupEndChain) []types.Transaction {
+	payAfterLoad := func(reader, to common.Address, value uint64) func(c *groupEndChain) []types.Transaction {
 		return func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(derivertest.UserKey, 0, to, value, 100_000)}
+			return around(c, reader, c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(derivertest.UserKey, 0, to, value, 100_000))
 		}
 	}
 	other := common.HexToAddress("0xc0ffee")
+	return []readersCase{
+		{groupEndCase{"native system address balance", alloc(true, false), eezl2, payAfterLoad(nativeBalance, native, 1)}, 2, nativeBalance},
+		{groupEndCase{"native system address balance, created", alloc(false, false), eezl2, payAfterLoad(nativeBalance, native, 1)}, 2, nativeBalance},
+		{groupEndCase{"native system address code hash, created", alloc(false, false), eezl2, payAfterLoad(nativeCodeHash, native, 1)}, 2, nativeCodeHash},
+		{groupEndCase{"EEZL2 balance, other coinbase", alloc(false, true), other, payAfterLoad(eezl2Balance, eezl2, common.GWei)}, 2, eezl2Balance},
+		{groupEndCase{"EEZL2 balance, delivery", alloc(false, true), other, func(c *groupEndChain) []types.Transaction {
+			return around(c, eezl2Balance, c.nativeTx(protocol.ExecuteIncomingCrossChainCallSelector, common.GWei))
+		}}, 1, eezl2Balance},
+	}
+}
 
-	for _, tc := range []struct {
-		name       string
-		fundNative bool
-		// stopEEZL2 replaces EEZL2's code so a payment to it succeeds.
-		stopEEZL2 bool
-		coinbase  common.Address
-		groupEnd  func(c *groupEndChain) []types.Transaction
-		reader    common.Address
-	}{
-		{"native system address balance", true, false, eezl2, payAfterLoad(native, 1), nativeBalance},
-		{"native system address balance, created", false, false, eezl2, payAfterLoad(native, 1), nativeBalance},
-		{"native system address code hash, created", false, false, eezl2, payAfterLoad(native, 1), nativeCodeHash},
-		{"EEZL2 balance, other coinbase", false, true, other, payAfterLoad(eezl2, common.GWei), eezl2Balance},
-		{"EEZL2 balance, delivery", false, true, other, func(c *groupEndChain) []types.Transaction {
-			return []types.Transaction{c.nativeTx(protocol.ExecuteIncomingCrossChainCallSelector, common.GWei)}
-		}, eezl2Balance},
-	} {
+// TestGroupEndBurnRevalidatesReaders checks that a transaction that read what
+// the group end wrote before its burn re-executes. A slow first transaction
+// lets the group end validate, and the readers after it run, before the
+// in-order finalize burns; the readers send from their own accounts and leave
+// the coinbase alone, so nothing else orders them after the burn.
+func TestGroupEndBurnRevalidatesReaders(t *testing.T) {
+	for _, tc := range readersCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
-			alloc := types.GenesisAlloc{
-				derivertest.UserAddress(): rich,
-				burner:                    {Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
-				nativeBalance:             {Code: append(storeOf(nil, native, vm.BALANCE, 0), byte(vm.STOP))},
-				nativeCodeHash:            {Code: append(storeOf(nil, native, vm.EXTCODEHASH, 0), byte(vm.STOP))},
-				eezl2Balance:              {Code: append(storeOf(nil, eezl2, vm.BALANCE, 0), byte(vm.STOP))},
-			}
-			for _, key := range keys {
-				alloc[crypto.PubkeyToAddress(key.PublicKey)] = rich
-			}
-			if tc.fundNative {
-				alloc[native] = types.GenesisAccount{Balance: big.NewInt(common.GWei)}
-			}
-			if tc.stopEEZL2 {
-				alloc[eezl2] = types.GenesisAccount{Code: []byte{byte(vm.STOP)}}
-			}
-			c := newGroupEndChain(t, alloc)
-			groupEnd := tc.groupEnd(c)
-			txs := append(append([]types.Transaction{c.userTx(keys[0], 0, burner, 0, 10_000_000)}, groupEnd...),
-				c.userTx(keys[1], 0, tc.reader, 0, 100_000), c.userTx(keys[2], 0, tc.reader, 0, 100_000))
-			serial, built := c.serial(tc.coinbase, txs)
-			require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[len(groupEnd)].Status, "group end")
+			c := newGroupEndChain(t, tc.alloc)
+			serial, built := c.serial(tc.coinbase, tc.txs(c))
+			require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[tc.ended].Status, "group end")
 			require.Equal(t, common.Hash{}, storageAt(t, serial, tc.reader, 0), "burnt or removed at the group end")
 
 			// Whether the group end validates ahead of finalize depends on
@@ -277,6 +306,41 @@ func TestGroupEndBurnRevalidatesReaders(t *testing.T) {
 						require.Equal(t, common.Hash{}, storageAt(t, c.parallel(t, workers, built.Block), tc.reader, 0))
 					})
 				}
+			}
+		})
+	}
+}
+
+// TestGroupEndBurnBlockAccessList checks that building block access lists,
+// which makes assembly run on a versioned state, leaves the assembled block
+// unchanged, and that parallel import derives the access list assembly built.
+func TestGroupEndBurnBlockAccessList(t *testing.T) {
+	cases := make([]groupEndCase, 0, 10)
+	for _, tc := range afterFeesCases() {
+		cases = append(cases, tc.groupEndCase)
+	}
+	for _, tc := range readersCases(t) {
+		cases = append(cases, tc.groupEndCase)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newGroupEndChain(t, tc.alloc)
+			_, plain := c.serial(tc.coinbase, tc.txs(c))
+			_, built := c.serial(tc.coinbase, tc.txs(c), execmoduletester.WithExperimentalBAL())
+			require.Equal(t, plain.Block.Hash(), built.Block.Hash(), "assembled with block access lists")
+			require.NotEmpty(t, built.BlockAccessList)
+
+			for _, workers := range []int{1, 2, 4, 8} {
+				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+					var derived atomic.Pointer[types.BlockAccessList]
+					c.parallel(t, workers, built.Block, execmoduletester.WithExperimentalBAL(), execmoduletester.WithBALSink(func(number uint64, bal types.BlockAccessList) {
+						if number == 1 {
+							derived.Store(&bal)
+						}
+					}))
+					require.NotNil(t, derived.Load())
+					require.Equal(t, built.BlockAccessList.DebugString(), derived.Load().DebugString())
+				})
 			}
 		})
 	}

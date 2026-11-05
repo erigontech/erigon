@@ -1006,7 +1006,7 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			var gasUsed GasUsed
 			writer := &completionErrorWriter{StateWriter: state.NewNoopWriter(), err: test.writerErr}
 			receipt, err := applyTransaction(chain.AllProtocolChanges, nil, NewGasPool(blockGasLimit, 0), ibs,
-				writer, &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
+				writer, &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg, nil)
 			require.ErrorIs(t, err, test.writerErr)
 			require.Equal(t, 1, calls)
 			require.ErrorIs(t, completionErr, test.writerErr)
