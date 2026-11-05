@@ -17,6 +17,8 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	evm.returnData = nil
+	runPadSink[0] = 0
+	runPadSink[1] = 0
 
 	var (
 		op          OpCode // current opcode
@@ -1023,3 +1025,6 @@ var isColdOp = [256]bool{
 	SWAP15:         true,
 	SWAP16:         true,
 }
+
+// runPadSink is a layout probe, not for merge.
+var runPadSink [8]uint64
