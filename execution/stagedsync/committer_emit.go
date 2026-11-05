@@ -17,6 +17,10 @@
 package stagedsync
 
 import (
+	"context"
+	"github.com/erigontech/erigon/common/dbg"
+	"golang.org/x/sync/errgroup"
+	"maps"
 	"slices"
 	"time"
 
@@ -97,7 +101,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	t0 := time.Now()
 	cc.touchedAccounts[a] = cc.touchHash(address[:])
 	t1 := time.Now()
-	if base != nil {
+	if _, cached := cc.baseAccounts[a]; base != nil && !cached {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
 		} else if cc.baseErr == nil {
@@ -193,3 +197,43 @@ func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 
 // probe: accumulateTouched split.
 var cpHash, cpBase, cpPrefetch time.Duration
+
+// basePrefetch is a probe: the committer reads the BAL accounts' block-start values in parallel when a block starts.
+var basePrefetch = dbg.EnvBool("BASE_PREFETCH", false)
+
+func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *state.VersionMap, txNum uint64) {
+	bal := vm.BALAccounts()
+	if len(bal) == 0 || cc.db == nil || cc.asOfReader == nil {
+		return
+	}
+	const workers = 8
+	parts := make([]map[accounts.Address]*accounts.Account, workers)
+	var g errgroup.Group
+	for w := range workers {
+		g.Go(func() error {
+			tx, err := cc.db.BeginTemporalRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			r := cc.asOfReader.dr.CloneWithTx(tx).StateReaderAt(txNum)
+			m := map[accounts.Address]*accounts.Account{}
+			for i := w; i < len(bal); i += workers {
+				a := accounts.InternAddress(bal[i].Address)
+				acc, err := r.ReadAccountData(a)
+				if err != nil {
+					return err
+				}
+				m[a] = acc
+			}
+			parts[w] = m
+			return nil
+		})
+	}
+	if g.Wait() != nil {
+		return
+	}
+	for _, m := range parts {
+		maps.Copy(cc.baseAccounts, m)
+	}
+}

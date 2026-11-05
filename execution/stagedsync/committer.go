@@ -387,6 +387,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.curVersionMap = r.versionMap
 			if r.versionMap != cc.blockBaseVM {
 				cc.setBlockBase(r.versionMap, cc.asOfReader.dr.StateReaderAt(r.txNum))
+				if basePrefetch {
+					cc.prefetchBaseAccounts(ctx, r.versionMap, r.txNum)
+				}
 			}
 			if perBlock {
 				base = cc.blockBase
