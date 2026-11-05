@@ -2502,9 +2502,9 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 	}
 }
 
-// TestParallelSameBlockDeployCallFuzz builds BAL blocks that deploy contracts and call them, or have them
-// self-destruct, later in the same block, in random orders. The parallel executor must reproduce the roots
-// and receipts the serial block generator computed.
+// TestParallelSameBlockDeployCallFuzz builds BAL blocks that deploy contracts and call them later in the same
+// block, in random orders; a call to a self-destruct contract sends its balance back to the caller (EIP-6780).
+// The parallel executor must reproduce the roots and receipts the serial block generator computed.
 func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
@@ -2523,7 +2523,12 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 			keys := make([]*ecdsa.PrivateKey, 6)
 			alloc := types.GenesisAlloc{}
 			for i := range keys {
-				key, err := crypto.GenerateKey()
+				var kb [32]byte
+				for j := range kb {
+					kb[j] = byte(rng.IntN(256))
+				}
+				kb[0] |= 1
+				key, err := crypto.ToECDSA(kb[:])
 				require.NoError(t, err)
 				keys[i] = key
 				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}

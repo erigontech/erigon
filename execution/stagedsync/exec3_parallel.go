@@ -2706,6 +2706,9 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
+		wakeAt:              map[int][]*poolTask{},
+		wakeValidated:       map[int][]*poolTask{},
+		validatedTasks:      map[int]bool{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3083,9 +3086,6 @@ func (be *blockExecutor) finishTask(tx int) {
 // Validated, which a reader continues on.
 func (be *blockExecutor) signalValidated(tx int) {
 	be.wakeMu.Lock()
-	if be.validatedTasks == nil {
-		be.validatedTasks = map[int]bool{}
-	}
 	be.validatedTasks[tx] = true
 	waiters := be.wakeValidated[tx]
 	delete(be.wakeValidated, tx)
@@ -3103,9 +3103,6 @@ func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
 	defer be.wakeMu.Unlock()
 	if int(be.committedFrontier.Load()) >= target || be.validatedTasks[target] {
 		return false
-	}
-	if be.wakeValidated == nil {
-		be.wakeValidated = map[int][]*poolTask{}
 	}
 	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
 	return true
@@ -3716,9 +3713,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
-		be.wakeAt = map[int][]*poolTask{}
-		be.wakeValidated = map[int][]*poolTask{}
-		be.validatedTasks = map[int]bool{}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
