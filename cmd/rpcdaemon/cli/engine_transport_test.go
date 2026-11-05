@@ -44,7 +44,11 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 			}
 			ln, err := (&net.ListenConfig{}).Listen(t.Context(), network, address)
 			require.NoError(t, err)
-			cfg := &httpcfg.HttpCfg{AuthRpcListener: ln, JWTSecretPath: filepath.Join(t.TempDir(), "jwt.hex")}
+			cfg := &httpcfg.HttpCfg{
+				AuthRpcListener:    ln,
+				AuthRpcVirtualHost: []string{"localhost"},
+				JWTSecretPath:      filepath.Join(t.TempDir(), "jwt.hex"),
+			}
 			server, engine, _, err := createEngineListener(cfg, nil, log.New())
 			require.NoError(t, err)
 			t.Cleanup(func() {
@@ -84,6 +88,7 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 						{"get payload invalid signature", http.MethodGet, getPayloadPath, invalidToken, "signature is invalid"},
 						{"JSON-RPC missing token", http.MethodPost, "/", "", "missing token"},
 						{"JSON-RPC invalid signature", http.MethodPost, "/", invalidToken, "signature is invalid"},
+						{"JSON-RPC authorized", http.MethodPost, "/", token, ""},
 						{"authorized after failures", http.MethodPost, payloadPath, token, ""},
 					} {
 						t.Run(tc.name, func(t *testing.T) {
@@ -110,7 +115,12 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 							require.Equal(t, protocol, resp.ProtoMajor)
 							if tc.detail == "" {
 								require.Equal(t, http.StatusOK, resp.StatusCode)
-								require.Equal(t, body, got)
+								require.Equal(t, contentType, resp.Header.Get("Content-Type"))
+								if tc.path == "/" {
+									require.JSONEq(t, `{"jsonrpc":"2.0","id":1,"result":{"rpc":"1.0"}}`, string(got))
+								} else {
+									require.Equal(t, body, got)
+								}
 								return
 							}
 							require.Equal(t, http.StatusForbidden, resp.StatusCode)
