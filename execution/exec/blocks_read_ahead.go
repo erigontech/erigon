@@ -481,16 +481,13 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 			prefetchBALCommitment(ctx, db, trieKeys())
 			return nil
 		})
-		cold = batchReadsState(codeMode, func() coldState { return stateKeysCold(ctx, db, bal) })
+		cold = stateKeysCold(ctx, db, bal)
 	}
 	group.Go(func() error {
 		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
 		if cold.any() {
-			prefetchBALState(ctx, db, bal, cold)
-			// The batch only reads pages, so the per-key warmup still fills the state cache, but not with the slots the batch
-			// read: a per-key read of them that starts after the batch only competes with exec.
-			if cold.storage {
-				warm = balAccounts(bal)
+			var stripped bool
+			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
 			}
 		}
@@ -509,13 +506,14 @@ func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
 	return accs
 }
 
-// batchReadsState reports which state domains the batch prefetch reads ahead of the per-key warmup: the cold ones, and
-// none when a code warmup is asked for.
-func batchReadsState(codeMode balCodeWarmupMode, stateCold func() coldState) coldState {
-	if codeMode != balCodeWarmupNone {
-		return coldState{}
+// perKeyWarmupBAL is the part of the BAL the per-key warmup reads after the batch. The batch only reads pages, so the
+// per-key warmup still fills the state cache, but not with the slots the batch read: a per-key read of them that
+// starts after the batch only competes with exec.
+func perKeyWarmupBAL(bal types.BlockAccessList, cold coldState, storageRead bool) (warm types.BlockAccessList, stripped bool) {
+	if cold.storage && storageRead {
+		return balAccounts(bal), true
 	}
-	return stateCold()
+	return bal, false
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {

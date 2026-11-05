@@ -2743,6 +2743,9 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 	// A key that no existence filter holds needs no page: drop it before the probed lookups, which touch every file.
 	pending := make([][]byte, 0, len(keys))
 	for _, k := range keys {
+		if ctx.Err() != nil {
+			return 0, nil
+		}
 		if dt.mayContainInFiles(k) {
 			pending = append(pending, k)
 		}

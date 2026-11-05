@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
@@ -335,21 +336,39 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 	return first
 }
 
-// logBatchPrefetch logs a finished batch prefetch, as a warning when it failed; a cancelled one is not logged.
+// logBatchPrefetch logs a finished batch prefetch; a cancelled one is not logged.
 func logBatchPrefetch(ctx context.Context, what string, keys int, started time.Time, err error) {
 	if commonerrors.IsOnlyCanceled(err) || err == nil && ctx.Err() != nil {
 		return
 	}
 	if err != nil {
-		log.Warn("[warmBAL] batch prefetch failed", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
+		logPrefetchFailure("[warmBAL] batch prefetch failed", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
 		return
 	}
 	log.Debug("[warmBAL] batch prefetch", "what", what, "keys", keys, "elapsed", time.Since(started))
 }
 
+var prefetchFailureWarned atomic.Bool
+
+// logPrefetchFailure warns on the first batch-prefetch or residency-sample failure of the process and logs the rest at
+// debug level: a broken ring fails every block the same way.
+func logPrefetchFailure(msg string, ctx ...any) {
+	if prefetchFailureWarned.CompareAndSwap(false, true) {
+		log.Warn(msg, ctx...)
+		return
+	}
+	log.Debug(msg, ctx...)
+}
+
+func logSampleFailure(domain kv.Domain, err error) {
+	if err != nil && !commonerrors.IsOnlyCanceled(err) {
+		logPrefetchFailure("[warmBAL] residency sample failed, the batch prefetch is off", "domain", domain, "err", err)
+	}
+}
+
 // prefetchBALState reads into the page cache, in io_uring batches, the file pages of the BAL's accounts and storage
-// in the domains that cold marks.
-func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, cold coldState) {
+// in the domains that cold marks, and reports whether the storage batch read without error.
+func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, cold coldState) (storageRead bool) {
 	started := time.Now()
 	var accs, slots [][]byte
 	if cold.storage {
@@ -368,9 +387,14 @@ func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList
 	}
 	if cold.storage {
 		keys += len(slots)
-		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots) })
+		g.Go(func() error {
+			err := prefetchDomain(ctx, db, kv.StorageDomain, slots)
+			storageRead = err == nil
+			return err
+		})
 	}
 	logBatchPrefetch(ctx, "state", keys, started, g.Wait())
+	return storageRead
 }
 
 // prefetchBALCommitment reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie,
@@ -496,6 +520,8 @@ func stateSampleCold(ctx context.Context, p latestPrefetcher, accs, slots [][]by
 	wg.Go(func() { accCold, accErr = cold(kv.AccountsDomain, accs, nAcc) })
 	wg.Go(func() { slotCold, slotErr = cold(kv.StorageDomain, slots, nSlot) })
 	wg.Wait()
+	logSampleFailure(kv.AccountsDomain, accErr)
+	logSampleFailure(kv.StorageDomain, slotErr)
 	if accErr != nil || slotErr != nil {
 		return coldState{}
 	}
@@ -525,18 +551,14 @@ func balPrefetchSample(bal types.BlockAccessList) (accs, slots [][]byte) {
 				break
 			}
 			if off < nChanges {
-				slots = append(slots, slotKey(a.Address[:], a.StorageChanges[off].Slot.Value()))
+				slots = append(slots, dbutils.GenerateStoragePlainKey(a.Address, a.StorageChanges[off].Slot.Value()))
 			} else {
-				slots = append(slots, slotKey(a.Address[:], a.StorageReads[off-nChanges]))
+				slots = append(slots, dbutils.GenerateStoragePlainKey(a.Address, a.StorageReads[off-nChanges]))
 			}
 		}
 		first += n
 	}
 	return accs, slots
-}
-
-func slotKey(addr []byte, slot common.Hash) []byte {
-	return append(append(make([]byte, 0, length.Addr+length.Hash), addr...), slot[:]...)
 }
 
 // balPrefetchKeys returns the account keys and the address||slot storage keys the BAL touches. Account keys alias
@@ -603,5 +625,6 @@ const (
 // trie; a failed probe also skips the walk.
 func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]byte) bool {
 	isCold, err := sampleCold(ctx, p, kv.CommitmentDomain, flatPrefixes(sampleEvenly(hashedKeys, residencySampleKeys)))
+	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
 }

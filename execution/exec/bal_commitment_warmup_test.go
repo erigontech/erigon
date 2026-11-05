@@ -401,11 +401,10 @@ func TestSampleColdCountsColdPagesPerSampledKey(t *testing.T) {
 
 // sharedPagesPrefetcher finds cold pages only on its first call: pages that all keys share,
 // which the first probe reads.
-type sharedPagesPrefetcher struct{ calls *int }
+type sharedPagesPrefetcher struct{ calls *atomic.Int32 }
 
 func (p sharedPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
-	*p.calls++
-	if *p.calls == 1 {
+	if p.calls.Add(1) == 1 {
 		return len(keys), nil
 	}
 	return 0, nil
@@ -416,7 +415,7 @@ func TestStateSampleColdIgnoresPagesTheFirstProbeRead(t *testing.T) {
 	for i := range keys {
 		keys[i] = []byte{byte(i >> 8), byte(i)}
 	}
-	calls := 0
+	var calls atomic.Int32
 	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys, 0, 10*len(keys)).any())
 }
 

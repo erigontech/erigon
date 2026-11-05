@@ -1083,14 +1083,17 @@ func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
 	<-waited
 }
 
-func TestBatchReadsStateOnlyWithoutCodeWarmup(t *testing.T) {
-	sampled := 0
-	cold := func() coldState { sampled++; return coldState{accounts: true, storage: true} }
-	require.True(t, batchReadsState(balCodeWarmupNone, cold).any())
-	for _, mode := range []balCodeWarmupMode{balCodeWarmupTxnDestinations, balCodeWarmupAll} {
-		require.False(t, batchReadsState(mode, cold).any(), "code is warmed only by the per-key warmup")
-	}
-	require.Equal(t, 1, sampled, "a code warmup skips the residency sample")
+func TestPerKeyWarmupKeepsSlotsTheBatchDidNotRead(t *testing.T) {
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: []common.Hash{{}}}}
+	warm, stripped := perKeyWarmupBAL(bal, coldState{storage: true}, true)
+	require.True(t, stripped)
+	require.Equal(t, balAccounts(bal), warm, "slots the batch read are dropped")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{storage: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "a failed storage batch leaves the slots to the per-key warmup")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{accounts: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "a warm storage domain keeps the slots")
 }
 
 func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
