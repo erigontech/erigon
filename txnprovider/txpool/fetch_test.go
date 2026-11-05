@@ -853,6 +853,8 @@ type announceFetchTest struct {
 	known         map[[32]byte]bool // hashes the pool holds
 	onFilter      func()
 	sendErr       error
+	failSendAt    int // when > 0, only that send (1-based) fails with sendErr
+	sends         int
 }
 
 func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
@@ -878,6 +880,10 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
+			a.sends++
+			if a.failSendAt > 0 && a.sends != a.failSendAt {
+				return nil, nil
+			}
 			return nil, a.sendErr
 		}).AnyTimes()
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
@@ -1348,4 +1354,42 @@ func TestFailedFirstSendReleasesTheHash(t *testing.T) {
 	a.sendErr = nil
 	a.announce(t, peerB, hash)
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "an unsent request must not hold the hash")
+}
+
+func TestFailedSendDoesNotReleaseANewerReservation(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xea}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	*a.now = a.now.Add(txFetchTimeout)
+	a.announce(t, peerB, hash) // A timed out; B holds the reservation now
+	a.fetch.releaseRequested(fetchPeer{a.sentryClient, peerA}, hash[:])
+	r, ok := a.fetch.requested.Get(hash[:])
+	require.True(t, ok, "A's late failure must not drop B's reservation")
+	require.Equal(t, peerB, r.peer.peerID)
+}
+
+func TestFailedChunkReleasesOnlyUnsentHashes(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hashes := make([][32]byte, 300)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	a.sendErr, a.failSendAt = errors.New("sentry busy"), 2
+	var concat []byte
+	var txTypes []byte
+	var sizes []uint32
+	for _, h := range hashes {
+		txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+	}
+	buf := make([]byte, announcementsLen(txTypes, sizes, concat))
+	ann := buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
+	_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
+		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: ann, PeerId: gointerfaces.ConvertHashToH512([64]byte{0xa}),
+	}, a.sentryClient)
+	_, sentKept := a.fetch.requested.Get(hashes[0][:])
+	_, unsentKept := a.fetch.requested.Get(hashes[299][:])
+	require.True(t, sentKept, "the sent chunk stays reserved")
+	require.False(t, unsentKept, "the failed chunk is released")
 }
