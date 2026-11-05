@@ -3925,6 +3925,17 @@ func TestExecutionPayloadApplyInFlightEndsWithARejectedEnvelope(t *testing.T) {
 	require.True(t, f.ExecutionPayloadReceivedBefore(root, time.Now().Add(time.Second)), "the arrival stays recorded")
 }
 
+func TestExecutionPayloadApplyInFlightCoversAcceptedImportBeforeApply(t *testing.T) {
+	root := common.Hash{1}
+	f := &ForkChoiceStore{}
+
+	finish := f.BeginPendingPayloadEnvelope(root)
+	require.True(t, f.ExecutionPayloadApplyInFlight(root))
+	require.False(t, f.ExecutionPayloadApplyInFlight(common.Hash{2}))
+	finish()
+	require.False(t, f.ExecutionPayloadApplyInFlight(root))
+}
+
 // availabilityRecordingForkGraph keeps the payload availability fork choice marks.
 type availabilityRecordingForkGraph struct {
 	*persistingEnvelopeForkGraph

@@ -1356,9 +1356,12 @@ func (f *ForkChoiceStore) ExecutionPayloadReceivedBefore(blockRoot common.Hash, 
 	return ok && arrival.receivedAt.Before(deadline)
 }
 
-// ExecutionPayloadApplyInFlight reports an envelope for blockRoot that passed its signature check
-// and is still being applied; it stops counting when the apply returns, applied or rejected.
+// ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature check
+// with the apply still running.
 func (f *ForkChoiceStore) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	if f.payloadPreparation.HasPendingEnvelope(blockRoot) {
+		return true
+	}
 	f.envelopeAppliesMu.Lock()
 	defer f.envelopeAppliesMu.Unlock()
 	return f.envelopeApplies[blockRoot] > 0
