@@ -86,7 +86,7 @@ func unfoldedPassThrough(base *HexPatriciaHashed) int {
 		return -1
 	}
 	nib := bits.TrailingZeros16(base.afterMap[row])
-	if base.grid[row][nib].hashedExtLen == 0 {
+	if base.gridCell(row, nib).hashedExtLen == 0 {
 		return -1
 	}
 	return nib
@@ -97,14 +97,14 @@ func (o openedRow) extendSingleSurvivor(base *HexPatriciaHashed, prefix []byte) 
 		return
 	}
 	nib := bits.TrailingZeros16(base.afterMap[o.row])
-	low := &base.grid[o.row][nib]
+	low := base.gridCell(o.row, nib)
 	if low.hashedExtLen == 0 || (low.accountAddrLen == 0 && low.storageAddrLen == 0) {
 		return
 	}
 	up, upDepth := &base.root, int16(0)
 	if o.row > 0 {
 		upDepth = base.depths[o.row-1]
-		up = &base.grid[o.row-1][prefix[upDepth-1]]
+		up = base.gridCell(o.row-1, int(prefix[upDepth-1]))
 	}
 	n := copy(up.hashedExtension[:], prefix[upDepth:])
 	up.hashedExtension[n] = byte(nib)

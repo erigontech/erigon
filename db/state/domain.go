@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -744,6 +745,7 @@ func (w *DomainBufferedWriter) addValue(k, value []byte, step kv.Step) error {
 
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
+	probe    *mmap.Probe // set only while PrefetchLatest plans its page batches
 	files    visibleFiles
 	visible  *domainVisible
 	name     kv.Domain
@@ -776,7 +778,9 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 	}
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
-		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, buf, dt.reusableReader(i))
+		g := dt.reusableReader(i)
+		g.SetProbe(dt.probe)
+		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, buf, g)
 		if err != nil || !ok {
 			return nil, false, 0, err
 		}
@@ -788,11 +792,12 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.TwoLayerLookupByHash(hi, lo)
+		offset, ok := reader.TwoLayerLookupByHashProbe(hi, lo, dt.probe)
 		if !ok {
 			return nil, false, 0, nil
 		}
 		g := dt.reusableReader(i)
+		g.SetProbe(dt.probe)
 		g.Reset(offset)
 
 		if g.MatchCmp(filekey) != 0 { // MPH false-positives protection
@@ -1666,7 +1671,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
 			if f.src.existence != nil {
-				if !f.src.existence.ContainsHash(hi) {
+				if !f.src.existence.ContainsHashProbe(hi, dt.probe) {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
@@ -2201,11 +2206,6 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	} else {
 		dc.History.Accumulate(other.History)
 	}
-}
-
-func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
-	txTo = min(txTo, dt.files.EndTxNum())
-	return dt.prune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
