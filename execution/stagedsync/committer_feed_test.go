@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -176,4 +178,49 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 	require.NotEmpty(t, wantDeleted)
 	require.Len(t, cc.deleted, len(wantDeleted))
 	require.Equal(t, wantDeleted, gotDeleted)
+}
+
+func TestComputeAheadFeedRootMatchesHexPatricia(t *testing.T) {
+	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
+	roots := make(map[bool][]byte)
+	for _, v3 := range []bool{false, true} {
+		statecfg.ExperimentalCommitmentV3 = v3
+		roots[v3] = computeAheadRoot(t, v3)
+	}
+	require.NotEmpty(t, roots[false])
+	require.Equal(t, roots[false], roots[true])
+}
+
+func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
+	ctx := context.Background()
+	db, tx, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	var bal types.BlockAccessList
+	for i := range 8 {
+		addr := common.Address{19: byte(i + 1)}
+		acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(uint64(i + 1)), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
+		ac := types.AccountChanges{
+			Address:        addr,
+			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(uint64(100 + i))}},
+			NonceChanges:   []*types.NonceChange{{Index: 0, Value: 2}},
+		}
+		for j := range i % 3 {
+			slot := accounts.InternKey(common.Hash{0: byte(i), 31: byte(j + 1)})
+			ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{Slot: slot, Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(uint64(j + 7))}}})
+		}
+		bal = append(bal, ac)
+	}
+	req := &blockRequest{blockNum: 2, firstTxNum: 2, lastTxNum: 3, bal: bal}
+	vm := state.NewVersionMap(req.bal)
+	vm.SetBaseTxNum(req.firstTxNum)
+	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
+	require.NoError(t, err)
+	require.Equal(t, wantFeed, cc.feed.Keys > 0, "v3 compute-ahead folds through the feed")
+	return rh
 }

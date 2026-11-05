@@ -706,7 +706,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	cc.clearTouched()
 	cc.balBlock = true
 	cc.accumulateTouched(bal.ToWriteSet(req.bal, maxTxIndex), nil)
-	err := cc.emitTouched(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
+	err := cc.emit(cc.foldView(vm, t.lastTxNum, reader.dr.StateReaderAt(reader.txNum)), balUpdates)
 	cc.clearTouched()
 	if err != nil {
 		return nil, nil, fmt.Errorf("base read: %w", err)
@@ -720,8 +720,8 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
+	cc.setInput(updates)
 	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(reader)
 	if !cc.ownsChangeset(t.blockNum) {
@@ -740,7 +740,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 	// Recompute block r the raw-view way (emitTouched over the version map) to
 	// cross-check against the BAL-driven root.
 	cc.asOfReader.txNum = r.lastTxNum + 1
-	err := cc.emitTouched(cc.foldView(cc.curVersionMap, r.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
+	err := cc.emit(cc.foldView(cc.curVersionMap, r.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	cc.clearTouched()
 	incUpdates := cc.handOffUpdates()
 	if err != nil {
@@ -896,21 +896,13 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.branchPrefetch.pause()
 	defer cc.branchPrefetch.resume()
 	sdCtx := cc.doms.GetCommitmentContext()
-	feed := sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
 	// from the view with no EIP knowledge. In a cross-block batch the touched union
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
-	view := cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum))
-	var emitErr error
-	if feed {
-		emitErr = cc.emitTouchedFeed(view)
-	} else {
-		cc.deleted = nil
-		emitErr = cc.emitTouched(view, cc.updates)
-	}
+	emitErr := cc.emit(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	if !m.midBlock {
 		cc.clearTouched()
 	}
@@ -925,11 +917,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if sdCtx.AcceptsFeed() {
 		defer raiseGCPercent()()
 	}
-	if feed {
-		sdCtx.SetFeed(&cc.feed.Feed)
-	} else {
-		sdCtx.SetUpdates(cc.handOffUpdates())
-	}
+	cc.setInput(cc.handOffUpdates())
 
 	sdCtx.SetStateReader(cc.asOfReader)
 
