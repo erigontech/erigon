@@ -19,15 +19,15 @@ package stagedsync
 import (
 	"context"
 	"errors"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"

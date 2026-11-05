@@ -18,14 +18,15 @@ package stagedsync
 
 import (
 	"context"
-	"github.com/erigontech/erigon/execution/types"
-	"golang.org/x/sync/errgroup"
 	"maps"
 	"slices"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -202,7 +203,7 @@ func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *st
 		return
 	}
 	got, err := readBaseAccounts(ctx, bal, baseAccountReaders, func() (state.StateReader, func(), error) {
-		tx, err := cc.db.BeginTemporalRo(ctx)
+		tx, err := cc.db.BeginTemporalRo(ctx) //nolint:gocritic // readBaseAccounts rolls it back through the returned func
 		if err != nil {
 			return nil, nil, err
 		}
