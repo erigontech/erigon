@@ -489,8 +489,8 @@ type TxnSlot struct {
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
 	AuthAndNonces []AuthAndNonce
-	// Parsed transactions are immutable. Admission reuses their stateless checks;
-	// directly constructed or replaced transactions still require validation.
+	// Admission reuses stateless validation only while Txn refers to this parsed
+	// object. The object must not be modified after validation.
 	validatedFrame *types.FrameTransaction
 	// A pooled frame without a validation result is restored and parked. It has
 	// no payer reservation until its first successful validation.

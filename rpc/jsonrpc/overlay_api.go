@@ -98,7 +98,8 @@ func checkTransactionGasCap(txn types.Transaction, gasCap uint64) error {
 	if err != nil {
 		return err
 	}
-	// Match block inclusion: execution and state have separate limits.
+	// For frame transactions, apply the cap independently to execution and state
+	// gas, matching block inclusion.
 	if gasLimit := max(limits.Execution, limits.State); gasLimit > gasCap {
 		return clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, gasCap))
 	}

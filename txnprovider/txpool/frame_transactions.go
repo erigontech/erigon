@@ -304,7 +304,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Another request may have established invalidity while this one waited.
+	// Another request may have cached a rejection while this one waited.
 	// Publish rejections before releasing the gate so its waiters can reuse them.
 	hash := string(txn.IDHash[:])
 	p.lock.Lock()
