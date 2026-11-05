@@ -80,6 +80,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
+	var accK, accV, stK, stV [][]byte
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
@@ -262,7 +263,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+				if applyBatch {
+					accK, accV = append(accK, bytes.Clone(address[:])), append(accV, enc)
+				} else if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
 					return err
 				}
 			}
@@ -304,7 +307,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+					if applyBatch {
+						stK, stV = append(stK, bytes.Clone(composite)), append(stV, v)
+					} else if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
 						return err
 					}
 				}
@@ -312,6 +317,16 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		}
 	}
 
+	if len(accK) > 0 {
+		if err := domains.DomainPutBatch(kv.AccountsDomain, roTx, accK, accV, txNum); err != nil {
+			return err
+		}
+	}
+	if len(stK) > 0 {
+		if err := domains.DomainPutBatch(kv.StorageDomain, roTx, stK, stV, txNum); err != nil {
+			return err
+		}
+	}
 	var acc accounts.Account
 	for addr, increase := range balanceIncreases {
 		addrValue := addr.Value()
@@ -1225,3 +1240,6 @@ func returnReadList(v ReadLists) {
 	}
 	readListPool.Put(v)
 }
+
+// applyBatch is a probe: ApplyWrites puts each domain's writes of a tx under one in-mem lock.
+var applyBatch = dbg.EnvBool("APPLY_BATCH", false)

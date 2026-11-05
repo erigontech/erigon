@@ -1848,6 +1848,39 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	return sd.domainPut(domain, roTx, k, v, txNum, prevVal)
 }
 
+// DomainPutBatch puts several keys of one domain, taking the in-mem latest-state lock once (probe).
+func (sd *SharedDomains) DomainPutBatch(domain kv.Domain, roTx kv.TemporalTx, keys, vals [][]byte, txNum uint64) error {
+	b, ok := sd.mem.(interface {
+		DomainPutBatch(kv.Domain, []string, [][]byte, uint64, [][]byte) error
+	})
+	if !ok {
+		for i := range keys {
+			if err := sd.domainPut(domain, roTx, keys[i], vals[i], txNum, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	ks := make([]string, 0, len(keys))
+	vs := make([][]byte, 0, len(keys))
+	ps := make([][]byte, 0, len(keys))
+	for i, k := range keys {
+		kstr := string(k)
+		prev, err := sd.resolvePrevVal(domain, roTx, k, kstr, vals[i], nil)
+		if err != nil {
+			return err
+		}
+		if domain != kv.RCacheDomain && bytes.Equal(prev, vals[i]) {
+			continue
+		}
+		ks, vs, ps = append(ks, kstr), append(vs, vals[i]), append(ps, prev)
+	}
+	if len(ks) == 0 {
+		return nil
+	}
+	return b.DomainPutBatch(domain, ks, vs, txNum, ps)
+}
+
 func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)

@@ -201,7 +201,28 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
+	return sd.putLatestHeld(domain, key, valWithStep)
+}
 
+// DomainPutBatch puts several keys of one domain under one latest-state lock (probe).
+func (sd *TemporalMemBatch) DomainPutBatch(domain kv.Domain, keys []string, vals [][]byte, txNum uint64, prevs [][]byte) error {
+	same := make([]bool, len(keys))
+	sizes := make([][2]int, len(keys))
+	sd.latestStateLocks[domain].Lock()
+	for i, k := range keys {
+		same[i], sizes[i][0], sizes[i][1] = sd.putLatestHeld(domain, k, dataWithTxNum{data: bytes.Clone(vals[i]), txNum: txNum})
+	}
+	sd.latestStateLocks[domain].Unlock()
+	for i, k := range keys {
+		sd.updatePutMetrics(domain, sizes[i][0], sizes[i][1])
+		if err := sd.putHistory(domain, common.ToBytesZeroCopy(k), vals[i], txNum, prevs[i], same[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sd *TemporalMemBatch) putLatestHeld(domain kv.Domain, key string, valWithStep dataWithTxNum) (sameTxNumUpdate bool, putKeySize, putValueSize int) {
 	val, txNum := valWithStep.data, valWithStep.txNum
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
