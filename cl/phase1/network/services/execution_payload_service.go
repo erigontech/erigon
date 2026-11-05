@@ -530,8 +530,9 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	err = s.processMessage(ctx, job.envelope, job.receivedAt, &admissionToken)
 	if err != nil {
 		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
-		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
-			!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed) ||
+			(!errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
+				!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope)) {
 			job.processing.Store(false)
 			return pendingJobKeep
 		}

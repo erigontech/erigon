@@ -62,9 +62,10 @@ var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload en
 var ErrExecutionPayloadEnvelopePersistenceFailed = errors.New("execution payload envelope persistence failed")
 
 var (
-	ErrInvalidExecutionPayloadEnvelope          = errors.New("invalid execution payload envelope")
-	ErrExecutionPayloadEnvelopeStateUnavailable = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
-	errPendingEnvelopeAgeBounded                = errors.New("pending execution payload envelope is age bounded")
+	ErrInvalidExecutionPayloadEnvelope           = errors.New("invalid execution payload envelope")
+	ErrExecutionPayloadEnvelopeStateUnavailable  = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
+	ErrExecutionPayloadEnvelopeStateReplayFailed = fmt.Errorf("%w: execution payload envelope state replay failed", ErrIgnore)
+	errPendingEnvelopeAgeBounded                 = errors.New("pending execution payload envelope is age bounded")
 )
 
 var blsVerify = bls.Verify
@@ -934,7 +935,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 			defer func() { <-validation }()
 			blockState, err := f.forkGraph.ReplayState(root)
 			if err != nil {
-				return fmt.Errorf("%w: beacon block state %v could not be replayed: %w", ErrIgnore, root, err)
+				return fmt.Errorf("%w: beacon block state %v: %w", ErrExecutionPayloadEnvelopeStateReplayFailed, root, err)
 			}
 			if blockState == nil {
 				return fmt.Errorf("%w: beacon block state %v is unavailable", ErrExecutionPayloadEnvelopeStateUnavailable, root)

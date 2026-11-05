@@ -1270,7 +1270,7 @@ func TestExecutionPayloadServiceParksEnvelopeOnlyWhenGossipStateIsUnavailable(t 
 		parked     bool
 	}{
 		{name: "state unavailable", validation: forkchoice.ErrExecutionPayloadEnvelopeStateUnavailable, parked: true},
-		{name: "replay failed", validation: fmt.Errorf("%w: state replay failed", forkchoice.ErrIgnore)},
+		{name: "replay failed", validation: fmt.Errorf("%w: state replay failed", forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, fcu := setupExecutionPayloadService(t)
@@ -1471,7 +1471,7 @@ func TestExecutionPayloadServiceAcceptsValidatedEnvelopeWithIndicesPending(t *te
 	require.Equal(t, int32(1), validations.Load())
 }
 
-func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *testing.T) {
+func TestExecutionPayloadServiceRejectsEnvelopeThatFailsValidationWithoutImporting(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
@@ -1483,7 +1483,10 @@ func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *
 
 	blockRoot := common.HexToHash("0x1234")
 	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
-	fcu.OnExecutionPayloadErr = forkchoice.ErrExecutionPayloadEnvelopeIndicesPending
+	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+		t.Error("import ran")
+		return nil
+	}
 	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
 		return errors.New("forged signature")
 	}
@@ -1492,6 +1495,8 @@ func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *
 	err := service.ProcessMessage(t.Context(), nil, envelope)
 
 	require.ErrorContains(t, err, "forged signature")
+	require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	require.NotErrorIs(t, err, ErrIgnore)
 	impl := service.(*executionPayloadService)
 	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 	select {
@@ -1502,37 +1507,38 @@ func TestExecutionPayloadServiceRejectsUnvalidatedEnvelopeWithIndicesPending(t *
 	requireEnvelopeImportReleased(t, fcu, blockRoot, 1)
 }
 
-func TestExecutionPayloadServiceIgnoresIndicesPendingWhenRevalidationCrossesFinality(t *testing.T) {
+func TestExecutionPayloadServiceDropsQueuedEnvelopeWhenFinalityPassesItsSlot(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	emitter := beaconevents.NewEventEmitter()
 	service := NewExecutionPayloadService(t.Context(), fcu, cfg, emitter, nil)
-	service.(*executionPayloadService).pending.stopAndWait()
+	impl := service.(*executionPayloadService)
+	impl.pending.stopAndWait()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
-	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3}
-	fcu.OnExecutionPayloadErr = forkchoice.ErrExecutionPayloadEnvelopeIndicesPending
-	validationStarted := make(chan struct{})
-	releaseValidation := make(chan struct{})
-	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
-		close(validationStarted)
-		<-releaseValidation
-		finalizedSlot := fcu.FinalizedCheckpointVal.Epoch * cfg.SlotsPerEpoch
-		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", forkchoice.ErrIgnore, envelope.Message.Payload.SlotNumber, finalizedSlot)
-	}
-	done := make(chan error, 1)
-	go func() { done <- service.ProcessMessage(t.Context(), nil, envelope) }()
-	receiveWithTimeout(t, validationStarted, "gossip validation did not start")
-	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
-	close(releaseValidation)
 
-	err := receiveWithTimeout(t, done, "gossip validation did not finish")
-	require.ErrorIs(t, err, ErrIgnore)
-	impl := service.(*executionPayloadService)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		t.Error("validation ran")
+		return nil
+	}
+	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+		t.Error("import ran")
+		return nil
+	}
+
+	impl.pending.processPending(t.Context())
+
+	require.Zero(t, impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
 	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 	select {
 	case event := <-events:
