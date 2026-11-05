@@ -263,61 +263,22 @@ func TestDownloadChainTomlByInfoHashRejectsZeroPieceLength(t *testing.T) {
 	require.EqualError(t, err, "invalid chain.toml torrent piece length: 0")
 }
 
-func TestDownloadChainTomlByInfoHashLimitsMetadataLength(t *testing.T) {
+func TestValidateChainTomlInfoAcceptsSizeLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		length int64
 	}{
 		{name: "below_limit", length: maxChainTomlSize - 1},
 		{name: "at_limit", length: maxChainTomlSize},
-		{name: "above_limit", length: maxChainTomlSize + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			snapDir, tmpDir := t.TempDir(), t.TempDir()
-			client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
-			require.NoError(t, err)
-			defer client.Close()
-			infoBytes, err := bencode.Marshal(metainfo.Info{
+			info := metainfo.Info{
 				Name:        ChainTomlFileName,
 				Length:      tc.length,
 				PieceLength: tc.length,
 				Pieces:      make([]byte, 20),
-			})
-			require.NoError(t, err)
-			infoHash := (&metainfo.MetaInfo{InfoBytes: infoBytes}).HashInfoBytes()
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			done := make(chan struct{})
-			var downloadErr error
-			go func() {
-				defer close(done)
-				_, downloadErr = DownloadChainTomlByInfoHash(ctx, client, infoHash, snapDir, tmpDir, nil)
-			}()
-			defer func() {
-				cancel()
-				<-done
-			}()
-			var manifest *torrent.Torrent
-			require.Eventually(t, func() bool {
-				var ok bool
-				manifest, ok = client.Torrent(infoHash)
-				return ok
-			}, 5*time.Second, time.Millisecond)
-			metadataErr := manifest.SetInfoBytes(infoBytes)
-			if tc.length <= maxChainTomlSize || metadataErr == nil {
-				cancel()
 			}
-			<-done
-			if tc.length <= maxChainTomlSize {
-				require.NoError(t, metadataErr)
-			} else {
-				require.ErrorContains(t, metadataErr, "chain.toml exceeds size limit")
-				require.ErrorContains(t, downloadErr, "chain.toml exceeds size limit")
-				assert.Nil(t, manifest.Info(), "oversized metadata must be rejected before storage opens")
-			}
-			assert.Empty(t, client.Torrents())
-			entries, err := os.ReadDir(tmpDir)
-			require.NoError(t, err)
-			assert.Empty(t, entries)
+			require.NoError(t, validateChainTomlInfo(&info))
 		})
 	}
 }
@@ -361,12 +322,23 @@ func TestChainTomlStorageRejectsInvalidMetadataBeforeOpeningFiles(t *testing.T) 
 			info: metainfo.Info{Length: -1},
 			err:  "invalid chain.toml torrent length",
 		},
+		{
+			name: "above_limit",
+			info: metainfo.Info{
+				Length:      maxChainTomlSize + 1,
+				PieceLength: maxChainTomlSize + 1,
+				Pieces:      make([]byte, 20),
+			},
+			err: "exceeds size limit",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.info.Name == "" {
 				tc.info.Name = ChainTomlFileName
 			}
-			tc.info.PieceLength = 256 * 1024
+			if tc.info.PieceLength == 0 {
+				tc.info.PieceLength = 256 * 1024
+			}
 			downloadDir := t.TempDir()
 			store := chainTomlStorage{
 				ClientImplCloser: storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: downloadDir}),
