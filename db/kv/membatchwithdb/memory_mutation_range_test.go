@@ -189,7 +189,6 @@ func TestReadViewIterationIsSafeAgainstConcurrentDelete(t *testing.T) {
 	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
-	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
 
 	view := overlay.NewReadView(rwTx)
 
@@ -199,6 +198,10 @@ func TestReadViewIterationIsSafeAgainstConcurrentDelete(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		if err := overlay.Delete(kv.HeaderNumber, []byte("CBAA")); err != nil {
+			writeErr = err
+			return
+		}
 		for i := range rounds {
 			if err := overlay.Delete(kv.HeaderNumber, []byte(fmt.Sprintf("E%03d", i))); err != nil {
 				writeErr = err
