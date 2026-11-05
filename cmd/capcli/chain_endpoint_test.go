@@ -17,20 +17,29 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
@@ -145,4 +154,83 @@ func TestChainEndpointRunCommitsAHeadWithNoCommitments(t *testing.T) {
 	slot := headSlotInDB(t, datadirPath, root)
 	require.NotNil(t, slot, "a head with no blobs must still be committed")
 	require.Equal(t, beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch, *slot)
+}
+
+// A block already in the local database ends the remote walk only if its blobs are missing. The
+// walk reads the local block from storage, which keeps no transactions, so the block's own hash is
+// not the root its sidecars are stored under. Using that hash, every local blob-bearing block with
+// transactions looked incomplete and was downloaded again, with its blobs, from the endpoint.
+func TestChainEndpointRunSkipsALocalBlockWhoseBlobsAreStored(t *testing.T) {
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Mainnet)
+	require.NoError(t, err)
+	slot := beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+
+	newBlock := func(slot uint64, parent common.Hash, commitments int) *cltypes.SignedBeaconBlock {
+		block := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
+		block.Block.Slot = slot
+		block.Block.ParentRoot = parent
+		for range commitments {
+			block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+		}
+		return block
+	}
+	rootOf := func(block *cltypes.SignedBeaconBlock) common.Hash {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		return root
+	}
+	local := newBlock(slot, common.HexToHash("0xbeef"), 1)
+	local.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x02, 0x01}, {0x02, 0x02}})
+	localRoot := rootOf(local)
+	parent := newBlock(slot+1, localRoot, 0)
+	head := newBlock(slot+2, rootOf(parent), 0)
+
+	datadirPath := t.TempDir()
+	dirs := datadir.New(datadirPath)
+	indexDB, err := caplin1.OpenCaplinIndexDb(t.Context(), dirs.CaplinIndexing)
+	require.NoError(t, err)
+	require.NoError(t, indexDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, local, true)
+	}))
+	indexDB.Close()
+	blobDB := mdbx.New(dbcfg.CaplinDB, log.New()).Path(filepath.Join(dirs.CaplinBlobs, "chaindata")).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	sidecar := cltypes.NewBlobSidecar(0, &cltypes.Blob{}, common.Bytes48{}, common.Bytes48{}, local.SignedBeaconBlockHeader(), solid.NewHashVector(cltypes.CommitmentBranchSize))
+	err = blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs)).
+		WriteBlobSidecars(t.Context(), localRoot, []*cltypes.BlobSidecar{sidecar})
+	blobDB.Close()
+	require.NoError(t, err)
+
+	served := map[string][]byte{"head": encodeBlock(t, head), fmt.Sprintf("0x%x", rootOf(parent)): encodeBlock(t, parent)}
+	var localRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		if id == fmt.Sprintf("0x%x", localRoot) {
+			localRequests.Add(1)
+		}
+		if encoded, ok := served[id]; ok && strings.Contains(r.URL.Path, "/eth/v2/beacon/blocks/") {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(encoded)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	endpoint := &ChainEndpoint{
+		Endpoint:     srv.URL,
+		Blobs:        true,
+		chainCfg:     chainCfg{Chain: networkname.Mainnet},
+		outputFolder: outputFolder{Datadir: datadirPath},
+	}
+	// The walk ends at the local block's parent, which nobody serves.
+	require.Error(t, endpoint.Run(t.Context()))
+	require.Zero(t, localRequests.Load(), "the local block, whose blobs are stored, was requested from the endpoint")
+}
+
+func encodeBlock(t *testing.T, block *cltypes.SignedBeaconBlock) []byte {
+	t.Helper()
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	return encoded
 }

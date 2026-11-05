@@ -390,16 +390,13 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 					break
 				}
 
-				blindedBlockRoot, err := block.Block.HashSSZ()
-				if err != nil {
-					return false, err
-				}
-				// check if we have all the blobs
+				// check if we have all the blobs, under the root being walked: the stored body has no
+				// transactions, so its own hash is not that root
 				kzgCommitments := 0
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, blindedBlockRoot)
+				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, currentRoot)
 				if err != nil {
 					return false, err
 				}
