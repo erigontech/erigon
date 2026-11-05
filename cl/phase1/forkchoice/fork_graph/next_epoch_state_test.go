@@ -192,11 +192,12 @@ func TestAddChainSegmentRejectsInvalidBlockWithPrecomputedEpochState(t *testing.
 
 	requireOutcome := outcomeRecorder(t)
 	postState, result, err := graph.AddChainSegment(block, true)
-	require.Error(t, err)
+	require.ErrorIs(t, err, eth2.ErrInvalidBlockSignature)
 	require.Equal(t, InvalidBlock, result)
 	require.Nil(t, postState)
+	// Changing the state root breaks the proposer signature, which does not mark the root invalid.
 	_, isBad := graph.badBlocks.Load(blockRoot)
-	require.True(t, isBad)
+	require.False(t, isBad)
 	require.Nil(t, graph.nextEpochState)
 	require.Equal(t, 1, strings.Count(logs.String(), "Invalid beacon block"))
 	require.Equal(t, 1, strings.Count(logs.String(), "lvl=warn"))
