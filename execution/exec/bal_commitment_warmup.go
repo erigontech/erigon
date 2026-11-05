@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -346,7 +347,7 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 
 // logBatchPrefetch logs a finished batch prefetch, as a warning when it failed; a cancelled one is not logged.
 func logBatchPrefetch(ctx context.Context, what string, keys int, started time.Time, err error) {
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+	if commonerrors.IsOnlyCanceled(err) || err == nil && ctx.Err() != nil {
 		return
 	}
 	if err != nil {
