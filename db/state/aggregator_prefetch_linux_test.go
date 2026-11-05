@@ -68,7 +68,9 @@ func TestPrefetchLatestOverColdFilesKeepsLatestValues(t *testing.T) {
 	defer dt.Close()
 	at := &AggregatorRoTx{}
 	at.d[kv.AccountsDomain] = dt
-	at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
+	pages, err := at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
+	require.NoError(t, err)
+	require.Positive(t, pages)
 	require.Greater(t, residentPages(t, maps), before, "the batch read cold file pages")
 	require.Greater(t, residentPages(t, kvMaps), kvBefore, "the batch read cold .kv pages")
 	require.Nil(t, dt.probe)

@@ -20,11 +20,11 @@ import (
 	"context"
 	"errors"
 	"os"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/tidwall/btree"
 	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -42,24 +42,19 @@ type mapping struct {
 
 var (
 	mappingsMu sync.Mutex
-	mappings   atomic.Pointer[[]mapping] // sorted by start, copy-on-write
+	mappingsW  btree.Map[uintptr, mapping]                 // under mappingsMu
+	mappings   atomic.Pointer[btree.Map[uintptr, mapping]] // read-only copy of mappingsW, keyed by start
 )
 
 func registerMapping(m []byte, f *os.File) {
 	if !BatchPrefetch || len(m) == 0 {
 		return
 	}
+	start := uintptr(unsafe.Pointer(&m[0]))
 	mappingsMu.Lock()
 	defer mappingsMu.Unlock()
-	var cur []mapping
-	if p := mappings.Load(); p != nil {
-		cur = *p
-	}
-	start := uintptr(unsafe.Pointer(&m[0]))
-	next := slices.Clone(cur)
-	i, _ := slices.BinarySearchFunc(next, start, func(e mapping, s uintptr) int { return int(int64(e.start) - int64(s)) })
-	next = slices.Insert(next, i, mapping{start: start, end: start + uintptr(len(m)), fd: int(f.Fd())})
-	mappings.Store(&next)
+	mappingsW.Set(start, mapping{start: start, end: start + uintptr(len(m)), fd: int(f.Fd())})
+	mappings.Store(mappingsW.Copy())
 }
 
 func unregisterMapping(m []byte) {
@@ -68,33 +63,19 @@ func unregisterMapping(m []byte) {
 	}
 	mappingsMu.Lock()
 	defer mappingsMu.Unlock()
-	p := mappings.Load()
-	if p == nil {
-		return
+	if _, ok := mappingsW.Delete(uintptr(unsafe.Pointer(&m[0]))); ok {
+		mappings.Store(mappingsW.Copy())
 	}
-	start := uintptr(unsafe.Pointer(&m[0]))
-	next := slices.DeleteFunc(slices.Clone(*p), func(e mapping) bool { return e.start == start })
-	mappings.Store(&next)
 }
 
-func mappingOf(page uintptr) (mapping, bool) {
-	ms := mappings.Load()
-	if ms == nil {
-		return mapping{}, false
+func mappingOf(page uintptr) (m mapping, ok bool) {
+	if ms := mappings.Load(); ms != nil {
+		ms.Descend(page, func(_ uintptr, e mapping) bool {
+			m, ok = e, page < e.end
+			return false
+		})
 	}
-	i, found := slices.BinarySearchFunc(*ms, page, func(e mapping, a uintptr) int {
-		if a < e.start {
-			return 1
-		}
-		if a >= e.end {
-			return -1
-		}
-		return 0
-	})
-	if !found {
-		return mapping{}, false
-	}
-	return (*ms)[i], true
+	return m, ok
 }
 
 // ColdPage is the panic value a probed read raises at its first page that is not resident.
@@ -261,7 +242,7 @@ func ReadPages(ctx context.Context, pages []uintptr) error {
 				}
 				if err := br.r.BlockingBatchRead(fd, chunk, lens, br.bufs[:len(chunk)]); err != nil {
 					errOnce.Do(func() { firstErr = err })
-					if !errors.Is(err, iouring.ErrRingReset) {
+					if !errors.Is(err, iouring.ErrReadFailed) && !errors.Is(err, iouring.ErrRingReset) {
 						br = replaceBrokenBatchRing(br, err)
 					}
 				}
