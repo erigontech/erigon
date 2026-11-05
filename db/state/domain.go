@@ -1665,8 +1665,8 @@ func (dt *DomainRoTx) mayContainInFiles(k []byte) bool {
 		return true
 	}
 	hi, _ := dt.ht.iit.hashKey(k)
-	for i := len(dt.files) - 1; i >= 0; i-- {
-		if f := dt.files[i]; f.src.existence == nil || !f.src.existence.InMem() || f.src.existence.ContainsHash(hi) {
+	for _, f := range slices.Backward(dt.files) {
+		if f.src.existence == nil || !f.src.existence.InMem() || f.src.existence.ContainsHash(hi) {
 			return true
 		}
 	}
