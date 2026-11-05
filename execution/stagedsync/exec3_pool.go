@@ -176,14 +176,6 @@ func (pt *poolTask) waitThen(t, next int) bool {
 const poolNamedReruns = 3
 
 func (pt *poolTask) rerunAfter(named int) bool {
-	if !dbg.RerunWaitsForWriter {
-		t := pt.tv.index - 1
-		if pt.reruns < poolNamedReruns {
-			t = named
-		}
-		pt.reruns++
-		return pt.waitThen(t, psReexec)
-	}
 	pt.reruns++
 	if pt.reruns <= poolNamedReruns {
 		pt.next = psReexec
