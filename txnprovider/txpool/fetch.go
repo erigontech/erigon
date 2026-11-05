@@ -247,17 +247,27 @@ func (p *retryPlan) add(hash []byte, size int) bool {
 	return true
 }
 
-// announcedSize is the size the peer announced for the hash, 0 if unknown.
+// announcedSize is the size the peer announced for the hash. An unknown size counts as a full
+// response, since it may be a blob.
 func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
 	if f.announcements == nil {
-		return 0
+		return p2pTxPacketLimit
 	}
 	k := announceKey(hash, peerHash(gointerfaces.ConvertHashToH512(peer.peerID)))
 	info, ok := f.announcements.Get(k[:])
 	if !ok {
-		return 0
+		return p2pTxPacketLimit
 	}
 	return int(info.size)
+}
+
+// forgetRequested drops the request state of delivered txns, so their retries spend no budget.
+func (f *Fetch) forgetRequested(txns TxnSlots) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	for _, txn := range txns.Txns {
+		f.requested.Delete(txn.IDHash[:])
+	}
 }
 
 // requestFromAlternates asks the next announcer for each hash whose request timed out.
@@ -287,7 +297,9 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		r.at, r.peer = now, next
 		f.pending = append(f.pending, pendingFetch{p.hash, now})
 	}
-	f.pending = append(deferred, f.pending...)
+	if len(deferred) > 0 {
+		f.pending = append(deferred, f.pending...)
+	}
 	f.requestedLock.Unlock()
 
 	for peer, plan := range plans {
@@ -855,6 +867,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if len(txns.Txns) == 0 {
 			return nil
 		}
+		f.forgetRequested(txns)
 
 		f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
 	default:
