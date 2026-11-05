@@ -1402,7 +1402,6 @@ type Updates struct {
 	directBytes    int
 	directMemLimit int
 
-	collected     []collectedUpdate
 	hashedTouches [][]byte
 
 	batchSlab []KeyUpdate
@@ -1416,11 +1415,6 @@ type Updates struct {
 }
 
 const arenaRingSize = 2
-
-type collectedUpdate struct {
-	plainKey string
-	update   Update
-}
 
 func (t *Updates) arenaAlloc(b []byte) []byte {
 	arena := t.arenas[t.curArena]
@@ -1572,7 +1566,7 @@ func (t *Updates) Size() (updates uint64) {
 	case ModeUpdate:
 		return uint64(t.tree.Len())
 	case ModeCollect:
-		return uint64(len(t.treeIdx) + len(t.collected))
+		return uint64(len(t.treeIdx))
 	default:
 		return 0
 	}
@@ -1618,21 +1612,20 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
-func (t *Updates) Grow(n int) {
-	if t.mode == ModeCollect {
-		t.collected = slices.Grow(t.collected, n)
-	}
-}
-
-func (t *Updates) TouchPlainKeyUnique(key string, update *Update) {
-	if t.mode != ModeCollect {
-		t.TouchPlainKeyDirect(key, update)
-		return
-	}
-	t.collected = append(t.collected, collectedUpdate{plainKey: key, update: *update})
-}
+func (t *Updates) HashKey(key []byte) []byte { return t.hashKey(key) }
 
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	t.TouchPlainKeyDirectHashed(key, nil, update)
+}
+
+func (t *Updates) hashedOr(key string, hashed []byte) []byte {
+	if hashed != nil {
+		return hashed
+	}
+	return t.hashKey(common.ToBytesZeroCopy(key))
+}
+
+func (t *Updates) TouchPlainKeyDirectHashed(key string, hashed []byte, update *Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
 			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
@@ -1644,7 +1637,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashedOr(key, hashed),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1653,12 +1646,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
+			t.collectDirect(t.hashedOr(key, hashed), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashedOr(key, hashed)
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
@@ -1708,12 +1701,6 @@ func mergeUpdateInto(existing, update *Update) {
 }
 
 func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
-	for i := range t.collected {
-		if err := fn(t.collected[i].plainKey, &t.collected[i].update); err != nil {
-			return err
-		}
-	}
-	t.collected = t.collected[:0]
 	t.hashedTouches = t.hashedTouches[:0]
 	for key, item := range t.treeIdx {
 		if err := fn(key, item.update); err != nil {
@@ -1756,10 +1743,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 }
 
 func (t *Updates) CollectedHashedKeys() [][]byte {
-	keys := make([][]byte, 0, len(t.collected)+len(t.treeIdx)+len(t.hashedTouches))
-	for i := range t.collected {
-		keys = append(keys, bytes.Clone(t.hashKey([]byte(t.collected[i].plainKey))))
-	}
+	keys := make([][]byte, 0, len(t.treeIdx)+len(t.hashedTouches))
 	for key := range t.treeIdx {
 		keys = append(keys, bytes.Clone(t.hashKey([]byte(key))))
 	}
@@ -1823,7 +1807,6 @@ func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
 	}
-	t.collected = nil
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
@@ -2090,7 +2073,6 @@ func (t *Updates) Reset() {
 		}
 	case ModeCollect:
 		clear(t.treeIdx)
-		t.collected = t.collected[:0]
 		t.hashedTouches = t.hashedTouches[:0]
 	default:
 	}

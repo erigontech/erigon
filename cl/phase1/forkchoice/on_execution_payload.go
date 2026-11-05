@@ -904,6 +904,9 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		defer f.mu.RUnlock()
 		block, ok := f.forkGraph.GetBlock(root)
 		if !ok || block == nil || block.Block == nil {
+			if f.forkGraph.IsBlockInvalid(root) {
+				return nil, false, fmt.Errorf("beacon block %v failed validation", root)
+			}
 			return nil, false, fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
 		}
 		finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)

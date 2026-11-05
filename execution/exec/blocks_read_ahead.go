@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -464,6 +465,12 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
 	var group errgroup.Group
+	if mmap.NewProbe() != nil {
+		group.Go(func() error {
+			prefetchBAL(ctx, db, bal)
+			return nil
+		})
+	}
 	group.Go(func() error {
 		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
 	})

@@ -24,45 +24,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollectUniqueDrainsInOrderWithMappedKeys(t *testing.T) {
-	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
-	for i, key := range []string{"c", "a", "b"} {
-		u.TouchPlainKeyUnique(key, &Update{Flags: NonceUpdate, Nonce: uint64(i)})
-	}
-	u.TouchPlainKeyDirect("m", &Update{Flags: NonceUpdate, Nonce: 9})
-	require.Equal(t, uint64(4), u.Size())
-
-	var keys []string
-	var nonces []uint64
-	require.NoError(t, u.Drain(func(key string, update *Update) error {
-		keys = append(keys, key)
-		nonces = append(nonces, update.Nonce)
-		return nil
-	}))
-	require.Equal(t, []string{"c", "a", "b", "m"}, keys)
-	require.Equal(t, []uint64{0, 1, 2, 9}, nonces)
-	require.Zero(t, u.Size())
-
-	u.TouchPlainKeyUnique("x", &Update{Flags: NonceUpdate})
-	u.TouchPlainKeyDirect("y", &Update{Flags: NonceUpdate})
-	u.Reset()
-	require.Zero(t, u.Size())
-}
-
-func TestCollectUniqueFallsBackOutsideCollectMode(t *testing.T) {
-	u := NewUpdates(ModeUpdate, t.TempDir(), KeyToHexNibbleHash)
-	u.TouchPlainKeyUnique("a", &Update{Flags: NonceUpdate, Nonce: 1})
-	u.TouchPlainKeyUnique("a", &Update{Flags: BalanceUpdate})
-	require.Equal(t, uint64(1), u.Size())
-}
-
 func TestCollectedHashedKeysIncludeHashedTouches(t *testing.T) {
 	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
 	account := []byte("0123456789abcdefghij")
 	other := []byte("jihgfedcba9876543210")
 	u.TouchPlainKey(string(account), nil, func(*KeyUpdate, []byte) {})
 	u.TouchPlainKeyDirect(string(account), &Update{Flags: NonceUpdate, Nonce: 1})
-	u.TouchPlainKeyUnique(string(other), &Update{Flags: NonceUpdate, Nonce: 2})
+	u.TouchPlainKeyDirect(string(other), &Update{Flags: NonceUpdate, Nonce: 2})
 	partial := []byte{0x3, 0x0, 0xa}
 	u.TouchHashedKey(partial)
 	u.TouchHashedKey(partial)

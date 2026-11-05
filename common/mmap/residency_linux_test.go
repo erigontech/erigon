@@ -19,9 +19,11 @@
 package mmap
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -65,4 +67,22 @@ func TestResidencyProbe(t *testing.T) {
 	res, err = Resident(m)
 	require.NoError(t, err)
 	require.True(t, res, "all pages should be resident after touching them")
+}
+
+func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
+	prev := BatchPrefetch
+	BatchPrefetch = true
+	defer func() { BatchPrefetch = prev }()
+	p := filepath.Join(t.TempDir(), "f")
+	require.NoError(t, os.WriteFile(p, make([]byte, 2*os.Getpagesize()), 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	defer f.Close()
+	m, err := OpenRo(f, 2*os.Getpagesize())
+	require.NoError(t, err)
+	defer func() { require.NoError(t, m.Unmap()) }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, ReadPages(ctx, []uintptr{uintptr(unsafe.Pointer(&m[0]))}), context.Canceled)
 }

@@ -25,10 +25,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -69,33 +71,35 @@ func calculatorRoots(t *testing.T, wantFeed bool) [][]byte {
 		slots[i] = accounts.InternKey(k)
 	}
 	balances := make(map[accounts.Address]uint64)
-	put := func(txNum uint64, ws *wsb, addr accounts.Address, nonce, balance uint64) {
+	put := func(txNum uint64, ver state.Version, ws *wsb, addr accounts.Address, nonce, balance uint64) {
 		acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(balance), CodeHash: accounts.EmptyCodeHash}
 		av := addr.Value()
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), txNum, nil))
-		ws.nonce(addr, state.Version{}, nonce).bal(addr, state.Version{}, *uint256.NewInt(balance)).codeHash(addr, state.Version{}, accounts.EmptyCodeHash)
+		ws.nonce(addr, ver, nonce).bal(addr, ver, *uint256.NewInt(balance)).codeHash(addr, ver, accounts.EmptyCodeHash)
 		balances[addr] = balance
 	}
-	store := func(txNum uint64, ws *wsb, addr accounts.Address, slot accounts.StorageKey, value uint64) {
+	store := func(txNum uint64, ver state.Version, ws *wsb, addr accounts.Address, slot accounts.StorageKey, value uint64) {
 		av, sv := addr.Value(), slot.Value()
 		v := uint256.NewInt(value)
 		require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, append(av[:], sv[:]...), v.Bytes(), txNum, nil))
-		ws.stor(addr, slot, state.Version{}, *v)
+		ws.stor(addr, slot, ver, *v)
 	}
 	var roots [][]byte
 	txNum := uint64(0)
 	for block := uint64(1); block <= 3; block++ {
-		for range 9 {
+		vm := newRawViewVM(txNum + 1)
+		for i := range 9 {
 			txNum++
+			ver := state.Version{TxIndex: i}
 			ws := newWS()
 			for range 3 {
 				addr := addrs[rnd.Intn(len(addrs))]
-				put(txNum, ws, addr, txNum, uint64(rnd.Intn(1000)+1))
+				put(txNum, ver, ws, addr, txNum, uint64(rnd.Intn(1000)+1))
 				for range 2 {
-					store(txNum, ws, addr, slots[rnd.Intn(len(slots))], uint64(rnd.Intn(3)))
+					store(txNum, ver, ws, addr, slots[rnd.Intn(len(slots))], uint64(rnd.Intn(3)))
 				}
 			}
-			cc.handleMessage(ctx, &txResult{blockNum: block, txNum: txNum, rules: &chain.Rules{}, writes: ws.build()})
+			cc.handleMessage(ctx, recordTx(vm, block, common.Hash{byte(block)}, txNum, &chain.Rules{}, ws.build()))
 		}
 		cc.handleMessage(ctx, newTestBlockResult(block, common.Hash{byte(block)}, txNum, false))
 		if block == 2 || block == 3 {
@@ -106,4 +110,70 @@ func calculatorRoots(t *testing.T, wantFeed bool) [][]byte {
 		}
 	}
 	return roots
+}
+
+func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
+	const txIdx = 3
+	ver := state.Version{TxIndex: txIdx}
+	a := func(b byte) accounts.Address { return accounts.InternAddress([20]byte{b}) }
+	k := func(b byte) accounts.StorageKey { return accounts.InternKey([32]byte{b}) }
+	ws := newWS().
+		bal(a(1), ver, *uint256.NewInt(100)).nonce(a(1), ver, 7).
+		bal(a(3), ver, *uint256.NewInt(5)).nonce(a(3), ver, 1).
+		stor(a(3), k(1), ver, *uint256.NewInt(0x1234)).stor(a(3), k(2), ver, uint256.Int{}).
+		emptyRemoval(a(4), ver).
+		selfDestruct(a(5), ver, true).bal(a(5), ver, *uint256.NewInt(3)).nonce(a(5), ver, 1).
+		stor(a(5), k(3), ver, *uint256.NewInt(7)).
+		build()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true)
+	view := func() *state.VersionMapView { return vm.View(txIdx+1, nil) }
+
+	plain := &commitmentCalculator{updates: newTestUpdates()}
+	plain.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), nil)
+	updates := newTestUpdates()
+	require.NoError(t, plain.emitTouched(view(), updates))
+	want := map[string]commitment.Update{}
+	wantDeleted := map[string]struct{}{}
+	for key, u := range collectUpdates(t, updates) {
+		if u.Deleted() {
+			wantDeleted[key] = struct{}{}
+		}
+		hash := crypto.Keccak256([]byte(key[:20]))
+		if len(key) > 20 {
+			hash = append(hash, crypto.Keccak256([]byte(key[20:]))...)
+		}
+		want[string(hash)] = u
+	}
+
+	cc := &commitmentCalculator{branchPrefetch: newPrefetchRecords()}
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), nil)
+	require.NoError(t, cc.emitTouchedFeed(view()))
+	feed := cc.feed.Feed
+	got := map[string]commitment.Update{}
+	distinct := map[[32]byte]struct{}{}
+	for _, account := range feed.Accounts {
+		distinct[account.Hash] = struct{}{}
+		got[string(account.Hash[:])] = *account.Update
+		for _, slot := range account.Slots {
+			u := commitment.Update{Flags: commitment.DeleteUpdate}
+			if len(slot.Value) != 0 {
+				u = commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(slot.Value))}
+				copy(u.Storage[:], slot.Value)
+			}
+			got[string(append(account.Hash[:], slot.Hash[:]...))] = u
+		}
+	}
+	require.Len(t, want, 7)
+	require.Len(t, distinct, len(feed.Accounts))
+	require.Equal(t, len(want), feed.Keys)
+	require.Equal(t, want, got)
+
+	gotDeleted := map[string]struct{}{}
+	for _, key := range cc.deleted {
+		gotDeleted[string(key)] = struct{}{}
+	}
+	require.NotEmpty(t, wantDeleted)
+	require.Len(t, cc.deleted, len(wantDeleted))
+	require.Equal(t, wantDeleted, gotDeleted)
 }

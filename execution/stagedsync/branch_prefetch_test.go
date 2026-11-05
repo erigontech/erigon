@@ -91,7 +91,7 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	head := common.Hash{9}
 	child := commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: head}
 	calc := func() *commitmentCalculator {
-		return &commitmentCalculator{state: &calcState{branchPrefetch: p}, readAtNum: 9, readAtHash: head}
+		return &commitmentCalculator{branchPrefetch: p, readAtNum: 9, readAtHash: head}
 	}
 
 	cc := calc()
@@ -121,13 +121,13 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 
 	p := &branchPrefetcher{work: make(chan prefetchItem, 16)}
 	cc := &commitmentCalculator{
-		state:         &calcState{branchPrefetch: p},
-		signalCtx:     context.Background(),
-		pending:       map[uint64]*pendingBlock{},
-		computedAhead: map[uint64]bool{},
-		balRoots:      map[uint64][]byte{},
-		hasFirstBlock: true,
-		firstBlockNum: 100,
+		branchPrefetch: p,
+		signalCtx:      context.Background(),
+		pending:        map[uint64]*pendingBlock{},
+		computedAhead:  map[uint64]bool{},
+		balRoots:       map[uint64][]byte{},
+		hasFirstBlock:  true,
+		firstBlockNum:  100,
 	}
 	balanceOnly, storageOnly, readOnly := common.Address{19: 1}, common.Address{19: 2}, common.Address{19: 3}
 	slotA, slotB := accounts.InternKey(common.Hash{31: 1}), accounts.InternKey(common.Hash{31: 2})
@@ -170,7 +170,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
 	require.NoError(t, err)
 	defer cc.Stop()
-	p := cc.state.branchPrefetch
+	p := cc.branchPrefetch
 	require.NotNil(t, p)
 	cc.hasFirstBlock, cc.firstBlockNum = true, 1
 
