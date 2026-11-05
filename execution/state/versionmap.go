@@ -2360,6 +2360,9 @@ func (res ReadResult) resolved() bool {
 
 // SetReaderCancel makes a read by txIdx of an unfinished write call cancel; nil removes it.
 func (vm *VersionMap) SetReaderCancel(txIdx int, cancel func()) {
+	if vm == nil {
+		return
+	}
 	if cancel == nil {
 		vm.readerCancel.Delete(txIdx)
 		return
