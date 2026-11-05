@@ -146,6 +146,10 @@ var (
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
+	OverrideGenesisFlag = cli.StringFlag{
+		Name:  "override.genesis",
+		Usage: "Load the genesis block and chain config from this JSON file instead of the --chain network's; written on first start like `erigon init`, and must match a genesis already in the datadir",
+	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
 		Usage: "Avoid overriding chain config already stored in the DB",
@@ -395,6 +399,11 @@ var (
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
 		Value: true,
+	}
+	HttpCompressionLoopbackFlag = cli.BoolFlag{
+		Name:  "http.compression.loopback",
+		Usage: "Also compress HTTP-RPC responses to clients connecting from a loopback address (127.0.0.1, ::1). Off by default: on loopback compression only costs CPU and latency. Requests with an X-Forwarded-For or Forwarded header are treated as remote. Enable it when a reverse proxy on the same host sets neither header and does not compress itself",
+		Value: false,
 	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
@@ -889,12 +898,6 @@ var (
 		Name:  "webseed",
 		Usage: "Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
 		Value: "",
-	}
-
-	AAFlag = cli.BoolFlag{
-		Name:  "aa",
-		Usage: "Enable AA transactions",
-		Value: false,
 	}
 
 	ConfigFlag = cli.StringFlag{
@@ -1643,10 +1646,6 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 			szLimit, DbSizeLimitFlag.Usage)
 	}
 
-	if err := cfg.Dirs.RenameOldVersions(false); err != nil {
-		return fmt.Errorf("failed to rename old versions: %w", err)
-	}
-
 	return nil
 }
 
@@ -1725,7 +1724,6 @@ func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	if ctx.IsSet(TxPoolQueuedDormancyFlag.Name) {
@@ -2071,7 +2069,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	}
 	setCaplin(ctx, cfg)
 
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	setParallelCommitment(ctx)
@@ -2110,6 +2107,9 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		log.Warn("blocking async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
+	}
+	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("BAL batch prefetch is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); it reads nothing")
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
@@ -2172,6 +2172,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		}
 	case networkname.Dev:
 		setDevnetEthConfig(ctx, cfg, logger)
+	}
+
+	if err := setOverrideGenesis(ctx, cfg); err != nil {
+		Fatalf("%v", err)
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
@@ -2415,6 +2419,40 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 		return g.Some(ctx.Bool(flag.Name))
 	}
 	return g.None[bool]()
+}
+
+// setOverrideGenesis must run after chain defaults so they cannot replace
+// the supplied genesis or network ID, or restore default DNS discovery.
+func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
+	// An explicitly empty path must fail instead of selecting the default chain.
+	if !ctx.IsSet(OverrideGenesisFlag.Name) {
+		return nil
+	}
+	if ctx.IsSet(ChainFlag.Name) {
+		return fmt.Errorf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
+	}
+	genesis, err := ReadGenesisFile(ctx.String(OverrideGenesisFlag.Name))
+	if err != nil {
+		return err
+	}
+	if !ctx.IsSet(NetworkIdFlag.Name) {
+		if !genesis.Config.ChainID.IsUint64() {
+			return fmt.Errorf("--%s: genesis chain id %v exceeds 64 bits, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
+		networkID := genesis.Config.ChainID.Uint64()
+		// Sentry treats local status with network ID 0 as incomplete,
+		// so it cannot proceed with peer handshakes.
+		if networkID == 0 {
+			return fmt.Errorf("--%s: genesis chain id %v maps to network id 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
+		cfg.NetworkID = networkID
+	}
+	cfg.Genesis = genesis
+	cfg.GenesisFromFile = true
+	if !ctx.IsSet(DNSDiscoveryFlag.Name) {
+		cfg.EthDiscoveryURLs = nil
+	}
+	return nil
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

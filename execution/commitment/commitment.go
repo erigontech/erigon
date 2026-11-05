@@ -87,7 +87,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -269,8 +268,8 @@ type PendingCommitmentUpdate struct {
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
 	// Metrics is the producing trie's, carried so the later apply still reaches
-	// that trie's log and CSV counters. The Prometheus counters do not depend on
-	// it — publishBranchWrites bills those where the write lands.
+	// that trie's log counters. The Prometheus counters do not depend on it —
+	// publishBranchWrites bills those where the write lands.
 	Metrics *Metrics
 }
 
@@ -359,7 +358,7 @@ var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512
 // were written. Writes are published to the branch-write counters as they land,
 // not against a round: the caller-owned path applies from SharedDomains after the
 // producing round has already closed, so there is no round left to bill. m, when
-// non-nil, additionally carries them into that trie's log and CSV counters.
+// non-nil, additionally carries them into that trie's log counters.
 //
 // putBranch must copy prefix and data rather than retain them: they are pooled and
 // reused for a later, unrelated update. prevData is cloned per update and carries
@@ -1538,7 +1537,20 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+func (t *Updates) HashKey(key []byte) []byte { return t.hashKey(key) }
+
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	t.TouchPlainKeyDirectHashed(key, nil, update)
+}
+
+func (t *Updates) hashedOr(key string, hashed []byte) []byte {
+	if hashed != nil {
+		return hashed
+	}
+	return t.hashKey(common.ToBytesZeroCopy(key))
+}
+
+func (t *Updates) TouchPlainKeyDirectHashed(key string, hashed []byte, update *Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
 			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
@@ -1576,7 +1588,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashedOr(key, hashed),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1585,12 +1597,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
+			t.collectDirect(t.hashedOr(key, hashed), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashedOr(key, hashed)
 		u := new(Update)
 		*u = *update
 		ik := keyBytes

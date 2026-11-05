@@ -87,6 +87,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.AnchorVisibleAtLowestDirty(snaptype.CaplinEnums.BeaconBlocks)
 	return c
 }
 
@@ -143,17 +144,11 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 	return res
 }
 
-func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false, nil) }
-
 func (s *CaplinSnapshots) OpenBeaconBlocks() error {
 	return s.openFolder(false, func(f snaptype.FileInfo) bool {
 		return f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BeaconBlocks
 	})
 }
-
-// Shadowed so the promoted base versions cannot reach the unfiltered directory scan:
-// Go embedding has no virtual dispatch, so they would call the base OpenFolder.
-func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 
 type snapshotNotifier interface {
 	OnNewSnapshot()
@@ -170,7 +165,7 @@ func (s *CaplinSnapshots) BuildMissedIndices(ctx context.Context, _ string, noti
 }
 
 func (s *CaplinSnapshots) openFolder(optimistic bool, fileFilter func(snaptype.FileInfo) bool) error {
-	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
+	files, err := snapshotsync.AllTypedSegments(s.Dir(), s.Types())
 	if err != nil {
 		return err
 	}
@@ -397,14 +392,8 @@ func removeBlobIndexAndTorrents(snapDir string, from, to uint64) error {
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	cfg := snapcfg.KnownCfgOrDevnet("")
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, cfg) {
-		blocksPerFile := snapcfg.MergeLimitFromCfg(cfg, snaptype.CaplinEnums.BeaconBlocks, i)
-
-		if toSlot-i < blocksPerFile {
-			break
-		}
-		to := chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, cfg)
+	for i := fromSlot; i+snaptype.CaplinMergeLimit <= toSlot; i += snaptype.CaplinMergeLimit {
+		to := i + snaptype.CaplinMergeLimit
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, i, to, salt, dirs, workers, lvl, logger); err != nil {
 			return err

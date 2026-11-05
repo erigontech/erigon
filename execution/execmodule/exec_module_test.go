@@ -728,6 +728,100 @@ func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testin
 func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
 	t.Helper()
 	ctx := t.Context()
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, invalidExecutionProgress, false)
+
+	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
+	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
+	// so the no-unwind branch fires. The handler then writes canonical entries
+	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
+	//
+	// Because the domain was ahead of blocks when the FCU started, the handler
+	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
+	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
+	// handle by inserting the missing canonical blocks and retrying.
+	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	require.NoError(t, err)
+	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
+
+	// After the FCU, TxNums must have caught up to (or past) commitBlock so
+	// the next NewSharedDomains() will not return ErrBehindCommitment.
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
+		return nil
+	}))
+}
+
+// Without changesets, a re-sent fork choice for the canonical tip below the
+// commitment block cannot unwind the state; nothing above the head needs it, so
+// it must not be rejected as ReorgTooDeep.
+func TestUpdateForkChoiceResentHeadBelowCommitment(t *testing.T) {
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false, false)
+	head := chainPack.Blocks[6].Header()
+	require.Less(t, head.Number.Uint64(), commitBlock)
+	for i := range 2 {
+		res, err := m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "fork choice %d", i+1)
+	}
+}
+
+// With changesets, the re-sent fork choice still unwinds the state down to the
+// head, so a later one validates it.
+func TestUpdateForkChoiceResentHeadBelowCommitmentWithChangesets(t *testing.T) {
+	m, chainPack, commitBlock := newStateAheadOfTxNums(t, false, true)
+	head := chainPack.Blocks[6].Header()
+	require.Less(t, head.Number.Uint64(), commitBlock)
+	var res execmodule.ForkChoiceResult
+	for range 3 {
+		var err error
+		res, err = m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+	}
+	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
+}
+
+// Outside the domain-ahead state an impossible unwind is still rejected: nothing
+// ties the committed state to the canonical head, which here is a fork the
+// domain-ahead path made canonical over the other branch's state.
+func TestUpdateForkChoiceResentForkTipOverOtherBranchStateIsNotValid(t *testing.T) {
+	m, chainPack := newExecutedTransferChain(t)
+	fork, err := m.GenerateChainFrom(chainPack.Blocks[4], 5, func(_ int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(b.TxNonce(m.Address), common.Address{0xfe}, uint256.NewInt(2_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			m.Key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, chainPack.TopBlock.Root(), fork.TopBlock.Root())
+	status, err := m.InsertBlocks(t.Context(), fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	require.Equal(t, fork.TopBlock.NumberU64(), truncateTxNumsBelowCommitment(t, m, false, false))
+	require.NoError(t, m.DB.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+		return stages.SaveStageProgress(tx, stages.Finish, 5)
+	}))
+	res, err := m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status)
+	res, err = m.UpdateForkChoice(t.Context(), fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, res.Status)
+}
+
+func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangesets bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, uint64) {
+	t.Helper()
+	m, chainPack := newExecutedTransferChain(t)
+	return m, chainPack, truncateTxNumsBelowCommitment(t, m, invalidExecutionProgress, keepChangesets)
+}
+
+func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -752,8 +846,13 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 
 	// Drive the full chain in (insert + validate + UFC). State commitBlock and
 	// TxNums.Last are now both at block 10.
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+	return m, chainPack
+}
 
+func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
+	t.Helper()
+	ctx := t.Context()
 	const truncateTo uint64 = 5
 	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
 	// extend to a frozen tip but the snapshot/state files commit to a later
@@ -770,7 +869,9 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
-		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		if !keepChangesets {
+			require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		}
 		if invalidExecutionProgress {
 			require.NoError(t, tx.Put(kv.SyncStageProgress, []byte(stages.Execution), []byte{1}))
 		}
@@ -783,29 +884,7 @@ func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExe
 		require.Equal(t, truncateTo, lastBlock, "canonical/TxNums must be truncated below commitBlock to set up the misalignment")
 		return nil
 	}))
-
-	// FCU on the same chain's tip (block 10). Walk-back finds canonical ancestor
-	// at the truncated tip (block 5), unwindTarget = 5 = lastCanonicalBlock,
-	// so the no-unwind branch fires. The handler then writes canonical entries
-	// for blocks 6..10 and AppendCanonicalTxNums re-extends TxNums.
-	//
-	// Because the domain was ahead of blocks when the FCU started, the handler
-	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
-	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
-	// handle by inserting the missing canonical blocks and retrying.
-	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
-	require.NoError(t, err)
-	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
-	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
-
-	// After the FCU, TxNums must have caught up to (or past) commitBlock so
-	// the next NewSharedDomains() will not return ErrBehindCommitment.
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		lastBlock, _, err := rawdbv3.TxNums.Last(tx)
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, lastBlock, commitBlock, "TxNums.Last must have caught up to commitBlock")
-		return nil
-	}))
+	return commitBlock
 }
 
 // Companion to TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums that also
@@ -4150,6 +4229,63 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 			require.NoError(t, err)
 			b.AddTx(tx)
 		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+}
+
+// Value transfers whose recipient is credited at validation must reach the state root of serial
+// execution, also when the recipient spends, its balance is read, or it gets code in the block.
+func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
+	prevParallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	keys := make([]*ecdsa.PrivateKey, 10)
+	alloc := types.GenesisAlloc{}
+	for i := range keys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
+	}
+	recipient := crypto.PubkeyToAddress(keys[9].PublicKey)
+	codeLater := types.CreateAddress(crypto.PubkeyToAddress(keys[0].PublicKey), 0)
+	balanceReader, sink := common.Address{0xaa}, common.Address{0xcc}
+	alloc[codeLater] = types.GenesisAccount{Balance: big.NewInt(1)}
+	alloc[balanceReader] = types.GenesisAccount{Code: []byte{byte(vm.PUSH0), byte(vm.CALLDATALOAD), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP)}}
+	genesis := &types.Genesis{Config: chain.TestChainOsakaConfig, Alloc: alloc}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(keys[1]))
+	// The deployed code stores the call value, so a credit that skips it changes the state root.
+	storeCallValue := []byte{
+		byte(vm.PUSH4), byte(vm.CALLVALUE), byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.RETURN),
+	}
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		nonces := make([]uint64, len(keys))
+		add := func(k int, to *common.Address, value uint64, data []byte) {
+			var txn types.Transaction
+			if to == nil {
+				txn = types.NewContractCreation(nonces[k], uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), data)
+			} else {
+				txn = types.NewTransaction(nonces[k], *to, uint256.NewInt(value), 100_000, uint256.NewInt(10*common.GWei), data)
+			}
+			nonces[k]++
+			tx, err := types.SignTx(txn, *types.LatestSignerForChainID(nil), keys[k])
+			require.NoError(t, err)
+			b.AddTx(tx)
+		}
+		readRecipient := common.BytesToHash(recipient[:])
+		for k := 1; k <= 4; k++ {
+			add(k, &recipient, uint64(k), nil)
+		}
+		add(9, &sink, 1, nil)
+		add(5, &balanceReader, 0, readRecipient[:])
+		add(6, &codeLater, 2, nil)
+		add(0, nil, 0, storeCallValue)
+		add(7, &codeLater, 3, nil)
+		add(8, &recipient, 8, nil)
+		add(5, &balanceReader, 0, readRecipient[:])
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))

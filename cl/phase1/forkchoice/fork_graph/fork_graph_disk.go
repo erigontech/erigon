@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
@@ -56,6 +57,8 @@ type validatedChildren struct {
 }
 
 var ErrStateNotFound = errors.New("state not found")
+
+var nextEpochStateOutcomes = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
 
 type ChainSegmentInsertionResult uint
 
@@ -121,6 +124,9 @@ type forkGraphDisk struct {
 
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
+	nextEpochParentRoot   common.Hash
+	nextEpochState        *state.CachingBeaconState
+	highestTransitionSlot uint64
 
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints sync.Map
@@ -234,6 +240,42 @@ func (f *forkGraphDisk) AnchorRoot() common.Hash {
 	return f.anchorRoot
 }
 
+func (f *forkGraphDisk) SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	if f.highestTransitionSlot >= state.Slot() {
+		recordNextEpochStateOutcome("late", state.Slot())
+		return
+	}
+	f.nextEpochParentRoot = parentRoot
+	f.nextEpochState = state
+}
+
+func recordNextEpochStateOutcome(outcome string, slot uint64) {
+	nextEpochStateOutcomes.WithLabelValues(outcome).Inc()
+	log.Debug("Precomputed epoch state", "outcome", outcome, "slot", slot)
+}
+
+func (f *forkGraphDisk) takeNextEpochStateLocked(block *cltypes.BeaconBlock, parentSlot uint64, fullValidation bool) *state.CachingBeaconState {
+	if f.nextEpochState == nil || block.Slot < f.nextEpochState.Slot() {
+		if block.Slot/f.beaconCfg.SlotsPerEpoch > parentSlot/f.beaconCfg.SlotsPerEpoch {
+			recordNextEpochStateOutcome("no_entry", block.Slot)
+		}
+		return nil
+	}
+	precomputed := f.nextEpochState
+	f.nextEpochState = nil
+	if !fullValidation {
+		recordNextEpochStateOutcome("no_full_validation", block.Slot)
+		return nil
+	}
+	if f.nextEpochParentRoot != block.ParentRoot {
+		recordNextEpochStateOutcome("parent_mismatch", block.Slot)
+		return nil
+	}
+	return precomputed
+}
+
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 	if f.currentState == nil {
 		return false
@@ -334,19 +376,38 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// get an empty response and penalize us (Lighthouse: -20 per NullBlocksByRoot).
 	f.blocks.Store(common.Hash(blockRoot), signedBlock)
 
-	blockRewardsCollector := &eth2.BlockRewardsCollector{}
-
 	if !isBlockRootTheCurrentState {
-		// Execute the state
-		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
-			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
-			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-			if !errors.Is(invalidBlockErr, eth2.ErrInvalidBlockSignature) {
-				f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+		f.highestTransitionSlot = max(f.highestTransitionSlot, block.Slot)
+		blockRewardsCollector := &eth2.BlockRewardsCollector{}
+		precomputedState := f.takeNextEpochStateLocked(block, newState.Slot(), fullValidation)
+		var precomputedErr error
+		if precomputedState != nil {
+			precomputedErr = transition.TransitionStateFromPrecomputedEpochState(precomputedState, signedBlock, blockRewardsCollector, fullValidation)
+			if precomputedErr == nil {
+				newState = precomputedState
+				recordNextEpochStateOutcome("hit", block.Slot)
+			} else {
+				blockRewardsCollector = &eth2.BlockRewardsCollector{}
 			}
-			f.currentState = nil
-			f.currentStateBlockRoot = common.Hash{}
-			return nil, InvalidBlock, invalidBlockErr
+		}
+		if precomputedState == nil || precomputedErr != nil {
+			if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
+				if precomputedErr != nil {
+					recordNextEpochStateOutcome("invalid", block.Slot)
+				}
+				log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
+				f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
+				if !errors.Is(invalidBlockErr, eth2.ErrInvalidBlockSignature) {
+					f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+				}
+				f.currentState = nil
+				f.currentStateBlockRoot = common.Hash{}
+				return nil, InvalidBlock, invalidBlockErr
+			}
+			if precomputedErr != nil {
+				nextEpochStateOutcomes.WithLabelValues("diverged").Inc()
+				log.Warn("Precomputed epoch state diverged", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", precomputedErr)
+			}
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
 	}

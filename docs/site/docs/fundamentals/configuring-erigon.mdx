@@ -53,6 +53,7 @@ These flags cover the general behavior and configuration of the Erigon client.
   * Default: `0`
 * `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
   * Default: `0`
+* `--override.genesis value`: Loads the genesis block and chain configuration from this JSON file instead of the `--chain` network's. A fresh datadir is initialized from it on first start, as `erigon init` would; on an initialized datadir it must match the stored genesis, or Erigon refuses to start. Cannot be combined with `--chain`.
 * `--vmdebug`: Records information for VM and contract debugging.
   * Default: `false`
 * `--gdbme`: Restarts Erigon under gdb for debugging.
@@ -185,8 +186,6 @@ Options for configuring the [transaction pool](/fundamentals/modules/txpool).
 * `--txpool.queued.dormancy value`: Evicts queued transactions from senders with no on-chain state changes for at least this duration (e.g. `3h`, `2h30m`).
   * Default: `3h0m0s`
   * Set to `0` to disable dormancy-based eviction.
-* `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
-  * Default: `false`
 
 ### Network and Peers
 
@@ -250,6 +249,8 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
 * `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
+* `--http.compression.loopback`: Also compresses HTTP-RPC responses to clients connecting from a loopback address (`127.0.0.1`, `::1`). By default these responses are sent uncompressed: on loopback compression only costs CPU and latency. Requests with an `X-Forwarded-For` or `Forwarded` header are treated as remote, so a reverse proxy on the same host that sets one of them keeps compression. Enable this flag only when such a proxy sets neither header and does not compress responses itself.
+  * Default: `false`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests. The same list gates browser WebSocket handshakes and cross-site `GET` calls: a page whose `Origin` is not listed gets `403`. Without the flag, only pages on `http://localhost`, `http://127.0.0.1`, `http://[::1]` or the node's own hostname can open a WebSocket. Clients that send no `Origin` header, such as `curl` or server-side libraries, are not affected.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
   * Default: `localhost`

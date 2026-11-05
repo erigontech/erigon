@@ -184,6 +184,66 @@ func TestQueuedUnknownParentBlockStartsELColumnsImportOnce(t *testing.T) {
 	require.Len(t, started, 1)
 }
 
+// Equivocating blocks of one proposer and slot, queued on the same unknown parent, start a single EL import.
+func TestQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
+	service, child, _, root, job := parkUnknownParentBlockForRetry(t, true)
+	encoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(service.beaconCfg, child.Version())
+	require.NoError(t, other.DecodeSSZ(encoded, int(child.Version())))
+	other.Block.Body.Graffiti = common.Hash{0x01}
+	otherJob, _ := service.scheduleBlockForLaterProcessing(other, nil, false, false)
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, child.Block.ProposerIndex, other.Block.ProposerIndex)
+	require.NotEqual(t, root, common.Hash(otherRoot))
+	started := 0
+	service.startELColumnsImport = func(context.Context, *cltypes.SignedBeaconBlock) { started++ }
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	service.processScheduledBlock(t.Context(), otherRoot, otherJob, time.Now())
+
+	require.ErrorIs(t, otherJob.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Equal(t, 1, started)
+}
+
+// A block above the blob limit, e.g. queued on an unknown parent before gossip validation checked its blob count, does
+// not take the import of its proposer and slot from a valid block.
+func TestBlockAboveBlobLimitDoesNotTakeTheELColumnsImport(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	maxBlobs := b.beaconCfg.GetBlobParameters(100 / b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	oversized, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, int(maxBlobs)+1)
+	valid, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	require.Equal(t, blockGossipKey(oversized), blockGossipKey(valid))
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	b.startELColumnsImportOnce(t.Context(), oversized)
+	b.startELColumnsImportOnce(t.Context(), valid)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{valid}, started)
+}
+
+// A Fulu block whose blob count is out of range, here one without blobs, does not take the import of its proposer and
+// slot from a block with blobs.
+func TestBlockWithoutBlobsDoesNotTakeTheELColumnsImport(t *testing.T) {
+	b, _, _, _ := setupELBlobsBlockService(t)
+	empty, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 0)
+	withBlobs, _, _ := elBlobsTestBlock(t, clparams.FuluVersion, 2)
+	require.Equal(t, blockGossipKey(empty), blockGossipKey(withBlobs))
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	b.startELColumnsImportOnce(t.Context(), empty)
+	b.startELColumnsImportOnce(t.Context(), withBlobs)
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{withBlobs}, started)
+}
+
 func TestQueuedBlockWithWrongProposerDoesNotStartELColumnsImport(t *testing.T) {
 	service, _, _, root, job := parkUnknownParentBlockForRetry(t, false)
 	started := 0
@@ -206,6 +266,32 @@ func TestProcessMessageStartsELColumnsImportForValidGossipBlock(t *testing.T) {
 
 	_ = service.ProcessMessage(t.Context(), nil, child)
 
+	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
+}
+
+// A gossip block and an equivocating block of the same proposer and slot queued on an unknown parent start one import:
+// the queued block never adds its key to the seen-blocks cache, so only the import claim stops the second one.
+func TestGossipAndQueuedEquivocatingBlocksStartOneELColumnsImport(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	b := service.(*blockService)
+	encoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(b.beaconCfg, child.Version())
+	require.NoError(t, other.DecodeSSZ(encoded, int(child.Version())))
+	other.Block.Body.Graffiti = common.Hash{0x01}
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	var started []*cltypes.SignedBeaconBlock
+	b.startELColumnsImport = func(_ context.Context, block *cltypes.SignedBeaconBlock) {
+		started = append(started, block)
+	}
+
+	_ = service.ProcessMessage(t.Context(), nil, child)
+	otherJob, _ := b.scheduleBlockForLaterProcessing(other, nil, false, false)
+	b.processScheduledBlock(t.Context(), otherRoot, otherJob, time.Now())
+
+	require.NotNil(t, otherJob.lastAttempt)
 	require.Equal(t, []*cltypes.SignedBeaconBlock{child}, started)
 }
 

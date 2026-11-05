@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -127,7 +128,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
-	RecoveredAuthorities() *types.RecoveredAuthorities
+	Authorities(chainID *uint256.Int) *types.RecoveredAuthorities
 	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
@@ -190,10 +191,6 @@ func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds b
 // ApplyMessageChargeSenderAtValidation is ApplyMessageNoFeeBurnOrTip without the sender charge (nonce, gas, value).
 func ApplyMessageChargeSenderAtValidation(evm *vm.EVM, msg Message, gp *GasPool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	return applyMessage(evm, msg, gp, true, false, true, true, engine)
-}
-
-func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResult, error) {
-	return NewTxnExecutor(evm, msg, gp).ApplyFrame()
 }
 
 // to returns the recipient of the message.
@@ -425,108 +422,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	return fees, nil
 }
 
-// ApplyFrame is similar to Execute but without gas accounting, for use in RIP-7560 transactions
-func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
-	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(st.msg.From())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-	}
-	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-	}
-
-	msg := st.msg
-	sender := msg.From()
-	contractCreation := msg.To().IsNil()
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
-	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
-
-	auths := msg.Authorizations()
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
-	intrinsicGas := intrinsicGasResult.ExecutionGas
-	if st.msg.Gas() < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
-	}
-
-	if contractCreation {
-		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
-			return nil, err
-		}
-	}
-
-	// Match the execution-spec error precedence: intrinsic gas and initcode size
-	// are checked before SetCode prerequisites. All validation completes before
-	// verifyAuthorities can update account code or nonces.
-	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
-		return nil, err
-	}
-	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
-	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
-	if st.evm.Config().NoBAL {
-		st.state.StopAccessRecording()
-	}
-	var (
-		gasUsed         runtimeGasAccounting
-		runtimeGas      mdgas.MdGas
-		runtimeSnapshot = -1
-	)
-	if rules.IsAmsterdam {
-		runtimeGas = st.gasRemaining
-		runtimeSnapshot = st.state.PushSnapshot()
-		defer st.state.PopSnapshot(runtimeSnapshot)
-	}
-	st.gasRemaining, _, err = st.verifyAuthorities(auths, rules.ChainID, st.gasRemaining)
-	if err == nil && !contractCreation {
-		st.gasRemaining, gasUsed.topLevel, err = st.handleRuntimeCall(st.gasRemaining)
-	}
-	if err != nil {
-		if !rules.IsAmsterdam {
-			return nil, err
-		}
-		st.state.RevertToSnapshot(runtimeSnapshot, err)
-		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-			st.handleRuntimeFailure(vm.CALL, st.to(), runtimeGas, err)
-			return &evmtypes.ExecutionResult{Err: err}, nil
-		}
-		return nil, err
-	}
-	var (
-		ret   []byte
-		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
-	)
-
-	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
-	if !contractCreation {
-		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr, vmConfig.Tracer)
-	}
-
-	result := &evmtypes.ExecutionResult{
-		TxnGasUsage: mdgas.TxnGasUsage{
-			BlockExecutionGasUsed: st.blockExecutionGasUsed,
-			BlockStateGasUsed:     st.blockStateGasUsed,
-		},
-		ReceiptGasUsed:      st.txnGasUsed,
-		Err:                 vmerr,
-		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:          ret,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
-	}
-
-	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
-	}
-
-	return result, nil
-}
-
 // Execute will transition the state by applying the current message and
 // returning the evm execution result with following fields.
 //
@@ -551,22 +446,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}()
 	}
 
+	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
+		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, gasBailout, nil)
+	}
 	coinbase := st.evm.Context.Coinbase
-	var senderInitBalance uint256.Int
-	if !st.chargeSenderAtValidation {
-		senderInitBalance, err = st.state.GetBalance(st.msg.From())
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
-
-	var coinbaseInitBalance uint256.Int
-	if !st.noFeeBurnAndTip {
-		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
-		}
-	}
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
@@ -684,6 +567,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.CreateWithNonce(sender, st.data, st.gasRemaining, st.value, st.msg.Nonce(), bailout)
 		case contractCreation:
 			ret, _, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+		case st.chargeSenderAtValidation && RecipientCreditedAtValidation(sender, st.to(), coinbase, st.value, vmConfig.Tracer, rules, st.state.StateReader()):
+			tracer := vmConfig.Tracer
+			tracer.EmitEnter(0, byte(vm.CALL), sender, st.to(), false, st.data, st.gasRemaining, st.value, nil)
+			tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 		default:
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
@@ -806,15 +693,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			BlockStateGasUsed:     st.blockStateGasUsed,
 			GasRefund:             refund,
 		},
-		ReceiptGasUsed:      st.txnGasUsed,
-		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		Err:                 vmerr,
-		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:          ret,
-		SenderInitBalance:   senderInitBalance,
-		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           tipAmount,
-		FeeBurnt:            burnAmount,
+		ReceiptGasUsed: st.txnGasUsed,
+		MaxGasUsed:     max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		Err:            vmerr,
+		Reverted:       errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:     ret,
+		FeeTipped:      tipAmount,
+		FeeBurnt:       burnAmount,
 	}
 
 	result.BurntContractAddress = burntContractAddress
@@ -862,6 +747,19 @@ func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRema
 	return gasRemaining, gasUsed, err
 }
 
+// RecipientCreditedAtValidation reports whether a value transfer runs no frame: at block start the
+// recipient exists and has no code, so validation credits it after every lower tx. A recorded read
+// of the recipient would conflict with each lower credit, so the run peeks at block-start state and
+// validation re-checks the code. A tracer that follows balances or gas needs the frame.
+func RecipientCreditedAtValidation(from, to, coinbase accounts.Address, value uint256.Int, tracer *tracing.Hooks, rules *chain.Rules, blockStart state.StateReader) bool {
+	if value.IsZero() || to == coinbase || to == from || tracer.HasGasChangeHook() || tracer != nil && tracer.OnBalanceChange != nil ||
+		slices.Contains(vm.ActivePrecompiles(rules), to) {
+		return false
+	}
+	acc, err := blockStart.ReadAccountData(to)
+	return err == nil && acc != nil && acc.CodeHash.IsEmpty()
+}
+
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;
 // callers must first validate the list with validateSetCodePrerequisites.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
@@ -876,6 +774,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
+	recovered := st.msg.Authorities(chainID)
 	for i := range auths {
 		auth := &auths[i]
 
@@ -888,9 +787,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		// 2. authority recover
 		var signer common.Address
 		var err error
-		// The pre-pass may start this list mid-loop: each auth checks again and waits for it from then on.
-		if r := st.msg.RecoveredAuthorities(); r != nil {
-			signer, err = r.Signers[i], r.Errs[i]
+		if recovered != nil {
+			signer, err = recovered.Signers[i], recovered.Errs[i]
 		} else {
 			signer, err = auth.RecoverSigner()
 		}

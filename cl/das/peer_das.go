@@ -421,26 +421,40 @@ func (d *peerdas) IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, err
 	return d.isMyColumnDataAvailable(slot, blockRoot)
 }
 
+// ColumnsToStore reports which data columns of a block this node keeps: its custody columns, or all of them in archive
+// mode or when the custody set is unknown.
+func ColumnsToStore(d PeerDas) func(columnIndex uint64) bool {
+	all := func(uint64) bool { return true }
+	if d == nil || d.IsArchivedMode() {
+		return all
+	}
+	custody, err := d.StateReader().GetMyCustodyColumns()
+	if err != nil || len(custody) == 0 {
+		return all
+	}
+	return func(columnIndex uint64) bool { return custody[columnIndex] }
+}
+
 func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (bool, error) {
 	expectedCustodies, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return false, err
 	}
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
-	if err != nil {
-		return false, err
-	}
 	if len(expectedCustodies) == 0 {
 		// this case is not reasonable due to empty node ID
+		existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
+		if err != nil {
+			return false, err
+		}
 		return len(existingColumns) == int(d.beaconConfig.NumberOfColumns), nil
 	}
-	nowCustodies := map[cltypes.CustodyIndex]bool{}
-	for _, column := range existingColumns {
-		if _, ok := expectedCustodies[column]; ok {
-			nowCustodies[column] = true
+	for column := range expectedCustodies {
+		exists, err := d.columnStorage.ColumnSidecarExists(context.Background(), slot, blockRoot, int64(column))
+		if err != nil || !exists {
+			return false, err
 		}
 	}
-	return len(nowCustodies) == len(expectedCustodies), nil
+	return true, nil
 }
 
 func (d *peerdas) resubscribeGossip() {

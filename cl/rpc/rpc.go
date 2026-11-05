@@ -47,6 +47,9 @@ import (
 
 const reqRespFallbackTimeout = 30 * time.Second
 
+// Prefer v2 but accept v1 for peers that haven't upgraded yet.
+var blocksByRangeTopic = communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
+
 var (
 	ErrInvalidResponse             = errors.New("invalid peer response")
 	errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
@@ -103,21 +106,25 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	if err != nil {
 		return nil, pid, err
 	}
+	blocks, err := b.decodeBlocks(ctx, responses, pid)
+	return blocks, pid, err
+}
 
+func (b *BeaconRpcP2P) decodeBlocks(ctx context.Context, responses []responseData, pid string) ([]*cltypes.SignedBeaconBlock, error) {
 	responsePacket := []*cltypes.SignedBeaconBlock{}
 	for _, data := range responses {
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+			return nil, err
 		}
 		if !b.beaconConfig.ForkSchemaMatchesSlot(responseChunk.Block.Slot, responseChunk.Version()) {
 			b.BanPeerForInvalidData(ctx, pid)
-			return nil, pid, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
+			return nil, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
 		responsePacket = append(responsePacket, responseChunk)
 	}
 
-	return responsePacket, pid, nil
+	return responsePacket, nil
 }
 
 func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.BlobSidecar, string, error) {
@@ -315,6 +322,27 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, c
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+	data, err := encodeBlocksByRangeRequest(start, count)
+	if err != nil {
+		return nil, "", err
+	}
+	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count))
+}
+
+// SendBeaconBlocksByRangeReqToPeer retrieves a blocks range from the given peer only.
+func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReqToPeer(ctx context.Context, pid string, start, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
+	data, err := encodeBlocksByRangeRequest(start, count)
+	if err != nil {
+		return nil, err
+	}
+	responses, _, err := b.sendRequestWithPeer(ctx, blocksByRangeTopic, data, pid, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count), count)
+	if err != nil {
+		return nil, err
+	}
+	return b.decodeBlocks(ctx, responses, pid)
+}
+
+func encodeBlocksByRangeRequest(start, count uint64) ([]byte, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
 		Count:     count,
@@ -322,13 +350,9 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 	}
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, "", err
+		return nil, err
 	}
-
-	data := buffer.Bytes()
-	// Prefer v2 but accept v1 for peers that haven't upgraded yet.
-	blocksByRangeTopic := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
-	return b.sendBlocksRequest(ctx, blocksByRangeTopic, data, communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), count))
+	return buffer.Bytes(), nil
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
@@ -495,11 +519,7 @@ func (b *BeaconRpcP2P) sendRequest(
 	if err != nil {
 		return nil, "", err
 	}
-	var chunkLimit *uint64
-	if len(maxChunks) > 0 {
-		chunkLimit = &maxChunks[0]
-	}
-	return b.parseResponseData(requestCtx, message, chunkLimit)
+	return b.parseResponseData(requestCtx, message, chunkLimit(maxChunks))
 }
 
 func (b *BeaconRpcP2P) sendRequestWithPeer(
@@ -508,6 +528,7 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	reqPayload []byte,
 	peerId string,
 	maxResponseBytes uint64,
+	maxChunks ...uint64,
 ) ([]responseData, string, error) {
 	requestCtx, cancel := boundReqRespContext(ctx)
 	defer cancel()
@@ -521,7 +542,14 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	if err != nil {
 		return nil, "", err
 	}
-	return b.parseResponseData(requestCtx, message, nil)
+	return b.parseResponseData(requestCtx, message, chunkLimit(maxChunks))
+}
+
+func chunkLimit(maxChunks []uint64) *uint64 {
+	if len(maxChunks) == 0 {
+		return nil
+	}
+	return &maxChunks[0]
 }
 
 func boundReqRespContext(ctx context.Context) (context.Context, context.CancelFunc) {

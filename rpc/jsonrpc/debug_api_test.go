@@ -1509,8 +1509,9 @@ func TestAccountAt(t *testing.T) {
 	})
 	t.Run("large transaction index", func(t *testing.T) {
 		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(t, err)
-		require.Equal(t, 42, int(result.Nonce))
+		var invalidParams *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &invalidParams)
+		require.Nil(t, result)
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -2172,6 +2173,15 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 	require.NoError(t, debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{})))
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
 	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
+
+	t.Run("debug_traceCallMany/negative_index_without_bounds", func(t *testing.T) {
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+			return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(1))
+		}))
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: new(int(-2))}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams)
+	})
 }
 
 func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
