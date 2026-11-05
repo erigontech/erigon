@@ -101,6 +101,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return err
 	}
 
+	// HashListSSZ decoding does not enforce its configured limit.
 	if uint64(req.Length()) > c.beaconConfig.MaxRequestBlocksDeneb {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
@@ -109,7 +110,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the number of roots.
+	// Charge for at most MaxRequestsBlocks responses; the wrapper already consumed one token.
 	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
@@ -122,6 +123,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 
 	var block *cltypes.SignedBeaconBlock
 	seen := make(map[common.Hash]struct{}, req.Length())
+	// Missing roots must not use the response budget or hide later known blocks.
 	written := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if written >= MaxRequestsBlocks {

@@ -44,6 +44,8 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
+	// Estimate response work from the requested slots and the configured blob limit.
+	// Cap the charge at the response limit, since larger ranges cannot return more blobs.
 	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
 	maxBlobs := c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock
 	if cost := sidecarsRequestCost(req.Count, maxBlobs, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
@@ -109,6 +111,8 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
+	// Blob requests keep the Deneb wire format across forks, while their size limit
+	// follows the active fork.
 	currentVersion := max(clparams.DenebVersion, c.beaconConfig.GetCurrentStateVersion(c.ethClock.GetCurrentEpoch()))
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](c.beaconConfig.MaxRequestBlobSidecarsByVersion(currentVersion), 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {

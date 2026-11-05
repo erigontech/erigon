@@ -100,7 +100,8 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	// Consume additional rate-limit tokens: one per requested period.
+	// Cap the unsigned count before converting to int so large requests cannot overflow the cost.
+	// The wrapper has already consumed one token for admission.
 	if cost := max(int(min(req.Count, maxLightClientsPerRequest))-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
@@ -112,6 +113,8 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 		endPeriod = c.beaconConfig.SyncCommitteePeriod(currentSlot) + 1
 	}
 
+	// The response must include the earliest available update and use consecutive periods.
+	// Skip leading gaps, but stop once a gap would split the response.
 	for i := req.StartPeriod; i < endPeriod; i++ {
 		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
 		if !has {

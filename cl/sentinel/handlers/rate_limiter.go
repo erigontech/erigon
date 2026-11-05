@@ -238,6 +238,7 @@ func (rl *peerRateLimiter) allowRequest(peerID string, protocol string, cost int
 // the protocol has noPunishment, the peer is punished. Batch handlers call this
 // after decoding the request to charge for the actual number of response items.
 func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost int) bool {
+	// Negative costs may be caused by overflow and must never bypass charging.
 	if cost <= 0 {
 		return cost == 0
 	}
