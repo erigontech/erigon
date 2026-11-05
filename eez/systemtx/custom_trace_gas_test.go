@@ -17,6 +17,8 @@
 package systemtx_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"maps"
 	"math/big"
 	"testing"
@@ -25,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/eez/config"
@@ -36,8 +39,14 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // TestCustomTraceGasFromBlock checks that the custom trace stage replays a
@@ -168,6 +177,50 @@ func systemTxAfter(t *testing.T, to common.Address, data []byte) (*execmoduletes
 	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[0].Status)
 
 	return m, l2, built.Receipts
+}
+
+// TestTraceBlockGasFromBlock checks that debug_traceBlock gives a type-0x76
+// transaction the gas block execution gave it, whether or not the trace shows
+// the refund of an earlier transaction.
+func TestTraceBlockGasFromBlock(t *testing.T) {
+	for name, user := range map[string]struct {
+		to   common.Address
+		data []byte
+	}{
+		"refund":         {to: refunder},
+		"calldata floor": {to: common.Address{0xf1}, data: bytes.Repeat([]byte{1}, 350_000)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, _, receipts := systemTxAfter(t, user.to, user.data)
+			api := jsonrpc.NewPrivateDebugAPI(
+				jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+				m.DB, nil, &rpccfg.DebugApiConfig{})
+			tracer := "callTracer"
+			for _, noRefunds := range []bool{false, true} {
+				var buf bytes.Buffer
+				stream := jsonstream.New(&buf)
+				require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &tracer, NoRefunds: &noRefunds}, stream))
+				require.NoError(t, stream.Flush())
+				var traces []struct {
+					Error  json.RawMessage `json:"error"`
+					Result struct {
+						GasUsed hexutil.Uint64 `json:"gasUsed"`
+					} `json:"result"`
+				}
+				require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
+				require.Len(t, traces, len(receipts))
+				require.Empty(t, traces[0].Error)
+				require.Empty(t, traces[1].Error)
+				// The option shows: the transaction before reports other gas than its receipt.
+				if noRefunds {
+					require.NotEqual(t, receipts[0].GasUsed, uint64(traces[0].Result.GasUsed))
+				} else {
+					require.Equal(t, receipts[0].GasUsed, uint64(traces[0].Result.GasUsed))
+				}
+				require.Equal(t, receipts[1].GasUsed, uint64(traces[1].Result.GasUsed), "noRefunds %v", noRefunds)
+			}
+		})
+	}
 }
 
 // domainCumulative returns the cumulative gas the receipt domain holds for the n

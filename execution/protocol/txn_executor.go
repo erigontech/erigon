@@ -745,12 +745,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	gasLeft := st.gasRemaining
 	gasTracing := vmConfig.Tracer.HasGasChangeHook()
 	applyRefunds := refunds && !gasBailout
+	refundQuotient := params.RefundQuotient
+	if rules.IsLondon {
+		refundQuotient = params.RefundQuotientEIP3529
+	}
 	var refund uint64
 	if applyRefunds {
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
 		var old mdgas.MdGas
 		if gasTracing {
 			old = gasLeft
@@ -788,6 +788,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 	} else if !rules.IsAmsterdam {
 		st.blockExecutionGasUsed = st.gas
+		if !gasBailout {
+			// A trace without refunds hides them from its transaction, not from the block.
+			st.blockExecutionGasUsed = st.txnGasUsed - min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+			if rules.IsPrague {
+				st.blockExecutionGasUsed = max(st.blockExecutionGasUsed, intrinsicGasResult.FloorGasCost)
+			}
+		}
 	}
 	// EIP-8037: deduct the actual per-dimension usage from the block pool.
 	// Pre-Amsterdam only the execution dimension exists.
