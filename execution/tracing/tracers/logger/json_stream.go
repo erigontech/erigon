@@ -120,7 +120,8 @@ func (s *stackJSON) encode(stack []uint256.Int) []byte {
 		s.json = append(s.json, '"')
 		s.ends = append(s.ends, len(s.json))
 	}
-	return append(s.json, ']')
+	s.json = append(s.json, ']')
+	return s.json
 }
 
 // hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
