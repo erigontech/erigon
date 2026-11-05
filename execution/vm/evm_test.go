@@ -260,7 +260,6 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
 	dbg.BALDeployerDependency = true
-	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	vm := state.NewVersionMap([]types.AccountChanges{{
@@ -299,7 +298,6 @@ func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 func TestZeroValueCallToUnflushedDeployCancelsOptedInRun(t *testing.T) {
 	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
 	dbg.BALDeployerDependency = true
-	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xc0df"))
 	vm := state.NewVersionMap([]types.AccountChanges{{
