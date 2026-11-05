@@ -2308,25 +2308,40 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 	<-done
 }
 
-func TestReaderCancelRunsWhenTheReaderHitsAnUnfinishedWrite(t *testing.T) {
-	vm := NewVersionMap(nil)
-	vm.InitStamps(3)
+func TestReaderCancelRunsWhenTheReaderRecordsADependency(t *testing.T) {
+	newRun := func(txIndex int) (*IntraBlockState, *VersionMap, *atomic.Bool) {
+		vm := NewVersionMap(nil)
+		vm.InitStamps(3)
+		ibs := NewWithVersionMap(NewNoopReader(), vm)
+		ibs.SetTxContext(1, txIndex)
+		var abort atomic.Bool
+		vm.SetReaderCancel(txIndex, &abort)
+		return ibs, vm, &abort
+	}
 	addr := accounts.InternAddress(common.HexToAddress("0xca"))
+
+	ibs, vm, abort := newRun(2)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false) // tx 1 still runs
-	var abort2, abort3 atomic.Bool
-	vm.SetReaderCancel(2, &abort2)
-	vm.SetReaderCancel(3, &abort3)
-	vm.ReadBalance(addr, 2)
-	require.True(t, abort2.Load(), "the reader of the unfinished write is cancelled")
-	require.False(t, abort3.Load(), "other runs are not")
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, ibs.HadInvalidRead())
+	require.True(t, abort.Load(), "a run that records a dependency is cancelled")
+	ibs.Close()
 
-	abort2.Store(false)
-	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), true)
-	vm.ReadBalance(addr, 3)
-	require.False(t, abort3.Load(), "a finished write cancels nothing")
-
+	ibs, vm, abort = newRun(2)
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false)
+	_, err = ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.False(t, ibs.HadInvalidRead(), "the tx's own write wins over the unfinished one")
+	require.False(t, abort.Load(), "no dependency, no cancel")
+	ibs.Close()
+
+	ibs, vm, abort = newRun(2)
 	vm.SetReaderCancel(2, nil)
-	vm.ReadBalance(addr, 2)
-	require.False(t, abort2.Load(), "a removed cancel is not called")
+	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false)
+	_, err = ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.False(t, abort.Load(), "a removed cancel is not set")
+	ibs.Close()
 }

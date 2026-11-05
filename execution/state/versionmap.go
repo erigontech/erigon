@@ -252,14 +252,15 @@ type VersionMap struct {
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
 
+	// readerCancel[txIdx+1] is the abort flag of txIdx's speculative run, set once the run records a read
+	// dependency (its result is void). Sized by InitStamps.
+	readerCancel []atomic.Pointer[atomic.Bool]
+
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
 	// write-once, so it lives in lock-free maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
-	// readerCancel[txIdx+1] is the abort flag of txIdx's speculative run: reading an unfinished write makes
-	// the run's result void, so it stops early. Sized by InitStamps.
-	readerCancel   []atomic.Pointer[atomic.Bool]
 	originAccounts atomic.Pointer[xsync.Map[accounts.Address, *accounts.Account]] // nil ptr = committed-absent
 	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
@@ -728,7 +729,6 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 		res.incarnation = fv.incarnation
 		res.validated = true
 	case FlagEstimate:
-		vm.cancelReader(txIdx)
 	default:
 		panic("unknown flag value")
 	}
@@ -836,7 +836,6 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 		res.incarnation = fv.incarnation
 		res.validated = true
 	case FlagEstimate:
-		vm.cancelReader(txIdx)
 	default:
 		panic("unknown flag value")
 	}
@@ -2367,7 +2366,7 @@ func (vm *VersionMap) SetReaderCancel(txIdx int, abort *atomic.Bool) {
 }
 
 func (vm *VersionMap) cancelReader(txIdx int) {
-	if txIdx+1 >= 0 && txIdx+1 < len(vm.readerCancel) {
+	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.readerCancel) {
 		if abort := vm.readerCancel[txIdx+1].Load(); abort != nil {
 			abort.Store(true)
 		}
