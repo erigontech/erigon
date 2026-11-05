@@ -374,6 +374,14 @@ func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Ac
 }
 
 // LoadOriginAccount returns the committed base account and whether it was seeded.
+// TxCount is the number of txs InitStamps sized the map for (0 before it).
+func (vm *VersionMap) TxCount() int {
+	if vm.stamps == nil {
+		return 0
+	}
+	return vm.stamps.n - 1
+}
+
 // BALAccounts returns the block access list the map was seeded from (nil without one).
 func (vm *VersionMap) BALAccounts() types.BlockAccessList { return vm.bal }
 

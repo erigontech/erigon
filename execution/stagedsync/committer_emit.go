@@ -191,11 +191,14 @@ func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 // baseAccountReaders is how many read txs the BAL prefetch of block-start accounts uses.
 const baseAccountReaders = 8
 
+// baseAccountPrefetchMinTxs is the block size from which the touch bookkeeping falls behind exec without the prefetch.
+const baseAccountPrefetchMinTxs = 1000
+
 // prefetchBaseAccounts reads, in parallel, the block-start values of the accounts a BAL block declares, so the
 // per-tx touch bookkeeping does not read them one by one on the calculator's goroutine.
 func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *state.VersionMap, txNum uint64) {
 	bal := vm.BALAccounts()
-	if len(bal) == 0 || cc.db == nil || cc.asOfReader == nil {
+	if len(bal) == 0 || vm.TxCount() < baseAccountPrefetchMinTxs || cc.db == nil || cc.asOfReader == nil {
 		return
 	}
 	got, err := readBaseAccounts(ctx, bal, baseAccountReaders, func() (state.StateReader, func(), error) {

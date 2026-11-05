@@ -17,8 +17,10 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"sync/atomic"
 	"testing"
 
@@ -423,4 +425,33 @@ func TestReadBaseAccounts_ReadsEveryBALAccountOnce(t *testing.T) {
 	require.Nil(t, got[accounts.InternAddress(bal[1].Address)], "an absent account is cached as absent")
 	require.Equal(t, int32(4), opened.Load())
 	require.Equal(t, int32(len(bal)), reads.Load())
+}
+
+type countingRoDB struct {
+	kv.TemporalRwDB
+	opens atomic.Int32
+}
+
+func (d *countingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	d.opens.Add(1)
+	return nil, errors.New("no db")
+}
+
+// TestPrefetchBaseAccounts_SkipsBlocksWithFewTxs pins that only a block with many txs prefetches its BAL accounts: in a
+// small block the touch bookkeeping keeps up, and extra readers only slow exec down.
+func TestPrefetchBaseAccounts_SkipsBlocksWithFewTxs(t *testing.T) {
+	t.Parallel()
+
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
+	for _, tc := range []struct {
+		txs       int
+		wantReads bool
+	}{{txs: 20, wantReads: false}, {txs: 2 * baseAccountPrefetchMinTxs, wantReads: true}} {
+		vm := state.NewVersionMap(bal)
+		vm.InitStamps(tc.txs - 1)
+		db := &countingRoDB{}
+		cc := &commitmentCalculator{db: db, asOfReader: &asOfStateReader{}, baseAccounts: map[accounts.Address]*accounts.Account{}}
+		cc.prefetchBaseAccounts(t.Context(), vm, 0)
+		require.Equal(t, tc.wantReads, db.opens.Load() > 0, "%d txs", tc.txs)
+	}
 }
