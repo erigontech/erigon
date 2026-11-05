@@ -363,6 +363,18 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 }
 
+// releaseRequested forgets hashes whose request was not sent and that have no alternate to retry, so the
+// next announcement asks at once; hashes with alternates retry one after the timeout.
+func (f *Fetch) releaseRequested(hashes Hashes) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		if r, ok := f.requested.Get(hashes[i : i+32]); ok && len(r.alternates) == 0 {
+			f.requested.Delete(hashes[i : i+32])
+		}
+	}
+}
+
 // keepAlternate puts a peer whose retry request was not sent back among the hashes' alternates.
 func (f *Fetch) keepAlternate(peer fetchPeer, hashes Hashes, sent time.Time) {
 	f.requestedLock.Lock()
@@ -766,6 +778,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 		if len(unknownHashes) > 0 {
 			if err := f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
+				f.releaseRequested(unknownHashes)
 				return err
 			}
 		}
@@ -795,6 +808,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 
 		if len(unknownHashes) > 0 {
 			if err := f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
+				f.releaseRequested(unknownHashes)
 				return err
 			}
 		}
