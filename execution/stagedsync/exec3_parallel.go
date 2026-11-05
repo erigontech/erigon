@@ -3664,6 +3664,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+	if be.poolTasks == nil && len(be.tasks) > 0 && originSeed && be.versionMap.HasBAL {
+		go pe.seedBALOrigins(ctx, be.versionMap, be.blockNum)
+	}
 	if be.poolTasks == nil && len(be.tasks) > 0 {
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
@@ -3748,4 +3751,43 @@ func init() {
 		runtime.SetMutexProfileFraction(1)
 		runtime.SetBlockProfileRate(10_000)
 	}
+}
+
+// originSeed is a probe: a BAL block seeds its accounts' pre-block values into the version map's origin layer when
+// dispatch starts, so exec reads them lock-free instead of from sd.mem.
+var originSeed = dbg.EnvBool("ORIGIN_SEED", false)
+
+func (pe *parallelExecutor) seedBALOrigins(ctx context.Context, vm *state.VersionMap, blockNum uint64) {
+	bal := vm.BALAccounts()
+	const workers = 8
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			tx, err := pe.cfg.db.BeginTemporalRo(ctx) //nolint
+			if err != nil {
+				return
+			}
+			defer tx.Rollback()
+			r := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(tx)), blockNum)
+			for i := w; i < len(bal); i += workers {
+				if ctx.Err() != nil {
+					return
+				}
+				a := accounts.InternAddress(bal[i].Address)
+				if _, seeded := vm.LoadOriginAccount(a); seeded {
+					continue
+				}
+				acc, err := r.ReadAccountData(a)
+				if err != nil {
+					return
+				}
+				if acc != nil {
+					c := *acc
+					acc = &c
+				}
+				vm.StoreOriginAccount(a, acc)
+			}
+		})
+	}
+	wg.Wait()
 }
