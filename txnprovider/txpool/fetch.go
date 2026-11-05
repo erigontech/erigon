@@ -54,6 +54,9 @@ const maxFetchAlternates = 4
 
 const maxFetchRequests = 64 * 1024
 
+// maxRetryRequestsPerPeer keeps one sweep well under sentry's 32-message outbound queue, which drops the oldest when full.
+const maxRetryRequestsPerPeer = 8
+
 type fetchPeer struct {
 	sentry sentryproto.SentryClient
 	peerID [64]byte
@@ -225,11 +228,44 @@ func (f *Fetch) retryTimedOutRequests(ctx context.Context) {
 	f.requestFromAlternates(ctx, tx)
 }
 
+// retryPlan groups a sweep's retries for one peer into requests a responder answers in full.
+type retryPlan struct {
+	reqs []Hashes
+	size int // announced bytes in the last request
+}
+
+// add reports false when the hash needs a request beyond maxRetryRequestsPerPeer.
+func (p *retryPlan) add(hash []byte, size int) bool {
+	if n := len(p.reqs); n == 0 || len(p.reqs[n-1]) == 256*32 || p.size >= p2pTxPacketLimit {
+		if n == maxRetryRequestsPerPeer {
+			return false
+		}
+		p.reqs, p.size = append(p.reqs, nil), 0
+	}
+	p.reqs[len(p.reqs)-1] = append(p.reqs[len(p.reqs)-1], hash...)
+	p.size += size
+	return true
+}
+
+// announcedSize is the size the peer announced for the hash, 0 if unknown.
+func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
+	if f.announcements == nil {
+		return 0
+	}
+	k := announceKey(hash, peerHash(gointerfaces.ConvertHashToH512(peer.peerID)))
+	info, ok := f.announcements.Get(k[:])
+	if !ok {
+		return 0
+	}
+	return int(info.size)
+}
+
 // requestFromAlternates asks the next announcer for each hash whose request timed out.
 func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	f.requestedLock.Lock()
 	now := f.now()
-	retries := map[fetchPeer]Hashes{}
+	plans := map[fetchPeer]*retryPlan{}
+	var deferred []pendingFetch
 	for len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
 		p := f.pending[0]
 		f.pending = f.pending[1:]
@@ -238,23 +274,34 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			continue
 		}
 		next := r.alternates[0]
+		plan := plans[next]
+		if plan == nil {
+			plan = &retryPlan{}
+			plans[next] = plan
+		}
+		if !plan.add(p.hash[:], f.announcedSize(p.hash[:], next)) {
+			deferred = append(deferred, p) // keeps its alternate for the next sweep
+			continue
+		}
 		r.alternates = r.alternates[1:]
 		r.at, r.peer = now, next
 		f.pending = append(f.pending, pendingFetch{p.hash, now})
-		retries[next] = append(retries[next], p.hash[:]...)
 	}
+	f.pending = append(deferred, f.pending...)
 	f.requestedLock.Unlock()
 
-	for peer, hashes := range retries {
-		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
-		if err != nil {
-			unknownHashes = hashes // the alternate is already taken; asking for a known txn costs only a dup
-		}
-		if len(unknownHashes) == 0 {
-			continue
-		}
-		if err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), unknownHashes); err != nil {
-			f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
+	for peer, plan := range plans {
+		for _, hashes := range plan.reqs {
+			unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+			if err != nil {
+				unknownHashes = hashes // the alternate is already taken; asking for a known txn costs only a dup
+			}
+			if len(unknownHashes) == 0 {
+				continue
+			}
+			if err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), unknownHashes); err != nil {
+				f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
+			}
 		}
 	}
 }

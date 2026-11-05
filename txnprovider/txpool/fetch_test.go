@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -875,11 +876,15 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 }
 
 func (a *announceFetchTest) announce(t *testing.T, peer [64]byte, hashes ...[32]byte) {
+	a.announceSized(t, peer, 100, hashes...)
+}
+
+func (a *announceFetchTest) announceSized(t *testing.T, peer [64]byte, size uint32, hashes ...[32]byte) {
 	var txTypes []byte
 	var sizes []uint32
 	var concat []byte
 	for _, h := range hashes {
-		txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+		txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, size), append(concat, h[:]...)
 	}
 	buf := make([]byte, announcementsLen(txTypes, sizes, concat))
 	announcement := buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
@@ -1160,4 +1165,36 @@ func TestFullPendingDoesNotEvictAnotherPendingRequest(t *testing.T) {
 	r, ok := a.fetch.requested.Get(y[:])
 	require.True(t, ok, "y is still pending, so its request must stay")
 	require.Equal(t, []fetchPeer{{a.sentryClient, peerB}}, r.alternates)
+}
+
+func TestRetryRequestsFitTheResponseLimit(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	blob1, blob2, peerA, peerB := [32]byte{0xb1}, [32]byte{0xb2}, [64]byte{0xa}, [64]byte{0xb}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, blob1)
+	a.announceSized(t, peerA, blobTxnSize, blob2)
+	a.announceSized(t, peerB, blobTxnSize, blob1, blob2)
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerB, peerB}, a.requestedFrom, "a responder stops at p2pTxPacketLimit, so each blob needs its own request")
+}
+
+func TestRetryRequestsPerPeerArePaced(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, (maxRetryRequestsPerPeer+2)*256)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	for c := range slices.Chunk(hashes, 1000) {
+		a.announce(t, peerA, c...)
+		a.announce(t, peerB, c...)
+	}
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a sweep must not overflow the peer's outbound queue")
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes in the next sweep")
 }
