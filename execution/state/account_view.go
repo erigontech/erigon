@@ -147,6 +147,14 @@ func (v *VersionedAccountView) exists() bool {
 	if v.destroyed() {
 		return false
 	}
+	return v.recordExists()
+}
+
+// recordExists reports whether any record of the account is present in the
+// cascade — a version-map field cell, the version-map address cell, or the base —
+// ignoring lifecycle. It is the data-only existence the commitment read uses;
+// exists() layers the lifecycle destroyed() verdict on top for execution reads.
+func (v *VersionedAccountView) recordExists() bool {
 	if v.vm != nil {
 		if _, ok := versionedUpdateBalance(v.vm, v.addr, v.txIdx); ok {
 			return true
@@ -186,16 +194,36 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil
 	}
+	acc := v.compose()
+	return &acc
+}
+
+// compose overlays the version-map field cells on the base record, reading raw
+// cells (no destroyed() gate) — the caller has already decided existence, so a
+// destroyed-but-preserved account (EIP-8246 no-burn) keeps its surviving fields.
+// For a non-destroyed account this equals the lifecycle getters. A field with no
+// cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
+func (v *VersionedAccountView) compose() accounts.Account {
 	v.ensureBase()
 	acc := accounts.NewAccount()
 	if v.baseAcc != nil {
 		acc = *v.baseAcc
 	}
-	acc.Balance = v.GetBalance()
-	acc.Nonce = v.GetNonce()
-	acc.Incarnation = v.GetIncarnation()
-	acc.CodeHash = v.GetCodeHash()
-	return &acc
+	if v.vm != nil {
+		if u, _, ok := v.vm.ReadBalance(v.addr, v.txIdx); ok {
+			acc.Balance = u
+		}
+		if u, _, ok := v.vm.ReadNonce(v.addr, v.txIdx); ok {
+			acc.Nonce = u
+		}
+		if u, _, ok := v.vm.ReadIncarnation(v.addr, v.txIdx); ok {
+			acc.Incarnation = u
+		}
+		if ch, _, ok := v.vm.ReadCodeHash(v.addr, v.txIdx); ok {
+			acc.CodeHash = ch
+		}
+	}
+	return acc
 }
 
 var _ accounts.AccountView = (*VersionedAccountView)(nil)

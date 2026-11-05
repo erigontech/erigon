@@ -3864,6 +3864,7 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 				}, stored)
 				clock := eth_clock.NewMockEthereumClock(ctrl)
 				genesisTime := uint64(time.Now().Unix()) - (stored.Message.ProposalSlot-1)*config.SecondsPerSlot
+				clock.EXPECT().Now().DoAndReturn(time.Now).AnyTimes()
 				clock.EXPECT().GenesisTime().Return(genesisTime).AnyTimes()
 				clock.EXPECT().GetCurrentSlot().Return(stored.Message.ProposalSlot - 1).AnyTimes()
 				clock.EXPECT().GetCurrentEpoch().Return((stored.Message.ProposalSlot - 1) / config.SlotsPerEpoch).AnyTimes()
