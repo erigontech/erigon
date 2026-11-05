@@ -1324,3 +1324,13 @@ func TestFailedRetrySendKeepsThePeer(t *testing.T) {
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerB, peerB}, a.requestedFrom, "the last alternate is asked again after a failed send")
 }
+
+func TestExhaustedRequestLeavesTheCache(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA := [32]byte{0xe8}, [64]byte{0xa}
+	a.announce(t, peerA, hash)
+	a.timeoutSweep()
+	_, ok := a.fetch.requested.Get(hash[:])
+	require.False(t, ok, "a timed-out request with no alternates must not hold a cache slot")
+}

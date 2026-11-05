@@ -318,6 +318,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		}
 		r.seenKnown = false
 		if len(r.alternates) == 0 {
+			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
 			continue
 		}
 		next := r.alternates[0]
