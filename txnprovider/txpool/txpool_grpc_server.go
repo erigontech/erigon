@@ -222,8 +222,14 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 			continue
 		}
 
-		reply.Imported[i] = mapDiscardReasonToProto(discardReasons[j])
-		reply.Errors[i] = discardReasons[j].String()
+		reason := discardReasons[j]
+		if reason == txpoolcfg.DuplicateHash {
+			// The membership check and admission are not atomic. Duplicates found
+			// during admission must produce the same RPC reply as those found earlier.
+			reason = txpoolcfg.AlreadyKnown
+		}
+		reply.Imported[i] = mapDiscardReasonToProto(reason)
+		reply.Errors[i] = reason.String()
 		j++
 	}
 	return reply, nil

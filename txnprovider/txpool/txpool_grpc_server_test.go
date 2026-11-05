@@ -136,6 +136,26 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
+func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	mockPool := &addMockTxPool{
+		knownByCall: []bool{false},
+		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash},
+	}
+	server := NewGrpcServer(ctx, mockPool, mdbxtest.NewTestPoolDB(t), nil, uint256.Int{1}, log.New())
+	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
+
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp}})
+	require.NoError(t, err)
+	require.Equal(t, 1, mockPool.addLocalSlotsLen)
+	require.Equal(t, &txpoolproto.AddReply{
+		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
+		Errors:   []string{"already known"},
+	}, reply)
+}
+
 func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 	for _, persisted := range []bool{false, true} {
 		name := "memory only"
