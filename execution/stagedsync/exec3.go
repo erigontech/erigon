@@ -211,7 +211,7 @@ func ExecV3(ctx context.Context,
 		doms.SetDeferCommitmentUpdates(false)
 		// Deferred commitment updates batch commitment to block boundaries rather than
 		// per-transaction, cutting re-org validation overhead.
-		if isForkValidation || isApplyingBlocks {
+		if (isForkValidation || isApplyingBlocks) && os.Getenv("SF_NODEFER") == "" {
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
@@ -347,7 +347,7 @@ func execV3Serial(ctx context.Context,
 		doms.EnableParaTrieDB(cfg.db)
 		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
-		if isForkValidation {
+		if isForkValidation && os.Getenv("SF_NODEFER") == "" {
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)

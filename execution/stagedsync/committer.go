@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"math"
 	"runtime/pprof"
 	"sync"
@@ -811,6 +812,12 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	emitErr := cc.emitTouched(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
+	if os.Getenv("STEP_FOLD_TRACE") != "" {
+		sfCheckStale(cc, t)
+	}
+	if os.Getenv("STEP_FOLD_TRACE") != "" {
+		fmt.Printf("SFTRACE emit blk=%d txNum=%d accs=%d slots=%d\n", t.blockNum, t.lastTxNum, len(cc.touchedAccounts), len(cc.touchedStorage))
+	}
 	if !m.midBlock || stepFoldIncremental {
 		cc.clearTouched()
 	}
@@ -844,6 +851,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	mismatch := m.checkRoot && !bytes.Equal(rh, t.stateRoot[:])
+	if os.Getenv("STEP_FOLD_TRACE") != "" {
+		fmt.Printf("SFTRACE blk=%d txNum=%d mid=%v owns=%v perBlockFrom=%d root=%x mismatch=%v\n", t.blockNum, t.lastTxNum, m.midBlock, cc.ownsChangeset(t.blockNum), cc.perBlockFrom, rh[:4], mismatch)
+	}
 	if flushOwn != nil {
 		if mismatch {
 			cc.doms.GetCommitmentContext().ResetPendingUpdates()
@@ -1047,3 +1057,55 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed
 // tx, so every read resolves on the worker's own tx and the fold need not serialize.
 func (r *asOfStateReader) BindsWorkerTx() bool { return true }
+
+var sfLast = map[accounts.Address]uint64{}
+var sfLastBlk uint64
+
+// sfCheckStale prints earlier-folded accounts whose value changed since their last fold but are not touched now.
+func sfCheckStale(cc *commitmentCalculator, t commitTarget) {
+	if t.blockNum != sfLastBlk {
+		clear(sfLast)
+		clear(sfLastSlot)
+		sfLastBlk = t.blockNum
+	}
+	now := cc.curVersionMap.View(t.lastTxNum, cc.asOfReader.dr.StateReaderAt(t.lastTxNum+1))
+	for a, at := range sfLast {
+		if _, ok := cc.touchedAccounts[a]; ok {
+			continue
+		}
+		then := cc.curVersionMap.View(at, cc.asOfReader.dr.StateReaderAt(at+1))
+		an, okn := now.GetAccount(a)
+		at0, okt := then.GetAccount(a)
+		if okn != okt || an.Balance != at0.Balance || an.Nonce != at0.Nonce || an.CodeHash != at0.CodeHash {
+			fmt.Printf("SFSTALE blk=%d fold=%d addr=%x lastFold=%d then=(%v %v n%d) now=(%v %v n%d)\n", t.blockNum, t.lastTxNum, a.Value(), at, okt, at0.Balance.String(), at0.Nonce, okn, an.Balance.String(), an.Nonce)
+		}
+	}
+	for a := range cc.touchedAccounts {
+		sfLast[a] = t.lastTxNum
+	}
+	for k, at := range sfLastSlot {
+		if m := cc.touchedStorage[k.a]; m != nil {
+			if _, ok := m[k.s]; ok {
+				continue
+			}
+		}
+		then := cc.curVersionMap.View(at, cc.asOfReader.dr.StateReaderAt(at+1))
+		vn, okn := now.GetStorage(k.a, k.s)
+		vt, okt := then.GetStorage(k.a, k.s)
+		if okn != okt || vn != vt {
+			fmt.Printf("SFSTALE slot blk=%d fold=%d addr=%x lastFold=%d then=%v now=%v\n", t.blockNum, t.lastTxNum, k.a.Value(), at, vt.String(), vn.String())
+		}
+	}
+	for a, m := range cc.touchedStorage {
+		for sl := range m {
+			sfLastSlot[sfSlot{a, sl}] = t.lastTxNum
+		}
+	}
+}
+
+type sfSlot struct {
+	a accounts.Address
+	s accounts.StorageKey
+}
+
+var sfLastSlot = map[sfSlot]uint64{}
