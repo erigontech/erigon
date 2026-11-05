@@ -1210,3 +1210,18 @@ func TestExhaustedRequestLeavesTheCache(t *testing.T) {
 	_, ok := a.fetch.requested.Get(hash[:])
 	require.False(t, ok, "a timed-out request with no alternates must not hold a cache slot")
 }
+
+func TestFailedFirstSendReleasesTheHash(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xe9}, [64]byte{0xa}, [64]byte{0xb}
+	a.sendErr = errors.New("sentry busy")
+	buf := make([]byte, announcementsLen([]byte{types.BlobTxType}, []uint32{100}, hash[:]))
+	ann := buf[:encodeAnnouncements([]byte{types.BlobTxType}, []uint32{100}, hash[:], buf)]
+	_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
+		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: ann, PeerId: gointerfaces.ConvertHashToH512(peerA),
+	}, a.sentryClient)
+	a.sendErr = nil
+	a.announce(t, peerB, hash)
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "an unsent request must not hold the hash")
+}
