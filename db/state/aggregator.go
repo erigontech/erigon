@@ -730,9 +730,7 @@ func (a *Aggregator) Close() {
 		return
 	}
 	a.ctxCancel()
-	if a.metricsCollector != nil {
-		a.metricsCollector.Stop()
-	}
+	a.metricsCollector.Stop()
 
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
