@@ -168,7 +168,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 	// them until the runner OOMs. All collector access is nil-safe.
 	if dbg.KVReadLevelledMetrics {
 		a.metricsCollector = kvmetrics.NewCollector()
-		a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
+		a.metricsCollector.Start()
 	}
 	return a, nil
 }
