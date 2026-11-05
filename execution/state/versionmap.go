@@ -247,8 +247,8 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 // sameCellValue compares accounts with Account.Equals: their Root is derived by commitment, not part of the value.
 func sameCellValue(a, b any) bool {
 	if x, ok := a.(*accounts.Account); ok {
-		y, ok := b.(*accounts.Account)
-		return ok && (x == y || (x != nil && y != nil && x.Equals(y)))
+		y, _ := b.(*accounts.Account)
+		return x == y || eqAccount(x, y)
 	}
 	return reflect.DeepEqual(a, b)
 }
