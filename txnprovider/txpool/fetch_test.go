@@ -1015,3 +1015,25 @@ func TestHashDroppedFromPendingIsRequestedAgain(t *testing.T) {
 	a.announce(t, peerA, hot)
 	require.Greater(t, len(a.requestedFrom), before, "a hash whose retry was dropped is requested on its next announcement")
 }
+
+func TestFullPendingDoesNotEvictAnotherPendingRequest(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	x, y, peerA, peerB := [32]byte{0xa1}, [32]byte{0xa2}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, x)
+	a.announce(t, peerA, y)
+	a.announce(t, peerB, y)
+	a.announce(t, peerA, x) // x is now the most recently used, y the least
+	hashes := make([][32]byte, 0, 1000)
+	for i := range maxFetchRequests - 1 {
+		var h [32]byte
+		binary.BigEndian.PutUint64(h[:], uint64(i)+1)
+		if hashes = append(hashes, h); len(hashes) == cap(hashes) || i == maxFetchRequests-2 {
+			a.announce(t, [64]byte{0xc}, hashes...)
+			hashes = hashes[:0]
+		}
+	}
+	r, ok := a.fetch.requested.Get(y[:])
+	require.True(t, ok, "y is still pending, so its request must stay")
+	require.Equal(t, []fetchPeer{{a.sentryClient, peerB}}, r.alternates)
+}
