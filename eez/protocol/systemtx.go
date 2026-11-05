@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -32,11 +31,11 @@ const SystemTxType byte = 0x76
 
 // The envelope carries no gas fields. Under rollup0 a system transaction
 // reserves SystemTxGasLimit like any transaction; under rollupX it executes
-// with the gas its block has left, at most RollupXSystemTxGasCap, the
-// EIP-7825 cap.
+// with the gas its block has left, at most RollupXSystemTxGasCap, the Osaka
+// value of the EIP-7825 cap whatever a later fork makes of that cap.
 const (
 	SystemTxGasLimit      uint64 = 2_000_000
-	RollupXSystemTxGasCap uint64 = params.MaxTxnGasLimit
+	RollupXSystemTxGasCap uint64 = 16_777_216
 )
 
 var (

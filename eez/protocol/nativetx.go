@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -37,8 +36,10 @@ const (
 )
 
 const (
-	// NativeTxGasCap bounds the gas of a native transaction: the EIP-7825 cap.
-	NativeTxGasCap = params.MaxTxnGasLimit
+	// NativeTxGasCap bounds the gas of a native transaction: the Osaka value of
+	// the EIP-7825 cap, fixed by the envelope version whatever a later fork
+	// makes of that cap.
+	NativeTxGasCap uint64 = 16_777_216
 	// HistoryTxGasCap bounds the gas of a history update.
 	HistoryTxGasCap uint64 = 2_000_000
 	// MaxHistoryBlocks bounds the L1 blocks one history update imports.
