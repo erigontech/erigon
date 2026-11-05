@@ -351,30 +351,37 @@ func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
 	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
 }
 
-func TestSoleAccount_SwapOnlySlotThenGrow(t *testing.T) {
+// When the whole state is one account, the root cell is that account's leaf. Each case
+// changes that leaf, and the next batch must still find everything under it.
+func TestSoleAccount_RootLeafAcrossBatches(t *testing.T) {
 	t.Parallel()
-	a := addrHex(findAddressForNibble(3, 4245))
-	old := storageLocsForNibble(0x8, 1, 21)
-	swapped := storageLocsForNibble(0x2, 1, 23)
-	fresh := storageLocsForNibble(0xc, 1, 29)
-
-	ub1 := NewUpdateBuilder().Balance(a, 1)
-	ub1.Storage(a, old[0], old[0])
-	ub2 := NewUpdateBuilder().Balance(a, 1)
-	ub2.DeleteStorage(a, old[0])
-	ub2.Storage(a, swapped[0], swapped[0])
-	ub3 := NewUpdateBuilder().Balance(a, 1)
-	ub3.Storage(a, fresh[0], fresh[0])
-
-	ubf := NewUpdateBuilder().Balance(a, 1)
-	ubf.Storage(a, swapped[0], swapped[0])
-	ubf.Storage(a, fresh[0], fresh[0])
-	kf, uf := ubf.Build()
-
-	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
-	carried, restored := lifecycleRoots(t, ub1, ub2, ub3)
-	require.Equal(t, want, carried, "carried trie navigated the swapped slot by the slot it replaced")
-	require.Equal(t, want, restored, "state-restored trie navigated the swapped slot by the slot it replaced")
+	a := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
+	slot := func(prefix []byte, i int) string { return slotLocsForHexPrefix(prefix, i+1, 1)[i] }
+	ub := NewUpdateBuilder
+	for _, tc := range []struct {
+		name    string
+		batches []*UpdateBuilder
+		final   *UpdateBuilder
+	}{
+		{
+			name: "swap_only_slot_then_grow",
+			batches: []*UpdateBuilder{
+				ub().Balance(a, 1).Storage(a, slot([]byte{8}, 0), "01"),
+				ub().DeleteStorage(a, slot([]byte{8}, 0)).Storage(a, slot([]byte{2}, 0), "02"),
+				ub().Storage(a, slot([]byte{0xc}, 0), "03"),
+			},
+			final: ub().Balance(a, 1).Storage(a, slot([]byte{2}, 0), "02").Storage(a, slot([]byte{0xc}, 0), "03"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			kf, uf := tc.final.Build()
+			want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+			carried, restored := lifecycleRoots(t, tc.batches...)
+			require.Equal(t, want, carried, "carried trie")
+			require.Equal(t, want, restored, "state-restored trie")
+		})
+	}
 }
 
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
