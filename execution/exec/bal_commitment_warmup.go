@@ -345,8 +345,8 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 }
 
 // logBatchPrefetch logs a finished batch prefetch, as a warning when it failed; a cancelled one is not logged.
-func logBatchPrefetch(what string, keys int, started time.Time, err error) {
-	if errors.Is(err, context.Canceled) {
+func logBatchPrefetch(ctx context.Context, what string, keys int, started time.Time, err error) {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return
 	}
 	if err != nil {
@@ -379,14 +379,14 @@ func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList
 		keys += len(slots)
 		g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots) })
 	}
-	logBatchPrefetch("state", keys, started, g.Wait())
+	logBatchPrefetch(ctx, "state", keys, started, g.Wait())
 }
 
 // prefetchBALCommitment reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie,
 // level by level since a branch decides whether the next level exists.
 func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 	started := time.Now()
-	logBatchPrefetch("trie", len(keys), started, prefetchCommitment(ctx, db, keys))
+	logBatchPrefetch(ctx, "trie", len(keys), started, prefetchCommitment(ctx, db, keys))
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
