@@ -190,17 +190,22 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		if ok && peer == r.peer && len(r.alternates) > 0 {
 			continue
 		}
+		// An announcement flood: forget the oldest request before the insert, so a full LRU evicts no other
+		// pending request, and the forgotten hash is asked again on its next announcement.
+		if len(f.pending) >= maxFetchRequests {
+			if old, ok := f.requested.Get(f.pending[0].hash[:]); ok && old.at.Equal(f.pending[0].at) {
+				f.requested.Delete(f.pending[0].hash[:])
+			}
+			f.pending = f.pending[1:]
+			if ok {
+				r, ok = f.requested.Get(h)
+			}
+		}
 		if ok {
 			r.alternates = slices.DeleteFunc(r.alternates, func(a fetchPeer) bool { return a == peer })
 			r.at, r.peer = now, peer
 		} else {
 			f.requested.Set(h, &fetchRequest{at: now, peer: peer})
-		}
-		if len(f.pending) >= maxFetchRequests { // an announcement flood: forget the oldest request, so its next announcement asks again
-			if r, ok := f.requested.Get(f.pending[0].hash[:]); ok && r.at.Equal(f.pending[0].at) {
-				f.requested.Delete(f.pending[0].hash[:])
-			}
-			f.pending = f.pending[1:]
 		}
 		f.pending = append(f.pending, pendingFetch{[32]byte(h), now})
 		toRequest = append(toRequest, h...)
