@@ -156,10 +156,11 @@ func TestChainEndpointRunCommitsAHeadWithNoCommitments(t *testing.T) {
 	require.Equal(t, beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch, *slot)
 }
 
-// A block already in the local database ends the remote walk only if its blobs are missing. The
-// walk reads the local block from storage, which keeps no transactions, so the block's own hash is
-// not the root its sidecars are stored under. Using that hash, every local blob-bearing block with
-// transactions looked incomplete and was downloaded again, with its blobs, from the endpoint.
+// The walk skips a block already in the local database when its blobs are stored, and fetches it
+// from the endpoint only when they are missing. The walk reads the local block from storage, which
+// keeps no transactions, so the block's own hash is not the root its sidecars are stored under.
+// Using that hash, every local blob-bearing block with transactions looked incomplete and was
+// downloaded again, with its blobs, from the endpoint.
 func TestChainEndpointRunSkipsALocalBlockWhoseBlobsAreStored(t *testing.T) {
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Mainnet)
 	require.NoError(t, err)
