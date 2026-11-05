@@ -2523,7 +2523,12 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 			keys := make([]*ecdsa.PrivateKey, 6)
 			alloc := types.GenesisAlloc{}
 			for i := range keys {
-				key, err := crypto.GenerateKey()
+				var kb [32]byte
+				for j := range kb {
+					kb[j] = byte(rng.IntN(256))
+				}
+				kb[0] |= 1
+				key, err := crypto.ToECDSA(kb[:])
 				require.NoError(t, err)
 				keys[i] = key
 				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
