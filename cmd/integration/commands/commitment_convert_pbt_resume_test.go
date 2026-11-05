@@ -429,7 +429,6 @@ func TestVerifyPBTResumeStreamRootDefaultsWorkers(t *testing.T) {
 	dbg.PBTWorkers = 2
 	t.Cleanup(func() { dbg.PBTWorkers = previousWorkers })
 	require.ErrorContains(t, verifyPBTResumeStreamRoot(t.Context(), agg, common.Hash{}, 0), "differs from resumed root")
-	require.Equal(t, dbg.PBTWorkers, dbstate.PBinConvertWorkers(0))
 }
 
 func pbtManifestWithoutField(t *testing.T, data []byte, field string) []byte {

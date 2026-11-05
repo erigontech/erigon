@@ -23,7 +23,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -172,7 +171,5 @@ func TestPBTManifestProgressCountsFinishedFiles(t *testing.T) {
 		done = append(done, value)
 	})
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), done[0])
-	slices.Sort(done)
 	require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7, 8}, done)
 }

@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"bytes"
+	"context"
 	"runtime"
 	"sort"
 	"sync/atomic"
@@ -111,25 +112,30 @@ func TestPBinReleasedTaskRowsUnreachable(t *testing.T) {
 	require.NotEmpty(t, paths)
 	stats := new(VerifyStats)
 	verifier.SetVerifyStats(stats)
+	require.NoError(t, verifier.verifyChains(t.Context(), 2, func(context.Context) (commitment.PatriciaContext, func()) {
+		return &pbinRangeContext{PatriciaContext: base, records: corpus.snapshot}, nil
+	}))
+	require.Greater(t, len(verifier.verifiedChains), 2)
+	require.Equal(t, stats.TaskRowsLoaded.Load(), stats.TaskRowsReleased.Load())
+	require.Zero(t, stats.LiveRows.Load())
+
+	released := NewTrie(base).newVerifier()
+	released.ctx = &pbinRangeContext{PatriciaContext: base, records: corpus.snapshot}
 	var finalized atomic.Uint64
-	verifier.ctx = &pbinRangeContext{PatriciaContext: base, records: corpus.snapshot}
-	require.NoError(t, verifier.loadVerifyRows(paths[0]))
-	for _, data := range verifier.verifyRows {
+	require.NoError(t, released.loadVerifyRows(paths[0]))
+	for _, data := range released.verifyRows {
 		counter := &finalized
 		runtime.SetFinalizer(&data[0], func(*byte) { counter.Add(1) })
 	}
-	emitted := uint64(len(verifier.verifyRows))
-	verifier.releaseVerifyRows()
+	emitted := uint64(len(released.verifyRows))
+	released.releaseVerifyRows()
 	require.Positive(t, emitted)
-	require.Equal(t, uint64(1), stats.TaskRowsLoaded.Load())
-	require.Equal(t, stats.TaskRowsLoaded.Load(), stats.TaskRowsReleased.Load())
-	require.Zero(t, stats.LiveRows.Load())
 	for range 10 {
 		runtime.GC()
 		time.Sleep(10 * time.Millisecond)
 	}
 	retained := emitted - finalized.Load()
-	runtime.KeepAlive(verifier)
+	runtime.KeepAlive(released)
 	require.Zero(t, retained, "released task row buffers remain reachable: retained=%d, emitted=%d, finalized=%d, rows_live=%d", retained, emitted, finalized.Load(), stats.LiveRows.Load())
 }
 
