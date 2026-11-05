@@ -109,7 +109,8 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
-	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](int(c.beaconConfig.MaxRequestBlobSidecarsElectra), 40)
+	currentVersion := max(clparams.DenebVersion, c.beaconConfig.GetCurrentStateVersion(c.ethClock.GetCurrentEpoch()))
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](c.beaconConfig.MaxRequestBlobSidecarsByVersion(currentVersion), 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}

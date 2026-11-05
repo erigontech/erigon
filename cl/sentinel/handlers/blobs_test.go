@@ -31,6 +31,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -131,22 +133,40 @@ func TestBlobsByIdentifiersSkipsDuplicatesAndUnavailable(t *testing.T) {
 
 func TestBlobsByIdentifiersRequestLimit(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	for _, count := range []int{int(cfg.MaxRequestBlobSidecarsElectra), int(cfg.MaxRequestBlobSidecarsElectra) + 1} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
-			_, db := setupStore(t)
-			c := &ConsensusHandlers{ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg, rateLimiter: newPeerRateLimiter()}
-			req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](count, 40)
-			for range count {
-				req.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{0xff}})
+	for _, tc := range []struct {
+		name  string
+		epoch uint64
+		limit int
+	}{
+		{"before Deneb", cfg.DenebForkEpoch - 1, int(cfg.MaxRequestBlobSidecars)},
+		{"Deneb", cfg.ElectraForkEpoch - 1, int(cfg.MaxRequestBlobSidecars)},
+		{"Electra", cfg.ElectraForkEpoch, int(cfg.MaxRequestBlobSidecarsElectra)},
+		{"Fulu", cfg.FuluForkEpoch, int(cfg.MaxRequestBlobSidecarsElectra)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, count := range []int{tc.limit, tc.limit + 1} {
+				t.Run(fmt.Sprint(count), func(t *testing.T) {
+					_, db := setupStore(t)
+					clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+					clock.EXPECT().GetCurrentEpoch().Return(tc.epoch).AnyTimes()
+					c := &ConsensusHandlers{
+						ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg,
+						ethClock: clock, rateLimiter: newPeerRateLimiter(),
+					}
+					req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](count, 40)
+					for range count {
+						req.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{0xff}})
+					}
+					stream := newHandlerTestStream(t, communication.BlobSidecarByRootProtocolV1, req)
+					err := c.blobsSidecarsByIdsHandlerDeneb(stream)
+					if count > tc.limit {
+						require.Error(t, err)
+					} else {
+						require.NoError(t, err)
+					}
+					require.Zero(t, stream.response.Len())
+				})
 			}
-			stream := newHandlerTestStream(t, communication.BlobSidecarByRootProtocolV1, req)
-			err := c.blobsSidecarsByIdsHandlerDeneb(stream)
-			if uint64(count) > cfg.MaxRequestBlobSidecarsElectra {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-			require.Zero(t, stream.response.Len())
 		})
 	}
 }
