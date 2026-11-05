@@ -112,6 +112,7 @@ func requireAcceptedTopicScoreParams(t *testing.T, topic *pubsub.Topic, params *
 }
 
 func TestTopicScoreParamsAreAcceptedByGossipsub(t *testing.T) {
+	topic := newScoredTopicForTest(t)
 	for _, preset := range []string{"mainnet", "minimal"} {
 		t.Run(preset, func(t *testing.T) {
 			networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
@@ -120,7 +121,6 @@ func TestTopicScoreParamsAreAcceptedByGossipsub(t *testing.T) {
 			}
 			for _, activeValidators := range []uint64{0, 1, 3, 64, 2047, 2048, 1_000_000} {
 				t.Run(strconv.FormatUint(activeValidators, 10), func(t *testing.T) {
-					topic := newScoredTopicForTest(t)
 					g := &GossipManager{beaconConfig: beaconConfig, networkConfig: networkConfig, activeIndicies: activeValidators}
 					for _, name := range []string{
 						gossipnames.TopicNameBeaconBlock,
