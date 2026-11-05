@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -177,6 +178,36 @@ func TestFindFilesWithVersionsByPattern_InvalidPattern(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("expected ok == false on error, got true")
+	}
+}
+
+func TestFindFilesWithVersionsByPattern_GlobMetaInDir(t *testing.T) {
+	names := []string{"dd[1]", "dd["}
+	if runtime.GOOS != "windows" {
+		names = append(names, "dd?", "dd*", `dd\x`)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "ddZ"), 0o755); err != nil {
+		t.Fatalf("failed to create sibling dir: %v", err)
+	}
+	if err := touch(filepath.Join(root, "ddZ", "v2.0-accounts.0-64.ef")); err != nil {
+		t.Fatalf("failed to create sibling file: %v", err)
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(root, name)
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatalf("failed to create dir: %v", err)
+			}
+			file := filepath.Join(dir, "v1.0-accounts.0-64.ef")
+			if err := touch(file); err != nil {
+				t.Fatalf("failed to create file: %v", err)
+			}
+			path, _, ok, err := FindFilesWithVersionsByPattern(filepath.Join(dir, "*-accounts.0-64.ef"))
+			if err != nil || !ok || path != file {
+				t.Fatalf("expected %q, got %q ok=%v err=%v", file, path, ok, err)
+			}
+		})
 	}
 }
 
