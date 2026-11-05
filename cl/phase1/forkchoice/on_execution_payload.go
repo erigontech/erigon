@@ -1045,7 +1045,6 @@ func (f *ForkChoiceStore) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoo
 	f.envelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
-// blobDataAvailable promises that the caller holds every bid blob with KZG proofs it verified or received from this node's EL.
 func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, blobDataAvailable bool) error {
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
