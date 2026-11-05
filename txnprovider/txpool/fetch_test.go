@@ -848,6 +848,7 @@ type announceFetchTest struct {
 	filterErr     error
 	known         map[[32]byte]bool // hashes the pool holds
 	onFilter      func()
+	sendErr       error
 }
 
 func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
@@ -873,7 +874,7 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
-			return nil, nil
+			return nil, a.sendErr
 		}).AnyTimes()
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
 	require.NoError(t, err)
@@ -1185,4 +1186,17 @@ func TestRetryBudgetCountsTheSizeSlack(t *testing.T) {
 	a.requestedFrom = nil
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerB, peerB}, a.requestedFrom)
+}
+
+func TestFailedRetrySendKeepsThePeer(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xe7}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.sendErr = errors.New("sentry busy")
+	a.timeoutSweep()
+	a.sendErr = nil
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB, peerB}, a.requestedFrom, "the last alternate is asked again after a failed send")
 }
