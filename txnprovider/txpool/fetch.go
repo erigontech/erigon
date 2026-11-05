@@ -287,6 +287,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 
 	f.requestedLock.Lock()
+	sent := f.now() // the lookup may have been slow; retries time out from when they are sent
 	plans := map[fetchPeer]*retryPlan{}
 	var deferred []pendingFetch
 	for len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
@@ -314,8 +315,8 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			continue
 		}
 		r.alternates = r.alternates[1:]
-		r.at, r.peer = now, next
-		f.pending = append(f.pending, pendingFetch{p.hash, now})
+		r.at, r.peer = sent, next
+		f.pending = append(f.pending, pendingFetch{p.hash, sent})
 	}
 	if len(deferred) > 0 {
 		f.pending = append(deferred, f.pending...)

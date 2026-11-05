@@ -851,6 +851,7 @@ type announceFetchTest struct {
 	requestedFrom [][64]byte
 	filterErr     error
 	known         map[[32]byte]bool // hashes the pool holds
+	onFilter      func()
 }
 
 func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
@@ -862,6 +863,9 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 	pool.EXPECT().Started().Return(true).AnyTimes()
 	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) {
+			if a.onFilter != nil {
+				a.onFilter()
+			}
 			var unknown Hashes
 			for i := 0; i < len(hashes); i += 32 {
 				if !a.known[[32]byte(hashes[i:i+32])] {
@@ -1240,4 +1244,19 @@ func TestDeliveredTxnsDoNotUseRetryBudget(t *testing.T) {
 	a.requestedFrom = nil
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "only the missing txn is retried")
+}
+
+func TestSlowLookupDoesNotExpireTheRetry(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB, peerC := [32]byte{0xd1}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.announce(t, peerC, hash)
+	a.onFilter = func() { *a.now = a.now.Add(txFetchTimeout) } // the known-hash lookup takes a whole timeout
+	a.timeoutSweep()
+	a.onFilter = nil
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "B was asked just now, not a timeout ago")
 }
