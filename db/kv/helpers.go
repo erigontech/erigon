@@ -278,6 +278,20 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	}
 }
 
+// MergeFrom adds o's entries whose keys d does not hold yet; d's earlier previous values win.
+func (d *DomainDiff) MergeFrom(o *DomainDiff) {
+	for k, v := range o.prevValues {
+		if d.prevValues == nil {
+			d.prevValues = make(map[string][]byte, len(o.prevValues))
+			d.currentStepBuf = make([]byte, 8)
+		}
+		if _, ok := d.prevValues[k]; !ok {
+			d.prevValues[k] = v
+			d.prevValsSlice = nil
+		}
+	}
+}
+
 func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	if len(d.prevValsSlice) != 0 {
 		return d.prevValsSlice

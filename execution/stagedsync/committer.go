@@ -664,10 +664,7 @@ func (cc *commitmentCalculator) saveAheadDiff(r *blockResult) error {
 	if cs == nil {
 		return fmt.Errorf("no changeset accumulator saved for computed-ahead block %d (%x)", r.BlockNum, r.BlockHash)
 	}
-	if cs.Diffs[kv.CommitmentDomain].Len() != 0 {
-		return fmt.Errorf("changeset of computed-ahead block %d (%x) already has commitment diffs", r.BlockNum, r.BlockHash)
-	}
-	cs.Diffs[kv.CommitmentDomain] = *diff
+	cs.Diffs[kv.CommitmentDomain].MergeFrom(diff)
 	return nil
 }
 
