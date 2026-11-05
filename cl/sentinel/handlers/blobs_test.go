@@ -21,7 +21,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
@@ -44,6 +46,110 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestBlobsByRangeChargesLargeCounts(t *testing.T) {
+	for _, count := range []uint64{math.MaxUint64 - 100, 1 << 60, 1 << 63} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			_, db := setupStore(t)
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg, rateLimiter: newPeerRateLimiter()}
+			proto := communication.BlobSidecarByRangeProtocolV1
+			c.rateLimiter.protocolLimits[proto] = protocolRateConfig{maxTokens: maxBlobsThroughputPerRequest}
+			stream := newHandlerTestStream(t, proto, &cltypes.BlobsByRangeRequest{StartSlot: 100, Count: count})
+			peerID := stream.Conn().RemotePeer().String()
+			require.True(t, c.rateLimiter.allowRequest(peerID, proto, 1))
+
+			require.NoError(t, c.blobsSidecarsByRangeHandlerDeneb(stream))
+			require.Empty(t, stream.response.Bytes())
+			require.False(t, c.rateLimiter.consumeTokens(peerID, proto, 1))
+		})
+	}
+}
+
+func TestBlobsByRangeRejectsOverflow(t *testing.T) {
+	_, db := setupStore(t)
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg, rateLimiter: newPeerRateLimiter()}
+	stream := newHandlerTestStream(t, communication.BlobSidecarByRangeProtocolV1,
+		&cltypes.BlobsByRangeRequest{StartSlot: math.MaxUint64 - 1, Count: 2})
+	require.NoError(t, c.blobsSidecarsByRangeHandlerDeneb(stream))
+	code, err := stream.response.ReadByte()
+	require.NoError(t, err)
+	require.Equal(t, byte(InvalidRequestPrefix), code)
+}
+
+func TestBlobsByIdentifiersSkipsDuplicatesAndUnavailable(t *testing.T) {
+	for _, first := range []string{"duplicate", "unknown", "post Fulu"} {
+		t.Run(first, func(t *testing.T) {
+			_, db := setupStore(t)
+			store := tests.NewMockBlockReader()
+			cfg := clparams.MainnetBeaconConfig
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			block := populateDatabaseWithBlocks(t, store, tx, 100, 0)[0]
+			fuluBlock := populateDatabaseWithBlocks(t, store, tx, cfg.FuluForkEpoch*cfg.SlotsPerEpoch, 0)[0]
+			require.NoError(t, tx.Commit())
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			fuluRoot, err := fuluBlock.Block.HashSSZ()
+			require.NoError(t, err)
+			blobDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			storage := blob_storage.NewBlobStore(blobDB, afero.NewMemMapFs())
+			sidecars := getTestBlobSidecars(block.SignedBeaconBlockHeader())
+			require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, sidecars))
+			c := &ConsensusHandlers{
+				ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg,
+				blobsStorage: storage, ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+			}
+			req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](3, 40)
+			switch first {
+			case "duplicate":
+				req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+			case "unknown":
+				req.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{0xff}, Index: 0})
+			case "post Fulu":
+				req.Append(&cltypes.BlobIdentifier{BlockRoot: fuluRoot, Index: 0})
+			}
+			req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+			req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 1})
+			stream := newHandlerTestStream(t, communication.BlobSidecarByRootProtocolV1, req)
+			require.NoError(t, c.blobsSidecarsByIdsHandlerDeneb(stream))
+			var indices []uint64
+			for stream.response.Len() > 0 {
+				code, err := stream.response.ReadByte()
+				require.NoError(t, err)
+				require.Equal(t, byte(SuccessfulResponsePrefix), code)
+				sidecar := new(cltypes.BlobSidecar)
+				require.NoError(t, decodeAndRead(&stream.response, sidecar, c.ethClock))
+				indices = append(indices, sidecar.Index)
+			}
+			require.Equal(t, []uint64{0, 1}, indices)
+		})
+	}
+}
+
+func TestBlobsByIdentifiersRequestLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	for _, count := range []int{int(cfg.MaxRequestBlobSidecarsElectra), int(cfg.MaxRequestBlobSidecarsElectra) + 1} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			_, db := setupStore(t)
+			c := &ConsensusHandlers{ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg, rateLimiter: newPeerRateLimiter()}
+			req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](count, 40)
+			for range count {
+				req.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{0xff}})
+			}
+			stream := newHandlerTestStream(t, communication.BlobSidecarByRootProtocolV1, req)
+			err := c.blobsSidecarsByIdsHandlerDeneb(stream)
+			if uint64(count) > cfg.MaxRequestBlobSidecarsElectra {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Zero(t, stream.response.Len())
+		})
+	}
+}
 
 func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltypes.BlobSidecar {
 	out := []*cltypes.BlobSidecar{}

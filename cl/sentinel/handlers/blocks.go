@@ -46,7 +46,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 
 	// Consume additional rate-limit tokens proportional to the blocks we may serve.
 	// The wrapper already consumed 1 token for admission.
-	if cost := int(min(req.Count, MaxRequestsBlocks)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := max(int(min(req.Count, MaxRequestsBlocks))-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -96,27 +96,21 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	var req solid.HashListSSZ = solid.NewHashList(100)
+	var req solid.HashListSSZ = solid.NewHashList(int(c.beaconConfig.MaxRequestBlocksDeneb))
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 
-	blockRoots := []common.Hash{}
-	for i := 0; i < req.Length(); i++ {
-		blockRoot := req.Get(i)
-		blockRoots = append(blockRoots, blockRoot)
-		// Limit the number of blocks to the count specified in the request.
-		if len(blockRoots) >= MaxRequestsBlocks {
-			break
-		}
+	if uint64(req.Length()) > c.beaconConfig.MaxRequestBlocksDeneb {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	if len(blockRoots) == 0 {
+	if req.Length() == 0 {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
 	// Consume additional rate-limit tokens proportional to the number of roots.
-	if cost := len(blockRoots) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -127,7 +121,16 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	defer tx.Rollback()
 
 	var block *cltypes.SignedBeaconBlock
-	req.Range(func(index int, blockRoot common.Hash, length int) bool {
+	seen := make(map[common.Hash]struct{}, req.Length())
+	written := 0
+	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
+		if written >= MaxRequestsBlocks {
+			return false
+		}
+		if _, ok := seen[blockRoot]; ok {
+			return true
+		}
+		seen[blockRoot] = struct{}{}
 		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
 		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
 			block, err = nil, nil
@@ -162,6 +165,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err = ssz_snappy.EncodeAndWrite(s, block); err != nil {
 			return false
 		}
+		written++
 		return true
 	})
 

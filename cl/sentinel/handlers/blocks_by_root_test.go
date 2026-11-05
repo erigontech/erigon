@@ -37,8 +37,75 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
 )
+
+func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
+	for _, count := range []int{128, 129} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			_, db := setupStore(t)
+			store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, uint64(count-1))
+			require.NoError(t, tx.Commit())
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{
+				ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+				ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+			}
+			req := solid.NewHashList(count)
+			for _, block := range blocks {
+				root, err := block.Block.HashSSZ()
+				require.NoError(t, err)
+				req.Append(root)
+			}
+			stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+			require.NoError(t, c.beaconBlocksByRootHandler(stream))
+			if uint64(count) > cfg.MaxRequestBlocksDeneb {
+				code, err := stream.response.ReadByte()
+				require.NoError(t, err)
+				require.Equal(t, byte(InvalidRequestPrefix), code)
+				require.Zero(t, store.readBlockByRootCalls)
+				return
+			}
+			require.Equal(t, MaxRequestsBlocks, store.readBlockByRootCalls)
+			stream.request = bytes.NewReader(stream.response.Bytes())
+			require.Len(t, readBlocksByRangeSlots(t, stream, c.ethClock), MaxRequestsBlocks)
+		})
+	}
+}
+
+func TestBeaconBlocksByRootDeduplicates(t *testing.T) {
+	_, db := setupStore(t)
+	store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, 1)
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	req := solid.NewHashList(6)
+	req.Append(common.Hash{0xff})
+	req.Append(common.Hash{0xff})
+	for _, block := range blocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		req.Append(root)
+		req.Append(root)
+	}
+	stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+	require.NoError(t, c.beaconBlocksByRootHandler(stream))
+	require.Equal(t, 3, store.readBlockByRootCalls)
+	stream.request = bytes.NewReader(stream.response.Bytes())
+	require.Equal(t, []uint64{100, 101}, readBlocksByRangeSlots(t, stream, c.ethClock))
+}
 
 func TestBlocksByRangeHandler(t *testing.T) {
 	ctx := context.Background()

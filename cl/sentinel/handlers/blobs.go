@@ -40,15 +40,13 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
+	if req.StartSlot+req.Count < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 
-	// Consume additional rate-limit tokens. Estimate blob count as slots × max blobs per block,
-	// capped at the per-request throughput limit (72). Use BlobSchedule-aware lookup so Deneb
-	// requests (max 6 blobs) are not overcharged at the Electra rate (max 9 blobs).
-	// Note: blob sidecars are deprecated at Fulu (replaced by data columns), so the effective
-	// max here is always ≤ Electra's MaxBlobsPerBlock.
 	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
-	maxBlobs := int(c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock)
-	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	maxBlobs := c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock
+	if cost := sidecarsRequestCost(req.Count, maxBlobs, maxBlobsThroughputPerRequest); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -111,13 +109,13 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
-	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](int(c.beaconConfig.MaxRequestBlobSidecarsElectra), 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
 	// Consume additional rate-limit tokens: one per blob identifier.
-	if cost := min(req.Len(), maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := max(min(req.Len(), maxBlobsThroughputPerRequest)-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -128,20 +126,25 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	defer tx.Rollback()
 
 	written := 0
+	seen := make(map[cltypes.BlobIdentifier]struct{}, req.Len())
 	for i := 0; i < req.Len() && written < maxBlobsThroughputPerRequest; i++ {
 
 		id := req.Get(i)
+		if _, ok := seen[*id]; ok {
+			continue
+		}
+		seen[*id] = struct{}{}
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, id.BlockRoot)
 		if err != nil {
 			return err
 		}
 		if slot == nil {
-			break
+			continue
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
 		if version >= clparams.FuluVersion {
 			// deprecated after Fulu upgrade
-			break
+			continue
 		}
 
 		// Read the fork digest

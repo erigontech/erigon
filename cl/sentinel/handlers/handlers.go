@@ -236,7 +236,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 // number of response items (beyond the 1 token already consumed by the wrapper).
 // Returns true if allowed. On rejection, writes an SSZ error response to s.
 func (c *ConsensusHandlers) consumeRateLimit(s network.Stream, cost int) bool {
-	if cost <= 0 {
+	if cost == 0 {
 		return true
 	}
 	peerID := s.Conn().RemotePeer().String()

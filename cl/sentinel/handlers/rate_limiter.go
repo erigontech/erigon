@@ -239,7 +239,7 @@ func (rl *peerRateLimiter) allowRequest(peerID string, protocol string, cost int
 // after decoding the request to charge for the actual number of response items.
 func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost int) bool {
 	if cost <= 0 {
-		return true
+		return cost == 0
 	}
 	key := peerProtocolKey{peerID: peerID, protocol: protocol}
 	cfg, hasCfg := rl.protocolLimits[protocol]

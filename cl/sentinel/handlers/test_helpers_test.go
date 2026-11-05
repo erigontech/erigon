@@ -1,13 +1,30 @@
 package handlers
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
+
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common/ssz"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/stretchr/testify/require"
 )
+
+func newHandlerTestStream(t *testing.T, proto string, request ssz.EncodableSSZ) *envelopeHandlerStream {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&buf, request))
+	return &envelopeHandlerStream{
+		request:  bytes.NewReader(buf.Bytes()),
+		conn:     &remotePeerConn{peerID: peer.ID("request-peer")},
+		protocol: protocol.ID(proto),
+	}
+}
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
 	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
