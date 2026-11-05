@@ -373,8 +373,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		// A header failure executed nothing and rejects the payload itself.
 		if latestValidNumber+1 < headersChain[0].Number.Uint64() {
 			latestValidHash = common.Hash{}
-			fv.extendingForkHeadHash = common.Hash{}
-			fv.extendingForkNumber = 0
 			if errors.Is(validationError, rules.ErrInvalidHeader) {
 				status = engine_types.InvalidStatus
 				return
