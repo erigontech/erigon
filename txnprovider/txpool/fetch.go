@@ -261,26 +261,46 @@ func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
 	return int(info.size)
 }
 
-// forgetRequested drops the request state of delivered txns, so their retries spend no budget.
-func (f *Fetch) forgetRequested(txns TxnSlots) {
-	f.requestedLock.Lock()
-	defer f.requestedLock.Unlock()
-	for _, txn := range txns.Txns {
-		f.requested.Delete(txn.IDHash[:])
-	}
-}
-
-// requestFromAlternates asks the next announcer for each hash whose request timed out.
+// requestFromAlternates asks the next announcer for each hash whose request timed out. Hashes the
+// pool already holds leave the retry state; a delivered but rejected txn keeps its alternates.
 func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	f.requestedLock.Lock()
 	now := f.now()
+	var expired Hashes
+	for _, p := range f.pending {
+		if now.Sub(p.at) < txFetchTimeout {
+			break
+		}
+		expired = append(expired, p.hash[:]...)
+	}
+	f.requestedLock.Unlock()
+	if len(expired) == 0 {
+		return
+	}
+	unknown := map[[32]byte]struct{}{}
+	unknownHashes, err := f.pool.FilterKnownIdHashes(tx, expired)
+	if err != nil {
+		unknownHashes = expired // ask anyway: a known txn costs only a duplicate reply
+	}
+	for i := 0; i < len(unknownHashes); i += 32 {
+		unknown[[32]byte(unknownHashes[i:i+32])] = struct{}{}
+	}
+
+	f.requestedLock.Lock()
 	plans := map[fetchPeer]*retryPlan{}
 	var deferred []pendingFetch
 	for len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
 		p := f.pending[0]
 		f.pending = f.pending[1:]
 		r, ok := f.requested.Get(p.hash[:])
-		if !ok || !r.at.Equal(p.at) || len(r.alternates) == 0 {
+		if !ok || !r.at.Equal(p.at) {
+			continue
+		}
+		if _, missing := unknown[p.hash]; !missing {
+			f.requested.Delete(p.hash[:]) // the pool holds it
+			continue
+		}
+		if len(r.alternates) == 0 {
 			continue
 		}
 		next := r.alternates[0]
@@ -304,14 +324,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 
 	for peer, plan := range plans {
 		for _, hashes := range plan.reqs {
-			unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
-			if err != nil {
-				unknownHashes = hashes // the alternate is already taken; asking for a known txn costs only a dup
-			}
-			if len(unknownHashes) == 0 {
-				continue
-			}
-			if err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), unknownHashes); err != nil {
+			if err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), hashes); err != nil {
 				f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
 			}
 		}
@@ -857,8 +870,6 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if len(txns.Txns) == 0 {
 			return nil
 		}
-		f.forgetRequested(txns)
-
 		f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
