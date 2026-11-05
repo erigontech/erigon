@@ -1115,3 +1115,27 @@ func TestPendingFetchesAreBounded(t *testing.T) {
 	}
 	require.LessOrEqual(t, len(a.fetch.pending), maxFetchRequests)
 }
+
+func TestHashDroppedFromPendingIsRequestedAgain(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hot, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hot)
+	a.announce(t, peerB, hot)
+	hashes := make([][32]byte, 0, 1000)
+	for i := range maxFetchRequests {
+		var h [32]byte
+		binary.BigEndian.PutUint64(h[:], uint64(i)+1)
+		if hashes = append(hashes, h); len(hashes) == cap(hashes) || i == maxFetchRequests-1 {
+			a.announce(t, [64]byte{0xc}, hashes...)
+			hashes = hashes[:0]
+		}
+		if i%10000 == 0 {
+			a.announce(t, peerA, hot) // keeps the hot hash in the LRU
+		}
+	}
+	*a.now = a.now.Add(txFetchTimeout)
+	before := len(a.requestedFrom)
+	a.announce(t, peerA, hot)
+	require.Greater(t, len(a.requestedFrom), before, "a hash whose retry was dropped is requested on its next announcement")
+}

@@ -196,7 +196,10 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		} else {
 			f.requested.Set(h, &fetchRequest{at: now, peer: peer})
 		}
-		if len(f.pending) >= maxFetchRequests { // an announcement flood: the oldest request loses only its retry
+		if len(f.pending) >= maxFetchRequests { // an announcement flood: forget the oldest request, so its next announcement asks again
+			if r, ok := f.requested.Get(f.pending[0].hash[:]); ok && r.at.Equal(f.pending[0].at) {
+				f.requested.Delete(f.pending[0].hash[:])
+			}
 			f.pending = f.pending[1:]
 		}
 		f.pending = append(f.pending, pendingFetch{[32]byte(h), now})
