@@ -315,13 +315,27 @@ func TestGroupEndBurnRevalidatesReaders(t *testing.T) {
 // which makes assembly run on a versioned state, leaves the assembled block
 // unchanged, and that parallel import derives the access list assembly built.
 func TestGroupEndBurnBlockAccessList(t *testing.T) {
-	cases := make([]groupEndCase, 0, 10)
+	cases := make([]groupEndCase, 0, 13)
 	for _, tc := range afterFeesCases() {
 		cases = append(cases, tc.groupEndCase)
 	}
 	for _, tc := range readersCases(t) {
 		cases = append(cases, tc.groupEndCase)
 	}
+	// The burn alone reads EEZL2's balance: the access list needs that read to
+	// tell the balance spent to zero from a no-op touch.
+	funded := types.GenesisAlloc{
+		derivertest.UserAddress():    groupEndRich,
+		protocol.RollupXEEZL2Address: {Code: []byte{byte(vm.STOP)}, Balance: big.NewInt(common.GWei)},
+	}
+	other, recipient := common.HexToAddress("0xc0ffee"), common.HexToAddress("0x7ec1")
+	cases = append(cases, groupEndCase{"EEZL2 funded, user transaction after a load", funded, other, func(c *groupEndChain) []types.Transaction {
+		return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(derivertest.UserKey, 0, recipient, 0, 21_000)}
+	}}, groupEndCase{"EEZL2 funded, delivery", funded, other, func(c *groupEndChain) []types.Transaction {
+		return []types.Transaction{c.nativeTx(protocol.ExecuteIncomingCrossChainCallSelector, 0)}
+	}}, groupEndCase{"EEZL2 funded as coinbase", funded, protocol.RollupXEEZL2Address, func(c *groupEndChain) []types.Transaction {
+		return []types.Transaction{c.nativeTx(protocol.LoadExecutionTableSelector, 0), c.userTx(derivertest.UserKey, 0, recipient, 0, 21_000)}
+	}})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newGroupEndChain(t, tc.alloc)

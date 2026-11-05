@@ -3354,6 +3354,25 @@ func (be *blockExecutor) postProcessTx(p rules.TxPostProcessor, tx int, task exe
 	if err != nil || writes.IsEmpty() {
 		return err
 	}
+	// Serial execution reads a balance before p replaces it; the block access
+	// list needs that read to tell a balance spent to zero from a no-op touch.
+	reads := be.blockIO.ReadSet(version.TxIndex)
+	before := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, be.versionMap, stateReader)
+	for addr := range writes.Balances() {
+		if _, ok := reads.GetBalance(addr); ok {
+			continue
+		}
+		acc, err := before.ReadAccountData(addr)
+		if err != nil {
+			return err
+		}
+		var balance uint256.Int
+		if acc != nil {
+			balance = acc.Balance
+		}
+		reads.SetBalance(addr, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: balance})
+	}
+	be.blockIO.RecordReads(version, reads)
 	// An account p removes keeps none of the transaction's other writes.
 	removed := func(h state.WriteHeader) bool {
 		sd, ok := writes.GetSelfDestruct(h.Address)
