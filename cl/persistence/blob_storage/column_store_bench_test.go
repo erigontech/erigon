@@ -59,7 +59,6 @@ func BenchmarkColumnWriteBlock(b *testing.B) {
 				store := newBenchColumnStore(b, fs, benchColumnConfig())
 				sidecars := benchColumnSidecars(b, blobs)
 				slot := uint64(subdivisionSlot)
-				b.ResetTimer()
 				for i := 0; b.Loop(); i++ {
 					root := benchRoot(i)
 					slot++

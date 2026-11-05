@@ -262,10 +262,17 @@ func TestColumnBitmapOfAnotherWidthIsNotUsed(t *testing.T) {
 
 func TestColumnBitmapsStayInStepWithTheFilesUnderConcurrency(t *testing.T) {
 	s := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter()).(*dataColumnStorageImpl)
-	const slot = 1000
-	root := common.Hash{1}
+	const slot = subdivisionSlot + 1000
+	root, pruned := common.Hash{1}, common.Hash{2}
 	columns := int64(globalBeaconConfig.NumberOfColumns)
+	require.NoError(t, s.WriteColumnSidecars(t.Context(), pruned, 0, createTestDataColumnSidecar(100, 0)))
+	require.Equal(t, []uint64{0}, savedColumns(t, s, 100, pruned))
 	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 50 {
+			assert.NoError(t, s.PruneBelow(subdivisionSlot))
+		}
+	})
 	for w := range 4 {
 		wg.Go(func() {
 			for i := range 200 {
@@ -291,8 +298,10 @@ func TestColumnBitmapsStayInStepWithTheFilesUnderConcurrency(t *testing.T) {
 	key := s.columnKey(slot, root)
 	scanned, err := s.scanSavedColumns(slot, key)
 	require.NoError(t, err)
-	if cached, ok := s.bitmaps.columns(key); ok {
-		require.Equal(t, scanned, cached, "every set bit must have its file and every file its bit")
-	}
 	require.Equal(t, scanned, savedColumns(t, s, slot, root))
+	cached, ok := s.bitmaps.columns(key)
+	require.Equal(t, len(scanned) > 0, ok, "a root with files must be seeded after a lookup")
+	require.Equal(t, scanned, cached, "every set bit must have its file and every file its bit")
+	require.NotContains(t, s.bitmaps.entries, pruned)
+	require.False(t, columnExists(t, s, 100, pruned, 0))
 }

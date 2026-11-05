@@ -129,12 +129,11 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
 	column := uint64(columnIndex)
-	// startWrite holds the prune floor, so the bucket of a slot above it stays while its bitmap
-	// is read.
-	if s.startWrite(slot) {
-		stored, known := s.bitmaps.has(s.columnKey(slot, blockRoot), column)
-		s.finishWrite()
-		if known {
+	// The gossip and peer-DAS paths call this per column, so it reads the floor without
+	// queueing behind a prune waiting on pruneMutex. A prune that raises the floor after this
+	// check removes the bucket after the answer, as it would after a stat.
+	if slot >= s.floor.Load() {
+		if stored, known := s.bitmaps.has(s.columnKey(slot, blockRoot), column); known {
 			return stored, nil
 		}
 	}

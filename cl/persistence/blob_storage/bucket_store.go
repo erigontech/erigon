@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/spf13/afero"
 
@@ -56,6 +57,8 @@ type bucketStore struct {
 	fs         afero.Fs
 	pruneMutex sync.RWMutex
 	pruneFloor uint64
+	// floor mirrors pruneFloor for readers that must not queue behind pruneMutex.
+	floor atomic.Uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
 	bucketLocks []sync.RWMutex
@@ -97,7 +100,7 @@ func (b *bucketStore) finishWrite() {
 //
 // The temp name is derived from the target alone, so two writes of the same
 // (slot, root, idx) would share it and interleave into one file. Callers must
-// hold that slot's lock.
+// hold the stripe lock that serializes writes of that file.
 func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
 	if !b.startWrite(slot) {
 		return false, nil
@@ -298,6 +301,7 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 	}
 	if slot > b.pruneFloor {
 		b.pruneFloor = slot
+		b.floor.Store(slot)
 	}
 	effectiveFloor := b.pruneFloor
 	b.pruneMutex.Unlock()
