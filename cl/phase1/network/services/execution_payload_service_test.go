@@ -2101,3 +2101,34 @@ func TestValidateEnvelopeLimitsRequiresWithdrawalsList(t *testing.T) {
 	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
 	require.NoError(t, validateEnvelopeLimits(&cfg, envelope))
 }
+
+func TestExecutionPayloadServiceRejectsEnvelopeForInvalidBlock(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.InvalidBlocks = map[common.Hash]struct{}{blockRoot: {}}
+	malformed := newTestSignedEnvelope(100, blockRoot, 1)
+	malformed.Message.Payload.Withdrawals = nil
+
+	for _, envelope := range []*cltypes.SignedExecutionPayloadEnvelope{newTestSignedEnvelope(100, blockRoot, 1), malformed} {
+		err := service.ProcessMessage(t.Context(), nil, envelope)
+		require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+		require.NotErrorIs(t, err, ErrIgnore)
+	}
+	impl := service.(*executionPayloadService)
+	require.Zero(t, impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
+}
+
+func TestExecutionPayloadServiceDropsPendingEnvelopeWhenBlockIsInvalid(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1)), ErrIgnore)
+	impl := service.(*executionPayloadService)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+
+	fcu.InvalidBlocks = map[common.Hash]struct{}{blockRoot: {}}
+	impl.pending.processPending(t.Context())
+
+	require.Zero(t, impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
+}
