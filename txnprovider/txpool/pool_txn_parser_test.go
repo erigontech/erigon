@@ -949,10 +949,34 @@ func TestKnownWrappedBlobTxnRejectedBeforeBlobs(t *testing.T) {
 	wrapperBuf := &bytes.Buffer{}
 	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
 
+	wire := wrapperBuf.Bytes()
+
 	ctx := NewTxnParseContext(*chainID)
 	ctx.WithSender(false)
 	var slot TxnSlot
-	_, err := ctx.ParseTransaction(wrapperBuf.Bytes(), 0, &slot, nil, false, true, func([]byte) error { return ErrRejected })
+	p, err := ctx.ParseTransaction(wire, 0, &slot, nil, false, true, func([]byte) error { return ErrRejected })
 	require.ErrorIs(t, err, ErrRejected)
+	require.Equal(t, len(wire), p, "the caller must be able to skip the known txn")
 	require.Empty(t, slot.BlobBundles)
+}
+
+// The blobs are copied after the hash check: what the payload holds then is what the slot keeps.
+func TestWrappedBlobTxnCopiedAfterHashCheck(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeWrappedBlobTxn(chainID)
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	wire := wrapperBuf.Bytes()
+	blobPos := bytes.Index(wire, wrapper.Blobs[0][:])
+	require.Positive(t, blobPos)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slot TxnSlot
+	_, err := ctx.ParseTransaction(wire, 0, &slot, nil, false, true, func([]byte) error {
+		wire[blobPos] ^= 0xff
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, wire[blobPos], slot.BlobBundles[0].Blob[0], "the copy was taken before the hash check")
 }

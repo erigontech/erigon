@@ -110,6 +110,7 @@ func (ctx *TxnParseContext) WithPoolRules() *TxnParseContext {
 // UnmarshalTransactionFromBinary (which creates a second bytes.Reader + stream
 // for typed txns).
 func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error) {
+	defer ctx.bytesReader.Reset(nil) // an idle context must not keep the last payload alive
 	var txn types.Transaction
 
 	// Legacy transactions: full RLP list starting with 0xc0..0xff
@@ -483,7 +484,7 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	BlobBundles []PoolBlobBundle // Parsed blob bytes reference the input RLP
+	BlobBundles []PoolBlobBundle // Blob bytes share the Rlp copy and keep it alive after Rlp is cleared at flush
 
 	// AuthAndNonces caches recovered authority/nonce pairs; nil means not recovered.
 	// Invalid tuples and authorizations for other chains are omitted.
