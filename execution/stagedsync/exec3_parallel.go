@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -3740,3 +3741,11 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 // probe: apply-loop fold time for the current block.
 var spApplyFold time.Duration
+
+// probe: MUTEX_PROFILE turns on mutex and block profiling for a /debug/pprof/mutex or /block capture.
+func init() {
+	if dbg.EnvBool("MUTEX_PROFILE", false) {
+		runtime.SetMutexProfileFraction(1)
+		runtime.SetBlockProfileRate(10_000)
+	}
+}
