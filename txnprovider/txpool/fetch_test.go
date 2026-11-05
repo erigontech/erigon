@@ -35,6 +35,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -1073,4 +1074,38 @@ func TestRetryRequestsPerPeerArePaced(t *testing.T) {
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a sweep must not overflow the peer's outbound queue")
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes in the next sweep")
+}
+
+func TestRetryWithUnknownSizeGetsItsOwnRequest(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, peerB := [32]byte{0xc1}, [32]byte{0xc2}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, h1, h2)
+	a.announce(t, peerB, h1, h2)
+	a.fetch.announcements, _ = maphash.NewLRU[announceInfo](16) // B's sizes were evicted
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerB, peerB}, a.requestedFrom, "an unknown size may be a blob, so it is asked alone")
+}
+
+func TestDeliveredTxnsDoNotUseRetryBudget(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, maxRetryRequestsPerPeer*256+1)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	for c := range slices.Chunk(hashes, 1000) {
+		a.announce(t, peerA, c...)
+		a.announce(t, peerB, c...)
+	}
+	delivered := TxnSlots{}
+	for _, h := range hashes[:len(hashes)-1] {
+		delivered.Append(&TxnSlot{IDHash: h}, nil, false)
+	}
+	a.fetch.forgetRequested(delivered)
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "only the missing txn is retried")
 }
