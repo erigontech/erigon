@@ -332,7 +332,8 @@ type readsUnfinishedWrite struct {
 }
 
 func (r *readsUnfinishedWrite) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, ibs *state.IntraBlockState,
-	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool) *exec.TxResult {
+	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
+) *exec.TxResult {
 	_, err := ibs.GetBalance(r.addr)
 	r.cancelled = evm.Cancelled()
 	return &exec.TxResult{Err: err}

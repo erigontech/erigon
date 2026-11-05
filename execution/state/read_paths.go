@@ -1773,9 +1773,9 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 
 // recordDep records that this run read through tx dep's unfinished or vanished write: its result is void, so
 // its run is cancelled at the next jump or call.
-func (s *IntraBlockState) recordDep(dep int) {
-	s.dep = max(s.dep, dep)
-	if s.HadInvalidRead() {
-		s.versionMap.cancelRun(s.txIndex, s.version)
+func (ibs *IntraBlockState) recordDep(dep int) {
+	ibs.dep = max(ibs.dep, dep)
+	if ibs.HadInvalidRead() {
+		ibs.versionMap.cancelRun(ibs.txIndex, ibs.version)
 	}
 }
