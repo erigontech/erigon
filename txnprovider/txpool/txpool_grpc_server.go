@@ -223,9 +223,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		}
 
 		reason := discardReasons[j]
-		if reason == txpoolcfg.DuplicateHash {
-			// The membership check and admission are not atomic. Duplicates found
-			// during admission must produce the same RPC reply as those found earlier.
+		// Another request may admit the transaction while this one validates.
+		// Failed simulations bypass admission's duplicate check, so recheck membership.
+		if reason == txpoolcfg.DuplicateHash || (reason != txpoolcfg.Success && s.txPool.HasTxn(slots.Txns[j].IDHash[:])) {
 			reason = txpoolcfg.AlreadyKnown
 		}
 		reply.Imported[i] = mapDiscardReasonToProto(reason)

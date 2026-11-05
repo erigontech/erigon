@@ -156,6 +156,86 @@ func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 	}, reply)
 }
 
+type concurrentAddTxPool struct {
+	*TxPool
+	admissions atomic.Int32
+	bothParsed chan struct{}
+}
+
+func (p *concurrentAddTxPool) AddLocalTxns(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	if p.admissions.Add(1) == 2 {
+		close(p.bothParsed)
+	}
+	return p.TxPool.AddLocalTxns(ctx, txns)
+}
+
+func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"invalid", nil},
+		{"unavailable", status.Error(codes.Unavailable, "backend unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			pool.chainID.SetUint64(1)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			wrapped := &concurrentAddTxPool{TxPool: pool, bothParsed: make(chan struct{})}
+			entered, admitted := make(chan struct{}), make(chan struct{})
+			var calls atomic.Int32
+			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+				if calls.Add(1) == 1 {
+					close(entered)
+					// Both requests must pass the initial membership check before either can admit the transaction.
+					select {
+					case <-wrapped.bothParsed:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					return backend.FrameValidation(ctx, req)
+				}
+				select {
+				case <-admitted:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				return &remoteproto.FrameValidationReply{Valid: false}, tc.err
+			}}
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			server := NewGrpcServer(ctx, wrapped, pool.poolDB, nil, pool.chainID, pool.logger)
+			request := &txpoolproto.AddRequest{RlpTxs: [][]byte{frame.Rlp}}
+			type outcome struct {
+				reply *txpoolproto.AddReply
+				err   error
+			}
+			first := make(chan outcome, 1)
+			go func() {
+				reply, err := server.Add(ctx, request)
+				first <- outcome{reply, err}
+				close(admitted)
+			}()
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			reply, err := server.Add(ctx, request)
+			accepted := <-first
+			require.NoError(t, accepted.err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, accepted.reply.Imported)
+			require.NoError(t, err)
+			require.True(t, pool.HasTxn(frame.IDHash[:]))
+			require.Equal(t, &txpoolproto.AddReply{
+				Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
+				Errors:   []string{txpoolcfg.AlreadyKnown.String()},
+			}, reply)
+		})
+	}
+}
+
 func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 	for _, persisted := range []bool{false, true} {
 		name := "memory only"
