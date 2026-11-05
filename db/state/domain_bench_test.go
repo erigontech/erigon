@@ -73,7 +73,11 @@ func BenchmarkAbsentKeyLatestLookup(b *testing.B) {
 		}
 	})
 	b.Run("probed-lookup", func(b *testing.B) {
-		dt.probe = mmap.NewProbe()
+		defer func(prev bool) { mmap.BatchPrefetch = prev }(mmap.BatchPrefetch)
+		mmap.BatchPrefetch = true
+		if dt.probe = mmap.NewProbe(); dt.probe == nil {
+			b.Fatal("no probe: the probed lookup needs io_uring")
+		}
 		defer func() { dt.probe = nil }()
 		for i := 0; b.Loop(); i++ {
 			probeLatestFromFiles(dt, absent[i%len(absent)])
