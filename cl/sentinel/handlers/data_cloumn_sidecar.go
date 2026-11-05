@@ -283,6 +283,5 @@ func sidecarsRequestCost(slots, sidecarsPerSlot, maxSidecars uint64) int {
 	if slots > maxSidecars/sidecarsPerSlot {
 		return int(maxSidecars) - 1
 	}
-	sidecars := min(slots*sidecarsPerSlot, maxSidecars)
-	return int(sidecars) - 1
+	return int(slots*sidecarsPerSlot) - 1
 }
