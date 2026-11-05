@@ -88,7 +88,7 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 	defer cancel()
 	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 		got, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
 		}
 		return got

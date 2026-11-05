@@ -139,7 +139,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 		if errors.Is(err, p2p.ErrChainLengthExceedsLimit) {
 			// Expected: gap is unbridgeable by a chain-length-limited download; the EL relies on FCU or staged sync.
 			e.logger.Info("[EngineBlockDownloader] backward download skipped — gap exceeds limit, awaiting FCU/staged sync", args...)
-		} else {
+		} else if !errors.Is(err, context.Canceled) {
 			e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
 		}
 		e.status.Store(Idle)

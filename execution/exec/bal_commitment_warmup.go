@@ -139,16 +139,6 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	warmuper.CloseAndWait()
 	close(factoryErrs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		// Every worker fails with the same cancellation; report it once.
-		log.Debug(
-			"[warmBAL] commitment warmup canceled",
-			"keys", len(keys),
-			"workers", workers,
-			"cacheHits", cacheStats.hits.Load(),
-			"cacheMisses", cacheStats.misses.Load(),
-			"cacheFillRequests", cacheStats.fillRequests.Load(),
-			"elapsed", time.Since(started),
-		)
 		return ctxErr
 	}
 	// The first worker error cancels the other workers; their context errors are not causes.
@@ -356,8 +346,9 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots) })
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal)) })
-	err := g.Wait()
-	log.Debug("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "elapsed", time.Since(started), "err", err)
+	if err := g.Wait(); !errors.Is(err, context.Canceled) {
+		log.Debug("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "elapsed", time.Since(started), "err", err)
+	}
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
