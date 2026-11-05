@@ -73,15 +73,18 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 					client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 					body := bytes.Repeat([]byte{0, 1, 0xff}, 400_000)
 					const payloadPath = "/engine/v1/payloads"
+					const getPayloadPath = payloadPath + "/0x0102030405060708"
 					for _, tc := range []struct {
-						name, path, token, detail string
+						name, method, path, token, detail string
 					}{
-						{"authorized", payloadPath, token, ""},
-						{"missing token", payloadPath, "", "missing token"},
-						{"invalid signature", payloadPath, invalidToken, "signature is invalid"},
-						{"JSON-RPC missing token", "/", "", "missing token"},
-						{"JSON-RPC invalid signature", "/", invalidToken, "signature is invalid"},
-						{"authorized after failures", payloadPath, token, ""},
+						{"authorized", http.MethodPost, payloadPath, token, ""},
+						{"missing token", http.MethodPost, payloadPath, "", "missing token"},
+						{"invalid signature", http.MethodPost, payloadPath, invalidToken, "signature is invalid"},
+						{"get payload missing token", http.MethodGet, getPayloadPath, "", "missing token"},
+						{"get payload invalid signature", http.MethodGet, getPayloadPath, invalidToken, "signature is invalid"},
+						{"JSON-RPC missing token", http.MethodPost, "/", "", "missing token"},
+						{"JSON-RPC invalid signature", http.MethodPost, "/", invalidToken, "signature is invalid"},
+						{"authorized after failures", http.MethodPost, payloadPath, token, ""},
 					} {
 						t.Run(tc.name, func(t *testing.T) {
 							requestBody, contentType := body, "application/octet-stream"
@@ -89,7 +92,10 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 								requestBody = []byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}`)
 								contentType = "application/json"
 							}
-							req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost"+tc.path, bytes.NewReader(requestBody))
+							if tc.method == http.MethodGet {
+								requestBody = nil
+							}
+							req, err := http.NewRequestWithContext(t.Context(), tc.method, "http://localhost"+tc.path, bytes.NewReader(requestBody))
 							require.NoError(t, err)
 							req.Header.Set("Content-Type", contentType)
 							req.Header.Set("Eth-Execution-Version", "amsterdam")
@@ -109,10 +115,12 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 							}
 							require.Equal(t, http.StatusForbidden, resp.StatusCode)
 							if tc.path == "/" {
+								require.Empty(t, resp.Header.Get("Cache-Control"))
 								require.Equal(t, "text/plain; charset=utf-8", resp.Header.Get("Content-Type"))
 								require.Equal(t, tc.detail+"\n", string(got))
 								return
 							}
+							require.Equal(t, "no-store", resp.Header.Get("Cache-Control"))
 							require.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
 							var problem map[string]string
 							require.NoError(t, json.Unmarshal(got, &problem))

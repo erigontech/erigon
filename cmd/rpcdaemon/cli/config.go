@@ -920,6 +920,7 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 
 		if jwtSecret != nil && AuthenticatedEngineRESTHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
 			if err := rpc.ValidateJWT(r, jwtSecret); err != nil {
+				w.Header().Set("Cache-Control", "no-store")
 				w.Header().Set("Content-Type", "application/problem+json")
 				w.WriteHeader(http.StatusForbidden)
 				problem := struct {
