@@ -2306,3 +2306,24 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 	e.mu.RUnlock()
 	<-done
 }
+
+func TestReaderCancelRunsWhenTheReaderHitsAnUnfinishedWrite(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0xca"))
+	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false) // tx 1 still runs
+	cancelled := map[int]int{}
+	for _, tx := range []int{2, 3} {
+		vm.SetReaderCancel(tx, func() { cancelled[tx]++ })
+	}
+	vm.ReadBalance(addr, 2)
+	require.Equal(t, map[int]int{2: 1}, cancelled, "only the reader of the unfinished write is cancelled")
+
+	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), true)
+	vm.ReadBalance(addr, 3)
+	require.Equal(t, map[int]int{2: 1}, cancelled, "a finished write cancels nothing")
+
+	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false)
+	vm.SetReaderCancel(2, nil)
+	vm.ReadBalance(addr, 2)
+	require.Equal(t, map[int]int{2: 1}, cancelled, "a removed cancel is not called")
+}

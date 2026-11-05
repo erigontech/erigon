@@ -2459,10 +2459,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
-	evm.SetAbortOnDependency(dbg.AbortOnReadDependency)
+	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
+	ev.versionMap.SetReaderCancel(ev.Version().TxIndex, evm.Cancel)
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
-	evm.SetAbortOnDependency(false)
+	ev.versionMap.SetReaderCancel(ev.Version().TxIndex, nil)
+	// The cancel must not reach this worker's next task, which may run without a Reset.
+	evm.Reset(evm.TxContext, evm.IntraBlockState())
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so
 	// occupancy reveals whether workers are starved or compute-bound.
