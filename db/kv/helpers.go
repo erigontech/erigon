@@ -22,14 +22,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -224,8 +221,8 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
+	for i, v := range slices.Backward(r) {
+		if v != 255 {
 			r[i]++
 			return r, true
 		}
@@ -233,19 +230,6 @@ func NextSubtree(in []byte) ([]byte, bool) {
 		r = r[:i] // make it shorter, because in tries after 11ff goes 12, but not 1200
 	}
 	return nil, false
-}
-
-func IncrementKey(tx RwTx, table string, k []byte) error {
-	v, err := tx.GetOne(table, k)
-	if err != nil {
-		return err
-	}
-	var version uint64
-	if len(v) == 8 {
-		version = binary.BigEndian.Uint64(v)
-	}
-	version++
-	return tx.Put(table, k, hexutil.EncodeTs(version))
 }
 
 type DomainEntryDiff struct {
@@ -260,10 +244,6 @@ type DomainDiff struct {
 	prevValsSlice []DomainEntryDiff
 
 	currentStepBuf, keyBuf []byte
-}
-
-func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
 }
 
 func (d *DomainDiff) Len() int {

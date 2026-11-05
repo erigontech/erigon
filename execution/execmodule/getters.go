@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -319,7 +320,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 // API then reports null for that block, per spec, rather than failing the
 // whole request.
 func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
-	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum)
+	encoded, err := e.balRegenerator.GetBlockAccessListBytes(ctx, e.config, tx, blockHash, blockNum, nil)
 	if err == nil {
 		return encoded, nil
 	}
@@ -371,6 +372,10 @@ func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.
 	return expectedHash == hash, nil
 }
 
+func (e *ExecModule) IsValidated(blockHash common.Hash) bool {
+	return e.forkValidator.IsValidated(blockHash)
+}
+
 func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash) (bool, error) {
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {
@@ -382,7 +387,22 @@ func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read canonical hash %w", err)
 	}
-	return isCanonical, nil
+	if !isCanonical {
+		return false, nil
+	}
+	// Forkchoice commits canonical hashes ahead of the Execution stage during catch-up.
+	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read block number %w", err)
+	}
+	if blockNumber == nil {
+		return false, nil
+	}
+	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read execution progress %w", err)
+	}
+	return executedTo >= *blockNumber, nil
 }
 
 func (e *ExecModule) CurrentHeader(ctx context.Context) (*types.Header, error) {

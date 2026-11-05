@@ -21,6 +21,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,6 +52,7 @@ type recordingDownloader struct {
 	calls     []string // "delete" / "seed", in the order they happened
 	deleted   [][]string
 	seeded    [][]string
+	seedErr   error
 	deleteErr error
 }
 
@@ -58,16 +60,24 @@ func (d *recordingDownloader) Seed(_ context.Context, paths []string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, "seed")
-	d.seeded = append(d.seeded, paths)
-	return nil
+	relativize(paths)
+	d.seeded = append(d.seeded, slices.Clone(paths))
+	return d.seedErr
 }
 
 func (d *recordingDownloader) Delete(_ context.Context, paths []string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, "delete")
-	d.deleted = append(d.deleted, paths)
+	relativize(paths)
+	d.deleted = append(d.deleted, slices.Clone(paths))
 	return d.deleteErr
+}
+
+func relativize(paths []string) {
+	for i := range paths {
+		paths[i] = filepath.Base(paths[i])
+	}
 }
 
 func (d *recordingDownloader) seededNames() []string {

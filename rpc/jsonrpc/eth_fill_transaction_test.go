@@ -204,6 +204,27 @@ func TestFillTransactionExplicitGasPreserved(t *testing.T) {
 	require.Equal(t, gas, result.Tx.Gas, "explicit gas must not be overwritten by estimation")
 }
 
+func TestFillTransactionLoneBlobFeeCapDoesNotFailEstimation(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	supplied := hexutil.Uint64(21000)
+
+	for name, gas := range map[string]*hexutil.Uint64{"estimated gas": nil, "supplied gas": &supplied} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+				From:             &from,
+				To:               &to,
+				Gas:              gas,
+				MaxFeePerBlobGas: (*hexutil.U256)(uint256.NewInt(1)),
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestFillTransactionBlobPreCancun(t *testing.T) {
 	// TestChainBerlinConfig has no Cancun (ExcessBlobGas == nil on head).
 	// A blob tx request must return a clear error, not panic.

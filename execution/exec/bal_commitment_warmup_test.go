@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -60,6 +61,28 @@ type commitmentBeginErrorDB struct {
 
 func (db *commitmentBeginErrorDB) BeginRo(context.Context) (kv.Tx, error) {
 	return nil, db.errs[db.next.Add(1)-1]
+}
+
+type commitmentBeginFuncDB struct {
+	kv.RoDB
+	begin func(context.Context) (kv.Tx, error)
+	calls atomic.Int64
+}
+
+func (db *commitmentBeginFuncDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.calls.Add(1)
+	return db.begin(ctx)
+}
+
+func threeAccountChanges() types.BlockAccessList {
+	var bal types.BlockAccessList
+	for i := range 3 {
+		bal = append(bal, types.AccountChanges{
+			Address:        common.Address{19: byte(i + 1)},
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+		})
+	}
+	return bal
 }
 
 type commitmentBranchLookupTx struct {
@@ -98,7 +121,7 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
 	bal := types.BlockAccessList{
-		{Address: readOnlyAddress.Value(), StorageReads: []accounts.StorageKey{readSlot}},
+		{Address: readOnlyAddress.Value(), StorageReads: []common.Hash{readSlot.Value()}},
 		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
 		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
 			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
@@ -158,6 +181,57 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	err := warmBALCommitment(t.Context(), db, bal, 2)
 	require.ErrorIs(t, err, firstErr)
 	require.ErrorIs(t, err, secondErr)
+}
+
+// A warmup whose context is already done does not open any read transaction.
+func TestWarmBALCommitmentSkipsAnEndedContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("unexpected BeginRo") }}
+
+	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+
+	require.Equal(t, context.Canceled, err)
+	require.Zero(t, db.calls.Load())
+}
+
+// A cancellation reaches every worker; it is reported once, not joined per worker.
+func TestWarmBALCommitmentReportsACancellationOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) {
+		cancel()
+		return nil, context.Canceled
+	}}
+
+	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+
+	require.Equal(t, context.Canceled, err)
+}
+
+// The first worker error cancels the other workers. Their context errors are consequences, so only
+// the cause is reported, once.
+func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
+	db := &commitmentBeginFuncDB{begin: func(ctx context.Context) (kv.Tx, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, kv.ErrReadTxLimitExceeded
+	}}
+
+	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+
+	require.Equal(t, int64(3), db.calls.Load())
+	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
+}
+
+// Workers that fail with errors allocated per call, such as a closed database's, report the
+// message once.
+func TestWarmBALCommitmentReportsAnErrorMessageOnce(t *testing.T) {
+	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("db closed") }}
+
+	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+
+	require.EqualError(t, err, "db closed")
 }
 
 func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
@@ -246,4 +320,30 @@ func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
 
 	require.Positive(t, tx.calls, "a touched key's path is read")
 	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
+}
+
+// branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.
+type branchTx struct {
+	kv.TemporalTx
+	children map[string]uint16
+}
+
+func (t branchTx) AggTx() any { return t }
+
+func (t branchTx) GetLatestBranchRaw(prefix []byte, _ kv.Tx) ([]byte, bool, error) {
+	bits, ok := t.children[string(prefix)]
+	if !ok {
+		return nil, false, nil
+	}
+	return []byte{0, 0, byte(bits >> 8), byte(bits)}, true, nil
+}
+
+func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
+	compact := func(path ...byte) string { return string(nibbles.HexToCompactInto(nil, path)) }
+	tx := branchTx{children: map[string]uint16{
+		compact(1): 1 << 2, // branch 1 has only child 2
+	}}
+	keys := [][]byte{{1, 2, 0}, {1, 5, 0}, {3, 0, 0}, {4}}
+	got := keysWithChild(context.Background(), nil, tx, keys, 1)
+	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
 }

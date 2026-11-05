@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -33,8 +34,10 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
@@ -42,6 +45,50 @@ type fcuEngineStub struct {
 	engineapi.EngineAPI
 	response *engine_types.ForkChoiceUpdatedResponse
 	err      error
+}
+
+type assembledPayloadIDModule struct {
+	execmodule.ExecutionModule
+	id    uint64
+	calls int
+}
+
+func (m *assembledPayloadIDModule) GetAssembledBlock(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+	m.id = id
+	m.calls++
+	return execmodule.AssembledBlockResult{}, nil
+}
+
+func TestLocalEnginePayloadIDRoundTrip(t *testing.T) {
+	const id = uint64(0x0102030405060708)
+	module := &assembledPayloadIDModule{}
+	reader := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second)
+	client := &ExecutionClientEngine{
+		chainRW: &reader,
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadId: engine_types.ConvertPayloadId(id),
+		}},
+	}
+	payloadID, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion)
+	require.NoError(t, err)
+	_, _, _, _, err = client.GetAssembledBlock(t.Context(), payloadID, clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Equal(t, id, module.id)
+}
+
+func TestLocalEngineRejectsMalformedPayloadIDs(t *testing.T) {
+	for _, size := range []int{9, 0, 1, 7} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			module := &assembledPayloadIDModule{}
+			reader := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second)
+			client := &ExecutionClientEngine{chainRW: &reader}
+			require.NotPanics(t, func() {
+				_, _, _, _, err := client.GetAssembledBlock(t.Context(), make([]byte, size), clparams.DenebVersion)
+				require.ErrorContains(t, err, "expected 8 bytes")
+			})
+			require.Zero(t, module.calls)
+		})
+	}
 }
 
 func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
@@ -377,4 +424,46 @@ func gloas(cfg *clparams.BeaconChainConfig, balData []byte) *cltypes.Eth1Block {
 		block.BlockAccessList = nil
 	}
 	return block
+}
+
+type newPayloadEngineStub struct {
+	engineapi.EngineAPI
+	err error
+}
+
+func (s *newPayloadEngineStub) NewPayloadV4(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return nil, s.err
+}
+
+func (s *newPayloadEngineStub) NewPayloadV5(context.Context, *engine_types.ExecutionPayload, []common.Hash, *common.Hash, []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return nil, s.err
+}
+
+// A timeout of the client's own request is no EL verdict, whatever the fork: the caller must not
+// import the payload on it (optimistic sync, "Execution Engine Errors").
+func TestNewPayloadReportsAClientTimeoutAsNoVerdict(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clientTimeout := fmt.Errorf("Post: %w (Client.Timeout exceeded while awaiting headers)", context.DeadlineExceeded)
+	electra := cltypes.NewEth1Block(clparams.ElectraVersion, &cfg)
+	electra.Extra = solid.NewExtraData()
+	electra.Transactions = &solid.TransactionsSSZ{}
+	electra.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	for _, payload := range []*cltypes.Eth1Block{gloas(&cfg, nil), electra} {
+		t.Run(payload.Version().String(), func(t *testing.T) {
+			client := &ExecutionClientEngine{engine: &newPayloadEngineStub{err: clientTimeout}, beaconCfg: &cfg}
+			status, err := client.NewPayload(t.Context(), payload, nil, nil, nil)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.EqualValues(t, PayloadStatusNone, status)
+		})
+	}
+}
+
+func TestValidationInterrupted(t *testing.T) {
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.True(t, ValidationInterrupted(cancelled, PayloadStatusNone, context.Canceled))
+	require.False(t, ValidationInterrupted(t.Context(), PayloadStatusNone, errors.New("connection refused")))
+	require.False(t, ValidationInterrupted(cancelled, PayloadStatusInvalidated, context.Canceled))
+	require.False(t, ValidationInterrupted(cancelled, PayloadStatusNone, nil))
 }

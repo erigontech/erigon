@@ -27,7 +27,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -87,7 +89,7 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 	defer cancel()
 	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 		got, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
-		if err != nil {
+		if err != nil && !commonerrors.IsOnlyCanceled(err) {
 			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
 		}
 		return got
@@ -236,24 +238,19 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 				continue
 			}
 		}
-		bal, err := types.DecodeBlockAccessListSidecarOwned(entry)
-		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
-			continue
-		}
-		hash, err := bal.Hash()
-		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d could not hash BAL: %w", ErrBadBALResponse, i, err)
-			continue
-		}
+		hash := crypto.Keccak256Hash(entry)
 		if hash != expected {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
-		if err = bal.ValidateForBlock(reqs[i].GasLimit); err != nil {
+		bal, err := types.DecodeBlockAccessListSidecarForHeader(entry, reqs[i].GasLimit)
+		if err != nil {
+			badPeer = true
+			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
+			continue
+		}
+		if err = bal.ValidateForHeader(reqs[i].GasLimit); err != nil {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d returned invalid BAL: %w", ErrBadBALResponse, i, err)
 			continue

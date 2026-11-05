@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"errors"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,10 +40,17 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 // ---------------------------------------------------------------------------
@@ -54,16 +62,17 @@ import (
 // ---------------------------------------------------------------------------
 
 type stubExecutionModule struct {
-	getHeaderFunc         func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
-	headerNumberFunc      func(ctx context.Context, hash common.Hash) (*uint64, error)
-	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
-	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
-	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
-	currentHeaderFunc     func(ctx context.Context) (*types.Header, error)
-	insertBlocksFunc      func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
-	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
-	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
-	inclusionListFunc     func(ctx context.Context) (types.Transactions, error)
+	getHeaderFunc          func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	headerNumberFunc       func(ctx context.Context, hash common.Hash) (*uint64, error)
+	assembleBlockFunc      func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
+	getAssembledBlockFunc  func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
+	getForkChoiceFunc      func(ctx context.Context) (execmodule.ForkChoiceState, error)
+	currentHeaderFunc      func(ctx context.Context) (*types.Header, error)
+	insertBlocksFunc       func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
+	validateChainFunc      func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
+	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
+	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
+	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -87,6 +96,12 @@ func (s *stubExecutionModule) GetAssembledBlock(ctx context.Context, payloadID u
 		return s.getAssembledBlockFunc(ctx, payloadID)
 	}
 	return execmodule.AssembledBlockResult{}, nil
+}
+
+func (s *stubExecutionModule) AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery) {
+	if s.addSendersRecoveryFunc != nil {
+		s.addSendersRecoveryFunc(blockHash, recovery)
+	}
 }
 
 // --- No-op implementations for the rest of the interface ---
@@ -152,6 +167,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
+}
+
+func (s *stubExecutionModule) IsValidated(_ common.Hash) bool {
+	return false
 }
 
 func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
@@ -874,29 +893,54 @@ func TestBuildBlockV1(t *testing.T) {
 func TestStaticTxnProvider(t *testing.T) {
 	t.Parallel()
 
-	// stubTx is a minimal unsigned transaction; its content is irrelevant for
-	// testing the atomic "consumed" semantics of staticTxnProvider.
+	// No signature is needed here: the provider selects transactions without validating them.
 	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	stubTx := types.NewTransaction(0, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
 
-	t.Run("returns transactions on first call", func(t *testing.T) {
+	t.Run("returns transactions without a filter", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
-		txns, err := p.ProvideTxns(context.Background())
-		require.NoError(t, err)
-		require.Len(t, txns, 1)
+		for range 2 {
+			txns, err := p.ProvideTxns(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, []types.Transaction{stubTx}, txns)
+		}
 	})
 
-	t.Run("returns nil on second call (consumed)", func(t *testing.T) {
+	t.Run("retries transactions removed from the filter", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
-		_, _ = p.ProvideTxns(context.Background()) // first call consumes
-		txns, err := p.ProvideTxns(context.Background())
+		filter := mapset.NewSet[[32]byte]()
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{stubTx}, txns)
+		require.True(t, filter.Contains(stubTx.Hash()))
+		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
 		require.NoError(t, err)
 		require.Nil(t, txns)
+		filter.Remove(stubTx.Hash())
+		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{stubTx}, txns)
 	})
 
-	t.Run("empty provider returns empty slice then nil", func(t *testing.T) {
+	t.Run("honors batch size and filter", func(t *testing.T) {
+		t.Parallel()
+		second := types.NewTransaction(1, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx, second}}
+		filter := mapset.NewSet[[32]byte]()
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(0), txnprovider.WithTxnIdsFilter(filter))
+		require.NoError(t, err)
+		require.Empty(t, txns)
+		require.True(t, filter.IsEmpty())
+		for _, want := range p.txns {
+			txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(1), txnprovider.WithTxnIdsFilter(filter))
+			require.NoError(t, err)
+			require.Equal(t, []types.Transaction{want}, txns)
+		}
+	})
+
+	t.Run("empty provider returns no transactions", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{}}
 		txns, err := p.ProvideTxns(context.Background())
@@ -908,9 +952,10 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.Nil(t, txns)
 	})
 
-	t.Run("concurrent callers: exactly one consumes the transactions", func(t *testing.T) {
+	t.Run("concurrent callers sharing a filter yield each transaction once", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		filter := mapset.NewSet[[32]byte]()
 		const goroutines = 32
 		var nonEmpty atomic.Int32
 		var wg sync.WaitGroup
@@ -920,7 +965,7 @@ func TestStaticTxnProvider(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				txns, err := p.ProvideTxns(context.Background())
+				txns, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
 				assert.NoError(t, err)
 				if len(txns) > 0 {
 					nonEmpty.Add(1)
@@ -929,7 +974,7 @@ func TestStaticTxnProvider(t *testing.T) {
 		}
 		close(start)
 		wg.Wait()
-		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must consume the transactions")
+		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must yield the transaction")
 	})
 }
 
@@ -1068,6 +1113,131 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 	})
 }
 
+func TestDecodeTxnProviderFrameNonces(t *testing.T) {
+	t.Parallel()
+	cfg := allForksChainConfig()
+	cfg.BogotaTime = common.NewUint64(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	frame := func(nonceKey, seq uint64) hexutil.Bytes {
+		tx := &types.FrameTransaction{
+			ChainID: *cfg.ChainID, SenderAddress: sender, Nonce: seq,
+			NonceKeys: []uint256.Int{*uint256.NewInt(nonceKey)},
+			Frames:    []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
+			Fees:      types.FrameFees{FeeCap: *uint256.NewInt(1_000_000_000)},
+		}
+		var encoded bytes.Buffer
+		require.NoError(t, tx.MarshalBinary(&encoded))
+		return encoded.Bytes()
+	}
+	ordinary0 := makeSignedRawTx(t, key, cfg, 0, 101, 1001)
+	ordinary1 := makeSignedRawTx(t, key, cfg, 1, 101, 1001)
+	for _, tc := range []struct {
+		name    string
+		txs     []hexutil.Bytes
+		wantErr string
+	}{
+		{name: "keyed sequence above account nonce", txs: []hexutil.Bytes{frame(1, 7)}},
+		{name: "keyed sequence below account nonce", txs: []hexutil.Bytes{ordinary0, frame(1, 0), ordinary1}},
+		{name: "keyed frame preserves account nonce", txs: []hexutil.Bytes{frame(1, 0), ordinary0}},
+		{name: "independent keys", txs: []hexutil.Bytes{frame(1, 0), frame(2, 0), ordinary0}},
+		{name: "legacy frame consumes account nonce", txs: []hexutil.Bytes{frame(0, 0), ordinary1}},
+		{name: "legacy frame nonce too high", txs: []hexutil.Bytes{frame(0, 1)}, wantErr: "nonce too high"},
+		{name: "legacy frame nonce too low", txs: []hexutil.Bytes{ordinary0, frame(0, 0)}, wantErr: "nonce too low"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := newTestingAPI(cfg, &stubExecutionModule{}).(*testingImpl)
+			provider, err := api.decodeTxnProvider(t.Context(), &tc.txs, 101, 1001)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.Nil(t, provider)
+				return
+			}
+			require.NoError(t, err)
+			provided, err := provider.ProvideTxns(t.Context())
+			require.NoError(t, err)
+			require.Len(t, provided, len(tc.txs))
+			for i, tx := range provided {
+				var encoded bytes.Buffer
+				require.NoError(t, tx.MarshalBinary(&encoded))
+				require.Equal(t, []byte(tc.txs[i]), encoded.Bytes())
+			}
+		})
+	}
+}
+
+func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		key          uint64
+		otherCreator bool
+	}{
+		{name: "legacy"},
+		{name: "keyed", key: 5},
+		{name: "other creator", otherCreator: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			sender := common.HexToAddress("0x1000")
+			creator := sender
+			if tc.otherCreator {
+				creator = common.HexToAddress("0x2000")
+			}
+			create := program.New().Push0().Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+			code := append([]byte{byte(vm.CALLDATASIZE), byte(vm.PUSH1), byte(4 + len(create)), byte(vm.JUMPI)}, create...)
+			code = append(code, program.New().Op(vm.JUMPDEST).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()...)
+			genesis := &types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:                  {Balance: big.NewInt(common.Ether), Code: code},
+					types.FrameNonceManager: {Nonce: 1, Code: common.FromHex("60006000fd")},
+				},
+			}
+			genesis.Alloc[creator] = types.GenesisAccount{Balance: big.NewInt(common.Ether), Code: code}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			parentChain, err := m.GenerateChain(1, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(parentChain))
+			parent := parentChain.TopBlock
+			approval := types.Frame{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}
+			first := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{*uint256.NewInt(tc.key)}, SenderAddress: sender,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+				Frames: []types.Frame{
+					{Mode: types.FrameDefault, Target: &creator, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+					approval,
+				},
+			}
+			// CREATE increments the creator's nonce, and legacy approval increments
+			// it once more when the creator is also the transaction sender.
+			secondNonce := uint64(1)
+			if tc.key == 0 && creator == sender {
+				secondNonce++
+			}
+			second := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: creator, Nonce: secondNonce,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: []types.Frame{approval},
+			}
+			txs := make([]hexutil.Bytes, 0, 2)
+			for _, tx := range []*types.FrameTransaction{first, second} {
+				var encoded bytes.Buffer
+				require.NoError(t, tx.MarshalBinary(&encoded))
+				txs = append(txs, encoded.Bytes())
+			}
+			server := NewEngineServer(m.Log, cfg, m.ExecModule, nil, false, false, true, true, nil, nil, 0, 0)
+			api := NewTestingImpl(server, m.Log, m.DB)
+			attrs := validPayloadAttrs(parent.Time())
+			slot := hexutil.Uint64(parent.NumberU64() + 1)
+			attrs.SlotNumber = &slot
+			response, err := api.BuildBlockV1(t.Context(), parent.Hash(), attrs, &txs, nil)
+			require.NoError(t, err)
+			require.Equal(t, txs, response.ExecutionPayload.Transactions)
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Multi-sender nonce tracking test
 // ---------------------------------------------------------------------------
@@ -1175,7 +1345,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr rpc.Error
-		require.True(t, errors.As(err, &rpcErr))
+		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
@@ -1217,7 +1387,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr rpc.Error
-		require.True(t, errors.As(err, &rpcErr))
+		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 }
@@ -1266,7 +1436,7 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 	require.Nil(t, resp)
 	require.Error(t, err)
 	var rpcErr rpc.Error
-	require.True(t, errors.As(err, &rpcErr))
+	require.ErrorAs(t, err, &rpcErr)
 	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
@@ -1363,7 +1533,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 	require.Nil(t, resp)
 	require.Error(t, err)
 	var rpcErr rpc.Error
-	require.True(t, errors.As(err, &rpcErr))
+	require.ErrorAs(t, err, &rpcErr)
 	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
@@ -1451,7 +1621,7 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.Error(t, err)
 		var rpcErr rpc.Error
-		require.True(t, errors.As(err, &rpcErr))
+		require.ErrorAs(t, err, &rpcErr)
 		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
@@ -1508,6 +1678,75 @@ func TestNewPayloadWithoutBaseFeeDoesNotPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		_, _ = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
 	})
+}
+
+func signedElectraPayload(t *testing.T, config *chain.Config) (*engine_types.ExecutionPayload, common.Address) {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(config, 1, 0), key)
+	require.NoError(t, err)
+
+	zero := uint64(0)
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		GasLimit:              30_000_000,
+		BaseFee:               uint256.NewInt(1),
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &common.Hash{},
+		RequestsHash:          types.FlatRequests{}.Hash(),
+	}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, []*types.Withdrawal{}, nil)
+	resp, err := assembledBlockToPayloadResponse(&types.BlockWithReceipts{Block: block, Requests: types.FlatRequests{}}, uint256.NewInt(0), clparams.ElectraVersion)
+	require.NoError(t, err)
+	resp.ExecutionPayload.Withdrawals = []*types.Withdrawal{}
+	return resp.ExecutionPayload, crypto.PubkeyToAddress(key.PublicKey)
+}
+
+func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
+	t.Parallel()
+
+	config := preAmsterdamChainConfig()
+	config.TerminalTotalDifficulty = nil
+	payload, sender := signedElectraPayload(t, config)
+
+	var registeredHash common.Hash
+	var recovery *exec.SendersRecovery
+	stub := &stubExecutionModule{addSendersRecoveryFunc: func(blockHash common.Hash, r *exec.SendersRecovery) {
+		registeredHash, recovery = blockHash, r
+	}}
+	srv := NewEngineServer(log.New(), config, stub, nil, false, false, false, true, nil, nil, 0, 0)
+	_, err := srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.ErrorContains(t, err, "not a proof-of-stake chain")
+
+	require.Equal(t, payload.BlockHash, registeredHash)
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddSendersRecovery(registeredHash, recovery)
+	senders, ok := readAheader.RecoveredSenders(t.Context(), registeredHash)
+	require.True(t, ok)
+	require.Equal(t, sender[:], senders)
+}
+
+func TestNewPayloadSkipsSendersRecoveryOnBlockHashMismatch(t *testing.T) {
+	t.Parallel()
+
+	config := preAmsterdamChainConfig()
+	payload, _ := signedElectraPayload(t, config)
+	payload.BlockHash = common.Hash{0x1}
+
+	registered := false
+	stub := &stubExecutionModule{addSendersRecoveryFunc: func(common.Hash, *exec.SendersRecovery) {
+		registered = true
+	}}
+	srv := NewEngineServer(log.New(), config, stub, nil, false, false, false, true, nil, nil, 0, 0)
+	status, err := srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.False(t, registered)
 }
 
 func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
@@ -1574,8 +1813,4 @@ func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
 			require.Nil(t, resp.PayloadId)
 		})
 	}
-}
-
-func ptrUint64(v uint64) *uint64 {
-	return &v
 }

@@ -26,9 +26,9 @@ To configure your local Metamask wallet (browser extension):
 
 * Click on the **network selector button**. This will display a list of networks to which you're already connected
 * Click **Add network**
-* A new browser tab will open, displaying various fields to fill out. Complete the fields with the proper information, in this example for Ethereum network:
+* A new browser tab will open, displaying various fields to fill out. Complete the fields with the proper information, in this example for the Ethereum network:
   * **Network Name**: `Ethereum on E3` (or any name of your choice)
-  * **Chain ID**: `1` for chain ID parameter see [Supported Networks](supported-networks)
+  * **Chain ID**: `1`; for the chain ID parameter, see [Supported Networks](supported-networks)
   * **New RPC URL**: `http://127.0.0.1:8545`
   * **Currency Symbol**: `ETH`
   * **Block Explorer URL**: `https://www.etherscan.io` (or any explorer of your choice)

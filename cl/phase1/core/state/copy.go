@@ -17,11 +17,10 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
+
+var pubkeyIndexDeltaSize = metrics.GetOrCreateGauge("beacon_state_pubkey_index_delta_size")
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	err = b.BeaconState.CopyInto(bs.BeaconState)
@@ -29,6 +28,8 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 		return err
 	}
 
+	bs.publicKeyIndices = pubkeyIndexFromBase(b.publicKeyIndices.base, bs.ValidatorSet())
+	pubkeyIndexDeltaSize.SetInt(len(bs.publicKeyIndices.delta))
 	err = bs.reinitCaches()
 	if err != nil {
 		return err
@@ -38,38 +39,6 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	// instead of recomputing HashSSZ(), which may diverge when the
 	// incremental hashing cache has been dirtied by fork-choice operations.
 	bs.previousStateRoot = b.previousStateRoot
-	return nil
-}
-
-func (b *CachingBeaconState) reinitCaches() error {
-	if b.Version() == clparams.Phase0Version {
-		return b.InitBeaconState()
-	}
-
-	if b.publicKeyIndicies == nil {
-		b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
-	} else {
-		b.publicKeyIndicies.Clear()
-	}
-
-	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		b.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
-		return true
-	})
-
-	b.totalActiveBalanceCache = nil
-	b._refreshActiveBalancesIfNeeded()
-	b.previousStateRoot = common.Hash{}
-	if err := b.initCaches(); err != nil {
-		return err
-	}
-	if err := b._updateProposerIndex(); err != nil {
-		return err
-	}
-	if b.Version() >= clparams.Phase0Version {
-		return b._initializeValidatorsPhase0()
-	}
-
 	return nil
 }
 

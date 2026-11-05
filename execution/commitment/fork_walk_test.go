@@ -297,7 +297,7 @@ func TestForkWalk_PanicInChildKeepsLeaseOnTheRunner(t *testing.T) {
 		leases:        pool,
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
-		metrics:       NewMetrics(""),
+		metrics:       &Metrics{},
 		grain:         ForkGrainNever,
 	}
 	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
@@ -338,7 +338,7 @@ func TestForkWalk_CheckinKeepsTheDeferredSliceOnTheTrie(t *testing.T) {
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
 		pu:            pu,
-		metrics:       NewMetrics(""),
+		metrics:       &Metrics{},
 		grain:         ForkGrainNever,
 	}
 	l, err := pool.acquire(context.Background())
@@ -395,11 +395,12 @@ func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
 			accountKeyLen: length.Addr,
 			cfg:           DefaultTrieConfig(),
 			pu:            ut.parallel,
-			metrics:       NewMetrics(""),
+			metrics:       &Metrics{},
 			grain:         1,
 		}
 		bw := &walker{trie: base}
 		require.NoError(t, fw.attach(ctx, bw))
+		ut.parallel.Build()
 		root := ut.parallel.trie.root
 		err := fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
 		fw.detach(bw)
@@ -487,12 +488,13 @@ func TestForkWalk_HelperErrorIsNotMaskedByCancellation(t *testing.T) {
 		accountKeyLen: length.Addr,
 		cfg:           DefaultTrieConfig(),
 		pu:            ut.parallel,
-		metrics:       NewMetrics(""),
+		metrics:       &Metrics{},
 		grain:         1,
 	}
 	bw := &walker{trie: base}
 	require.NoError(t, fw.attach(ctx, bw))
 	require.Same(t, first, bw.lease, "the forking walker must hold the lease whose reads wait for the helper to fail")
+	ut.parallel.Build()
 	root := ut.parallel.trie.root
 	err = fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
 	fw.detach(bw)
@@ -573,9 +575,10 @@ func absentDeleteCorpus(freshRegion bool) (k1 [][]byte, u1 []Update, k2 [][]byte
 
 func TestForkWalk_SplitsExcludesTheNodesOwnKey(t *testing.T) {
 	pu := newParallelUpdate()
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil)
-	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
-	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
+	pu.Collect(nibs(0x01, 0x02), []byte("pk-D"), nil)
+	pu.Collect(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
+	pu.Collect(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
+	pu.Build()
 	node := pu.trie.root.children[0]
 	require.NotNil(t, node.plainKey)
 	require.Equal(t, uint32(3), node.subtreeCount)

@@ -37,6 +37,9 @@ jobs:
       ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Fast checkout git repository
         uses: actions/checkout@v7
         with:

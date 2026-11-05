@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/spf13/afero"
@@ -35,6 +37,7 @@ import (
 
 const (
 	subdivisionSlot = 10_000
+	listBatch       = 64
 	rwLocksCount    = 64
 	tmpSuffix       = ".tmp"
 )
@@ -208,6 +211,72 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 	defer fh.Close()
 	_, err = io.Copy(w, fh)
 	return err
+}
+
+// EarliestStoredSlot returns where the lowest bucket holding a sidecar starts, which can be
+// below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
+// cannot be read is skipped, since its sidecars cannot be served either, but when no readable
+// bucket holds a sidecar the first read error is returned, so an unreadable store is not
+// mistaken for an empty one.
+func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
+	entries, err := afero.ReadDir(b.fs, ".")
+	if err != nil {
+		return 0, err
+	}
+	buckets := make([]uint64, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		bucket, err := strconv.ParseUint(name, 10, 64)
+		if err != nil || strconv.FormatUint(bucket, 10) != name {
+			continue
+		}
+		buckets = append(buckets, bucket)
+	}
+	slices.Sort(buckets)
+	var firstErr error
+	for _, bucket := range buckets {
+		stored, err := b.holdsSidecar(strconv.FormatUint(bucket, 10))
+		if err != nil {
+			log.Warn("[blob_storage] skipping unreadable column bucket", "bucket", bucket, "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("column bucket %d: %w", bucket, err)
+			}
+			continue
+		}
+		if stored {
+			return bucket * subdivisionSlot, nil
+		}
+	}
+	return 0, firstErr
+}
+
+// holdsSidecar reads the bucket in small batches and stops at the first entry that is a
+// stored sidecar, since a bucket holds one file per root and column.
+func (b *bucketStore) holdsSidecar(dir string) (bool, error) {
+	f, err := b.fs.Open(dir)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	for {
+		files, err := f.Readdir(listBatch)
+		if slices.ContainsFunc(files, isStoredSidecar) {
+			return true, nil
+		}
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+}
+
+func isStoredSidecar(f os.FileInfo) bool {
+	return !f.IsDir() && !strings.HasSuffix(f.Name(), tmpSuffix)
 }
 
 // pruneBelow removes every bucket that ends before slot. It attempts all of them and

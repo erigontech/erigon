@@ -59,7 +59,7 @@ func TestAppendRPCLogs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := appendRPCLogs(tc.logs, tc.receiptLogs, nil, nil, blockTime, tc.maxResults)
+			got, err := appendRPCLogs(tc.logs, tc.receiptLogs, types.NewLogFilter(nil, nil), blockTime, tc.maxResults)
 			if tc.wantErr {
 				require.Nil(t, got)
 				var rpcErr rpc.Error
