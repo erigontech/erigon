@@ -5,7 +5,6 @@ import (
 	"math/big"
 	"math/rand"
 	"runtime"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2308,40 +2307,80 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 	<-done
 }
 
-func TestReaderCancelRunsWhenTheReaderRecordsADependency(t *testing.T) {
-	newRun := func(txIndex int) (*IntraBlockState, *VersionMap, *atomic.Bool) {
+type countingCanceller struct{ n int }
+
+func (c *countingCanceller) Cancel() { c.n++ }
+
+func TestSpecRunCancelledWhenItsReadRecordsADependency(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xca"))
+	newRun := func(inc Incarnation) (*IntraBlockState, *VersionMap, *countingCanceller) {
 		vm := NewVersionMap(nil)
 		vm.InitStamps(3)
 		ibs := NewWithVersionMap(NewNoopReader(), vm)
-		ibs.SetTxContext(1, txIndex)
-		var abort atomic.Bool
-		vm.SetReaderCancel(txIndex, &abort)
-		return ibs, vm, &abort
+		ibs.SetTxContext(1, 2)
+		ibs.SetVersion(inc)
+		run := &countingCanceller{}
+		vm.SetSpecRun(2, &SpecRun{Run: run, Incarnation: inc})
+		vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false) // tx 1 still runs
+		return ibs, vm, run
 	}
-	addr := accounts.InternAddress(common.HexToAddress("0xca"))
 
-	ibs, vm, abort := newRun(2)
-	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false) // tx 1 still runs
+	ibs, _, run := newRun(0)
 	_, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.True(t, ibs.HadInvalidRead())
-	require.True(t, abort.Load(), "a run that records a dependency is cancelled")
+	require.Equal(t, 1, run.n, "a run that records a dependency is cancelled")
 	ibs.Close()
 
-	ibs, vm, abort = newRun(2)
+	ibs, vm, run := newRun(0)
+	vm.SetSpecRun(2, nil)
+	_, err = ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Zero(t, run.n, "a cleared run is not cancelled")
+	ibs.Close()
+}
+
+func TestSpecRunOwnWriteRecordsNoDependency(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xcb"))
+	vm := NewVersionMap(nil)
+	vm.InitStamps(3)
+	ibs := NewWithVersionMap(NewNoopReader(), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	run := &countingCanceller{}
+	vm.SetSpecRun(2, &SpecRun{Run: run})
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false)
-	_, err = ibs.GetBalance(addr)
+	_, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.False(t, ibs.HadInvalidRead(), "the tx's own write wins over the unfinished one")
-	require.False(t, abort.Load(), "no dependency, no cancel")
-	ibs.Close()
+	require.Zero(t, run.n, "no dependency, no cancel")
+}
 
-	ibs, vm, abort = newRun(2)
-	vm.SetReaderCancel(2, nil)
+// A worker reuses its EVM for the next incarnation: a dependency that the old incarnation records after
+// the new run is published must not cancel the new run.
+func TestSpecRunStaleIncarnationDoesNotCancelTheNextRun(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xcc"))
+	vm := NewVersionMap(nil)
+	vm.InitStamps(3)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false)
-	_, err = ibs.GetBalance(addr)
+	old := NewWithVersionMap(NewNoopReader(), vm)
+	defer old.Close()
+	old.SetTxContext(1, 2)
+	old.SetVersion(0)
+	next := &countingCanceller{}
+	vm.SetSpecRun(2, &SpecRun{Run: next, Incarnation: 1})
+
+	_, err := old.GetBalance(addr)
 	require.NoError(t, err)
-	require.False(t, abort.Load(), "a removed cancel is not set")
-	ibs.Close()
+	require.True(t, old.HadInvalidRead())
+	require.Zero(t, next.n, "incarnation 0's dependency does not cancel incarnation 1")
+
+	cur := NewWithVersionMap(NewNoopReader(), vm)
+	defer cur.Close()
+	cur.SetTxContext(1, 2)
+	cur.SetVersion(1)
+	_, err = cur.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, 1, next.n, "incarnation 1's own dependency cancels it")
 }

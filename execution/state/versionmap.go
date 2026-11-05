@@ -252,9 +252,9 @@ type VersionMap struct {
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
 
-	// readerCancel[txIdx+1] is the abort flag of txIdx's speculative run, set once the run records a read
-	// dependency (its result is void). Sized by InitStamps.
-	readerCancel []atomic.Pointer[atomic.Bool]
+	// specRuns[txIdx+1] is txIdx's running speculative run; a read dependency it records cancels it (the
+	// result is void). Sized by InitStamps.
+	specRuns []atomic.Pointer[SpecRun]
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -292,7 +292,7 @@ type writeStamps struct {
 func (vm *VersionMap) InitStamps(lastTxIndex int) {
 	n := lastTxIndex + 2
 	vm.stamps = &writeStamps{n: n, inflight: make([]atomic.Int32, n+1), last: make([]atomic.Uint64, n+1)}
-	vm.readerCancel = make([]atomic.Pointer[atomic.Bool], n)
+	vm.specRuns = make([]atomic.Pointer[SpecRun], n)
 	vm.writeSeq.Store(1)
 }
 
@@ -2358,17 +2358,27 @@ func (res ReadResult) resolved() bool {
 	return s == MVReadResultDone || s == MVReadResultValidated
 }
 
-// SetReaderCancel makes a read by txIdx of an unfinished write set abort; nil removes it.
-func (vm *VersionMap) SetReaderCancel(txIdx int, abort *atomic.Bool) {
-	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.readerCancel) {
-		vm.readerCancel[txIdx+1].Store(abort)
+// Canceller stops a running speculative execution (vm.EVM).
+type Canceller interface{ Cancel() }
+
+// SpecRun is one incarnation's speculative execution of a tx.
+type SpecRun struct {
+	Run         Canceller
+	Incarnation Incarnation
+}
+
+// SetSpecRun publishes txIdx's running speculative run; nil clears it, before its EVM is reused.
+func (vm *VersionMap) SetSpecRun(txIdx int, r *SpecRun) {
+	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.specRuns) {
+		vm.specRuns[txIdx+1].Store(r)
 	}
 }
 
-func (vm *VersionMap) cancelReader(txIdx int) {
-	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.readerCancel) {
-		if abort := vm.readerCancel[txIdx+1].Load(); abort != nil {
-			abort.Store(true)
+// cancelRun cancels txIdx's speculative run when it is incarnation inc.
+func (vm *VersionMap) cancelRun(txIdx int, inc Incarnation) {
+	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.specRuns) {
+		if r := vm.specRuns[txIdx+1].Load(); r != nil && r.Incarnation == inc {
+			r.Run.Cancel()
 		}
 	}
 }
