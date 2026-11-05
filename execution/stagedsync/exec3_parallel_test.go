@@ -1905,6 +1905,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 	})
 }
 
+<<<<<<< ours
 func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
 	config := chain.AllProtocolChanges
 	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
@@ -2027,4 +2028,21 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	acc, ok = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
+=======
+func TestResumedBlockDoesNotWaitForDeployerInSkippedPrefix(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x04})
+	bal := types.BlockAccessList{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: []byte{0x60, 0x00}}},
+	}}
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), bal, discardConsumers(1), false, nil)
+	be.sealSkippedPrefix(3)
+	_, res, _ := be.versionMap.ReadAddress(addr, 4)
+	require.Equal(t, state.MVReadResultNone, res.Status(), "the deployer at tx 1 is in the base state of a block resumed at tx 3")
+
+	fresh := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), bal, discardConsumers(1), false, nil)
+	fresh.sealSkippedPrefix(-1)
+	_, res, _ = fresh.versionMap.ReadAddress(addr, 4)
+	require.Equal(t, state.MVReadResultDependency, res.Status(), "a block run from its start still waits for the deployer")
+>>>>>>> theirs
 }

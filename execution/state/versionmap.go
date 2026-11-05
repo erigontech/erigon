@@ -13,6 +13,7 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -251,6 +252,9 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// deployers maps each address the access list gives non-empty code to the tx indices
+	// that set it, ascending; nil when the block deploys no code.
+	deployers map[common.Address][]int
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -420,6 +424,17 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
 		bal:    changes,
+	}
+	for i := range changes {
+		acc := &changes[i]
+		for _, c := range acc.CodeChanges {
+			if len(c.Bytecode) > 0 && c.Index > 0 {
+				if vm.deployers == nil {
+					vm.deployers = map[common.Address][]int{}
+				}
+				vm.deployers[acc.Address] = append(vm.deployers[acc.Address], int(c.Index)-1)
+			}
+		}
 	}
 	vm.WriteChanges(changes)
 	return vm
@@ -910,6 +925,9 @@ func (vm *VersionMap) ReadCodeSizeLife(addr accounts.Address, txIdx int) (int, R
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
 	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address })
+	if k := vm.unflushedDeployer(addr, txIdx); k >= 0 && (!ok || res.depIdx < k) {
+		return nil, ReadResult{depIdx: k, incarnation: -1}, false
+	}
 	if ok {
 		return val, res, true
 	}
@@ -920,6 +938,24 @@ func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.A
 		return oacc, ReadResult{depIdx: originIndex}, true
 	}
 	return val, res, false
+}
+
+// unflushedDeployer returns the earlier tx the access list shows deploying code at addr while
+// that tx is neither sealed nor validated, or -1. Until it flushes, addr has no account cell.
+func (vm *VersionMap) unflushedDeployer(addr accounts.Address, txIdx int) int {
+	idxs := vm.deployers[addr.Value()]
+	i := sort.SearchInts(idxs, txIdx)
+	if i == 0 {
+		return -1
+	}
+	k := idxs[i-1]
+	if vm.sealedArmed.Load() && int64(k) <= vm.sealed.Load() {
+		return -1
+	}
+	if _, rr, ok := vm.ReadCode(addr, k+1); ok && rr.validated {
+		return -1
+	}
+	return k
 }
 
 func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {

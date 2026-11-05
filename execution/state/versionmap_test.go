@@ -2158,6 +2158,59 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(42), val)
 }
 
+// A contract an earlier tx deploys has no account cell until that tx flushes. A reader of its
+// AddressPath must wait for the deployer the BAL names instead of reading the pre-block
+// absence and running the contract's code against it.
+func TestBALReadAddressOfInBlockDeployIsDependency(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x03})
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+	}})
+	_, res, _ := vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultDependency, res.Status())
+	require.Equal(t, 2, res.DepIdx())
+
+	_, res, _ = vm.ReadAddress(addr, 2)
+	require.Equal(t, MVReadResultNone, res.Status(), "the deployer itself has nothing to wait for")
+
+	vm.SealUpTo(2)
+	_, res, _ = vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultNone, res.Status(), "a sealed deployer is in the base state")
+}
+
+func TestBALReadAddressOfPrefundedInBlockDeployIsDependency(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x05})
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+	}})
+	vm.StoreOriginAccount(addr, &accounts.Account{Balance: *uint256.NewInt(1)})
+	_, res, _ := vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultDependency, res.Status(), "the pre-deploy account of a prefunded address is stale until the deployer flushes")
+	require.Equal(t, 2, res.DepIdx())
+
+	_, res, _ = vm.ReadAddress(addr, 2)
+	require.Equal(t, MVReadResultDone, res.Status(), "the deployer itself reads the pre-block account")
+}
+
+func TestBALReadAddressFundedBeforeInBlockDeployIsDependency(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xcd, 0x06})
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
+		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: []byte{0x60, 0x00}}},
+	}})
+	vm.WriteAddress(addr, Version{TxIndex: 0}, &accounts.Account{Balance: *uint256.NewInt(1)}, true)
+
+	_, res, _ := vm.ReadAddress(addr, 5)
+	require.Equal(t, MVReadResultDependency, res.Status(), "the funded account is stale until the deployer flushes")
+	require.Equal(t, 2, res.DepIdx())
+
+	_, res, ok := vm.ReadAddress(addr, 2)
+	require.True(t, ok)
+	require.Equal(t, 0, res.DepIdx(), "the deployer itself reads the funded account")
+}
+
 // Readers combine a true destruct's flag with other cells' flags, so marking an entry with one
 // must wait for its readers.
 func TestMarkWritesCompleteWaitsForReadersOfADestructEntry(t *testing.T) {
