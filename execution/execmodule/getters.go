@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -418,7 +419,22 @@ func (e *ExecModule) IsCanonicalHash(ctx context.Context, blockHash common.Hash)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read canonical hash %w", err)
 	}
-	return isCanonical, nil
+	if !isCanonical {
+		return false, nil
+	}
+	// Forkchoice commits canonical hashes ahead of the Execution stage during catch-up.
+	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read block number %w", err)
+	}
+	if blockNumber == nil {
+		return false, nil
+	}
+	executedTo, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return false, fmt.Errorf("ethereumExecutionModule.IsCanonicalHash: could not read execution progress %w", err)
+	}
+	return executedTo >= *blockNumber, nil
 }
 
 func (e *ExecModule) CurrentHeader(ctx context.Context) (*types.Header, error) {

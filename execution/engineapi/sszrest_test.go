@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -1284,20 +1285,33 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		blobHash   common.Hash
+		frame      bool
 		wantStatus engine_types.EngineStatus
 		wantError  string
 	}{
-		{"valid versioned hash", common.Hash{0x01, 0x01}, engine_types.SyncingStatus, ""},
-		{"invalid versioned hash", common.Hash{0x02, 0x01}, engine_types.InvalidStatus, misc.ErrInvalidVersionedHash.Error()},
+		{name: "valid versioned hash", blobHash: common.Hash{0x01, 0x01}, wantStatus: engine_types.SyncingStatus},
+		{name: "invalid versioned hash", blobHash: common.Hash{0x02, 0x01}, wantStatus: engine_types.InvalidStatus, wantError: misc.ErrInvalidVersionedHash.Error()},
+		{name: "frame transaction", blobHash: common.Hash{0x01, 0x01}, frame: true, wantStatus: engine_types.SyncingStatus},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := prePragueChainConfig()
+			version, fork := clparams.DenebVersion, "cancun"
 			txs := types.Transactions{&types.BlobTx{
 				DynamicFeeTransaction: types.DynamicFeeTransaction{
 					CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x01}},
 				},
 				BlobVersionedHashes: []common.Hash{tc.blobHash},
 			}}
+			if tc.frame {
+				cfg = allForksChainConfig()
+				cfg.BogotaTime = common.NewUint64(0)
+				version, fork = clparams.GloasVersion, "amsterdam"
+				txs[0] = &types.FrameTransaction{
+					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: common.Address{0x01},
+					Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 21_000}}},
+					BlobVersionedHashes: []common.Hash{tc.blobHash},
+				}
+			}
 			header := makeParentHeader(1001)
 			header.ParentHash = common.Hash{0x01}
 			header.UncleHash = empty.UncleHash
@@ -1308,31 +1322,50 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 			header.BlobGasUsed = common.NewUint64(misc.GetBlobGasUsed(1))
 			header.ExcessBlobGas = new(uint64)
 			header.ParentBeaconBlockRoot = &common.Hash{}
+			if tc.frame {
+				header.RequestsHash = (types.FlatRequests{}).Hash()
+				balHash := empty.BlockAccessListHash
+				header.BlockAccessListHash = &balHash
+				header.SlotNumber = new(uint64)
+			}
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
-			payload.SSZVersion = clparams.DenebVersion
-			body, err := encodeNewPayloadEnvelope(clparams.DenebVersion, payload, *header.ParentBeaconBlockRoot, nil)
+			payload.SSZVersion = version
+			if tc.frame {
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+			}
+			body, err := encodeNewPayloadEnvelope(version, payload, *header.ParentBeaconBlockRoot, nil)
 			require.NoError(t, err)
 			stub := &stubExecutionModule{}
 			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
 			srv.test = true
 			rec := httptest.NewRecorder()
-			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", "cancun", body))
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", fork, body))
 			require.Equal(t, http.StatusOK, rec.Code)
 			var status engine_types.PayloadStatus
 			require.NoError(t, status.DecodeSSZ(rec.Body.Bytes(), 0))
-			require.Equal(t, tc.wantStatus, status.Status)
+			var validationErr error
+			if status.ValidationError != nil {
+				validationErr = status.ValidationError.Error()
+			}
+			require.Equal(t, tc.wantStatus, status.Status, "validation error: %v", validationErr)
 			if tc.wantError != "" {
 				require.EqualError(t, status.ValidationError.Error(), tc.wantError)
 				return
 			}
 			require.Nil(t, status.ValidationError)
 
-			_, err = srv.NewPayloadV3(t.Context(), payload, nil, header.ParentBeaconBlockRoot)
+			newPayload := func(hashes []common.Hash) (*engine_types.PayloadStatus, error) {
+				if tc.frame {
+					return srv.NewPayloadV5(t.Context(), payload, hashes, header.ParentBeaconBlockRoot, []hexutil.Bytes{})
+				}
+				return srv.NewPayloadV3(t.Context(), payload, hashes, header.ParentBeaconBlockRoot)
+			}
+			_, err = newPayload(nil)
 			require.ErrorContains(t, err, "nil blob hashes array")
-			response, err := srv.NewPayloadV3(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot)
+			response, err := newPayload([]common.Hash{})
 			require.NoError(t, err)
 			require.Equal(t, engine_types.InvalidStatus, response.Status)
 			require.EqualError(t, response.ValidationError.Error(), misc.ErrMismatchBlobHashes.Error())
