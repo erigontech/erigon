@@ -59,7 +59,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/heimdalr/dag v1.5.1
 	github.com/holiman/bloomfilter/v2 v2.0.3
-	github.com/holiman/uint256 v1.3.3-0.20260228135838-087f4b32f234
+	github.com/holiman/uint256 v1.3.3-0.20261104134511-4019abcf0234
 	github.com/huandu/xstrings v1.6.3
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.1.0

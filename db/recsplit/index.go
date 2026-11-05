@@ -423,6 +423,11 @@ func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is safe for concurrent use: it only reads the index's immutable state
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
+	return idx.LookupProbe(bucketHash, fingerprint, nil)
+}
+
+// LookupProbe is Lookup with pr touching the pages it reads.
+func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
@@ -430,11 +435,11 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
 		case 1:
-			if ok := idx.existenceV1.ContainsHash(bucketHash); !ok {
+			if ok := idx.existenceV1.ContainsHashProbe(bucketHash, pr); !ok {
 				return 0, false
 			}
 		case 2:
-			if ok := idx.existenceV2.ContainsHash(bucketHash); !ok {
+			if ok := idx.existenceV2.ContainsHashProbe(bucketHash, pr); !ok {
 				return 0, false
 			}
 		}
@@ -450,8 +455,17 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	gr.data = idx.grData
 
 	bucket := remap(bucketHash, idx.bucketCount)
-	cumKeys, cumKeysNext, bitPos := idx.ef.Get3(bucket)
+	var cumKeys, cumKeysNext, bitPos uint64
+	if pr == nil {
+		cumKeys, cumKeysNext, bitPos = idx.ef.Get3(bucket)
+	} else {
+		cumKeys, cumKeysNext, bitPos = idx.ef.Get3Probe(bucket, pr)
+	}
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
+	if pr != nil {
+		pr.Touch(unsafe.Pointer(&gr.data[bitPos/64]))
+		pr.Touch(unsafe.Pointer(&gr.data[(int(bitPos)+int(idx.skipBits(m)))/64]))
+	}
 	gr.ReadReset(int(bitPos), idx.skipBits(m))
 	var level int
 	for m > idx.secondaryAggrBound { // fanout = 2
@@ -494,6 +508,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
+	pr.Touch(unsafe.Pointer(&idx.data[pos]))
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
 	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
