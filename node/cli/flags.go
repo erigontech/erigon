@@ -505,7 +505,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		WitnessCacheMaxMB:       ctx.Uint(utils.WitnessCacheMaxMBFlag.Name),
 		BatchLimit:              ctx.Int(utils.RpcBatchLimit.Name),
 		SubscriptionLimit:       ctx.Int(utils.RpcSubscriptionLimit.Name),
-		BatchResponseLimit:      ctx.Int(utils.RpcBatchResponseLimit.Name),
+		BatchResponseLimit:      ctx.Int(utils.RpcBatchResponseMaxSize.Name),
 		ReturnDataLimit:         ctx.Int(utils.RpcReturnDataLimit.Name),
 		AllowUnprotectedTxs:     ctx.Bool(utils.AllowUnprotectedTxs.Name),
 

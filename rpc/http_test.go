@@ -685,8 +685,8 @@ func TestBatchResponseLimit(t *testing.T) {
 
 	require.JSONEq(t, `[{"jsonrpc":"2.0","id":1,"result":"aaaaaaaaaa"},`+
 		`{"jsonrpc":"2.0","id":2,"result":"bbbbbbbbbb"},`+
-		`{"jsonrpc":"2.0","id":3,"error":{"code":-32003,"message":"batch response limit 50 exceeded (can increase by --rpc.batch.response.limit)"}},`+
-		`{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"batch response limit 50 exceeded (can increase by --rpc.batch.response.limit)"}}]`, rec.Body.String())
+		`{"jsonrpc":"2.0","id":3,"error":{"code":-32003,"message":"batch response limit 50 exceeded (can increase by --rpc.batch-response-max-size)"}},`+
+		`{"jsonrpc":"2.0","id":4,"error":{"code":-32003,"message":"batch response limit 50 exceeded (can increase by --rpc.batch-response-max-size)"}}]`, rec.Body.String())
 }
 
 // echoRequest returns a test_echo call padded to exactly size bytes.

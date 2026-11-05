@@ -444,9 +444,9 @@ var (
 		Usage: "Maximum number of requests in a batch",
 		Value: 100,
 	}
-	RpcBatchResponseLimit = cli.IntFlag{
-		Name:  "rpc.batch.response.limit",
-		Usage: "Maximum bytes of all answers in a batch; the calls after it get an error. 0 = unlimited",
+	RpcBatchResponseMaxSize = cli.IntFlag{
+		Name:  "rpc.batch-response-max-size",
+		Usage: "Maximum bytes of all answers in a batch, as geth's --rpc.batch-response-max-size; the calls after it get an error. 0 = unlimited",
 		Value: rpccfg.DefaultBatchResponseLimit,
 	}
 	RpcSubscriptionLimit = cli.IntFlag{
