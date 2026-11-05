@@ -41,9 +41,10 @@ import (
 )
 
 type Generator struct {
-	stateCache    kvcache.Cache
-	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	stateCache      kvcache.Cache
+	receiptsCache   *lru.Cache[common.Hash, types.Receipts]
+	receiptCache    *cache.ByteLRU[*types.Receipt]  // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	frozenCanonical *lru.Cache[uint64, common.Hash] // a remote block reader asks the backend for each frozen height
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -86,6 +87,11 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		panic(err)
 	}
 
+	frozenCanonical, err := lru.New[uint64, common.Hash](receiptsCacheLimit)
+	if err != nil {
+		panic(err)
+	}
+
 	txNumReader := blockReader.TxnumReader()
 
 	var f *rpchelper.Filters
@@ -96,6 +102,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 	return &Generator{
 		stateCache:         stateCache,
 		receiptsCache:      receiptsCache,
+		frozenCanonical:    frozenCanonical,
 		blockReader:        blockReader,
 		txNumReader:        txNumReader,
 		engine:             engine,
@@ -166,11 +173,12 @@ func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, head
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	view := g.filters.WithTemporalOverlay(tx)
+	receipt, ok, err := readPersistedReceipt(view, header.Number.Uint64(), header.Hash(), txnHash, txNum)
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	g.addToCacheReceipt(txNum, receipt)
+	g.addToCacheReceipt(ctx, view, header, txNum, receipt)
 	return receipt, true, nil
 }
 
@@ -215,8 +223,31 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	}, nil
 }
 
-func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
-	if rpcDisableRLRU {
+// canonicalInView reports whether header is canonical in view, the view its receipts were read from;
+// when it is not, view holds another fork at this height and its receipts must not be cached under header.
+func (g *Generator) canonicalInView(ctx context.Context, view kv.TemporalTx, header *types.Header) bool {
+	n := header.Number.Uint64()
+	// Read the mapping from view: RemoteBlockReader.CanonicalHash ignores the tx and asks the live backend.
+	hash, err := rawdb.ReadCanonicalHash(view, n)
+	if err != nil {
+		return false
+	}
+	if hash == (common.Hash{}) { // frozen blocks have their mapping only in snapshots
+		var ok bool
+		if hash, ok = g.frozenCanonical.Get(n); !ok {
+			if hash, ok, err = g.blockReader.CanonicalHash(ctx, view, n); err != nil || !ok {
+				return false
+			}
+			if n < g.blockReader.FrozenBlocks() {
+				g.frozenCanonical.Add(n, hash)
+			}
+		}
+	}
+	return hash == header.Hash()
+}
+
+func (g *Generator) addToCacheReceipts(ctx context.Context, tx kv.TemporalTx, header *types.Header, receipts types.Receipts) {
+	if rpcDisableRLRU || !g.canonicalInView(ctx, tx, header) {
 		return
 	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
@@ -227,8 +258,8 @@ func newReceiptCache(maxBytes datasize.ByteSize) *cache.ByteLRU[*types.Receipt] 
 	return cache.NewByteLRU(maxBytes, func(_ uint64, r *types.Receipt) int64 { return int64(r.Size()) + cache.ByteLRUEntryOverheadBytes })
 }
 
-func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
-	if rpcDisableRLRU {
+func (g *Generator) addToCacheReceipt(ctx context.Context, tx kv.TemporalTx, header *types.Header, txNum uint64, receipt *types.Receipt) {
+	if rpcDisableRLRU || !g.canonicalInView(ctx, tx, header) {
 		return
 	}
 	g.receiptCache.Add(txNum, receipt)
@@ -292,7 +323,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			return nil, err
 		}
 		if ok && PersistedReceiptsServed() {
-			g.addToCacheReceipt(txNum, receiptFromDB)
+			g.addToCacheReceipt(ctx, tx, header, txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
 	}
@@ -440,7 +471,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(txNum, receipt)
+	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
 
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB, txn)
@@ -494,7 +525,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// A block with no transactions has no receipts to derive, and preparing an
 	// execution environment for it would need state history that may be pruned.
 	if len(block.Transactions()) == 0 {
-		g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+		g.addToCacheReceipts(ctx, tx, block.HeaderNoCopy(), receipts)
 		return receipts, nil
 	}
 
@@ -510,7 +541,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			return nil, err
 		}
 		if len(receiptsFromDB) > 0 && PersistedReceiptsServed() {
-			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
+			g.addToCacheReceipts(ctx, tx, block.HeaderNoCopy(), receiptsFromDB)
 			return receiptsFromDB, nil
 		}
 	}
@@ -650,7 +681,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
-	g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+	g.addToCacheReceipts(ctx, tx, block.HeaderNoCopy(), receipts)
 	return receipts, nil
 }
 
