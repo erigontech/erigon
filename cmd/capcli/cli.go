@@ -230,12 +230,7 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	return block, nil
 }
 
-func retrieveBlobsFromRemoteEndpoint(ctx context.Context, uri string, block *cltypes.SignedBeaconBlock) ([]*cltypes.BlobSidecar, error) {
-	// Construct the blob sidecars endpoint
-	root, err := block.Block.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
+func retrieveBlobsFromRemoteEndpoint(ctx context.Context, uri string, root common.Hash) ([]*cltypes.BlobSidecar, error) {
 	blobUri := fmt.Sprintf("%s/0x%x", uri, root)
 	log.Debug("[Blob Retrieval] Requesting blob sidecars", "uri", blobUri)
 
