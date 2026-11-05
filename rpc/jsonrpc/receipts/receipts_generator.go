@@ -420,9 +420,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 
 		evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
-		if !calculatePostState && index > 0 {
+		if !calculatePostState && index > 0 && !evm.ChainRules().IsAmsterdam {
 			// The earlier transactions did not run: a message that takes its gas
-			// from the block runs with what the receipt domain says they left.
+			// from the block runs with what the receipt domain says they left. From
+			// Amsterdam it does not hold what a block counts, and the messages taking
+			// gas from the block there encode all they get.
 			msg, err := txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, evm.ChainRules())
 			if err != nil {
 				return nil, err

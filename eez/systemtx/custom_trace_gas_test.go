@@ -115,7 +115,7 @@ func TestCustomTraceGasFromBlock(t *testing.T) {
 // the block does not from Amsterdam, leaves a later type-0x76 transaction no more gas.
 // No rule set runs that type under Amsterdam; here it only exposes the count.
 func TestCustomTraceGasFromBlockAmsterdam(t *testing.T) {
-	m, l2, receipts := systemTxAfter(t, refunder, nil)
+	m, l2, built := systemTxAfter(t, refunder, nil)
 
 	amsterdam := *m.ChainConfig
 	amsterdam.AmsterdamTime = common.NewUint64(0)
@@ -123,7 +123,7 @@ func TestCustomTraceGasFromBlockAmsterdam(t *testing.T) {
 	require.NoError(t, stagedsync.StageCustomTraceReset(t.Context(), m.DB, cfg.Produce))
 	require.NoError(t, stagedsync.SpawnCustomTrace(cfg, t.Context(), m.Log))
 
-	got := domainCumulative(t, m, 1, len(receipts))
+	got := domainCumulative(t, m, 1, len(built.Receipts))
 	blockGas := got[0] + params.SstoreClearsScheduleRefundEIP8038
 	require.Equal(t, l2.BlockGasLimit-blockGas, got[1]-got[0])
 }
@@ -133,7 +133,7 @@ var refunder = common.HexToAddress("0x00000000000000000000000000000000000fe1d0")
 
 // systemTxAfter extends a chain with a user transaction and a type-0x76
 // transaction burning the gas the block has left, below its limit.
-func systemTxAfter(t *testing.T, to common.Address, data []byte) (*execmoduletester.ExecModuleTester, *config.L2Config, types.Receipts) {
+func systemTxAfter(t *testing.T, to common.Address, data []byte) (*execmoduletester.ExecModuleTester, *config.L2Config, *types.BlockWithReceipts) {
 	t.Helper()
 	eezl2 := protocol.RollupXEEZL2Address
 	spec := networks.Chiado699069
@@ -176,7 +176,7 @@ func systemTxAfter(t *testing.T, to common.Address, data []byte) (*execmoduletes
 	require.NoError(t, err)
 	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[0].Status)
 
-	return m, l2, built.Receipts
+	return m, l2, built
 }
 
 // TestTraceBlockGasFromBlock checks that debug_traceBlock gives a type-0x76
@@ -191,7 +191,8 @@ func TestTraceBlockGasFromBlock(t *testing.T) {
 		"calldata floor": {to: common.Address{0xf1}, data: bytes.Repeat([]byte{1}, 350_000)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			m, _, receipts := systemTxAfter(t, user.to, user.data)
+			m, _, built := systemTxAfter(t, user.to, user.data)
+			receipts := built.Receipts
 			api := jsonrpc.NewPrivateDebugAPI(
 				jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
 				m.DB, nil, &rpccfg.DebugApiConfig{})

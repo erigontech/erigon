@@ -297,10 +297,11 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 	}
 
-	// The earlier transactions of the block never ran here either: the gas
-	// they used comes from the receipt domain.
+	// The earlier transactions of the block never ran here either: the gas they
+	// used comes from the receipt domain. From Amsterdam it does not hold what a
+	// block counts, and the messages taking gas from the block there encode all they get.
 	var gasBefore uint64
-	if txnIndex > 0 {
+	if txnIndex > 0 && !rules.IsAmsterdam {
 		if gasBefore, _, _, err = rawtemporaldb.ReceiptAsOf(tx, txNum); err != nil {
 			return err
 		}
