@@ -111,15 +111,16 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
-	// Blob requests keep the Deneb wire format across forks, while their size limit
-	// follows the active fork.
+	// Blob requests retain their Deneb wire format when later forks change the size limit.
+	// Before Deneb activates, use its limit because this handler is already registered.
 	currentVersion := max(clparams.DenebVersion, c.beaconConfig.GetCurrentStateVersion(c.ethClock.GetCurrentEpoch()))
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](c.beaconConfig.MaxRequestBlobSidecarsByVersion(currentVersion), 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
-	// Consume additional rate-limit tokens: one per blob identifier.
+	// Charge from the requested identifier count, capped at the response limit.
+	// The stream wrapper has already consumed one token for admission.
 	if cost := max(min(req.Len(), maxBlobsThroughputPerRequest)-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
@@ -148,7 +149,8 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 		}
 		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
 		if version >= clparams.FuluVersion {
-			// deprecated after Fulu upgrade
+			// Only serve blob sidecars for blocks before Fulu. Roots can appear in any
+			// slot order, so later identifiers may still refer to blocks we can serve.
 			continue
 		}
 

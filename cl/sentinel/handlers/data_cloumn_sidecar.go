@@ -274,8 +274,8 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	return responseErr
 }
 
-// sidecarsRequestCost charges for estimated responses beyond the admission token.
-// Check the cap before multiplying so an oversized request cannot overflow the cost.
+// sidecarsRequestCost returns the estimated additional tokens to charge after admission.
+// Check the cap by division so large counts cannot overflow the multiplication.
 func sidecarsRequestCost(slots, sidecarsPerSlot, maxSidecars uint64) int {
 	if slots == 0 || sidecarsPerSlot == 0 || maxSidecars == 0 {
 		return 0

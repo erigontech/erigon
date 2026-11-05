@@ -123,7 +123,8 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 
 	var block *cltypes.SignedBeaconBlock
 	seen := make(map[common.Hash]struct{}, req.Length())
-	// Missing roots must not use the response budget or hide later known blocks.
+	// Only successfully written blocks count toward the response limit; missing or
+	// duplicate roots must not prevent later known blocks from being served.
 	written := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if written >= MaxRequestsBlocks {

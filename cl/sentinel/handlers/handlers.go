@@ -232,9 +232,9 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 }
 
 // consumeRateLimit consumes additional rate-limit tokens for a batch request.
-// Batch handlers call this after decoding the request to charge for the actual
-// number of response items (beyond the 1 token already consumed by the wrapper).
-// Returns true if allowed. On rejection, writes an SSZ error response to s.
+// Handlers estimate cost from the request before reading or building responses,
+// excluding the admission token already consumed by the stream wrapper.
+// It returns false and writes an SSZ error response if cost is negative or credit is insufficient.
 func (c *ConsensusHandlers) consumeRateLimit(s network.Stream, cost int) bool {
 	if cost == 0 {
 		return true
