@@ -199,8 +199,9 @@ func (g *GossipManager) defaultPayloadAttestationTopicParams() *pubsub.TopicScor
 	}
 }
 
-// staticTopicParams scores low-rate topics by first deliveries only, with a flat
-// invalid-message penalty.
+// staticTopicParams uses fixed first-delivery weights and caps for low-rate topics.
+// It also rewards time in the mesh and penalizes invalid messages, while leaving
+// mesh delivery rate scoring disabled.
 func (g *GossipManager) staticTopicParams(topicWeight, firstMessageWeight, firstMessageCap float64) *pubsub.TopicScoreParams {
 	return &pubsub.TopicScoreParams{
 		TopicWeight:                    topicWeight,
@@ -215,9 +216,11 @@ func (g *GossipManager) staticTopicParams(topicWeight, firstMessageWeight, first
 	}
 }
 
-// rateBasedTopicParams scores a topic by its expected message rate; mesh delivery stays
-// unscored, like the subnet topics.
+// rateBasedTopicParams calculates first-delivery weights and caps from the expected
+// message rate; mesh delivery rate scoring stays disabled. A zero rate retains
+// invalid-message penalties and disables rewards for first deliveries and time in the mesh.
 func (g *GossipManager) rateBasedTopicParams(topicWeight float64, messagesPerSlot uint64) *pubsub.TopicScoreParams {
+	// Gossipsub requires a nonzero TimeInMeshQuantum even when TimeInMeshWeight is zero.
 	params := &pubsub.TopicScoreParams{
 		TopicWeight:                    topicWeight,
 		TimeInMeshQuantum:              g.oneSlotDuration(),
