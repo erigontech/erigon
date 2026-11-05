@@ -132,7 +132,7 @@ type TxPool struct {
 	unprocessedRemoteTxns   *TxnSlots
 	unprocessedRemotePeers  []remoteSource                                  // index-aligned with unprocessedRemoteTxns
 	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
-	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
+	byHash                  map[string]*metaTxn                             // All pooled transactions by hash, including parked frames
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
 	baseFee                 *SubPool
@@ -1014,14 +1014,11 @@ func (p *TxPool) CountContent() (int, int, int) {
 }
 
 func (p *TxPool) countContent() (int, int, int) {
-	queued := p.queued.Len()
-	// Include parked frames in the queued count, matching their RPC listing.
-	for _, mt := range p.all.senderIDFrameTxn {
-		if mt.currentSubPool == 0 {
-			queued++
-		}
-	}
-	return p.pending.Len(), p.baseFee.Len(), queued
+	pending, baseFee := p.pending.Len(), p.baseFee.Len()
+	// Every indexed transaction outside pending and base-fee is queued or parked.
+	// RPC reports both as queued.
+	queued := len(p.byHash) - pending - baseFee
+	return pending, baseFee, queued
 }
 
 func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
