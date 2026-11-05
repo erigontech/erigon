@@ -850,6 +850,7 @@ type announceFetchTest struct {
 	now           *time.Time
 	requestedFrom [][64]byte
 	filterErr     error
+	known         map[[32]byte]bool // hashes the pool holds
 }
 
 func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
@@ -860,7 +861,15 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 	a := &announceFetchTest{ctx: ctx}
 	pool.EXPECT().Started().Return(true).AnyTimes()
 	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, a.filterErr }).AnyTimes()
+		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) {
+			var unknown Hashes
+			for i := 0; i < len(hashes); i += 32 {
+				if !a.known[[32]byte(hashes[i:i+32])] {
+					unknown = append(unknown, hashes[i:i+32]...)
+				}
+			}
+			return unknown, a.filterErr
+		}).AnyTimes()
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
@@ -1224,11 +1233,10 @@ func TestDeliveredTxnsDoNotUseRetryBudget(t *testing.T) {
 		a.announce(t, peerA, c...)
 		a.announce(t, peerB, c...)
 	}
-	delivered := TxnSlots{}
+	a.known = map[[32]byte]bool{}
 	for _, h := range hashes[:len(hashes)-1] {
-		delivered.Append(&TxnSlot{IDHash: h}, nil, false)
+		a.known[h] = true
 	}
-	a.fetch.forgetRequested(delivered)
 	a.requestedFrom = nil
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "only the missing txn is retried")
