@@ -55,6 +55,9 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+// stepFoldIncremental is a probe: a mid-block step fold clears the touched set, so the next fold covers only later keys.
+var stepFoldIncremental = dbg.EnvBool("STEP_FOLD_INCREMENTAL", false)
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -808,7 +811,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	emitErr := cc.emitTouched(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
-	if !m.midBlock {
+	if !m.midBlock || stepFoldIncremental {
 		cc.clearTouched()
 	}
 	if emitErr != nil {
