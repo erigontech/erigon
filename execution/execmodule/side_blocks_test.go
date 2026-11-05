@@ -19,6 +19,7 @@ package execmodule_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -202,6 +203,12 @@ func TestRetainedSideBlockVisibleThroughInsertsAndForkChoices(t *testing.T) {
 	var misses, failures atomic.Int64
 	stop := make(chan struct{})
 	done := make(chan struct{})
+	var stopOnce sync.Once
+	stopReader := func() {
+		stopOnce.Do(func() { close(stop) })
+		<-done
+	}
+	t.Cleanup(stopReader)
 	go func() {
 		defer close(done)
 		for {
@@ -223,8 +230,7 @@ func TestRetainedSideBlockVisibleThroughInsertsAndForkChoices(t *testing.T) {
 		insertAndValidateBlocks(t, m, block)
 		updateForkChoiceTo(t, m, block)
 	}
-	close(stop)
-	<-done
+	stopReader()
 	require.Zero(t, failures.Load())
 	require.Zero(t, misses.Load())
 }
@@ -285,7 +291,7 @@ func TestForkChoicePersistsSideBlockBeyondReorgDepth(t *testing.T) {
 
 	result, err := m.UpdateForkChoice(t.Context(), side.Header())
 	require.NoError(t, err)
-	require.NotEqual(t, execmodule.ExecutionStatusMissingSegment, result.Status)
+	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
 	m.ExecModule.WaitIdle(t.Context())
 }
 

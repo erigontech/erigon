@@ -230,3 +230,20 @@ func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
 	require.True(t, e.lock.TryLock(), "the read lock is still held after the panic")
 	e.lock.Unlock()
 }
+
+func TestIsValidatedDoesNotWaitForValidation(t *testing.T) {
+	fv := newForkValidator(t.Context(), 0, nil, nil, 1, nil)
+	hash := common.Hash{1}
+	fv.validHashes.Add(hash, true)
+
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	validated := make(chan bool, 1)
+	go func() { validated <- fv.IsValidated(hash) }()
+	select {
+	case ok := <-validated:
+		require.True(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("IsValidated waited for the fork validator lock")
+	}
+}
