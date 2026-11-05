@@ -87,8 +87,8 @@ func NewCollector() *Collector {
 	}
 }
 
-// Start launches the collector goroutine; Stop joins it.
-// The goroutine must stay outside wait groups that are drained before Stop.
+// Start launches the collector goroutine; Stop signals it to exit and waits for it.
+// Including it in a wait group waited on before Stop would deadlock shutdown.
 func (c *Collector) Start() {
 	if c == nil {
 		return

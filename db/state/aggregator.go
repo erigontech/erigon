@@ -724,6 +724,8 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
+	// Every caller must wait for maintenance before it can safely close the database.
+	// Keep the aggregator context alive until that work finishes.
 	firstClose := a.background.BeginClose()
 	a.background.Wait()
 	if !firstClose {
