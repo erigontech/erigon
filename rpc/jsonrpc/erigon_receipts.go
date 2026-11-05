@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -202,6 +201,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, beginErr
 	}
 	defer tx.Rollback()
+	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
+	tx = rpchelper.PinToOverlay(tx, nil)
 
 	rpcLogs := types.Logs{}
 
@@ -256,9 +257,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if err != nil {
 		return nil, err
 	}
-	exec := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, nil)
-	defer exec.Close()
-
 	// The Logs should retrieve from latest to oldest order=Descend
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
@@ -321,16 +319,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, fmt.Errorf("header not found: %d", blockNum)
 			}
 			blockHash = header.Hash()
-			exec.ChangeBlock(header)
 			timestamp = header.Time
 			blockCount++
 		}
 		if isSystemTxn {
 			continue
 		}
-		var logIndex uint
-		var blockLogs types.Logs
-
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -344,16 +338,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, err
 			}
 		}
-		err = exec.ExecTxn(txNum, txIndex, txn, true)
+		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil)
 		if err != nil {
 			return nil, err
 		}
-
-		blockLogs = exec.GetRawLogs(txIndex)
-		for _, log := range blockLogs {
-			log.Index = hexutil.Uint(logIndex)
-			logIndex++
-		}
+		blockLogs := receipt.Logs
 		var filtered types.Logs
 		var maxLogCount uint64
 		maxLogCount = 0
@@ -369,10 +358,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
-		for i := range filtered {
-			filtered[i].TxIndex = hexutil.Uint(txIndex)
-			logCount++
-		}
+		logCount += uint64(len(filtered))
 
 		if len(blockLogs) == 0 {
 			continue
