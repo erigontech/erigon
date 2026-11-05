@@ -28,6 +28,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -346,9 +347,11 @@ func prefetchBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) {
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs) })
 	g.Go(func() error { return prefetchDomain(ctx, db, kv.StorageDomain, slots) })
 	g.Go(func() error { return prefetchCommitment(ctx, db, balCommitmentWarmupKeys(bal)) })
-	if err := g.Wait(); ctx.Err() == nil && !errors.Is(err, context.Canceled) {
-		log.Debug("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "elapsed", time.Since(started), "err", err)
+	err := g.Wait()
+	if commonerrors.IsOnlyCanceled(err) || err == nil && ctx.Err() != nil {
+		return
 	}
+	log.Debug("[warmBAL] batch prefetch", "accounts", len(accs), "slots", len(slots), "elapsed", time.Since(started), "err", err)
 }
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
