@@ -223,8 +223,8 @@ func TestChainEndpointRunSkipsALocalBlockWhoseBlobsAreStored(t *testing.T) {
 		chainCfg:     chainCfg{Chain: networkname.Mainnet},
 		outputFolder: outputFolder{Datadir: datadirPath},
 	}
-	// The walk ends at the local block's parent, which nobody serves.
-	require.Error(t, endpoint.Run(t.Context()))
+	// The walk passes the local block and ends at its parent, which nobody serves.
+	require.ErrorContains(t, endpoint.Run(t.Context()), fmt.Sprintf("0x%x", local.Block.ParentRoot))
 	require.Zero(t, localRequests.Load(), "the local block, whose blobs are stored, was requested from the endpoint")
 }
 
