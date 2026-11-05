@@ -123,7 +123,12 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc rangeFetcher, fr
 				r.to = to
 			}
 			busy[*peer] = true
-			wg.Go(func() { results <- fetchRange(fetchCtx, svc, r, peer) })
+			wg.Go(func() {
+				select {
+				case results <- fetchRange(fetchCtx, svc, r, peer):
+				case <-fetchCtx.Done():
+				}
+			})
 		}
 		queued = waiting
 

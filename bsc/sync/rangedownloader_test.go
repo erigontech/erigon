@@ -361,3 +361,45 @@ func TestDownloadRangesHoldsRangeAboveDroppedTarget(t *testing.T) {
 		require.Len(t, run.inserted, 2048)
 	})
 }
+
+func TestDownloadRangesReturnsWithMoreFetchesInFlightThanRanges(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		chain := rangesChain(3)
+		svc := &fakeP2P{peers: 6, chain: chain, serve: func(ctx context.Context, peer, start uint64) ([]*types.Block, error) {
+			switch {
+			case peer == 1 && start == rangeStart(0):
+				return nil, common.Sleep(ctx, fetchLatency)
+			case start == rangeStart(1) && peer <= 4:
+				return nil, errTransient
+			}
+			return nil, common.Sleep(ctx, time.Hour)
+		}}
+		targets := []uint64{2048, 1100, 1050, 2048}
+		target := func() uint64 {
+			if len(targets) == 0 {
+				return 1024
+			}
+			next := targets[0]
+			targets = targets[1:]
+			return next
+		}
+		var inserted int
+		insert := func(_ context.Context, blocks []*types.Block) error {
+			inserted += len(blocks)
+			return nil
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			done <- downloadRanges(t.Context(), testlog.Logger(t, log.LvlCrit), svc, 1, target, chain[0].HeaderNoCopy(), 2, insert)
+		}()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(30 * time.Minute):
+			require.FailNow(t, "downloadRanges did not return")
+		}
+		require.Equal(t, 1024, inserted)
+	})
+}
