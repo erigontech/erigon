@@ -257,6 +257,9 @@ type VersionMap struct {
 	// write-once, so it lives in lock-free maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
+	// readerCancel maps a reading tx index to the cancel of its speculative run: reading an unfinished write
+	// makes the run's result void, so it stops early.
+	readerCancel   sync.Map
 	originAccounts atomic.Pointer[xsync.Map[accounts.Address, *accounts.Account]] // nil ptr = committed-absent
 	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
@@ -724,6 +727,7 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 		res.incarnation = fv.incarnation
 		res.validated = true
 	case FlagEstimate:
+		vm.cancelReader(txIdx)
 	default:
 		panic("unknown flag value")
 	}
@@ -831,6 +835,7 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 		res.incarnation = fv.incarnation
 		res.validated = true
 	case FlagEstimate:
+		vm.cancelReader(txIdx)
 	default:
 		panic("unknown flag value")
 	}
@@ -2351,4 +2356,19 @@ func (vm *VersionMap) accountLiveAt(addr accounts.Address, txIdx int) bool {
 func (res ReadResult) resolved() bool {
 	s := res.Status()
 	return s == MVReadResultDone || s == MVReadResultValidated
+}
+
+// SetReaderCancel makes a read by txIdx of an unfinished write call cancel; nil removes it.
+func (vm *VersionMap) SetReaderCancel(txIdx int, cancel func()) {
+	if cancel == nil {
+		vm.readerCancel.Delete(txIdx)
+		return
+	}
+	vm.readerCancel.Store(txIdx, cancel)
+}
+
+func (vm *VersionMap) cancelReader(txIdx int) {
+	if c, ok := vm.readerCancel.Load(txIdx); ok {
+		c.(func())()
+	}
 }
