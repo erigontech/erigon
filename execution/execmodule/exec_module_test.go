@@ -3284,6 +3284,18 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 				badBlocks[i] = types.NewBlockFromNetwork(header, block.Body(), block.BlockAccessListSidecar())
 				parentHash = badBlocks[i].Hash()
 			}
+			assertRejectedStorageAbsent := func(tx kv.Tx) {
+				t.Helper()
+				for _, block := range badBlocks {
+					key := dbutils.BlockBodyKey(block.NumberU64(), block.Hash())
+					for _, table := range []string{kv.BlockBody, kv.HeaderTD} {
+						exists, err := tx.Has(table, key)
+						require.NoError(t, err)
+						require.False(t, exists, "rejected block %d still has %s", block.NumberU64(), table)
+					}
+				}
+			}
+
 			if tc.persisted > 0 {
 				insRes, err := m.InsertBlocks(ctx, badBlocks[:tc.persisted])
 				require.NoError(t, err)
@@ -3320,13 +3332,7 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 			require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 			require.Equal(t, parent.Hash(), validation.LatestValidHash)
 			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-				for _, block := range badBlocks {
-					for _, table := range []string{kv.BlockBody, kv.HeaderTD} {
-						exists, err := tx.Has(table, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
-						require.NoError(t, err)
-						require.False(t, exists, "%s must be removed before the next forkchoice update", table)
-					}
-				}
+				assertRejectedStorageAbsent(tx)
 				count, err := tx.Count(kv.EthTx)
 				require.NoError(t, err)
 				require.Equal(t, uint64(1), count, "only the committed parent transaction should remain")
@@ -3350,13 +3356,7 @@ func TestValidateChainBadBlockRemovesStorage(t *testing.T) {
 			require.Equal(t, execmodule.ExecutionStatusSuccess, forkChoice.Status)
 			m.ExecModule.WaitIdle(ctx)
 			require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
-				for _, block := range badBlocks {
-					for _, table := range []string{kv.BlockBody, kv.HeaderTD} {
-						exists, err := tx.Has(table, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
-						require.NoError(t, err)
-						require.False(t, exists, "rejected %s must not be committed later", table)
-					}
-				}
+				assertRejectedStorageAbsent(tx)
 				for _, block := range []*types.Block{parent, sibling} {
 					stored := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
 					require.NotNil(t, stored)
