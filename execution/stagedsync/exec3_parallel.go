@@ -2581,8 +2581,6 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
 
-	oracleHook func()
-
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
 	// between finalize and publish.
@@ -2658,8 +2656,6 @@ type blockExecutor struct {
 	// each task exactly once. Touched only on the exec-loop goroutine.
 	selfLoopDispatched map[int]bool
 }
-
-var validationSkipHook func(int)
 
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
 // order: exec-complete and not already validated. The self-loop worker only sends a
@@ -3181,23 +3177,9 @@ func (be *blockExecutor) validateNow(txIdx int) bool {
 		}, false, "") == state.VersionValid
 }
 
-func (be *blockExecutor) arrivalValid(txIdx int, valStamp uint64) bool {
-	if !be.versionMap.QuietBelow(txIdx, valStamp) {
-		return be.validateNow(txIdx)
-	}
-	be.cntValidationSkip++
-	if validationSkipHook != nil {
-		validationSkipHook(txIdx)
-	}
-	if dbg.AssertEnabled {
-		if be.oracleHook != nil {
-			be.oracleHook()
-		}
-		if !be.validateNow(txIdx) && be.versionMap.QuietBelow(txIdx, valStamp) {
-			panic(fmt.Sprintf("validation skip oracle: tx %d skipped arrival validation but is stale", txIdx))
-		}
-	}
-	return true
+func (be *blockExecutor) arrivalValid(txIdx int, _ uint64) bool {
+	// The write-stamp skip let stale results through (its oracle fired), so every arrival is validated.
+	return be.validateNow(txIdx)
 }
 
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
