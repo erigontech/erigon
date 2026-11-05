@@ -38,7 +38,7 @@ func TestAttestationSubnetScoringWithFewValidatorsPerMeshPeer(t *testing.T) {
 		activeValidators uint64
 		rate             float64
 	}{{2047, 0}, {2048, 0.25}, {4096, 0.5}, {6144, 0.75}, {8191, 0.75}, {8192, 1}} {
-		requireAcceptedTopicScoreParams(t, topic, newManager(tc.activeValidators).defaultAggregateSubnetTopicParams(), tc.activeValidators, tc.rate)
+		requireAcceptedTopicScoreParams(t, topic, newManager(tc.activeValidators).defaultAttestationSubnetTopicParams(), tc.activeValidators, tc.rate)
 	}
 }
 

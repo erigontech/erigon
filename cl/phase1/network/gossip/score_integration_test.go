@@ -25,7 +25,7 @@ import (
 )
 
 type gossipScoreTracer struct {
-	added      chan struct{}
+	peerReady  chan struct{}
 	rejections chan string
 }
 
@@ -33,7 +33,7 @@ func (tracer *gossipScoreTracer) Trace(event *pb.TraceEvent) {
 	switch event.GetType() {
 	case pb.TraceEvent_ON_NEW_OUTBOUND_STREAM:
 		select {
-		case tracer.added <- struct{}{}:
+		case tracer.peerReady <- struct{}{}:
 		default:
 		}
 	case pb.TraceEvent_REJECT_MESSAGE:
@@ -42,6 +42,10 @@ func (tracer *gossipScoreTracer) Trace(event *pb.TraceEvent) {
 }
 
 func TestGossipValidationGraylistsPeer(t *testing.T) {
+	const (
+		ignoredPrefix         byte = 0
+		malformedSnappyPrefix byte = 0x80
+	)
 	for _, tc := range []struct {
 		topic            string
 		activeValidators uint64
@@ -83,7 +87,7 @@ func TestGossipValidationGraylistsPeer(t *testing.T) {
 			params := manager.topicScoreParams(tc.topic)
 			require.NotNil(t, params)
 			topicName := composeTopic(common.Bytes4{}, tc.topic)
-			tracer := &gossipScoreTracer{added: make(chan struct{}, 1), rejections: make(chan string, 32)}
+			tracer := &gossipScoreTracer{peerReady: make(chan struct{}, 1), rejections: make(chan string, 32)}
 			router := pubsub.DefaultGossipSubRouter(receiver)
 			ps, err := pubsub.NewGossipSubWithRouter(ctx, receiver, router,
 				pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
@@ -100,7 +104,7 @@ func TestGossipValidationGraylistsPeer(t *testing.T) {
 			)
 			require.NoError(t, err)
 			validator := manager.newPubsubValidator(&mockService{}, func(_ peer.ID, msg *pubsub.Message, _ clparams.StateVersion) bool {
-				return msg.Data[0] != 0
+				return msg.Data[0] != ignoredPrefix
 			})
 			require.NoError(t, ps.RegisterTopicValidator(topicName, validator))
 			topic, err := ps.Join(topicName)
@@ -115,9 +119,9 @@ func TestGossipValidationGraylistsPeer(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, stream.Close()) })
 			select {
-			case <-tracer.added:
+			case <-tracer.peerReady:
 			case <-ctx.Done():
-				t.Fatal("peer was not added to the router")
+				t.Fatal("peer was not ready for scoring")
 			}
 			writer := msgio.NewVarintWriter(stream)
 			sendAndAwaitRejections := func(prefix byte, reason string) {
@@ -139,9 +143,9 @@ func TestGossipValidationGraylistsPeer(t *testing.T) {
 			}
 
 			require.Equal(t, pubsub.AcceptAll, router.AcceptFrom(sender.ID()))
-			sendAndAwaitRejections(0, pubsub.RejectValidationIgnored)
+			sendAndAwaitRejections(ignoredPrefix, pubsub.RejectValidationIgnored)
 			require.Equal(t, pubsub.AcceptAll, router.AcceptFrom(sender.ID()))
-			sendAndAwaitRejections(0x80, pubsub.RejectValidationFailed)
+			sendAndAwaitRejections(malformedSnappyPrefix, pubsub.RejectValidationFailed)
 			require.Equal(t, pubsub.AcceptNone, router.AcceptFrom(sender.ID()))
 		})
 	}
