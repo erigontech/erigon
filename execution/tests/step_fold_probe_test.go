@@ -68,7 +68,7 @@ func TestProbeParallelStepEdgeFuzz(t *testing.T) {
 						if rng.IntN(2) == 0 {
 							to = common.BytesToAddress([]byte{byte(rng.IntN(200)) + 1, 0xee})
 						}
-						txn = types.NewTransaction(nonces[s], to, uint256.NewInt(uint64(rng.IntN(3))), 100_000, gasPrice, nil)
+						txn = types.NewTransaction(nonces[s], to, uint256.NewInt(uint64(rng.IntN(3))), 300_000, gasPrice, nil)
 					}
 					signed, err := types.SignTx(txn, *signer, keys[s])
 					require.NoError(t, err)
