@@ -611,8 +611,11 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 // ExecRecoversBALSenders reports whether parallel exec workers recover the senders of
 // blocks with a non-empty BAL; the Execution stage then writes them.
 func ExecRecoversBALSenders() bool {
-	return dbg.Exec3Parallel && !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks
+	return dbg.Exec3Parallel && !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks && !sendersPrepass
 }
+
+// sendersPrepass is a probe: newPayload recovers a BAL block's senders up front instead of the exec workers.
+var sendersPrepass = dbg.EnvBool("SENDERS_PREPASS", false)
 
 func RecoversSenders(header *types.Header) bool {
 	return ExecRecoversBALSenders() && header.HasNonEmptyBAL()
