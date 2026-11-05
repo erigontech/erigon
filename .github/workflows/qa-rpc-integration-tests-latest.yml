@@ -17,8 +17,32 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  # Keeps other jobs off the machine of the reference client while the tests query it
+  reserve-reference-system:
+    name: Reserve the reference system
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-geth ]
+    timeout-minutes: 360
+    steps:
+      - name: Wait for the RPC integration tests to complete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TEST_JOB: mainnet-rpc-integ-tests-latest
+        run: |
+          while true; do
+            status=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" |
+              python3 -c "import json, sys; print(next((j['status'] for j in json.load(sys.stdin)['jobs'] if j['name'].endswith(sys.argv[1])), ''))" "$TEST_JOB" || true)
+            if [ "$status" = "completed" ]; then
+              echo "Job $TEST_JOB completed, releasing the reference system"
+              exit 0
+            fi
+            sleep 30
+          done
+
   mainnet-rpc-integ-tests-latest:
     concurrency:
       group: >-
@@ -167,6 +191,29 @@ jobs:
         with:
           name: pre-test-logs
           path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
+
+      - name: Wait for the reference system to be reserved
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RESERVE_JOB: Reserve the reference system
+        run: |
+          for _ in {1..480}; do
+            status=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" |
+              python3 -c "import json, sys; print(next((j['status'] for j in json.load(sys.stdin)['jobs'] if j['name'].endswith(sys.argv[1])), ''))" "$RESERVE_JOB" || true)
+            case "$status" in
+              in_progress)
+                echo "Reference system reserved"
+                exit 0 ;;
+              completed)
+                echo "::error::Job '$RESERVE_JOB' completed before the tests, the reference system is not reserved"
+                exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "::error::Reference system not reserved in time, another job is running on it"
+          exit 1
 
       - name: Run RPC Integration Tests
         id: test_step
