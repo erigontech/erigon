@@ -1653,3 +1653,36 @@ func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
 	require.Len(torrents, 1)
 	require.Equal(segName, torrents[0].Name())
 }
+
+// A file whose bytes changed under a live registration keeps being served
+// against the old piece layout, and a peer request past the new end reads out
+// of bounds and kills the process. Re-seeding must replace the registration,
+// not refuse and leave the stale one answering.
+func TestAddNewSeedableFile_ReplacesARegistrationWhoseContentChanged(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+
+	name := "domain/v2.0-accounts.0-1024.kv"
+	path := d.filePathForName(name)
+	require.NoError(os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(os.WriteFile(path, []byte("the original content, which is long"), 0o644))
+	require.NoError(d.AddNewSeedableFile(t.Context(), name))
+
+	d.lock.Lock()
+	before := d.torrentsByName[snapshotNameKey(name)].InfoHash()
+	d.lock.Unlock()
+
+	// Rewrite the file shorter and refresh its sidecar, as a rebuild does.
+	require.NoError(os.WriteFile(path, []byte("shorter"), 0o644))
+	require.NoError(dir.RemoveFile(path + ".torrent"))
+	_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+	require.NoError(err)
+
+	require.NoError(d.AddNewSeedableFile(t.Context(), name))
+
+	d.lock.Lock()
+	after := d.torrentsByName[snapshotNameKey(name)].InfoHash()
+	d.lock.Unlock()
+	require.NotEqual(before, after,
+		"the registration must follow the file's new content, not keep serving the old layout")
+}

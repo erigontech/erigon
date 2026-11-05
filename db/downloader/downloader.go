@@ -1599,6 +1599,18 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	// sync.Mutex is not reentrant. See the invariant comment on
 	// addCompleteTorrent.
 	t, isNew, err := d.addCompleteTorrent(name)
+	if errors.Is(err, ErrInfoHashMismatch) {
+		// The live registration describes bytes this file no longer holds, so
+		// it answers peer requests against the wrong piece layout — a request
+		// past the new end reads out of bounds and takes the process down.
+		// Replacing it is the only way to stop that; retrying the add without
+		// dropping it fails identically forever.
+		d.log(log.LvlWarn, "re-registering snapshot whose content changed under it", "name", name, "err", err)
+		d.lock.Lock()
+		d.dropTorrentByNameLocked(name)
+		d.lock.Unlock()
+		t, isNew, err = d.addCompleteTorrent(name)
+	}
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
 	}
@@ -2881,6 +2893,11 @@ func (d *Downloader) metainfoFilePathForName(name string) string {
 	return d.filePathForName(name) + ".torrent"
 }
 
+// ErrInfoHashMismatch reports that a name is already registered under a
+// different info-hash than the one being added — the file's bytes changed
+// under a live registration.
+var ErrInfoHashMismatch = errors.New("snapshot already loaded with different infohash")
+
 // This does all the checks: Valid name, no overlaps on infohash and names.
 func (d *Downloader) getExistingSnapshotTorrent(name string, infoHash metainfo.Hash) (t *torrent.Torrent, ok bool, err error) {
 	name = snapshotNameKey(name)
@@ -2891,7 +2908,7 @@ func (d *Downloader) getExistingSnapshotTorrent(name string, infoHash metainfo.H
 	t, ok = d.torrentsByName[name]
 	if ok {
 		if t.InfoHash() != infoHash {
-			err = fmt.Errorf("snapshot already loaded with different infohash: %v", t.InfoHash().HexString())
+			err = fmt.Errorf("%w: %v", ErrInfoHashMismatch, t.InfoHash().HexString())
 		}
 		return
 	}
