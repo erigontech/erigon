@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -284,6 +285,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
+	npStart := time.Now()
 	if req == nil {
 		return nil, &rpc.InvalidParamsError{Message: "missing payload"}
 	}
@@ -558,7 +560,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	npPre := time.Since(npStart)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	if npPhaseProbe {
+		e.logger.Info("[np-phase] engine", "blk", block.NumberU64(), "npPre", npPre, "npInsert", npInsertDur, "npValidate", npValidateDur, "npTotal", time.Since(npStart))
+	}
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -1120,7 +1126,10 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
+	insStart := time.Now()
+	insErr := e.chainRW.InsertBlocks(ctx, []*types.Block{block})
+	npInsertDur = time.Since(insStart)
+	if err := insErr; err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
@@ -1135,7 +1144,9 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
+	valStart := time.Now()
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+	npValidateDur = time.Since(valStart)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1503,3 +1514,9 @@ func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func
 	}
 	return true, nil
 }
+
+// probe: newPayload phase timers.
+var (
+	npPhaseProbe               = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
+	npInsertDur, npValidateDur time.Duration
+)
