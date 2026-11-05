@@ -181,10 +181,8 @@ func (v *VersionedAccountView) Empty() bool {
 
 // Account composes the whole account at txIdx from the versionMap (seeded origin
 // base plus field cells below txIdx), or nil if it does not exist there. Correct
-// only when every account written this block has its origin seeded. It overlays
-// raw cells (no destroyed() gate) once existence is decided, so a
-// destroyed-but-preserved account (EIP-8246 no-burn) keeps its surviving fields.
-// A field with no cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
+// only when every account written this block has its origin seeded. A field with
+// no cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
 func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil
