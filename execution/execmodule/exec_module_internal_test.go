@@ -306,3 +306,8 @@ func TestIsValidatedDoesNotWaitForValidation(t *testing.T) {
 		t.Fatal("IsValidated waited for the fork validator lock")
 	}
 }
+
+func TestCacheCodeByHashIsNilWithoutStateCache(t *testing.T) {
+	require.True(t, (&Cache{}).CodeByHash() == nil)
+	require.True(t, (&Cache{execModule: &ExecModule{}}).CodeByHash() == nil, "a nil *StateCache must not become a non-nil CodeByHash")
+}
