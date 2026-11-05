@@ -2,7 +2,7 @@
 
 ### Breaking Changes
 
-- engine: REST-SSZ clients must migrate from the v3.8 draft API to the routes and wire formats in [execution-apis#793](https://github.com/ethereum/execution-apis/pull/793). Fork-scoped requests now use `/engine/v1/...` with the required `Eth-Execution-Version` header. Client identity moves from `POST /engine/v1/client/version` to `GET /engine/v1/identity`, and errors use `application/problem+json` (#21729).
+- engine: REST-SSZ clients must migrate from the v3.8 draft API to the routes and wire formats in [execution-apis#793](https://github.com/ethereum/execution-apis/pull/793). Fork-scoped requests now use `/engine/v1/...` with the required `Eth-Execution-Version` header. Blob requests use `POST /engine/v1/blobs/v1` through `/engine/v1/blobs/v4`, replacing `/engine/v{1..3}/blobs`. Capabilities change from `POST` to `GET /engine/v1/capabilities`, returning a JSON object with supported forks, endpoint groups and request limits instead of an SSZ list. `engine_exchangeCapabilities` no longer advertises REST endpoints. Client identity moves from `POST /engine/v1/client/version` to `GET /engine/v1/identity`, and errors use `application/problem+json` (#21729) — by @yperbasis
 - cli: removed the experimental `--aa` flag and `aa` configuration key. Remove them from startup arguments and configuration files, including `aa: false`, or startup will fail. EIP-8141 frame transactions replace RIP-7560 account abstraction and activate at the chain's Bogota fork (#25243).
 - rpc, txpool: the private ETHBACKEND API is now version 5.0.0, replacing `AAValidation` with `FrameValidation`. Upgrade standalone `rpcdaemon` and `txpool` together with `erigon` (#25243).
 - chain: timestamp-based fork schedules now reject missing required predecessors. Update affected custom genesis configurations and fork overrides before startup; Bogota requires Amsterdam at the same or an earlier timestamp (#25243).
@@ -13,7 +13,7 @@
 
 ### Added
 
-- engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729).
+- engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729) — by @yperbasis
 
 ### Changed
 
