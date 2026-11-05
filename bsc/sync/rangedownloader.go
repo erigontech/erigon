@@ -110,10 +110,17 @@ func downloadRanges(ctx context.Context, logger log.Logger, svc rangeFetcher, fr
 		}
 		waiting := queued[:0]
 		for _, r := range queued {
-			peer := fastestIdlePeer(svc.ListPeersMayHaveBlockNum(r.from), busy, r.failed, rates)
+			var peer *p2p.PeerId
+			if r.from <= to {
+				peer = fastestIdlePeer(svc.ListPeersMayHaveBlockNum(r.from), busy, r.failed, rates)
+			}
 			if peer == nil {
 				waiting = append(waiting, r)
 				continue
+			}
+			if r.to > to {
+				waiting = append(waiting, blockRange{from: to + 1, to: r.to, deadline: r.deadline})
+				r.to = to
 			}
 			busy[*peer] = true
 			wg.Go(func() { results <- fetchRange(fetchCtx, svc, r, peer) })

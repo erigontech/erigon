@@ -56,6 +56,10 @@ func forkAt(chain []*types.Block, n int) []*types.Block {
 }
 
 func downloadChain(t *testing.T, svc *fakeP2P) downloadRun {
+	return downloadChainTo(t, svc, func() uint64 { return uint64(len(svc.chain) - 1) })
+}
+
+func downloadChainTo(t *testing.T, svc *fakeP2P, target func() uint64) downloadRun {
 	chain := svc.chain
 	prev := chain[0].HeaderNoCopy()
 	var run downloadRun
@@ -72,7 +76,6 @@ func downloadChain(t *testing.T, svc *fakeP2P) downloadRun {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Hour)
 	defer cancel()
 	start := time.Now()
-	target := func() uint64 { return uint64(len(chain) - 1) }
 	run.err = downloadRanges(ctx, testlog.Logger(t, log.LvlCrit), svc, 1, target, chain[0].HeaderNoCopy(), 8, insert)
 	run.elapsed = time.Since(start)
 	return run
@@ -283,5 +286,78 @@ func TestDownloadRangesBoundsRangesAboveGap(t *testing.T) {
 		}
 		require.Equal(t, rangeStart(7), highest)
 		requireDownloaded(t, chain, run)
+	})
+}
+
+func TestDownloadRangesShrinksRangeAboveDroppedTarget(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		chain := rangesChain(3)[:3001]
+		svc := &fakeP2P{peers: 4, chain: chain}
+		targets := []uint64{3072}
+		target := func() uint64 {
+			if len(targets) == 0 {
+				return 2968
+			}
+			next := targets[0]
+			targets = targets[1:]
+			return next
+		}
+
+		run := downloadChainTo(t, svc, target)
+
+		require.NoError(t, run.err)
+		require.Len(t, run.inserted, 2968)
+		require.Equal(t, chain[2968].Hash(), run.inserted[len(run.inserted)-1].Hash())
+	})
+}
+
+func TestDownloadRangesFetchesRemainderWhenTargetRisesAgain(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		chain := rangesChain(3)
+		svc := &fakeP2P{peers: 1, chain: chain}
+		targets := []uint64{3072, 2968, 2968}
+		target := func() uint64 {
+			if len(targets) == 0 {
+				return 3072
+			}
+			next := targets[0]
+			targets = targets[1:]
+			return next
+		}
+
+		run := downloadChainTo(t, svc, target)
+
+		require.Equal(t, []uint64{1}, svc.headerFetchers(2969))
+		requireDownloaded(t, chain, run)
+	})
+}
+
+func TestDownloadRangesHoldsRangeAboveDroppedTarget(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		chain := rangesChain(3)
+		svc := &fakeP2P{peers: 2, chain: chain, serve: func(ctx context.Context, peer, start uint64) ([]*types.Block, error) {
+			if peer == 1 && start == rangeStart(0) {
+				return nil, common.Sleep(ctx, fetchLatency)
+			}
+			return nil, nil
+		}}
+		targets := []uint64{3072}
+		target := func() uint64 {
+			if len(targets) == 0 {
+				return 2000
+			}
+			next := targets[0]
+			targets = targets[1:]
+			return next
+		}
+
+		run := downloadChainTo(t, svc, target)
+
+		require.Empty(t, svc.headerFetchers(rangeStart(2)))
+		require.NoError(t, run.err)
+		require.Len(t, run.inserted, 2048)
 	})
 }
