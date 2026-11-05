@@ -1209,8 +1209,9 @@ func TestRetryRequestsPerPeerArePaced(t *testing.T) {
 	a.requestedFrom = nil
 	a.timeoutSweep()
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a sweep must not overflow the peer's outbound queue")
+	*a.now = a.now.Add(txFetchTimeout)
 	a.fetch.requestFromAlternates(a.ctx, nil)
-	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes in the next sweep")
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes in the next budget window")
 }
 
 func TestRetryWithUnknownSizeGetsItsOwnRequest(t *testing.T) {
@@ -1259,4 +1260,53 @@ func TestSlowLookupDoesNotExpireTheRetry(t *testing.T) {
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "B was asked just now, not a timeout ago")
+}
+
+func TestQueuedBodyKeepsAlternatesUntilValidated(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xe1}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.known = map[[32]byte]bool{hash: true} // A's body is queued, not yet validated
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA}, a.requestedFrom)
+	delete(a.known, hash) // the body failed validation
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "the alternate is still there")
+}
+
+func TestRetryBudgetHoldsAcrossSweeps(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, 2*maxRetryRequestsPerPeer*256)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	for c := range slices.Chunk(hashes, 1000) {
+		a.announce(t, peerA, c...)
+		a.announce(t, peerB, c...)
+	}
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer)
+	*a.now = a.now.Add(time.Second)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "the peer may still be draining the last sweep's requests")
+	*a.now = a.now.Add(txFetchTimeout)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Len(t, a.requestedFrom, 2*maxRetryRequestsPerPeer)
+}
+
+func TestRetryBudgetCountsTheSizeSlack(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, peerB := [32]byte{0xf1}, [32]byte{0xf2}, [64]byte{0xa}, [64]byte{0xb}
+	const size = p2pTxPacketLimit - 4 // the delivered body may be up to announcedSizeSlack larger
+	a.announceSized(t, peerA, size, h1, h2)
+	a.announceSized(t, peerB, size, h1, h2)
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerB, peerB}, a.requestedFrom)
 }

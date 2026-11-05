@@ -66,6 +66,13 @@ type fetchRequest struct {
 	at         time.Time
 	peer       fetchPeer
 	alternates []fetchPeer
+	seenKnown  bool // the pool held it at the last sweep, maybe only queued for validation
+}
+
+// retryBudget counts a peer's retry requests in the current txFetchTimeout window.
+type retryBudget struct {
+	used  int
+	since time.Time
 }
 
 type pendingFetch struct {
@@ -103,6 +110,7 @@ type Fetch struct {
 	requestedLock            sync.Mutex
 	requested                *maphash.LRU[*fetchRequest]
 	pending                  []pendingFetch // in request order, so the oldest expires first
+	retryBudgets             map[fetchPeer]*retryBudget
 	now                      func() time.Time
 	logger                   log.Logger
 }
@@ -141,6 +149,7 @@ func NewFetch(
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
 		announcements:        announcements,
 		requested:            requested,
+		retryBudgets:         map[fetchPeer]*retryBudget{},
 		now:                  time.Now,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
@@ -230,14 +239,15 @@ func (f *Fetch) retryTimedOutRequests(ctx context.Context) {
 
 // retryPlan groups a sweep's retries for one peer into requests a responder answers in full.
 type retryPlan struct {
-	reqs []Hashes
-	size int // announced bytes in the last request
+	reqs  []Hashes
+	size  int // announced bytes in the last request
+	limit int // requests the peer's budget still allows
 }
 
 // add reports false when the hash needs a request beyond maxRetryRequestsPerPeer.
 func (p *retryPlan) add(hash []byte, size int) bool {
 	if n := len(p.reqs); n == 0 || len(p.reqs[n-1]) == 256*32 || p.size >= p2pTxPacketLimit {
-		if n == maxRetryRequestsPerPeer {
+		if n == p.limit {
 			return false
 		}
 		p.reqs, p.size = append(p.reqs, nil), 0
@@ -258,7 +268,7 @@ func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
 	if !ok {
 		return p2pTxPacketLimit
 	}
-	return int(info.size)
+	return int(info.size) + announcedSizeSlack // a delivered body may be that much larger
 }
 
 // requestFromAlternates asks the next announcer for each hash whose request timed out. Hashes the
@@ -298,16 +308,27 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			continue
 		}
 		if _, missing := unknown[p.hash]; !missing {
-			f.requested.Delete(p.hash[:]) // the pool holds it
+			if r.seenKnown { // held for a whole timeout: validated, not just queued
+				f.requested.Delete(p.hash[:])
+				continue
+			}
+			r.seenKnown, r.at = true, sent // a queued body may still fail validation; keep the alternates
+			f.pending = append(f.pending, pendingFetch{p.hash, sent})
 			continue
 		}
+		r.seenKnown = false
 		if len(r.alternates) == 0 {
 			continue
 		}
 		next := r.alternates[0]
 		plan := plans[next]
 		if plan == nil {
-			plan = &retryPlan{}
+			b := f.retryBudgets[next]
+			if b == nil || sent.Sub(b.since) >= txFetchTimeout {
+				b = &retryBudget{since: sent}
+				f.retryBudgets[next] = b
+			}
+			plan = &retryPlan{limit: maxRetryRequestsPerPeer - b.used}
 			plans[next] = plan
 		}
 		if !plan.add(p.hash[:], f.announcedSize(p.hash[:], next)) {
@@ -320,6 +341,14 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 	if len(deferred) > 0 {
 		f.pending = append(deferred, f.pending...)
+	}
+	for peer, plan := range plans {
+		f.retryBudgets[peer].used += len(plan.reqs)
+	}
+	for peer, b := range f.retryBudgets {
+		if sent.Sub(b.since) >= txFetchTimeout {
+			delete(f.retryBudgets, peer)
+		}
 	}
 	f.requestedLock.Unlock()
 
