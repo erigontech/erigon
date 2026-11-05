@@ -24,7 +24,6 @@ func TestRevertedFreshCreate_NoPhantom(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xda, 0x11})
 	code := []byte("deployed-bytecode")
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 
@@ -34,7 +33,7 @@ func TestRevertedFreshCreate_NoPhantom(t *testing.T) {
 	require.NoError(t, ibs.SetCode(addr, code, 0))
 	ibs.RevertToSnapshot(snap, nil)
 
-	writes := ibs.FinalizedWrites(finalizedWritesRules())
+	writes := finalizedWrites(t, ibs, finalizedWritesRules())
 	_, hasNonce := writes.GetNonce(addr)
 	_, hasCode := writes.GetCode(addr)
 	_, hasCodeHash := writes.GetCodeHash(addr)
@@ -54,7 +53,6 @@ func TestRevertedRecreate_NoPhantom(t *testing.T) {
 	pre.Balance = *uint256.NewInt(0)
 	reader := &fieldReader{addr: addr, account: &pre}
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 
@@ -67,7 +65,7 @@ func TestRevertedRecreate_NoPhantom(t *testing.T) {
 	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), ch)
 	ibs.RevertToSnapshot(snap, nil)
 
-	writes := ibs.FinalizedWrites(finalizedWritesRules())
+	writes := finalizedWrites(t, ibs, finalizedWritesRules())
 	_, hasNonce := writes.GetNonce(addr)
 	_, hasCode := writes.GetCode(addr)
 	nonceVal := uint64(0)

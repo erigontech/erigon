@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -134,8 +135,27 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 }
 
 func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
+	key := blobGasPriceKey{config.GetMinBlobGasPrice(), config.GetBlobGasPriceUpdateFraction(headerTime), excessBlobGas}
+	if last := lastBlobGasPrice.Load(); last != nil && last.key == key {
+		return last.price, nil
+	}
+	price, err := FakeExponential(uint256.NewInt(key.minPrice), uint256.NewInt(key.updateFraction), excessBlobGas)
+	if err == nil {
+		lastBlobGasPrice.Store(&blobGasPriceResult{key, price})
+	}
+	return price, err
 }
+
+type blobGasPriceKey struct{ minPrice, updateFraction, excessBlobGas uint64 }
+
+type blobGasPriceResult struct {
+	key   blobGasPriceKey
+	price uint256.Int
+}
+
+// lastBlobGasPrice keeps the last price: every block context of one head (each eth_call
+// builds one) asks for the same inputs, and FakeExponential costs a 512-bit division per term.
+var lastBlobGasPrice atomic.Pointer[blobGasPriceResult]
 
 func GetBlobGasUsed(numBlobs int) uint64 {
 	return uint64(numBlobs) * params.GasPerBlob
@@ -147,13 +167,11 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 	}
 	actualBlobHashes := []common.Hash{}
 	for _, txn := range *transactions {
-		if txn.Type() == types.BlobTxType {
-			for _, h := range txn.GetBlobHashes() {
-				if h[0] != kzg.BlobCommitmentVersionKZG {
-					return ErrInvalidVersionedHash
-				}
-				actualBlobHashes = append(actualBlobHashes, h)
+		for _, h := range txn.GetBlobHashes() {
+			if h[0] != kzg.BlobCommitmentVersionKZG {
+				return ErrInvalidVersionedHash
 			}
+			actualBlobHashes = append(actualBlobHashes, h)
 		}
 	}
 	if len(actualBlobHashes) > int(maxBlobsPerBlock) {

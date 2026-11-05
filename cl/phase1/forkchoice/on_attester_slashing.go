@@ -47,7 +47,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	defer f.mu.Unlock()
 
 	if f.syncedDataManager.Syncing() {
-		s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root, false)
+		s, err := f.getStateLocked(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root)
 		if err != nil {
 			log.Debug("[OnAttesterSlashing] failed to load the justified state", "err", err)
 		}

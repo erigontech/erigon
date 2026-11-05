@@ -73,11 +73,13 @@ const (
 )
 
 type payloadAttestationService struct {
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	ethClock        eth_clock.EthereumClock
-	netCfg          *clparams.NetworkConfig
-	emitters        *beaconevents.EventEmitter
-	epbsPool        *pool.EpbsPool
+	forkchoiceStore        forkchoice.ForkChoiceStorage
+	ethClock               eth_clock.EthereumClock
+	netCfg                 *clparams.NetworkConfig
+	emitters               *beaconevents.EventEmitter
+	epbsPool               *pool.EpbsPool
+	batchSignatureVerifier *BatchSignatureVerifier
+	invalidPTCSlotPlusOne  atomic.Uint64
 
 	// Cache to track seen attestations: (slot, validatorIndex) -> struct{}
 	seenAttestationsCache *lru.Cache[seenPayloadAttestationKey, struct{}]
@@ -99,21 +101,23 @@ func NewPayloadAttestationService(
 	netCfg *clparams.NetworkConfig,
 	epbsPool *pool.EpbsPool,
 	emitters *beaconevents.EventEmitter,
+	batchSignatureVerifier *BatchSignatureVerifier,
 ) PayloadAttestationService {
 	seenCache, err := lru.New[seenPayloadAttestationKey, struct{}]("seen_payload_attestations", seenPayloadAttestationCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	s := &payloadAttestationService{
-		forkchoiceStore:       forkchoiceStore,
-		ethClock:              ethClock,
-		netCfg:                netCfg,
-		epbsPool:              epbsPool,
-		emitters:              emitters,
-		seenAttestationsCache: seenCache,
-		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
-		validatedREST:         make(map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation),
-		now:                   time.Now,
+		forkchoiceStore:        forkchoiceStore,
+		ethClock:               ethClock,
+		netCfg:                 netCfg,
+		epbsPool:               epbsPool,
+		emitters:               emitters,
+		batchSignatureVerifier: batchSignatureVerifier,
+		seenAttestationsCache:  seenCache,
+		validationAdmission:    make(chan struct{}, maxConcurrentPayloadAttestationValidations),
+		validatedREST:          make(map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation),
+		now:                    time.Now,
 	}
 	s.pending = s.newPendingQueue(ctx)
 	return s
@@ -163,7 +167,7 @@ var (
 	ErrAttestationCapacity  = errors.New("validated payload attestation retry capacity reached")
 )
 
-func (s *payloadAttestationService) processMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, queueMissing bool, publish func() error) error {
+func (s *payloadAttestationService) processMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, fromGossip bool, publish func() error) error {
 	if msg == nil || msg.Data == nil {
 		return fmt.Errorf("nil payload attestation message")
 	}
@@ -198,7 +202,7 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 	// A client MAY queue attestation for processing once the block is retrieved.
 	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
 	if !ok {
-		if !queueMissing {
+		if !fromGossip {
 			return fmt.Errorf("%w: block not available", ErrIgnore)
 		}
 		if err := s.queuePendingAttestation(blockRoot, msg); err != nil {
@@ -238,7 +242,7 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 			coordinator.mu.Unlock()
 			s.releaseValidatedRESTAttestation(seenKey, coordinator, false)
 		}
-		if err := s.validatePayloadAttestation(ctx, msg); err != nil {
+		if err := s.validatePayloadAttestation(ctx, msg, fromGossip); err != nil {
 			return err
 		}
 		s.commitPayloadAttestation(seenKey, msg)
@@ -256,7 +260,7 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 		return fmt.Errorf("%w: %w: already seen payload attestation from validator %d for slot %d", ErrIgnore, ErrAttestationDuplicate, validatorIndex, slot)
 	}
 	if !coordinator.validated.Load() {
-		if err := s.validatePayloadAttestation(ctx, msg); err != nil {
+		if err := s.validatePayloadAttestation(ctx, msg, fromGossip); err != nil {
 			return err
 		}
 		coordinator.validated.Store(true)
@@ -297,14 +301,34 @@ func isPayloadAttestationSlotCurrent(clock eth_clock.EthereumClock, now time.Tim
 	return !now.Before(lowerBound) && !now.After(upperBound)
 }
 
-func (s *payloadAttestationService) validatePayloadAttestation(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error {
+func (s *payloadAttestationService) validatePayloadAttestation(ctx context.Context, msg *cltypes.PayloadAttestationMessage, fromGossip bool) error {
 	select {
 	case s.validationAdmission <- struct{}{}:
 	case <-ctx.Done():
 		return fmt.Errorf("%w: %w: payload attestation validation canceled: %v", ErrIgnore, ErrAttestationRetryable, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
 	}
 	defer func() { <-s.validationAdmission }()
-	err := s.forkchoiceStore.OnGossipPayloadAttestationMessage(ctx, msg)
+	var verifySignature forkchoice.PayloadAttestationSignatureVerifier
+	if fromGossip && s.batchSignatureVerifier != nil && s.invalidPTCSlotPlusOne.Load() != msg.Data.Slot+1 {
+		verifySignature = func(ctx context.Context, signature, signingRoot, publicKey []byte) error {
+			err := s.batchSignatureVerifier.VerifyPayloadAttestation(ctx, &AggregateVerificationData{
+				Signatures: [][]byte{signature},
+				SignRoots:  [][]byte{signingRoot},
+				Pks:        [][]byte{publicKey},
+				F:          func() {},
+			})
+			if err != nil && !errors.Is(err, ErrIgnore) {
+				invalidSlotPlusOne := msg.Data.Slot + 1
+				for current := s.invalidPTCSlotPlusOne.Load(); current < invalidSlotPlusOne; current = s.invalidPTCSlotPlusOne.Load() {
+					if s.invalidPTCSlotPlusOne.CompareAndSwap(current, invalidSlotPlusOne) {
+						break
+					}
+				}
+			}
+			return err
+		}
+	}
+	err := s.forkchoiceStore.OnGossipPayloadAttestationMessage(ctx, msg, verifySignature)
 	// Within the gossip clock disparity the message is valid gossip even though
 	// fork choice no longer counts its vote.
 	if err == nil || errors.Is(err, forkchoice.ErrPayloadAttestationNotCurrentSlot) {

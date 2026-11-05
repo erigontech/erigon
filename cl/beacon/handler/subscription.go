@@ -73,6 +73,9 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		}
 		syncnets[i] = sn
 	}
+	for _, subRequest := range req {
+		a.validatorParams.AddAttachedValidator(subRequest.ValidatorIndex)
+	}
 
 	for i, subRequest := range req {
 		expiry := a.ethClock.GetSlotTime(subRequest.UntilEpoch * a.beaconChainCfg.SlotsPerEpoch)
@@ -118,6 +121,9 @@ func (a *ApiHandler) PostEthV1ValidatorBeaconCommitteeSubscription(w http.Respon
 	if len(req) == 0 {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("empty request")).WriteTo(w)
 		return
+	}
+	for _, sub := range req {
+		a.validatorParams.AddAttachedValidator(sub.ValidatorIndex)
 	}
 	for _, sub := range req {
 		if err := a.committeeSub.AddAttestationSubscription(context.Background(), sub); err != nil {

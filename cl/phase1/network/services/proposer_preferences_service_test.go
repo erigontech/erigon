@@ -254,7 +254,7 @@ func TestProposerPreferencesServiceRejectsUnrepresentableSlotBeforeState(t *test
 			cfg.MinSeedLookahead = 1
 			stateCalls := 0
 			fc := forkchoice_mock.NewForkChoiceStorageMock(t)
-			fc.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+			fc.GetStateAtBlockRootFn = func(common.Hash) (*state2.CachingBeaconState, error) {
 				stateCalls++
 				return nil, nil
 			}
@@ -397,7 +397,7 @@ func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.
 	ctrl := gomock.NewController(t)
 	service, _, _, epbsPool, forkChoice := setupProposerPreferencesService(t, ctrl)
 	validationState := forkChoice.StateAtBlockRootVal[testDependentRoot]
-	forkChoice.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	forkChoice.GetStateAtBlockRootFn = func(common.Hash) (*state2.CachingBeaconState, error) {
 		return validationState, nil
 	}
 	emitter := beaconevents.NewEventEmitter()
@@ -555,7 +555,7 @@ func TestProposerPreferencesServiceLateDependentRootRejectedWithoutStateLoad(t *
 	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
 	fc.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{Slot: 64}
 	stateLoads := 0
-	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
 		stateLoads++
 		return fc.StateAtBlockRootVal[root].Copy()
 	}
@@ -574,7 +574,7 @@ func TestProposerPreferencesServiceImpossibleDependentRootSkipsStateLoad(t *test
 	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
 	fc.HeadVal = common.HexToHash("0x99")
 	stateLoads := 0
-	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
 		stateLoads++
 		return fc.StateAtBlockRootVal[root].Copy()
 	}
@@ -591,7 +591,7 @@ func TestProposerPreferencesServiceSharesDependentStateAcrossSlots(t *testing.T)
 	defer ctrl.Finish()
 	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
 	stateLoads := 0
-	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
 		stateLoads++
 		return fc.StateAtBlockRootVal[root].Copy()
 	}
@@ -608,7 +608,7 @@ func TestProposerPreferencesServiceSharesDependentStateLoadInFlight(t *testing.T
 	service, _, ethClock, _, fc := setupProposerPreferencesService(t, ctrl)
 	var stateLoads atomic.Int32
 	release := make(chan struct{})
-	fc.GetStateAtBlockRootFn = func(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+	fc.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
 		stateLoads.Add(1)
 		<-release
 		return fc.StateAtBlockRootVal[root].Copy()
@@ -723,10 +723,8 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 
 	depState := newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 42})
 	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = depState
-	var requestedCopy bool
 	var ownedState *state2.CachingBeaconState
-	forkChoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
-		requestedCopy = alwaysCopy
+	forkChoiceMock.GetStateAtBlockRootFn = func(root common.Hash) (*state2.CachingBeaconState, error) {
 		var err error
 		ownedState, err = forkChoiceMock.StateAtBlockRootVal[root].Copy()
 		return ownedState, err
@@ -738,7 +736,6 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.NoError(t, err)
-	require.True(t, requestedCopy)
 	require.NotSame(t, depState, ownedState)
 	require.Equal(t, uint64(64), depState.Slot())
 

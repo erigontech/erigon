@@ -51,6 +51,14 @@ func (v *VersionedAccountView) ensureBase() {
 	}
 }
 
+// Err reports an error from the lazily-loaded base read. It forces the base
+// load so callers can bail before trusting the composed (zeroed-on-error)
+// fields.
+func (v *VersionedAccountView) Err() error {
+	v.ensureBase()
+	return v.baseErr
+}
+
 func (v *VersionedAccountView) GetBalance() uint256.Int {
 	if v.destroyed() {
 		return uint256.Int{}
@@ -123,7 +131,7 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 	}
 	if v.vm != nil {
 		if code, ok := versionedUpdateCode(v.vm, v.addr, v.txIdx); ok {
-			return code, nil
+			return code.Bytes, nil
 		}
 	}
 	if v.base != nil {

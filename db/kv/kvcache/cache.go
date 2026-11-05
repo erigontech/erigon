@@ -19,7 +19,6 @@ package kvcache
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -303,11 +302,8 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				for _, change := range sc.Changes[i].StorageChanges {
 					loc := gointerfaces.ConvertH256ToHash(change.Location)
-					k := make([]byte, 20+8+32)
-					copy(k, addr[:])
-					binary.BigEndian.PutUint64(k[20:], sc.Changes[i].Incarnation)
-					copy(k[20+8:], loc[:])
-					c.add(k, change.Data, r, id)
+					// evict, don't cache: a later selfdestruct in the same block can undo this write
+					c.evictKey(append(addr[:], loc[:]...), r)
 				}
 			}
 		}
@@ -387,11 +383,7 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 
 	c.miss.Inc()
 
-	if len(k) == 20 {
-		v, _, err = tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
-	} else {
-		v, _, err = tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
-	}
+	v, _, err = tx.GetLatest(stateDomain(k), k, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -430,6 +422,12 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	defer c.lock.Unlock()
 	v = c.addCode(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
+}
+
+func (c *Coherent) evictKey(k []byte, r *CoherentRoot) {
+	if e, ok := r.cache.Delete(&Element{K: k}); ok {
+		c.stateEvict.Remove(e)
+	}
 }
 
 func (c *Coherent) removeOldest(r *CoherentRoot) {
@@ -533,7 +531,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 
 	clearCache := false
 
-	compare := func(cache *btree2.BTreeG[*Element], domain kv.Domain) (bool, [][]byte, error) {
+	compare := func(cache *btree2.BTreeG[*Element], domainOf func(k []byte) kv.Domain) (bool, [][]byte, error) {
 		keys := make([][]byte, 0)
 
 		for {
@@ -543,7 +541,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 			}
 
 			// check the db
-			inDb, _, err := tx.GetLatest(domain, val.K, kv.GetLatestOptions{})
+			inDb, _, err := tx.GetLatest(domainOf(val.K), val.K, kv.GetLatestOptions{})
 			if err != nil {
 				return false, keys, err
 			}
@@ -565,7 +563,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 
 	cache, codeCache := c.cloneCaches(root)
 
-	cancelled, keys, err := compare(cache, kv.AccountsDomain)
+	cancelled, keys, err := compare(cache, stateDomain)
 	if err != nil {
 		return nil, err
 	}
@@ -575,17 +573,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 		return result, nil
 	}
 
-	cancelled, keys, err = compare(cache, kv.StorageDomain)
-	if err != nil {
-		return nil, err
-	}
-	result.StateKeysOutOfSync = keys
-	if cancelled {
-		result.RequestCancelled = true
-		return result, nil
-	}
-
-	cancelled, keys, err = compare(codeCache, kv.CodeDomain)
+	cancelled, keys, err = compare(codeCache, func([]byte) kv.Domain { return kv.CodeDomain })
 	if err != nil {
 		return nil, err
 	}
@@ -601,6 +589,13 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 	result.CacheCleared = clearCache
 
 	return result, nil
+}
+
+func stateDomain(k []byte) kv.Domain {
+	if len(k) == 20 {
+		return kv.AccountsDomain
+	}
+	return kv.StorageDomain
 }
 
 func (c *Coherent) cloneCaches(r *CoherentRoot) (cache *btree2.BTreeG[*Element], codeCache *btree2.BTreeG[*Element]) {

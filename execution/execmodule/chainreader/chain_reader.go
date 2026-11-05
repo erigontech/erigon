@@ -122,12 +122,16 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
-	h, err := c.executionModule.GetHeader(ctx, &hash, nil)
+	h, err := c.HeaderByHash(ctx, hash)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
 	return h
+}
+
+func (c ChainReaderWriterEth1) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return c.executionModule.GetHeader(ctx, &hash, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
@@ -208,9 +212,16 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.
 	return c.executionModule.IsCanonicalHash(ctx, hash)
 }
 
+func (c ChainReaderWriterEth1) IsValidated(hash common.Hash) bool {
+	return c.executionModule.IsValidated(hash)
+}
+
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		panic(err)
 	}
 	return frozen, hasGap

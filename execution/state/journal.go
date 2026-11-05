@@ -52,11 +52,14 @@ const (
 	kindFakeStorage
 	kindCode
 	kindRefund
-	kindAddLog
 	kindTouch
 	kindAccessListAddAccount
 	kindAccessListAddSlot
 	kindTransientStorage
+	kindFrameApproval
+	kindFrameStateGas
+	kindFrameStorageOwner
+	kindFrameTransient
 	kindEnd // not a kind; bounds the range TestJournalDirtySymmetry must cover
 )
 
@@ -70,6 +73,8 @@ const (
 // journalExtra holds the fields needed only by the infrequent entry kinds,
 // kept out of line so the common entry stays small (see TestJournalEntrySize).
 type journalExtra struct {
+	frame                *FrameContext
+	prevTransient        transientStorage
 	prevObj              *stateObject         // kindResetObject: the cached object, nil if none
 	prevWrites           *createWriteSnapshot // kindResetObject
 	bi                   *BalanceIncrease     // kindBalanceIncreaseTransfer
@@ -252,10 +257,6 @@ func (j *journal) refundChange(prev uint64) {
 	j.entries = append(j.entries, journalEntry{kind: kindRefund, aux: prev})
 }
 
-func (j *journal) addLogChange(txIndex int) {
-	j.entries = append(j.entries, journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
-}
-
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
 	j.entries = append(j.entries, journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
 	j.dirties[account]++
@@ -279,7 +280,9 @@ func (j *journal) transientStorageChange(account accounts.Address, slot int, pre
 // dropping either loses a recreated account from dirties, diverging the state root.
 func (je *journalEntry) dirtied() (accounts.Address, bool) {
 	switch je.kind {
-	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAddLog, kindAccessListAddAccount, kindAccessListAddSlot:
+	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAccessListAddAccount, kindAccessListAddSlot:
+		return accounts.NilAddress, false
+	case kindFrameApproval, kindFrameStateGas, kindFrameStorageOwner, kindFrameTransient:
 		return accounts.NilAddress, false
 	case kindCreateObject, kindResetObject, kindSelfdestruct, kindBalance, kindBalanceIncrease, kindNonce, kindStorage, kindFakeStorage, kindCode, kindTouch:
 		return je.account, true
@@ -292,6 +295,24 @@ var ripemd = accounts.InternAddress(common.HexToAddress("00000000000000000000000
 // revert undoes the change recorded by this entry.
 func (je *journalEntry) revert(s *IntraBlockState) error {
 	switch je.kind {
+	case kindFrameTransient:
+		s.transientStorage = je.extra.prevTransient
+		return nil
+	case kindFrameApproval:
+		je.extra.frame.Payer = je.account
+		je.extra.frame.SenderApproved = je.flags != 0
+		return nil
+	case kindFrameStateGas:
+		je.extra.frame.Receipts[je.flags].GasUsed.State = je.aux
+		return nil
+	case kindFrameStorageOwner:
+		slot := frameStorageSlot{je.account, je.key}
+		if je.flags == 0 {
+			delete(je.extra.frame.storageOwners, slot)
+		} else {
+			je.extra.frame.storageOwners[slot] = je.flags
+		}
+		return nil
 	case kindCreateObject:
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.release()
@@ -499,10 +520,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		s.refund = je.aux
 		return nil
 
-	case kindAddLog:
-		s.logs.revertLast(int(je.aux))
-		return nil
-
 	case kindTouch:
 		// Do NOT delete versionedReads here.  Even though the touch is being
 		// reverted (e.g. a CREATE that ran out of gas), the read that triggered
@@ -512,7 +529,8 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// stale reads to pass validation and produce incorrect results.
 		//
 		// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
-		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
+		// lets the EIP-161 removal in FinalizedWrites delete an account whose touch was
+		// rolled back.
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
 		//

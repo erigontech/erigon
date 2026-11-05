@@ -98,6 +98,10 @@ func newBackfillFixture(t *testing.T, currentSlot uint64, blocks map[uint64]*clt
 			}
 			return nil, nil
 		}).AnyTimes()
+	columnStorage.EXPECT().ColumnSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, slot uint64, _ common.Hash, _ int64) (bool, error) {
+			return complete[slot], nil
+		}).AnyTimes()
 	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 	return &backfillFixture{d: &peerdas{
@@ -222,7 +226,7 @@ func TestBackfillCustodyColumnsWaitsForTheCanonicalChain(t *testing.T) {
 	marked := make(chan error, 1)
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		marked <- f.d.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+		marked <- f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
 			return beacon_indicies.MarkRootCanonical(tx, 14, common.Hash{14, 0xab})
 		})
 	}()
@@ -254,7 +258,7 @@ func TestBackfillCustodyColumnsSkipsGloasBlocksWithoutAnEnvelope(t *testing.T) {
 		10: gloasBlockWithBlobs(t, 10),
 		12: gloasBlockWithBlobs(t, 12),
 	}, nil)
-	require.NoError(t, f.d.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+	require.NoError(t, f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
 		return beacon_indicies.WriteExecutionBlockHash(tx, f.roots[10], common.Hash{0x10})
 	}))
 
@@ -307,7 +311,7 @@ func TestBackfillCustodyColumnsStopsWhenCancelled(t *testing.T) {
 	reader := f.d.blockReader.(bodyReader)
 	reader.onRead = cancel
 	f.d.blockReader = reader
-	views := &countingDB{RwDB: f.d.indiciesDB.(kv.RwDB)}
+	views := &countingDB{RwDB: f.d.indiciesDB}
 	f.d.indiciesDB = views
 
 	f.d.backfillCustodyColumns(ctx, 10, 50)

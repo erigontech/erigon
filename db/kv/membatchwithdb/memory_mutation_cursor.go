@@ -56,7 +56,7 @@ func (m *memoryMutationCursor) isTableCleared() bool {
 	return m.mutation.isTableCleared(m.table)
 }
 
-func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte, t NextType) bool {
+func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
 	if m.pureDupSort {
 		return m.mutation.isDupDeleted(m.table, key, value)
 	}
@@ -75,7 +75,7 @@ func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue, Normal) {
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
 		if dbKey, dbValue, err = m.getNextOnDb(Normal); err != nil {
 			return nil, nil, err
 		}
@@ -106,7 +106,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 		return
 	}
 
-	for key != nil && value != nil && m.isEntryDeleted(key, value, t) {
+	for key != nil && value != nil && m.isEntryDeleted(key, value) {
 		switch t {
 		case Normal:
 			key, value, err = m.cursor.Next()
@@ -251,7 +251,7 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	// If the entry is marked as deleted find one that is not
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue, Normal) {
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
 		dbKey, dbValue, err = m.getNextOnDb(Normal)
 		if err != nil {
 			return nil, nil, err
@@ -337,7 +337,7 @@ func (m *memoryMutationCursor) SeekBothRange(key, value []byte) ([]byte, error) 
 		return nil, err
 	}
 
-	if dbValue != nil && m.isEntryDeleted(key, dbValue, Dup) {
+	if dbValue != nil && m.isEntryDeleted(key, dbValue) {
 		_, dbValue, err = m.getNextOnDb(Dup)
 		if err != nil {
 			return nil, err
@@ -372,7 +372,7 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	m.currentMemEntry = cursorEntry{memKey, memValue}
 
 	// Basic checks
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue, Normal) {
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
 		m.currentDbEntry = cursorEntry{}
 		m.isPrevFromDb = false
 		return memKey, memValue, nil

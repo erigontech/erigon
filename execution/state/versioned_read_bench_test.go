@@ -30,7 +30,6 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	// tx 1 reads → hits MapRead path inside versionedRead
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
-	s.SetNoMaterialize(true)
 	s.txIndex = 1
 
 	b.Run("GetNonce", func(b *testing.B) {
@@ -74,7 +73,6 @@ func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 	mvhm.WriteCodeHash(addr, v0, ch, true)
 
 	s := NewWithVersionMap(reader, mvhm)
-	s.SetNoMaterialize(true)
 	s.txIndex = 1
 	// warm the read-set (first EXTCODEHASH)
 	_, _ = s.Empty(addr)

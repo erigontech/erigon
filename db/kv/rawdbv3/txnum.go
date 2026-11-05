@@ -400,6 +400,7 @@ func SecondKeyC(c kv.Cursor) ([]byte, error) {
 //   - blockNum
 //   - txIndex in block: -1 means first system tx
 //   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
+//   - isSystemTxn: first or last system-txn, independent of the order
 //   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
 //
 // Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
@@ -433,10 +434,10 @@ func (i *MapTxNum2BlockNumIter) Close() {
 	}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
-func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, isSystemTxn, blockNumChanged bool, err error) {
 	txNum, err = i.it.Next()
 	if err != nil {
-		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
+		return txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err
 	}
 
 	if i.maxTxNumInBlock == 0 || txNum > i.maxTxNumInBlock || txNum < i.minTxNumInBlock {
@@ -466,6 +467,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 	} else {
 		isFinalTxn = txNum == i.minTxNumInBlock
 	}
+	isSystemTxn = txNum == i.minTxNumInBlock || txNum == i.maxTxNumInBlock
 	return
 }
 

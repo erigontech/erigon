@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -44,7 +43,6 @@ type columnDataPeers struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	ethClock      eth_clock.EthereumClock
 	peerMetaCache *lru.CacheWithTTL[peerDataKey, *peerData]
-	beaconState   *state.CachingBeaconState
 
 	peersMutex   sync.RWMutex
 	peersQueue   []peerData
@@ -57,14 +55,12 @@ func newColumnPeers(
 	sentinel sentinelproto.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
-	beaconState *state.CachingBeaconState,
 ) *columnDataPeers {
 	s := &columnDataPeers{
 		sentinel:      sentinel,
 		beaconConfig:  beaconConfig,
 		ethClock:      ethClock,
 		peerMetaCache: lru.NewWithTTL[peerDataKey, *peerData]("colum-peer-cache", 512, 5*time.Minute),
-		beaconState:   beaconState,
 		peersQueue:    []peerData{},
 		peersIndex:    0,
 	}

@@ -107,6 +107,33 @@ func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
 	require.True(t, tx.opts.BranchCache())
 }
 
+func TestSnapshotGetterHonorsStepBound(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, _, committed, _ := twoStepRows(t, db, stateCache)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.BindStateCache(stateCache)
+	newer := encAccount(3)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, key, newer, 40, committed))
+	getter := domains.AsSnapshotGetter(tx)
+
+	got, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{}.WithMaxStep(1))
+	require.NoError(t, err)
+	require.Equal(t, committed, got, "an in-memory value above the caller's bound must not be served")
+	require.Equal(t, kv.Step(1), tx.opts.MaxStep())
+	got, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, newer, got, "an unbounded read must still use the selected in-memory value")
+}
+
 func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -134,17 +161,23 @@ func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 // the caller lends, the way seg's Getter does.
 type codeBufTx struct {
 	kv.TemporalTx
-	code map[string][]byte
+	code     map[string][]byte
+	lentCaps *[]int
 }
 
 func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain != kv.CodeDomain {
 		return tx.TemporalTx.GetLatest(domain, key, opts)
 	}
+	if tx.lentCaps != nil {
+		*tx.lentCaps = append(*tx.lentCaps, cap(opts.Buf()))
+	}
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
 }
 
-func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
+// A caller-owned buffer outlives each getter, so a later getter decodes into it
+// instead of growing its own.
+func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -152,12 +185,12 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	defer roTx.Rollback()
 
 	codes := [][]byte{
-		bytes.Repeat([]byte{0xa1}, 1024),
-		bytes.Repeat([]byte{0xb2}, 1024),
-		bytes.Repeat([]byte{0xc3}, 1024),
+		bytes.Repeat([]byte{0x17}, 1024),
+		bytes.Repeat([]byte{0x28}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
@@ -178,6 +211,55 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, acc, 5, nil))
 	}
 
+	var buf []byte
+	opts := execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)
+	for i, addr := range addrs {
+		got, ok, err := sd.AsStateGetter(tx, opts).GetCode(addr, 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, codes[i], got)
+	}
+	require.Len(t, lentCaps, len(codes))
+	require.GreaterOrEqual(t, lentCaps[1], len(codes[1]), "the second getter must decode into the buffer the first one grew")
+}
+
+func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	codes := [][]byte{
+		bytes.Repeat([]byte{0xa1}, 1024),
+		bytes.Repeat([]byte{0xb2}, 1024),
+		bytes.Repeat([]byte{0xc3}, 1024),
+	}
+	addrs := make([][]byte, len(codes))
+	for i := range codes {
+		addrs[i] = make([]byte, 20)
+		addrs[i][0] = byte(i + 1)
+		// Committed, not batched: a codeHash from the batch makes the read
+		// clone the bytes itself instead of going through FillCode.
+		commitAccount(t, db, nil, addrs[i], accounts.SerialiseV3(&accounts.Account{
+			Nonce:    1,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(codes[i])),
+		}), 5)
+	}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var lentCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	for i, addr := range addrs {
+		tx.code[string(addr)] = codes[i]
+	}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 	got := make([][]byte, len(codes))
 	for i, addr := range addrs {
@@ -189,6 +271,10 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	}
 	for i := range codes {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
+	}
+	require.Len(t, lentCaps, len(codes))
+	for i := 1; i < len(codes); i++ {
+		require.Positive(t, lentCaps[i], "read %d must decode into the lent buffer", i)
 	}
 }
 
@@ -343,6 +429,55 @@ func TestCachedTemporalTxStateGetterForeignCacheStateReadsTx(t *testing.T) {
 	}
 }
 
+func TestCachedTemporalTxStateGetterRetriesAfterCachePublication(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sourceVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	roTx.Rollback()
+
+	key, value := bytes.Repeat([]byte{0xdd}, 20), encAccount(2)
+	commitAccount(t, db, nil, key, value, 10)
+	roTx, err = db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	committedVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	got, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, 1, tx.reads, "the cache has not published this transaction's state yet")
+
+	stateCache.Applier().Publish(sourceVersion, committedVersion, []cache.StateUpdate{
+		{Domain: kv.AccountsDomain, Key: key, Value: value, TxNum: 10},
+	})
+	got, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, 1, tx.reads, "the existing getter must use the cache once publication catches up")
+
+	missing := make([]byte, 20)
+	for range 2 {
+		got, _, err = getter.GetLatest(kv.AccountsDomain, missing, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
+	require.Equal(t, 2, tx.reads, "the rebound view must also admit fills")
+
+	stateCache.Applier().Publish(committedVersion, committedVersion+1, nil)
+	cached, hit := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, hit)
+	require.Equal(t, value, cached)
+	got, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, 2, tx.reads, "an unchanged entry must stay usable after another forward publication")
+}
+
 func TestCachedTemporalTxStateGetterWithoutCacheReadsEveryTime(t *testing.T) {
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -375,12 +510,31 @@ func TestCachedTemporalTxStateGetterRefusesWrappedWritableTx(t *testing.T) {
 	defer rwTx.Rollback()
 
 	counting := &countingLatestTx{TemporalTx: rwTx}
-	getter := execctx.NewCachedTemporalTxStateGetter(roWrappingRwTx{TemporalTx: counting, under: rwTx}, stateCache)
+	wrapped := roWrappingRwTx{TemporalTx: counting, under: rwTx}
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.NoError(t, domains.InitBlockOverlay(rwTx))
 	key := make([]byte, 20)
-	for i := 1; i <= 2; i++ {
-		_, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-		require.NoError(t, err)
-		require.Equal(t, i, counting.reads)
+	for _, tc := range []struct {
+		name string
+		tx   kv.TemporalTx
+	}{
+		{"read-only facade", wrapped},
+		{"overlay read view", domains.BlockOverlay().NewReadView(wrapped)},
+		{"temporal overlay read view", domains.BlockOverlay().NewTemporalReadView(wrapped)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			counting.reads = 0
+			getter := execctx.NewCachedTemporalTxStateGetter(tc.tx, stateCache)
+			for i := 1; i <= 2; i++ {
+				_, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, i, counting.reads)
+			}
+			_, hit := stateCache.View(nil).Get(kv.AccountsDomain, key)
+			require.False(t, hit, "a writable backing transaction must not fill the shared cache")
+		})
 	}
 }
 
@@ -414,19 +568,35 @@ func TestCachedTemporalTxStateGetterServesRepeatPositiveReadFromCache(t *testing
 	db, stateCache := committedCacheState(t)
 	key := bytes.Repeat([]byte{0xdd}, 20)
 	commitAccount(t, db, stateCache, key, encAccount(2), 6)
-	stateCache.Applier().Clear()
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
 	tx := &countingLatestTx{TemporalTx: roTx}
-	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
-	for range 2 {
-		v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-		require.NoError(t, err)
-		require.Equal(t, encAccount(2), v)
+	domains, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.NoError(t, domains.InitBlockOverlay(roTx))
+	for _, tc := range []struct {
+		name string
+		tx   kv.TemporalTx
+	}{
+		{"plain transaction", tx},
+		{"overlay read view", domains.BlockOverlay().NewReadView(tx)},
+		{"temporal overlay read view", domains.BlockOverlay().NewTemporalReadView(tx)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateCache.Applier().Clear()
+			tx.reads = 0
+			getter := execctx.NewCachedTemporalTxStateGetter(tc.tx, stateCache)
+			for range 2 {
+				v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, encAccount(2), v)
+			}
+			require.Equal(t, 1, tx.reads, "the second read must hit the shared cache")
+		})
 	}
-	require.Equal(t, 1, tx.reads)
 }
 
 // indexBlock1 maps block 1 to the txNums the tests commit at.
@@ -513,4 +683,41 @@ func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
 			require.Equal(t, encAccount(2), v)
 		})
 	}
+}
+
+type countingAsOfTx struct {
+	kv.TemporalTx
+	reads int
+}
+
+func (tx *countingAsOfTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	tx.reads++
+	return tx.TemporalTx.GetAsOf(domain, key, ts)
+}
+
+// The as-of read serves a value committed before ts from the state cache, and reads the tx for one written at ts.
+func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+
+	tx := &countingAsOfTx{TemporalTx: roTx}
+	asOf := sd.AsOfGetter(tx)
+	committed := make([]byte, 20)
+	committed[0] = 0xcc
+
+	v, ok, err := asOf.GetAsOf(kv.AccountsDomain, committed, 10)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, encAccount(1), v)
+	require.Zero(t, tx.reads, "a value committed at txNum 5 is the value as of 10")
+
+	_, _, err = asOf.GetAsOf(kv.AccountsDomain, committed, 5)
+	require.NoError(t, err)
+	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
 }

@@ -1001,7 +1001,7 @@ func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 	return f
 }
 
-func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verified bool) *ForkChoiceStore {
+func newPayloadVoteTestStore(t testing.TB, root common.Hash, hasEnvelope, verified bool) *ForkChoiceStore {
 	t.Helper()
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)

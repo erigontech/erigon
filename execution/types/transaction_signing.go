@@ -43,6 +43,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		return &Signer{}
 	}
 	return makeSigner(config.ChainID, signerForks{
+		bogota:         config.IsBogota(blockTime),
 		prague:         config.IsPrague(blockTime),
 		cancun:         config.IsCancun(blockTime),
 		london:         config.IsLondon(blockNumber),
@@ -62,6 +63,7 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 		chainID = rules.ChainID
 	}
 	return makeSigner(chainID, signerForks{
+		bogota:         rules.IsBogota,
 		prague:         rules.IsPrague,
 		cancun:         rules.IsCancun,
 		london:         rules.IsLondon,
@@ -72,52 +74,24 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 }
 
 type signerForks struct {
-	prague, cancun, london, berlin, spuriousDragon, homestead bool
+	bogota, prague, cancun, london, berlin, spuriousDragon, homestead bool
 }
 
 func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
 	var signer Signer
-	var chainId uint256.Int
-	if chainID != nil {
-		chainId.Set(chainID)
-	}
 	signer.unprotected = true
-	switch {
-	case forks.prague:
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.blob = true
-		signer.setCode = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.cancun:
-		// All transaction types are still supported
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.blob = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.london:
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.berlin:
-		signer.protected = true
-		signer.accessList = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.spuriousDragon:
-		signer.protected = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
-	case forks.homestead:
-	default:
-		// Only allow malleable transactions in Frontier
-		signer.malleable = true
+	// Later forks enable all earlier transaction types, even if their fork flags are unset.
+	signer.frame = forks.bogota
+	signer.setCode = forks.prague || signer.frame
+	signer.blob = forks.cancun || signer.setCode
+	signer.dynamicFee = forks.london || signer.blob
+	signer.accessList = forks.berlin || signer.dynamicFee
+	signer.protected = forks.spuriousDragon || signer.accessList
+	// Only allow malleable transactions in Frontier.
+	signer.malleable = !forks.homestead && !signer.protected
+	if signer.protected && chainID != nil {
+		signer.chainID.Set(chainID)
+		signer.chainIDMul.Lsh(chainID, 1) // ×2
 	}
 	return &signer
 }
@@ -129,45 +103,30 @@ func MakeFrontierSigner() *Signer {
 	return &signer
 }
 
-// LatestSigner returns the 'most permissive' Signer available for the given chain
-// configuration. Specifically, this enables support of EIP-155 replay protection and
-// EIP-2930 access list transactions when their respective forks are scheduled to occur at
-// any block number in the chain config.
-//
-// Use this in transaction-handling code where the current block number is unknown. If you
-// have the current block number available, use MakeSigner instead.
+// LatestSigner returns the most permissive signer for the forks scheduled in config.
+// A nil chain ID allows only unprotected legacy transactions.
+// Use MakeSigner when the current block number and timestamp are known.
 func LatestSigner(config *chain.Config) *Signer {
 	var signer Signer
 	signer.unprotected = true
-	if config.ChainID != nil {
-		signer.chainID.Set(config.ChainID)
-		signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
-		if config.CancunTime != nil {
-			signer.blob = true
-		}
-		if config.LondonBlock != nil {
-			signer.dynamicFee = true
-		}
-		if config.BerlinBlock != nil {
-			signer.accessList = true
-		}
-		if config.SpuriousDragonBlock != nil {
-			signer.protected = true
-		}
-		if config.PragueTime != nil {
-			signer.setCode = true
-		}
+	if config.ChainID == nil {
+		return &signer
 	}
+	signer.chainID.Set(config.ChainID)
+	signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
+	signer.protected = config.SpuriousDragonBlock != nil
+	signer.accessList = config.BerlinBlock != nil
+	signer.dynamicFee = config.LondonBlock != nil
+	signer.blob = config.CancunTime != nil
+	signer.setCode = config.PragueTime != nil
+	signer.frame = config.BogotaTime != nil
 	return &signer
 }
 
-// LatestSignerForChainID returns the 'most permissive' Signer available. Specifically,
-// this marks support for EIP-155 replay protection, EIP-2718 typed transactions and EIP-1559 dynamic fee
-// transaction types if chainID is non-nil.
-//
-// Use this in transaction-handling code where the current block number and fork
-// configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
-// If you have a ChainConfig and know the current block number, use MakeSigner instead.
+// LatestSignerForChainID returns the most permissive signer for the given chain ID.
+// A nil chain ID allows only unprotected legacy transactions.
+// Use LatestSigner when the chain configuration is known, or MakeSigner when the
+// current block number and timestamp are also known.
 func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	var signer Signer
 	signer.unprotected = true
@@ -181,6 +140,7 @@ func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	signer.dynamicFee = true
 	signer.blob = true
 	signer.setCode = true
+	signer.frame = true
 	return &signer
 }
 
@@ -229,6 +189,7 @@ type Signer struct {
 	dynamicFee          bool // Whether this signer should allow transactions with base fee and tip (instead of gasprice), supersedes accessList
 	blob                bool // Whether this signer should allow blob transactions
 	setCode             bool // Whether this signer should allow set code transactions
+	frame               bool
 }
 
 func (sg Signer) String() string {
@@ -314,8 +275,17 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, &u256.Num27)
 		R, S = &t.R, &t.S
-	case *AccountAbstractionTransaction:
-		return txn.Sender(Signer{})
+	case *FrameTransaction:
+		if !sg.frame {
+			return accounts.NilAddress, ErrTxTypeNotSupported
+		}
+		if !t.ChainID.Eq(&sg.chainID) {
+			return accounts.NilAddress, ErrInvalidChainId
+		}
+		if err := t.Validate(); err != nil {
+			return accounts.NilAddress, err
+		}
+		return accounts.InternAddress(t.SenderAddress), nil
 	default:
 		if spec, ok := registeredTxType(txn.Type()); ok && spec.Sender != nil {
 			return spec.Sender(txn, sg)
@@ -385,7 +355,8 @@ func (sg Signer) Equal(other Signer) bool {
 		sg.accessList == other.accessList &&
 		sg.dynamicFee == other.dynamicFee &&
 		sg.blob == other.blob &&
-		sg.setCode == other.setCode
+		sg.setCode == other.setCode &&
+		sg.frame == other.frame
 }
 
 func decodeSignature(sig []byte) (r, s, v *uint256.Int, err error) {

@@ -891,10 +891,10 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 ### Snapshots Upgrade Options
 
 - `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
-- `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and any leftover `heimdall/` and `polygon-bridge/` directories from a former Polygon datadir) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
+- `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and any leftover `heimdall/` and `polygon-bridge/` directories from a former Polygon datadir) and removes any snapshot files **not** in the preverified set (locally generated files), unless `--keep-local-snapshots` is set. A `.torrent` with a mismatched hash is removed and its data file kept. On the next start Erigon re-hashes every preverified snapshot without a matching `.torrent`, downloads only **missing or differing** pieces, and rebuilds state.
 
 :::warning
-`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and any leftover Polygon aux directories) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and any leftover Polygon aux directories) and any locally generated snapshots, then rebuilds state on the next start (downloading only missing or differing pieces). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
 :::
 
 Choose `update-to-new-ver-format` to convert your data in place, or `reset` for a clean reset to the preverified snapshot set.
@@ -1864,7 +1864,7 @@ MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat
 
 Erigon must be stopped. The command takes the datadir lock and opens each database exclusively, so it fails instead of touching a database still in use. The copy is written inside the database's own directory, so each database needs free space for a second copy of itself on the volume it already lives on, and a big `chaindata/` can take hours.
 
-Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
+Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 5 GB **and** more than three times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
 
 `erigon db compact` is a manual defragmentation pass, not the background compaction of a log-structured merge-tree (LSM) engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
@@ -2082,7 +2082,7 @@ Downgrading to v3.5 after v3.6 has written new snapshot files is **not supported
 
 ### Path 1 — re-download the snapshot set (`erigon seg reset`)
 
-Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing in the published v3.6 form, which is already plain. At the default `--local=true` it removes what the preverified set does not describe. Independently of `--local`, it also removes any file whose `.torrent` carries the wrong infohash or cannot be read at all, together with the data file that torrent vouched for. Everything else the set does describe stays.
+Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing or differs, in the published v3.6 form, which is already plain. By default it removes what the preverified set does not describe; `--keep-local-snapshots` keeps those files. It also removes any `.torrent` that carries the wrong infohash or cannot be read at all, but keeps the data file it described: the next start re-hashes that file and fetches only the pieces that differ. Everything else the set does describe stays.
 
 ```bash
 erigon seg reset --datadir /your/datadir
@@ -2091,18 +2091,19 @@ erigon seg reset --datadir /your/datadir
 | Flag | Description |
 | --- | --- |
 | `--datadir <path>` | Path to the Erigon data directory. |
-| `--local`, `-l` | A single switch over two behaviours: remove snapshot files that are not described in the preverified set (locally generated ones), **and** remove `chaindata/` together with any `heimdall/` and `polygon-bridge/` directories left over from former Polygon support. **Default: `true`.** `--local=false` keeps all of them, subject to the mixed-build check below. |
+| `--keep-local-snapshots` | Keep snapshot files that are not described in the preverified set (locally generated ones), subject to the mixed-build check below. Default: `false`. `chaindata/` and any `heimdall/` and `polygon-bridge/` directories left over from former Polygon support are removed either way. |
+| `--local`, `-l` | Deprecated. `--local=false` means `--keep-local-snapshots`, and no longer keeps `chaindata/`. Passing it together with `--keep-local-snapshots` is an error. |
 | `--allow-mixed-state` | Proceed even when a step range would keep its commitment file and its accounts/storage files from different builds. Default: `false`. |
 | `--dry-run`, `-n` | Print the files that would be removed and exit without removing anything. Default: `false`. |
 | `--preverified <remote\|local>` | Which preverified snapshot list to reset against. Default: `remote`. |
 
-`seg reset` is **destructive and not reversible**: at the default `--local=true` it deletes `chaindata/`, any leftover `heimdall/` and `polygon-bridge/` directories, and any locally generated snapshot files. Independently of `--local` — that is, even with `--local=false` — it also deletes any `.torrent` file whose infohash does not match the preverified list, **together with the snapshot data file that torrent vouched for** (a stale local build is unverifiable, so the downloader must re-fetch the canonical copy). All other preverified snapshots already on disk are kept and corrected by the downloader on the next start. The node must be **stopped** — the command takes an exclusive lock on the datadir.
+`seg reset` is **destructive and not reversible**: it deletes `chaindata/`, any leftover `heimdall/` and `polygon-bridge/` directories, and, unless `--keep-local-snapshots` is set, any locally generated snapshot files. It also deletes any `.torrent` file whose infohash does not match the preverified list; the snapshot data file it described stays. On the next start the downloader re-hashes every preverified snapshot that has no matching `.torrent` and fetches only the pieces that differ; a snapshot with a matching `.torrent` is kept as it is. With `--no-downloader` nothing is re-hashed or fetched, so kept files stay as they are. The node must be **stopped** — the command takes an exclusive lock on the datadir.
 
-At `--local=false` a locally built file can survive next to a canonical one. If that would leave a step range whose commitment file stores references from a different build than its accounts or storage file, `seg reset` refuses before removing anything and names the ranges: those references are byte offsets into the accounts and storage files of the same build. Remove the ranges with `erigon seg rm-state-snapshots --datadir /your/datadir --step=<range>`, or pass `--allow-mixed-state` to proceed anyway. At `--local=true` the check does not apply, since every locally built file is removed.
+With `--keep-local-snapshots` a locally built file can survive next to a canonical one. If that would leave a step range whose commitment file stores references from a different build than its accounts or storage file, `seg reset` refuses before removing anything and names the ranges: those references are byte offsets into the accounts and storage files of the same build. Remove the ranges with `erigon seg rm-state-snapshots --datadir /your/datadir --step=<range>`, or pass `--allow-mixed-state` to proceed anyway. Without `--keep-local-snapshots` the check does not apply, since every locally built file is removed.
 
 Cost: whatever the downloader has to re-fetch, plus rebuilding state on the next start. Run `--dry-run` first, and back up the datadir.
 
-Size that cost by how far the node is past the published preverified manifest, not by download time. The manifest can lag the live tip considerably, and only the range it covers can be restored by fetching a torrent. Blocks past it are held either in `chaindata/` or in locally built segments — and at `--local=true` `seg reset` removes both (the reset path in `db/datadir/reset`). That range then comes back through Caplin's per-block beacon backfill rather than a segment fetch, which is orders of magnitude slower, and a node far enough behind it may need more than one restart before execution resumes.
+Size that cost by how far the node is past the published preverified manifest, not by download time. The manifest can lag the live tip considerably, and only the range it covers can be restored by fetching a torrent. Blocks past it are held either in `chaindata/` or in locally built segments — `seg reset` always removes `chaindata/`, and the locally built segments too unless `--keep-local-snapshots` is set (the reset path in `db/datadir/reset`). That range then comes back through Caplin's per-block beacon backfill rather than a segment fetch, which is orders of magnitude slower, and a node far enough behind it may need more than one restart before execution resumes.
 
 `seg reset` has no `--chain` flag of its own; it reads the chain name from `chaindata/`. If `chaindata/` is missing or unreadable, pass `--chain` — it is a root-level flag and resolves in either position: `erigon --chain mainnet seg reset --datadir /your/datadir` and `erigon seg reset --chain mainnet --datadir /your/datadir` behave the same.
 
@@ -2323,6 +2324,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 - `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
   - Default: `0`
 
+- `--override.genesis value`: Loads the genesis block and chain configuration from this JSON file instead of the `--chain` network's. A fresh datadir is initialized from it on first start, as `erigon init` would; on an initialized datadir it must match the stored genesis, or Erigon refuses to start. Cannot be combined with `--chain`.
 - `--vmdebug`: Records information for VM and contract debugging.
   - Default: `false`
 
@@ -2504,9 +2506,6 @@ Options for configuring the [transaction pool](https://docs.erigon.tech/fundamen
   - Default: `3h0m0s`
   - Set to `0` to disable dormancy-based eviction.
 
-- `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
-  - Default: `false`
-
 ### Network and Peers
 
 These flags manage network connectivity, peer discovery, and traffic control. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) for the full port map.
@@ -2586,6 +2585,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 - `--authrpc.jwtsecret value`: The path to the [JWT secret](https://docs.erigon.tech/fundamentals/jwt) file for the consensus layer.
 - `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   - Default: `true`
+
+- `--http.compression.loopback`: Also compresses HTTP-RPC responses to clients connecting from a loopback address (`127.0.0.1`, `::1`). By default these responses are sent uncompressed: on loopback compression only costs CPU and latency. Requests with an `X-Forwarded-For` or `Forwarded` header are treated as remote, so a reverse proxy on the same host that sets one of them keeps compression. Enable this flag only when such a proxy sets neither header and does not compress responses itself.
+  - Default: `false`
 
 - `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests. The same list gates browser WebSocket handshakes and cross-site `GET` calls: a page whose `Origin` is not listed gets `403`. Without the flag, only pages on `http://localhost`, `http://127.0.0.1`, `http://[::1]` or the node's own hostname can open a WebSocket. Clients that send no `Origin` header, such as `curl` or server-side libraries, are not affected.
 - `--http.vhosts value`: A comma-separated list of virtual hostnames.
@@ -3009,7 +3011,7 @@ Flags for configuring the parallel block execution engine.
 - `--exec.serial`: Force serial execution by clamping the parallel executor to a single worker. Wins over `--exec.workers` and `EXEC3_WORKERS` — use to disable parallelism for diagnostics or like-for-like baseline comparisons.
   - Default: `false`
 
-- `--exec.no-prune`: Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/retirement). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.
+- `--exec.no-prune`: Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.
   - Default: `false`
 
 - `--exec.no-merge`: Disable state-aggregator file merges for Domain / History / Inverted-Index. Equivalent to `NO_MERGE=true`. Diagnostic / perf-comparison use only.
@@ -3109,6 +3111,9 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
   - Default: `false`
 
 - `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
+  - Default: `false`
+
+- `--caplin.payload-preparation.disable`: Disables speculative payload preparation.
   - Default: `false`
 
 - `--caplin.custom-config value`: Sets a custom config for Caplin.
@@ -3356,20 +3361,6 @@ To run an op-node alongside Erigon, follow these steps:
 2. **Run the Op-Node**: Configure the op-node with the `--l1.trustrpc` flag to trust the Erigon RPC layer as the L1 node. This setup ensures smooth communication and synchronization.
 
 This configuration enables the op-node to function effectively with Erigon serving as both the L1 node and the CL.
-
-### How to run Erigon Nitro for Sepolia (experimental)
-
-To start an Erigon Nitro node, simply use this Docker command:
-
-```shell
-mkdir /disk/datadir && \
-docker run -d -v /disk/datadir/:/home/user/erigon-data/ erigontech/nitro-erigon:main-fe4c973 --torrent.download.rate=10G --prune.mode=archive --l2rpc="http://rpcserver:port --sync.loop.block.limit 100000
-```
-
-- **Arbitrum Sequencer**: We're currently working on adding support for the Arbitrum Sequencer. Until that work is complete, you must point Erigon to an external L2 Arbitrum RPC to get the most recent transactions and blocks. This can be either a pruned Nitro node you operate or a publicly available RPC. Any data beyond that is queried via the configured `l2rpc` during setup and synchronization, so keep this in mind when bringing a node online.
-- **RPC compatibility**: Before declaring full Arbitrum One support, we are targeting complete RPC compatibility with the Nitro node. Please note that the `timeboosted` field will remain unavailable until Sequencer integration is complete.
-
-For more recent versions, please check [https://hub.docker.com/r/erigontech/nitro-erigon/tags](https://hub.docker.com/r/erigontech/nitro-erigon/tags).
 
 ---
 
@@ -4854,6 +4845,7 @@ Flags:
       --http.addr string                            HTTP server listening interface (default "localhost")
       --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
       --http.compression                            Disable http compression (default true)
+      --http.compression.loopback                   Also compress HTTP-RPC responses to loopback clients (default false)
       --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
       --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
       --http.enabled                                enable http server (default true)
@@ -8165,7 +8157,7 @@ lighthouse account validator import --directory <path_to_validator_keys>
 
 ### 3.1. Payload Preparation Ahead of the Proposer Slot
 
-Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. There is no flag for this; it is on whenever all of the following hold:
+Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. Preparation is enabled by default. Use `--caplin.payload-preparation.disable` to disable it while keeping the validator API and normal block production enabled. Preparation runs when all of the following hold:
 
 - The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
 - A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
@@ -8178,7 +8170,9 @@ PayloadPreparation: watching for proposals
 PayloadPreparation: primed execution layer
 ```
 
-Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids instead, and before Capella.
+Preparation starts at Capella. It supports the first Gloas slot and steady-state Gloas EMPTY paths whose execution parent is already canonical. Gloas FULL and FULL-to-EMPTY paths wait for normal production's fork-choice update. Missing or mismatched preparation keeps the normal collection window.
+
+The metrics endpoint exposes `caplin_payload_preparation_outcomes_total{outcome="..."}` for scheduler results. Outcomes use fixed reasons such as `success`, `unregistered`, `stale_head`, `busy`, `too_early`, `late`, `needs_forkchoice`, and `unchanged`. `caplin_payload_preparation_collections_total{outcome="reused|absent|mismatch"}` records whether production reused a prepared payload ID, found no prepared payload, or found a different ID. `absent` also covers nodes where preparation is disabled or unsupported. Head hashes, slots, proposer indices, and error messages are never metric labels.
 
 ### 3.2. Fork-Choice Head Published Before the Head-State Copy
 
@@ -8747,7 +8741,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Configure Firewall Rules | Configure your firewall to allow only the necessary ports for P2P and RPC communication. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports). | Standard security practice to limit attack surface. |
 | Never Expose RPC Ports | Never expose the RPC ports to the public internet without a reverse proxy. See [Security](https://docs.erigon.tech/fundamentals/security). | RPC (Remote Procedure Call) ports grant access to node functions; public exposure is a major security risk. |
 | Monitor Your Node's Health | Implement comprehensive monitoring using tools like Prometheus and Grafana to track key metrics like disk I/O, CPU load, and sync status in real time. See [Creating a Dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard). | Essential for proactively identifying performance bottlenecks and stability issues. |
-| Enable JSON-RPC Compression | Use the `--http.compression` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon). | Reduces network bandwidth usage for RPC requests. |
+| Enable JSON-RPC Compression | Use the `--http.compression` flag. See [Configuring Erigon](https://docs.erigon.tech/fundamentals/configuring-erigon). | Reduces network bandwidth usage for RPC requests. Responses to loopback clients stay uncompressed unless `--http.compression.loopback` is set. |
 | Tune RPC Batch Concurrency | Adjust the `--rpc.batch.concurrency` flag. See [RPC & API flags](https://docs.erigon.tech/fundamentals/configuring-erigon#rpc--api). | Limits the number of parallel database reads to prevent a single batch request from overloading the server. |
 | Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. See [TLS Authentication](https://docs.erigon.tech/fundamentals/tls-authentication). | A direct public binding exposes the node to denial-of-service (DoS) attacks and unrestricted calls that can exhaust resources. |
 

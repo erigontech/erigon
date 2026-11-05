@@ -112,14 +112,25 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	prunedHeader, err := rawdb.ReadHeaderByHash(tx, emptyBlockHash)
 	require.NoError(t, err)
 	require.Nil(t, prunedHeader)
-	for _, num := range []uint64{1, frozenChainLength} { // a frozen block and a block still in the DB
+	for num := uint64(1); num <= frozenChainLength; num++ { // frozen blocks and blocks still in the DB
 		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
 		require.NoError(t, err)
-		hash, ok, err := m.BlockReader.TxnHashByIdxInBlock(m.Ctx, tx, num, 0)
+		if len(block.Transactions()) == 0 {
+			continue
+		}
+		minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, num)
+		require.NoError(t, err)
+		hash, ok, err := m.BlockReader.TxnHashByIdxInBlock(m.Ctx, tx, num, minTxNum+1, 0)
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, block.Transactions()[0].Hash(), hash)
+		require.Equal(t, block.Transactions()[0].Hash(), hash, "block %d", num)
 	}
+	// A txNum of the closing system transaction, stored without data in the file, is not a transaction.
+	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	_, ok, err := m.BlockReader.TxnHashByIdxInBlock(m.Ctx, tx, 1, minTxNum+2, 1)
+	require.NoError(t, err)
+	require.False(t, ok)
 	receiptsGetter := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
 	encodedReceipts := func(num uint64) rlp.RawValue {
 		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)

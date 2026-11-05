@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -285,6 +286,54 @@ func recoverableGloasColumns(t *testing.T, cfg *clparams.BeaconChainConfig, slot
 	columns, err := peerdasutils.GetDataColumnSidecarsGloas(cfg, slot, root, cellsAndProofs)
 	require.NoError(t, err)
 	return block, root, columns
+}
+
+func TestColumnsToStore(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	withCgc := func(cgc uint64) func(*testing.T) PeerDas {
+		return func(t *testing.T) PeerDas {
+			d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+			d.state.SetCustodyGroupCount(cgc, func() uint64 { return 0 })
+			return d
+		}
+	}
+	withCaplinConfig := func(caplinConfig clparams.CaplinConfig) func(*testing.T) PeerDas {
+		return func(t *testing.T) PeerDas { return newELBlobsTestPeerDas(t, &cfg, &caplinConfig) }
+	}
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	for _, tc := range []struct {
+		name        string
+		peerDas     func(*testing.T) PeerDas
+		custodyOnly bool
+	}{
+		{name: "custody", peerDas: withCaplinConfig(clparams.CaplinConfig{}), custodyOnly: true},
+		{name: "supernode", peerDas: withCgc(cfg.NumberOfCustodyGroups)},
+		{name: "archive", peerDas: withCaplinConfig(clparams.CaplinConfig{ArchiveBlobs: true})},
+		{name: "immediate backfill", peerDas: withCaplinConfig(clparams.CaplinConfig{ImmediateBlobsBackfilling: true})},
+		{name: "no local node", peerDas: func(*testing.T) PeerDas {
+			return &peerdas{state: peerdasstate.NewPeerDasState(&cfg, &networkConfig), beaconConfig: &cfg, caplinConfig: &clparams.CaplinConfig{}}
+		}},
+		{name: "custody lookup error", peerDas: withCgc(cfg.NumberOfCustodyGroups + 1)},
+		{name: "nil", peerDas: func(*testing.T) PeerDas { return nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := tc.peerDas(t)
+			store := ColumnsToStore(d)
+			if !tc.custodyOnly {
+				for column := range cfg.NumberOfColumns {
+					require.True(t, store(column), "column %d", column)
+				}
+				return
+			}
+			custody, err := d.StateReader().GetMyCustodyColumns()
+			require.NoError(t, err)
+			require.Less(t, len(custody), int(cfg.NumberOfColumns))
+			for column := range cfg.NumberOfColumns {
+				require.Equal(t, custody[column], store(column), "column %d", column)
+			}
+		})
+	}
 }
 
 func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
