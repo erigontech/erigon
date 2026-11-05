@@ -310,8 +310,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	defer logEvery.Stop()
 	in, reqs := cc.in, cc.blockRequests
 	for in != nil {
+		idleStart := time.Now()
 		select {
 		case result, ok := <-in:
+			cpIdle += time.Since(idleStart)
 			if !ok {
 				in = nil
 				continue
@@ -394,7 +396,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.hashAtFold = !perBlock
 			if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute {
+				accStart := time.Now()
 				cc.accumulateTouched(r.writes, base)
+				cpAcc += time.Since(accStart)
 			}
 		}
 
@@ -408,7 +412,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			// Checkpoint commitment at a mid-block step edge without advancing
 			// lastComputedBlock or resetting block flags — the block-end fold still
 			// needs the pre-edge dirty keys.
+			edgeStart := time.Now()
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
+			cpEdge += time.Since(edgeStart)
 		}
 
 	case *blockResult:
@@ -422,6 +428,14 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 		// lastBlockResultSeen opens the compute-ahead gate for the next block
 		// (its baseline is now in sd.mem).
+		if logNpPhases && cc.logger != nil {
+			lag := time.Duration(0)
+			if !r.execEndedAt.IsZero() {
+				lag = time.Since(r.execEndedAt)
+			}
+			cc.logger.Info("[np-phase] committer", "blk", r.BlockNum, "cpAcc", cpAcc, "cpEdge", cpEdge, "cpIdle", cpIdle, "cpLagAfterExec", lag)
+		}
+		cpAcc, cpEdge, cpIdle = 0, 0, 0
 		cc.lastBlockResult = r
 		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true
@@ -1152,3 +1166,6 @@ type sfSlot struct {
 var sfLastSlot = map[sfSlot]uint64{}
 
 var sfMidBlock uint64
+
+// probe: committer time per block.
+var cpAcc, cpEdge, cpIdle time.Duration
