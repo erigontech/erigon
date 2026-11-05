@@ -129,7 +129,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return root, applyDeltas(parts, ctx.PutBranch)
+	return root, applyDeltas(parts, ctx.PutBranch, nil)
 }
 
 func entryOf(path []byte, update *commitment.Update) storageEntry {

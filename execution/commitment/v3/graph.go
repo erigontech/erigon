@@ -163,11 +163,7 @@ func (p *deltaParts) add(d recordDelta) {
 	*last = append(*last, d)
 }
 
-func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error) error {
-	return applyDeltasCounted(parts, putBranch, nil)
-}
-
-func applyDeltasCounted(parts deltaParts, putBranch func(key, data, prev []byte) error, applied func(recordDelta)) error {
+func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error, applied func(recordDelta)) error {
 	for _, part := range parts {
 		for _, delta := range part {
 			if err := putBranch(delta.Key, delta.Data, delta.Prev); err != nil {

@@ -210,7 +210,7 @@ func TestTrieAPI(t *testing.T) {
 
 			deltas := trie.TakeDeferredDeltas()
 			require.NotNil(t, deltas)
-			require.NoError(t, applyDeltas(deltas, ctx.PutBranch))
+			require.NoError(t, applyDeltas(deltas, ctx.PutBranch, nil))
 			require.NotZero(t, ctx.putCalls)
 		}},
 		{"E45/TrieProcessRejectsWrongUpdateMode", func(t *testing.T) {

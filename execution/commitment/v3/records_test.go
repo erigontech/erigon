@@ -53,12 +53,12 @@ func TestDeltas(t *testing.T) {
 			wantErr := errors.New("put failed")
 			err := applyDeltas(deltaParts{{{Key: []byte{1}, Data: []byte{2}, Prev: []byte{3}}}}, func(_, _, _ []byte) error {
 				return wantErr
-			})
+			}, nil)
 			require.ErrorIs(t, err, wantErr)
 		}},
 		{"E40/ApplyDeltasCountsOnlyAppliedWrites", func(t *testing.T) {
 			metered := &meteredContext{meterCounts: new(meterCounts)}
-			err := applyDeltasCounted(deltaParts{{
+			err := applyDeltas(deltaParts{{
 				{Key: []byte{1}, Data: []byte{2}},
 				{Key: []byte{3}, Data: []byte{4}},
 			}}, func(key, data, prev []byte) error {
@@ -106,7 +106,7 @@ func TestDeltas(t *testing.T) {
 					g := graph{plane: planeStorage, addrHash: addr[:]}
 					parts, err := g.persistGraph(ctx, root, foldPlan{})
 					require.NoError(t, err)
-					require.NoError(t, applyDeltas(parts, ctx.PutBranch))
+					require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 					require.NotEmpty(t, ctx.branches)
 					require.Equal(t, 1, linkedNodeCount(root))
 					require.Empty(t, ctx.accountCalls)
@@ -135,7 +135,7 @@ func TestDeltas(t *testing.T) {
 			require.NoError(t, insert(root, diverging, []byte{0x01}))
 			parts, err := g.persistGraph(ctx, root, foldPlan{})
 			require.NoError(t, err)
-			require.NoError(t, applyDeltas(parts, ctx.PutBranch))
+			require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 
 			require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
 			require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])
@@ -220,7 +220,7 @@ func TestDeltas(t *testing.T) {
 				}
 			}
 			replayed := runner.NewMemory(runner.ContextSpec{CheckPrevious: true})
-			require.NoError(t, applyDeltas(deltaParts{ctx.Deltas()}, replayed.PutBranch))
+			require.NoError(t, applyDeltas(deltaParts{ctx.Deltas()}, replayed.PutBranch, nil))
 			require.Equal(t, ctx.Records(), replayed.Records())
 			n, err := unfold(replayed, nil, planeStorage, addr[:])
 			require.NoError(t, err)

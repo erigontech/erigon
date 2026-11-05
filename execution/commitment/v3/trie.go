@@ -222,7 +222,7 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 	if t.deferUpdates {
 		t.deferred = parts
 		metered.countDeltas(parts)
-	} else if err := applyDeltasCounted(parts, t.ctx.PutBranch, metered.countDelta); err != nil {
+	} else if err := applyDeltas(parts, t.ctx.PutBranch, metered.countDelta); err != nil {
 		return nil, err
 	}
 	t.root = append(t.root[:0], root[:]...)
