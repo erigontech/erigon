@@ -155,6 +155,17 @@ func (f *fakeP2P) FetchHeaders(ctx context.Context, start, end uint64, peerId *p
 			chain = served
 		}
 	}
+	if end > uint64(len(chain)) {
+		f.mu.Lock()
+		if missing, ok := f.missing[peer]; !ok || uint64(len(chain)) < missing {
+			if f.missing == nil {
+				f.missing = map[uint64]uint64{}
+			}
+			f.missing[peer] = uint64(len(chain))
+		}
+		f.mu.Unlock()
+		return p2p.FetcherResponse[[]*types.Header]{}, fmt.Errorf("fake: incomplete headers [%d,%d) of %d", start, end, len(chain))
+	}
 	var headers []*types.Header
 	for n := start; n < end && n < uint64(len(chain)); n++ {
 		headers = append(headers, chain[n].HeaderNoCopy())
