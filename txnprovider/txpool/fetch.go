@@ -356,7 +356,19 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		for _, hashes := range plan.reqs {
 			if err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), hashes); err != nil {
 				f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
+				f.keepAlternate(peer, hashes, sent)
 			}
+		}
+	}
+}
+
+// keepAlternate puts a peer whose retry request was not sent back among the hashes' alternates.
+func (f *Fetch) keepAlternate(peer fetchPeer, hashes Hashes, sent time.Time) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && r.at.Equal(sent) && !slices.Contains(r.alternates, peer) {
+			r.alternates = append(r.alternates, peer)
 		}
 	}
 }
