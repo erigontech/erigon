@@ -199,7 +199,8 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	origOsakaTime := chain.AllProtocolChanges.OsakaTime
 
 	logger := log.New()
-	baseCfg := &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}
+	baseCfg := chain.TestChainOsakaConfig.Copy()
+	baseCfg.OsakaTime = common.NewUint64(1)
 	gspec := &types.Genesis{Config: baseCfg}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -305,7 +306,9 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	}
 
 	logger := log.New()
-	gspec := &types.Genesis{Config: &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}}
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.OsakaTime = common.NewUint64(1)
+	gspec := &types.Genesis{Config: cfg}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
@@ -335,7 +338,9 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	}
 
 	logger := log.New()
-	gspec := &types.Genesis{Config: &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}}
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.OsakaTime = common.NewUint64(1)
+	gspec := &types.Genesis{Config: cfg}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
@@ -651,6 +656,11 @@ func TestCommitGenesisBlockRejectsToleratedForkHidingLaterConflict(t *testing.T)
 
 func TestCommitGenesisBlockRejectsToleratedForkWithTimestampConflict(t *testing.T) {
 	stored := posFromGenesisConfig()
+	stored.BerlinBlock = common.NewUint64(0)
+	stored.LondonBlock = common.NewUint64(0)
+	stored.ShanghaiTime = common.NewUint64(0)
+	stored.CancunTime = common.NewUint64(0)
+	stored.PragueTime = common.NewUint64(0)
 	stored.OsakaTime = common.NewUint64(1)
 	db := dbAtHeightOne(t, stored)
 

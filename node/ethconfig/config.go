@@ -264,9 +264,6 @@ type Config struct {
 	// The chain config may differ, subject to the writer's compatibility checks.
 	GenesisFromFile bool
 
-	// Account Abstraction
-	AllowAA bool
-
 	// fork choice update timeout
 	FcuTimeout         time.Duration
 	FcuBackgroundPrune bool

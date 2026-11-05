@@ -121,6 +121,11 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 	}
 }
 
+const (
+	ancestorLookupWindow      = 64
+	maxAncestorLookupRequests = 4
+)
+
 // fetchBlocksFromReqResp retrieves blocks starting from a specified block number and continues for a given count.
 // It sends a request to fetch the blocks, verifies the associated blobs, and inserts them into the blob store.
 // It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
@@ -247,12 +252,118 @@ MainLoop:
 			if blocks == nil {
 				continue
 			}
-			if processChainTipBatch(ctx, cfg, args, blocks.Data, seenBlockRoots, rejected) {
+			if processChainTipBatch(ctx, cfg, args, withMissingAncestors(ctx, cfg, blocks, rejected), seenBlockRoots, rejected) {
 				break MainLoop
 			}
 		case <-logTicker.C:
 			// Log progress periodically
 			logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
+		}
+	}
+	return nil
+}
+
+// withMissingAncestors puts the ancestors of a batch's first block with an unknown parent before the
+// batch. The peer that served the batch has them on its chain, so it is the one asked.
+func withMissingAncestors(ctx context.Context, cfg *Cfg, batch *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], rejected map[common.Hash]error) []*cltypes.SignedBeaconBlock {
+	if cfg.rpc == nil || batch.Peer == "" {
+		return batch.Data
+	}
+	orphan := firstBlockWithMissingParent(cfg, batch.Data, rejected)
+	if orphan == nil || cfg.ethClock.GetCurrentSlot() == cfg.ancestorLookupFailedSlot {
+		return batch.Data
+	}
+	finalizedStart := cfg.forkChoice.FinalizedCheckpoint().Epoch * cfg.beaconCfg.SlotsPerEpoch
+	start := max(max(orphan.Block.Slot, ancestorLookupWindow)-ancestorLookupWindow, finalizedStart+1, cfg.forkChoice.AnchorSlot()+1)
+	if start >= orphan.Block.Slot {
+		return batch.Data
+	}
+	// Bound each lookup to half a slot so the loop can still react to the gossip block.
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.beaconCfg.SecondsPerSlot)*time.Second/2)
+	defer cancel()
+	ancestors, err := fetchLinkedAncestors(ctx, cfg, batch.Peer, orphan, start)
+	if err != nil {
+		log.Debug("[chainTipSync] ancestor lookup failed", "peer", batch.Peer, "startSlot", start, "orphanSlot", orphan.Block.Slot, "err", err)
+		cfg.ancestorLookupFailedSlot = cfg.ethClock.GetCurrentSlot()
+		return batch.Data
+	}
+	return append(ancestors, batch.Data...)
+}
+
+// fetchLinkedAncestors asks the peer for the slots from start below the orphan until what it
+// returned links the orphan's parent to a known block.
+func fetchLinkedAncestors(ctx context.Context, cfg *Cfg, peer string, orphan *cltypes.SignedBeaconBlock, start uint64) ([]*cltypes.SignedBeaconBlock, error) {
+	var fetched []*cltypes.SignedBeaconBlock
+	next, end := start, orphan.Block.Slot
+	for requests := 0; next < end && requests < maxAncestorLookupRequests; requests++ {
+		blocks, err := cfg.rpc.SendBeaconBlocksByRangeReqToPeer(ctx, peer, next, end-next)
+		switch {
+		case err != nil:
+			return nil, err
+		case len(blocks) == 0:
+			return nil, fmt.Errorf("empty response, blocks fetched before: %d", len(fetched))
+		case !slotsIncreasingWithin(blocks, next, end):
+			return nil, errors.New("response slots out of range or not increasing")
+		}
+		fetched = append(fetched, blocks...)
+		if linked, ok := linkedAncestors(cfg, fetched, orphan.Block.ParentRoot); ok {
+			return linked, nil
+		}
+		next = blocks[len(blocks)-1].Block.Slot + 1
+	}
+	if next < end {
+		return nil, fmt.Errorf("request cap of %d reached", maxAncestorLookupRequests)
+	}
+	return nil, errors.New("window does not link the orphan to a known block")
+}
+
+func slotsIncreasingWithin(blocks []*cltypes.SignedBeaconBlock, from, to uint64) bool {
+	for i, block := range blocks {
+		if block.Block.Slot < from || block.Block.Slot >= to || i > 0 && block.Block.Slot <= blocks[i-1].Block.Slot {
+			return false
+		}
+	}
+	return true
+}
+
+// linkedAncestors returns the blocks that chain by parent root from missing down to a block fork
+// choice knows, oldest first.
+func linkedAncestors(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock, missing common.Hash) ([]*cltypes.SignedBeaconBlock, bool) {
+	byRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
+	for _, block := range blocks {
+		root, _ := block.Block.HashSSZ()
+		byRoot[root] = block
+	}
+	var linked []*cltypes.SignedBeaconBlock
+	for root := missing; ; {
+		if _, known := cfg.forkChoice.GetHeader(root); known {
+			slices.Reverse(linked)
+			return linked, true
+		}
+		block, ok := byRoot[root]
+		if !ok {
+			return nil, false
+		}
+		linked = append(linked, block)
+		root = block.Block.ParentRoot
+	}
+}
+
+// firstBlockWithMissingParent returns the first block whose parent is neither known, in the
+// batch, nor rejected for a cause of its own.
+func firstBlockWithMissingParent(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock, rejected map[common.Hash]error) *cltypes.SignedBeaconBlock {
+	inBatch := make(map[common.Hash]struct{}, len(blocks))
+	for _, block := range blocks {
+		root, _ := block.Block.HashSSZ()
+		inBatch[root] = struct{}{}
+	}
+	for _, block := range blocks {
+		parentRoot := block.Block.ParentRoot
+		if _, ok := inBatch[parentRoot]; ok || rejected[parentRoot] != nil {
+			continue
+		}
+		if _, ok := cfg.forkChoice.GetHeader(parentRoot); !ok {
+			return block
 		}
 	}
 	return nil

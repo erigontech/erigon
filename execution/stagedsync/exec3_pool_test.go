@@ -222,7 +222,6 @@ func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
 	pe.pool = newTaskPool(pe, nil)
 	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
 	be.pool = pe.pool
-	be.versionMap = state.NewVersionMap(nil)
 	be.wakeAt = map[int][]*poolTask{}
 	be.committedFrontier.Store(-1)
 	be.poolTasks = make([]*poolTask, tasks)

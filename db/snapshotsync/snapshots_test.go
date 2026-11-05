@@ -22,6 +22,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -110,7 +111,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range 24 {
 			RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 		}
-		found := merger.FindMergeRanges(RangesOld)
+		found := merger.FindMergeRanges(RangesOld, snaptype.Unknown)
 
 		expect := Ranges{
 			NewRange(0, 500000),
@@ -125,7 +126,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(24) {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
-		found = merger.FindMergeRanges(RangesNew)
+		found = merger.FindMergeRanges(RangesNew, snaptype.Unknown)
 
 		expect = Ranges{}
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -136,7 +137,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(240) {
 			RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 		}
-		found := merger.FindMergeRanges(RangesOld)
+		found := merger.FindMergeRanges(RangesOld, snaptype.Unknown)
 		var expect Ranges
 		for i := range uint64(4) {
 			expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
@@ -152,13 +153,37 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(240) {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
-		found = merger.FindMergeRanges(RangesNew)
+		found = merger.FindMergeRanges(RangesNew, snaptype.Unknown)
 		expect = nil
 		for i := range uint64(24) {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
 		require.Equal(t, expect.String(), Ranges(found).String())
+	})
+
+	t.Run("lowest range above a span start", func(t *testing.T) {
+		var ranges Ranges
+		for from := uint64(610_000); from < 1_000_000; from += 10_000 {
+			ranges = append(ranges, NewRange(from, from+10_000))
+		}
+		expect := Ranges{NewRange(700_000, 800_000), NewRange(800_000, 900_000), NewRange(900_000, 1_000_000)}
+		require.Equal(t, expect.String(), Ranges(merger.FindMergeRanges(ranges, snaptype.Unknown)).String())
+	})
+
+	t.Run("caplin", func(t *testing.T) {
+		var ranges Ranges
+		start := uint64(9_500_000)
+		for i := range uint64(50) {
+			ranges = append(ranges, NewRange(start+i*snaptype.CaplinMergeLimit, start+(i+1)*snaptype.CaplinMergeLimit))
+		}
+		var expect Ranges
+		for i := range uint64(5) {
+			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
+		}
+
+		require.Equal(t, expect.String(), Ranges(merger.FindMergeRanges(ranges, snaptype.CaplinEnums.BeaconBlocks)).String())
+		require.Empty(t, merger.FindMergeRanges(ranges, snaptype.CaplinEnums.BlobSidecars))
 	})
 }
 
@@ -191,7 +216,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
 		require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
-		Ranges := merger.FindMergeRanges(s.Ranges(false))
+		Ranges := merger.FindMergeRanges(s.Ranges(false), snaptype.Unknown)
 		require.Len(Ranges, 3)
 		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
 		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
@@ -213,7 +238,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
 		require.NoError(s.OpenFolder())
-		Ranges := merger.FindMergeRanges(s.Ranges(false))
+		Ranges := merger.FindMergeRanges(s.Ranges(false), snaptype.Unknown)
 		require.Empty(Ranges)
 		// doIndex=false, same rationale as above
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -270,6 +295,129 @@ func TestMergeSnapshots(t *testing.T) {
 	// defer d.Close()
 	// a = d.Count()
 	// require.Equal(10, a)
+}
+
+func openFds(t *testing.T) int {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return 0
+	}
+	d, err := os.Open("/dev/fd")
+	require.NoError(t, err)
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	require.NoError(t, err)
+	return len(names)
+}
+
+func TestMergeFailureKeepsSamePathInput(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "salt-blocks.txt"), []byte{0, 0, 0, 0}, 0o644))
+	headerInfo := snaptype2.Headers.FileInfo(dir, 0, 100_000)
+	createTestSegmentFile(t, 0, 100_000, snaptype2.Headers.Enum(), dir, headerInfo.Version, logger)
+	for i := range uint64(10) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Transactions.Enum(), dir, snaptype2.Transactions.Versions().Current, logger)
+	}
+
+	types := []snaptype.Type{snaptype2.Headers, snaptype2.Transactions}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	injected := errors.New("injected")
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	var deletedOnFailure []string
+	err := merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func([]string) error {
+		return injected
+	}, func(_ context.Context, files []string) error {
+		deletedOnFailure = append(deletedOnFailure, files...)
+		return nil
+	})
+	require.ErrorIs(t, err, injected)
+	require.FileExists(t, headerInfo.Path)
+	headerIndex := filepath.Join(dir, snaptype.IdxFileName(headerInfo.Version, 0, 100_000, snaptype2.Headers.Name()))
+	require.FileExists(t, headerIndex)
+	require.NotContains(t, deletedOnFailure, headerInfo.Path)
+
+	require.NoError(t, s.OpenFolder())
+	var seeded []string
+	err = merger.Merge(t.Context(), s, types, []Range{NewRange(0, 100_000)}, dir, false, func(files []string) error {
+		seeded = append(seeded, files...)
+		return nil
+	}, nil)
+	require.NoError(t, err)
+	require.Contains(t, seeded, headerInfo.Path)
+}
+
+func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
+	dir := t.TempDir()
+	info := snaptype2.Transactions.FileInfo(dir, 0, 500_000)
+	files := []string{info.Path, info.Path + ".torrent"}
+	for _, idx := range info.Type.IdxFileNames(info.From, info.To) {
+		files = append(files, filepath.Join(dir, idx), filepath.Join(dir, idx)+".torrent")
+	}
+	for _, f := range files {
+		require.NoError(t, os.WriteFile(f, nil, 0o644))
+	}
+
+	removeMergedFiles(info)
+
+	for _, f := range files {
+		require.NoFileExists(t, f)
+	}
+}
+
+func TestMergeFailureClosesMergedSegments(t *testing.T) {
+	injected := errors.New("injected")
+
+	for _, tc := range []struct {
+		name        string
+		failIdxFrom uint64
+		onMerge     func([]string) error
+		onDelete    func(context.Context, []string) error
+	}{
+		{name: "onDelete fails", failIdxFrom: 40_000, onDelete: func(context.Context, []string) error { return injected }},
+		{name: "onMerge fails", failIdxFrom: 40_000, onMerge: func([]string) error { return injected }},
+		{name: "index build fails", failIdxFrom: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			dir, require := t.TempDir(), require.New(t)
+			for i := range uint64(4) {
+				createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype.CaplinEnums.BeaconBlocks, dir, version.V1_0, logger)
+			}
+			types := []snaptype.Type{snaptype.BeaconBlocks}
+			s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype.BeaconBlocks, true, logger)
+			defer s.Close()
+			require.NoError(s.OpenFolder())
+			s.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+				if info.From >= tc.failIdxFrom {
+					return injected
+				}
+				return BeaconSimpleIdx(ctx, info, salt, tmpDir, p, lvl, logger)
+			}))
+
+			merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+			merger.DisableFsync()
+			ranges := []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}
+
+			before := openFds(t)
+			for range 3 {
+				require.ErrorIs(merger.Merge(t.Context(), s, types, ranges, dir, true, tc.onMerge, tc.onDelete), injected)
+			}
+			require.LessOrEqual(openFds(t), before)
+			for _, r := range ranges {
+				merged := snaptype.BeaconBlocks.FileInfo(dir, r.From(), r.To()).Path
+				for _, f := range []string{merged, strings.TrimSuffix(merged, ".seg") + ".idx"} {
+					if err := dir2.RemoveFile(f); !errors.Is(err, os.ErrNotExist) {
+						require.NoError(err)
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestMergeKeepsFinishedRangesOnLaterFailure(t *testing.T) {

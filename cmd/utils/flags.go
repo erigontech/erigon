@@ -900,12 +900,6 @@ var (
 		Value: "",
 	}
 
-	AAFlag = cli.BoolFlag{
-		Name:  "aa",
-		Usage: "Enable AA transactions",
-		Value: false,
-	}
-
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
@@ -1731,7 +1725,6 @@ func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	if ctx.IsSet(TxPoolQueuedDormancyFlag.Name) {
@@ -2077,7 +2070,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	}
 	setCaplin(ctx, cfg)
 
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	setParallelCommitment(ctx)
@@ -2116,6 +2108,9 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		log.Warn("blocking async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
+	}
+	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("BAL batch prefetch is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); it reads nothing")
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
