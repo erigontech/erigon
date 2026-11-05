@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -124,4 +125,52 @@ func TestValidateChainBeyondLoopBlockLimitDoesNotWarn(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	require.False(t, recorder.warned.Load())
+}
+
+func TestValidateChainAcceptsCanonicalUnexecutedBlock(t *testing.T) {
+	const lag = 12
+	m, chainPack := execmoduletester.NewWithExecLag(t, lag, 1, execmoduletester.WithLoopBlockLimit(5))
+
+	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[lag].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+}
+
+func TestValidateChainExecutesCanonicalUnexecutedBlockWithinLimit(t *testing.T) {
+	m, chainPack := execmoduletester.NewWithExecLag(t, 3, 1, execmoduletester.WithLoopBlockLimit(5))
+
+	block := chainPack.Blocks[3]
+	result, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+	require.True(t, m.ExecModule.IsValidated(block.Hash()), "the block must be executed, not answered from the canonical mapping")
+}
+
+func TestValidateChainDoesNotInvalidateUnexecutedCanonicalAncestorsOfBadTip(t *testing.T) {
+	m, chainPack := execmoduletester.NewWithExecLag(t, 2, 1, execmoduletester.WithLoopBlockLimit(5))
+	tip := chainPack.Blocks[3]
+	badHeader := types.CopyHeader(tip.Header())
+	badHeader.Root[0] ^= 0xff
+	bad := tip.WithSeal(badHeader)
+	execmoduletester.InsertUnexecutedCanonical(t, m, []*types.Block{bad})
+
+	result, err := m.ValidateChain(t.Context(), bad.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
+	require.Equal(t, common.Hash{}, result.LatestValidHash)
+}
+
+func TestValidateChainRejectsBadHeaderWhileLagging(t *testing.T) {
+	m, chainPack := execmoduletester.NewWithExecLag(t, 2, 1, execmoduletester.WithLoopBlockLimit(5))
+	tip := chainPack.Blocks[3]
+	badHeader := types.CopyHeader(tip.Header())
+	badHeader.Time = chainPack.Blocks[2].Time()
+	bad := tip.WithSeal(badHeader)
+	execmoduletester.InsertUnexecutedCanonical(t, m, []*types.Block{bad})
+
+	result, err := m.ValidateChain(t.Context(), bad.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+	require.Equal(t, common.Hash{}, result.LatestValidHash)
+	require.NotContains(t, result.ValidationError, "invalid header", "exception mappers match the header error's own text")
 }
