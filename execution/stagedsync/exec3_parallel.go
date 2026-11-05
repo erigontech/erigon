@@ -1136,7 +1136,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"valFail", blockExecutor.cntValidationFail,
 						"valSkip", blockExecutor.cntValidationSkip,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3),
-						"spFee", blockExecutor.spFee, "spFin", blockExecutor.spFin, "parks", blockExecutor.spParks)
+						"spFee", blockExecutor.spFee, "spFin", blockExecutor.spFin, "parks", blockExecutor.spParks,
+						"spNext", blockExecutor.spNext, "spDep", blockExecutor.spDep, "spVal", blockExecutor.spVal, "spSched", blockExecutor.spSched)
 					npWait, npProc = 0, 0
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
@@ -1593,7 +1594,10 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	// preceding blockResult to trigger the fast-path install above).
 	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
 
-	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+	nrStart := time.Now()
+	r, nerr := blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+	blockExecutor.spNext += time.Since(nrStart)
+	return r, nerr
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
@@ -2587,7 +2591,7 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
 	// probe: spine time in the fee credit and the finalize tail; named re-run parks.
-	spFee, spFin time.Duration
+	spFee, spFin, spNext, spDep, spVal, spSched time.Duration
 	spParks      int
 
 	oracleHook func()
@@ -3277,6 +3281,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			return r, ferr
 		}
 
+		valStart := time.Now()
 		toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
 			return be.readyForDepOrderValidation(t)
 		})
@@ -3329,6 +3334,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// without going through the dispatch path.
 			be.signalSelfLoopReexec(tx)
 		}
+		be.spVal += time.Since(valStart)
 
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
 			return r, ferr
@@ -3420,12 +3426,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// do validations ...
 	var stateReader state.StateReader
 
-	if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
+	depStart := time.Now()
+	r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader)
+	be.spDep += time.Since(depStart)
+	if derr != nil || r != nil {
 		return r, derr
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
+	schedStart := time.Now()
 	be.scheduleExecution(ctx, pe)
+	be.spSched += time.Since(schedStart)
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
