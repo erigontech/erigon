@@ -95,6 +95,7 @@ type Cfg struct {
 	forkChoiceWaitingForIndices bool
 	forkChoiceIndicesChanged    <-chan struct{}
 	chainTipRejections          *chainTipRejections
+	ancestorLookupFailedSlot    uint64
 	pendingBlockWrite           *pendingBlockWrite
 }
 

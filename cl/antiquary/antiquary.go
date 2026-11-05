@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/chain"
 )
 
 const (
@@ -213,6 +214,10 @@ func (s *Antiquary) retirementLoop() error {
 		run:     s.antiquate,
 		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
 	}
+	merges := &retirementStep{
+		run:     s.mergeBlocks,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to merge beacon blocks", "err", err) },
+	}
 	blobs := &retirementStep{
 		run:     s.antiquateBlobs,
 		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
@@ -223,18 +228,19 @@ func (s *Antiquary) retirementLoop() error {
 	for {
 		select {
 		case <-retirementTicker.C:
-			s.retirementTick(blocks, blobs)
+			s.retirementTick(blocks, merges, blobs)
 		case <-s.ctx.Done():
 			return nil
 		}
 	}
 }
 
-func (s *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+func (s *Antiquary) retirementTick(blocks, merges, blobs *retirementStep) {
 	if !s.backfilled.Load() {
 		return
 	}
 	blocks.attempt(s.shuttingDown)
+	merges.attempt(s.shuttingDown)
 
 	if s.cfg.DenebForkEpoch == math.MaxUint64 {
 		return
@@ -469,6 +475,28 @@ func (s *Antiquary) antiquate() error {
 		}
 	}
 
+	return nil
+}
+
+func (s *Antiquary) mergeBlocks() error {
+	if !s.snapgen {
+		return nil
+	}
+	merger := snapshotsync.NewMerger(s.dirs.Tmp, 1, log.LvlDebug, nil, &chain.Config{}, s.logger)
+	ranges := merger.FindMergeRanges(s.sn.Ranges(false), snaptype.CaplinEnums.BeaconBlocks)
+	if len(ranges) == 0 {
+		return nil
+	}
+	var onMerge func([]string) error
+	var onDelete func(context.Context, []string) error
+	if s.downloader != nil {
+		onMerge = func(l []string) error { return s.downloader.Seed(s.ctx, l) }
+		onDelete = s.downloader.Delete
+	}
+	if err := merger.Merge(s.ctx, &s.sn.BaseRoSnapshots, []snaptype.Type{snaptype.BeaconBlocks}, ranges[:1], s.sn.Dir(), true, onMerge, onDelete); err != nil {
+		return err
+	}
+	s.removeBlockOverlaps()
 	return nil
 }
 
