@@ -630,9 +630,11 @@ func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64)
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	stripe := c.putStripe(prefix)
-	stripe.Lock()
-	defer stripe.Unlock()
+	if !ablFillLock {
+		stripe := c.putStripe(prefix)
+		stripe.Lock()
+		defer stripe.Unlock()
+	}
 
 	// Rechecked under the stripe: a commit records its view before it publishes or deletes under this stripe.
 	if c.coh.Epoch() != epoch || viewID < c.committedView.Load() {

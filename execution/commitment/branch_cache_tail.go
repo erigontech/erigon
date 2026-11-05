@@ -44,6 +44,9 @@ type tailLRU struct {
 
 func newTailLRU(maxCapacity uint32) *tailLRU {
 	start := min(uint32(tailStartCapacity), maxCapacity)
+	if ablTailMax {
+		start = maxCapacity
+	}
 	t := &tailLRU{maxCap: maxCapacity}
 	t.reserved = int64(start) * tailEntryBytes
 	cachebudget.Global.Take(t.reserved)

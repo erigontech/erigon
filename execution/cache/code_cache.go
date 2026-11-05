@@ -390,9 +390,11 @@ func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, boo
 // mapping for unwind invalidation.
 func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	a := common.BytesToAddress(addr)
-	stripe := &c.putStripes[a[len(a)-1]]
-	stripe.Lock()
-	defer stripe.Unlock()
+	if !ablCodePut {
+		stripe := &c.putStripes[a[len(a)-1]]
+		stripe.Lock()
+		defer stripe.Unlock()
+	}
 
 	slot := addrSlot(a)
 	if e, ok := c.addrToCodeHash.Get(slot); ok {

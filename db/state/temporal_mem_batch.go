@@ -275,8 +275,10 @@ func (sd *TemporalMemBatch) updatePutMetrics(domain kv.Domain, putKeySize int, p
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	sd.latestStateLocks[domain].RLock()
-	defer sd.latestStateLocks[domain].RUnlock()
+	if !ablMemRLock {
+		sd.latestStateLocks[domain].RLock()
+		defer sd.latestStateLocks[domain].RUnlock()
+	}
 	return sd.getLatest(domain, key)
 }
 
