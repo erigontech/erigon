@@ -1125,6 +1125,31 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 		require.Equal(t, 1, imports)
 		require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
 	})
+
+	t.Run("consensus mode when the payload is invalidated and the client leaves during column writes", func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 2)
+		requestCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		f.failWrite = func(uint64) error {
+			f.payloadInvalidated = true
+			cancel()
+			return nil
+		}
+		imports := 0
+		f.wrapImport(func(ctx context.Context, next func() error) error {
+			imports++
+			if ctx.Err() != nil {
+				return forkchoice.ErrPayloadValidationInterrupted
+			}
+			return next()
+		})
+
+		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		require.Equal(t, 1, imports)
+		require.Empty(t, f.eventsOf(eventEnvelopePublish))
+	})
 }
 
 func TestPostEnvelopeConsensusModeBroadcastFailureKeepsContentsRequired(t *testing.T) {
@@ -1202,6 +1227,24 @@ func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
 				require.False(t, ok, "a published envelope must clear its retry record")
 			})
 		}
+
+		t.Run(mode+"/the payload is invalidated during the retry's writes", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failEnvelope = errors.New("injected envelope publish failure")
+			body := f.contents(f.blobs...)
+			query := "?broadcast_validation=" + mode
+			require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, query).Code)
+			f.failEnvelope = nil
+			f.failWrite = func(uint64) error {
+				f.payloadInvalidated = true
+				return nil
+			}
+
+			retry := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusBadRequest, retry.Code, retry.Body.String())
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
+		})
 	}
 }
 
@@ -1302,6 +1345,29 @@ func TestPostEnvelopeContentsConsensusModesWriteFailureAnswersAccepted(t *testin
 
 			require.Equal(t, http.StatusOK, repair.Code, repair.Body.String())
 			f.requireContentsRequiredRecord(false)
+		})
+
+		t.Run(mode+"/the pending retry imports a payload invalidated during the repair writes", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failFirstCustodyWrite()
+			body := f.contents(f.blobs...)
+			require.Equal(t, http.StatusAccepted, f.postContents(t.Context(), body, query).Code)
+			f.requireContentsRequiredRecord(true)
+			f.requireClaimReleased()
+			envelopes := len(f.eventsOf(eventEnvelopePublish))
+			f.failWrite = func(uint64) error {
+				f.forkchoice.SetEnvelope(f.root, f.signedEnvelope)
+				f.payloadInvalidated = true
+				return nil
+			}
+
+			repair := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusBadRequest, repair.Code, repair.Body.String())
+			require.Len(t, f.eventsOf(eventEnvelopePublish), envelopes)
+			require.Equal(t, f.root, f.invalidatedBlockRoot)
+			require.Equal(t, f.signedEnvelope.Message.Payload.BlockHash, f.invalidatedExecutionHash)
+			f.requireClaimReleased()
 		})
 
 		t.Run(mode+"/a column publish fails too", func(t *testing.T) {
@@ -1462,10 +1528,11 @@ func TestPostEnvelopeConsensusModeWithoutBlobDataReadsStoredColumns(t *testing.T
 func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRequest(t *testing.T) {
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, tc := range []struct {
-			name      string
-			err       error
-			status    int
-			envelopes int
+			name        string
+			err         error
+			invalidated bool
+			status      int
+			envelopes   int
 		}{
 			{name: "invalid execution payload", err: forkchoice.ErrInvalidExecutionPayloadEnvelope, status: http.StatusBadRequest},
 			{name: "DA missing after successful writes", err: forkchoice.ErrEIP7594ColumnDataNotAvailable, status: http.StatusBadRequest},
@@ -1475,10 +1542,22 @@ func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRe
 				status:    http.StatusInternalServerError,
 				envelopes: 1,
 			},
+			{
+				name:        "persistence failure for a payload invalidated during the writes",
+				err:         fmt.Errorf("disk unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed),
+				invalidated: true,
+				status:      http.StatusBadRequest,
+			},
 		} {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				f := newEnvelopeContentsFixture(t, 0, 2)
 				f.failImport(tc.err)
+				if tc.invalidated {
+					f.failWrite = func(uint64) error {
+						f.payloadInvalidated = true
+						return nil
+					}
+				}
 
 				recorder := f.postAllBlobs(false, "?broadcast_validation="+mode)
 

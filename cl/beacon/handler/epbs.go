@@ -1210,13 +1210,18 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	integrationPending := false
 	if err := a.processExecutionPayloadEnvelope(workCtx, signedEnvelope); err != nil {
 		switch {
+		case validation != BlockPublishingValidationGossip &&
+			a.forkchoiceStore.ExecutionPayloadInvalidated(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.BlockHash):
+			// A payload marked invalid after the consensus validation is never accepted or published, whatever error
+			// the import returned: an ignored or interrupted import does not recheck it.
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
 			// The envelope passed every consensus check; only the EL verdict is pending.
 			integrationPending = true
-		case validation != BlockPublishingValidationGossip && columnWriteFailed && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) &&
-			!a.forkchoiceStore.ExecutionPayloadInvalidated(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.BlockHash):
+		case validation != BlockPublishingValidationGossip && columnWriteFailed && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			// Consensus validation saw the blob data, so this local write failure remains repairable.
 		case !envelopeFirst && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
