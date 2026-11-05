@@ -289,3 +289,8 @@ func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
 	require.True(t, e.lock.TryLock(), "the read lock is still held after the panic")
 	e.lock.Unlock()
 }
+
+func TestCacheCodeByHashIsNilWithoutStateCache(t *testing.T) {
+	require.True(t, (&Cache{}).CodeByHash() == nil)
+	require.True(t, (&Cache{execModule: &ExecModule{}}).CodeByHash() == nil, "a nil *StateCache must not become a non-nil CodeByHash")
+}

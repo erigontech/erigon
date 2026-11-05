@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1361,6 +1362,62 @@ func TestVersionedRead_CreateCarriesRevivedBalanceAfterEarlierDestroyedRead(t *t
 			require.EqualValues(t, 1000, bal.Uint64())
 		})
 	}
+}
+
+type codeStoreMap map[common.Hash][]byte
+
+func (m codeStoreMap) GetCodeByHash(codeHash []byte) ([]byte, bool) {
+	c, ok := m[common.BytesToHash(codeHash)]
+	return c, ok
+}
+
+type countingCodeReader struct {
+	codeReader
+	codeReads, codeSizeReads int
+}
+
+func (r *countingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.codeReads++
+	return r.codeReader.ReadAccountCode(addr)
+}
+
+func (r *countingCodeReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	r.codeSizeReads++
+	return r.codeReader.ReadAccountCodeSize(addr)
+}
+
+func newSharedCodeReplay(t *testing.T) (*IntraBlockState, *countingCodeReader, accounts.Address, []byte) {
+	t.Helper()
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01, 0x00}
+	codeHash := crypto.Keccak256Hash(code)
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.CodeHash = accounts.InternCodeHash(codeHash)
+	reader := &countingCodeReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetNoConflictDetection()
+	ibs.SetCodeByHash(codeStoreMap{codeHash: code})
+	ibs.SetTxContext(100, 0)
+	return ibs, reader, addr, code
+}
+
+func TestVersionedRead_CodeServedBySharedStore(t *testing.T) {
+	ibs, reader, addr, code := newSharedCodeReplay(t)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Zero(t, reader.codeReads)
+}
+
+func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
+	ibs, reader, addr, code := newSharedCodeReplay(t)
+
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, len(code), size)
+	require.Zero(t, reader.codeReads+reader.codeSizeReads)
 }
 
 // A versioned read that finds a stateObject materialized before the IBS was bound to a
