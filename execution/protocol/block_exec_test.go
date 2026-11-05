@@ -23,9 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -61,37 +58,4 @@ func TestSysCallContractSeesBlockCoinbase(t *testing.T) {
 	var want uint256.Int
 	want.SetBytes(coinbase[:])
 	require.Equal(t, want.Hex(), got.Hex())
-}
-
-// Stateless execution rejects an invalid tx and goes on, but a panic inside execution is a
-// failure of the run, not a verdict on the tx.
-func TestExecuteBlockEphemerallyStatelessFailsOnExecPanic(t *testing.T) {
-	t.Parallel()
-	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
-	cfg := chain.TestChainBerlinConfig
-	txn, err := types.SignTx(types.NewTransaction(0, common.HexToAddress("0xc0ffee"), uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(cfg.ChainID), key)
-	require.NoError(t, err)
-	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 1_000_000}
-	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
-
-	res, err := ExecuteBlockEphemerally(cfg, &vm.Config{StatelessExec: true}, nil, ethash.NewFaker(), block,
-		&panicOnceReader{NoopReader: state.NewNoopReader()}, state.NewNoopWriter(), nil, nil, log.New())
-	require.ErrorIs(t, err, ErrExecPanic)
-	require.Nil(t, res)
-}
-
-// panicOnceReader panics on the first account read only, so a run that wrongly
-// survives the panic reaches the assertions instead of panicking again in finalize.
-type panicOnceReader struct {
-	*state.NoopReader
-	panicked bool
-}
-
-func (r *panicOnceReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
-	if !r.panicked {
-		r.panicked = true
-		panic("injected exec panic")
-	}
-	return r.NoopReader.ReadAccountData(addr)
 }

@@ -20,7 +20,6 @@
 package protocol
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -82,30 +81,10 @@ func ExecuteBlockEphemerally(
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
-	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+	ibs := state.New(stateReader)
 	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
-	blockNum := block.NumberU64()
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
-	blockRules := blockContext.Rules(chainConfig)
-	_, noopWriter := stateWriter.(*state.NoopWriter)
-	writesState := stateWriter != nil && !noopWriter
-	// endPhase writes the finished phase to stateWriter and publishes it to the version map for the next one.
-	endPhase := func() error {
-		writes, err := ibs.FinalizedWrites(blockRules)
-		if err != nil {
-			return err
-		}
-		ibs.FlushWritesToVersionMap(writes)
-		if writesState {
-			if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
-				return err
-			}
-		}
-		ibs.ResetVersionedIO()
-		return nil
-	}
 
 	gasUsed := new(GasUsed)
 	gp := new(GasPool)
@@ -126,17 +105,14 @@ func ExecuteBlockEphemerally(
 		}()
 	}
 
-	ibs.SetTxContext(blockNum, -1)
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, vmConfig.Tracer); err != nil {
 		return nil, err
-	}
-	if err := endPhase(); err != nil {
-		return nil, fmt.Errorf("init of block %d: %w", blockNum, err)
 	}
 
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
+	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
@@ -156,15 +132,11 @@ func ExecuteBlockEphemerally(
 		}
 
 		if err != nil {
-			if !vmConfig.StatelessExec || errors.Is(err, ErrExecPanic) {
+			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 			}
-			ibs.ResetVersionedIO()
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
-			if err := endPhase(); err != nil {
-				return nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, blockNum, txn.Hash().Hex(), err)
-			}
 			includedTxs = append(includedTxs, txn)
 			if !vmConfig.NoReceipts {
 				receipts = append(receipts, receipt)
@@ -205,13 +177,9 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		ibs.SetTxContext(blockNum, len(txs))
 		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
-		}
-		if err := endPhase(); err != nil {
-			return nil, fmt.Errorf("finalize of block %d: %w", blockNum, err)
 		}
 	}
 	newRoot := newBlock.Root()
