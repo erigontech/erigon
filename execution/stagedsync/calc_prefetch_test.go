@@ -32,13 +32,13 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
+func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 	var got [][]byte
-	cs := newTestCalcState()
-	cs.prefetch = func(plainKey []byte) { got = append(got, plainKey) }
+	cc := &commitmentCalculator{updates: newTestUpdates(), prefetchFn: func(plainKey []byte) { got = append(got, plainKey) }}
 	payer, contract := common.Address{19: 1}, common.Address{19: 2}
 	slot := accounts.InternKey(common.Hash{31: 9})
 	writes := func(v uint64) *state.WriteSet {
@@ -52,14 +52,45 @@ func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 	slotValue := slot.Value()
 	want := [][]byte{payer[:], contract[:], append(contract[:], slotValue[:]...)}
 
-	cs.ApplyWrites(writes(1))
-	cs.ApplyWrites(writes(2))
-	require.ElementsMatch(t, want, got, "a key written twice in one block is prefetched once")
+	cc.accumulateTouched(writes(1), nil)
+	cc.accumulateTouched(writes(2), nil)
+	require.ElementsMatch(t, want, got, "a key touched twice in one block is prefetched once")
 
 	got = nil
-	cs.ResetBlockFlags()
-	cs.ApplyWrites(writes(3))
+	cc.clearTouched()
+	cc.accumulateTouched(writes(3), nil)
 	require.ElementsMatch(t, want, got, "the next block prefetches the key again")
+}
+
+// The BAL compute-ahead of a batch's first block skips the branch prefetch, as the
+// BAL blocks folded from tx results do.
+func TestComputeAhead_FirstBlockSkipsBranchPrefetch(t *testing.T) {
+	defer func(balDriven, ignoreBAL, readAhead bool, workers int) {
+		dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers = balDriven, ignoreBAL, readAhead, workers
+	}(dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers)
+	dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers = true, false, true, 2
+
+	ctx := context.Background()
+	db, _, doms := setupStepTest(t)
+	out := make(chan commitmentResult, 4)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, make(chan applyResult, 4), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	cc.hasFirstBlock = true
+	cc.firstBlockNum = 2
+
+	prefetch := cc.prefetchFn
+	require.NotNil(t, prefetch)
+	called, started := false, false
+	cc.prefetchFn = func(plainKey []byte) {
+		prefetch(plainKey)
+		called = true
+		started = started || cc.prefetch != nil
+	}
+	bal := types.BlockAccessList{{Address: [20]byte{19: 1}, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: 11, lastTxNum: 12, stateRoot: common.Hash{0xde, 0xad}, bal: bal})
+	require.True(t, called, "precondition: the compute-ahead fold reaches the prefetch hook")
+	require.False(t, started)
 }
 
 func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
@@ -116,15 +147,11 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 		require.NoError(t, err)
 
 		const lastTxNum = 1 + 64
+		vm := newRawViewVM(2)
 		for i, addr := range addrs[:64] {
 			txNum := uint64(2 + i)
 			putAccount(doms, tx, addr, 2, txNum)
-			cc.handleMessage(ctx, &txResult{
-				blockNum: 2,
-				txNum:    txNum,
-				rules:    &chain.Rules{IsAmsterdam: amsterdam},
-				writes:   nonceBalanceWrites(accounts.InternAddress(addr), 2, *uint256.NewInt(20)),
-			})
+			cc.handleMessage(ctx, recordTx(vm, 2, common.Hash{0x02}, txNum, &chain.Rules{IsAmsterdam: amsterdam}, nonceBalanceWrites(accounts.InternAddress(addr), 2, *uint256.NewInt(20))))
 		}
 		started := cc.prefetch != nil
 		cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, lastTxNum, false))
@@ -139,4 +166,85 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 	require.NotEmpty(t, want, "computeAndCheck publishes the root with the header mismatch")
 	require.Equal(t, want, root(true, false), "prefetched branches must yield the same root as direct reads")
 	root(true, true)
+}
+
+// The first-touch base cache must not change a root. Block 3 writes only balances, so
+// its fold takes each nonce block 2 committed from the base; both blocks straddle step
+// edges. Per-block mode (base cached at first touch) must give batch mode's root (base
+// read at the fold).
+func TestCalculatorRootSameWithFirstTouchBaseCache(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BatchCommitments = true
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+
+	addrs := make([]common.Address, 32)
+	for i := range addrs {
+		addrs[i] = common.Address{0: byte(i * 37), 19: byte(i + 1)}
+	}
+	putAccount := func(doms *execctx.SharedDomains, tx kv.TemporalTx, addr common.Address, nonce, bal, txNum uint64) {
+		acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(bal), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), txNum, nil))
+	}
+	func() {
+		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+		require.NoError(t, err)
+		defer tx.Rollback()
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+		require.NoError(t, err)
+		defer doms.Close()
+		for _, addr := range addrs {
+			putAccount(doms, tx, addr, 1, 10, 1)
+		}
+		_, err = doms.ComputeCommitment(ctx, tx, true, 0, 1, "", nil)
+		require.NoError(t, err)
+		require.NoError(t, doms.Flush(ctx, tx))
+		require.NoError(t, tx.Commit())
+	}()
+
+	root := func(perBlock bool) []byte {
+		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+		require.NoError(t, err)
+		defer tx.Rollback()
+		doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+		require.NoError(t, err)
+		defer doms.Close()
+		doms.SetDisableInlineTouchKey(true)
+
+		out := make(chan commitmentResult, 64)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, perBlock, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		require.NoError(t, err)
+
+		txNum := uint64(1)
+		for blockNum := uint64(2); blockNum <= 3; blockNum++ {
+			vm := newRawViewVM(txNum + 1)
+			for _, addr := range addrs {
+				txNum++
+				a := accounts.InternAddress(addr)
+				ws := &state.WriteSet{}
+				ws.SetBalance(a, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: a, Path: state.BalancePath}, Val: *uint256.NewInt(txNum)})
+				if blockNum == 2 {
+					ws.SetNonce(a, &state.VersionedWrite[uint64]{WriteHeader: state.WriteHeader{Address: a, Path: state.NoncePath}, Val: 2})
+				}
+				putAccount(doms, tx, addr, 2, txNum, txNum)
+				cc.handleMessage(ctx, recordTx(vm, blockNum, common.Hash{byte(blockNum)}, txNum, &chain.Rules{}, ws))
+			}
+			cc.handleMessage(ctx, newTestBlockResult(blockNum, common.Hash{byte(blockNum)}, txNum, false))
+		}
+		if !perBlock {
+			cc.handleMessage(ctx, &commitComputeRequest{})
+		}
+		cc.Stop()
+		var last []byte
+		for len(out) > 0 {
+			last = (<-out).rootHash
+		}
+		return last
+	}
+
+	want := root(false)
+	require.NotEmpty(t, want)
+	require.Equal(t, want, root(true))
 }

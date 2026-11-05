@@ -20,7 +20,6 @@
 package hexutil
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -147,16 +146,16 @@ func (b U256) MarshalText() ([]byte, error) {
 // AppendText implements encoding.TextAppender (alloc-free MarshalText).
 func (b U256) AppendText(dst []byte) ([]byte, error) {
 	z := (*uint256.Int)(&b)
-	nibbles := (z.BitLen() + 3) / 4
-	if nibbles == 0 {
-		nibbles = 1
+	if z.IsUint64() {
+		return AppendUint64(dst, z.Uint64()), nil
 	}
-	// hex.Encode works in whole bytes, so an odd nibble count produces one
+	nibbles := (z.BitLen() + 3) / 4
+	// encodeHex works in whole bytes, so an odd nibble count produces one
 	// leading zero digit to drop.
 	nbytes := (nibbles + 1) / 2
 	be := z.Bytes32()
 	var digits [64]byte
-	hex.Encode(digits[:2*nbytes], be[32-nbytes:])
+	encodeHex(digits[:2*nbytes], be[32-nbytes:])
 	return append(append(dst, '0', 'x'), digits[2*nbytes-nibbles:2*nbytes]...), nil
 }
 

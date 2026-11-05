@@ -122,6 +122,7 @@ func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 // not lose transactions we already held. The caller holds the pool lock.
 func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*metaTxn) {
 	var announcements Announcements
+	cells := make(blobCells)
 	for i, txn := range txns.Txns {
 		if p.byHash[string(txn.IDHash[:])] != nil {
 			continue
@@ -130,12 +131,12 @@ func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(sender, p.logger)
 		reason := p.validateFrame(txn, isLocal)
 		if reason == txpoolcfg.Success && txn.HasBlobs() {
-			reason = p.validateBlobTxn(txn, isLocal)
+			reason = p.validateBlobTxn(txn, isLocal, cells)
 		}
 		if reason == txpoolcfg.Success {
 			txn.frameValidation = nil
 			mt := newMetaTxn(txn, isLocal, blockNum)
-			if reason = p.addLocked(mt, &announcements); reason == txpoolcfg.NotSet {
+			if reason = p.addLocked(mt, &announcements, cells); reason == txpoolcfg.NotSet {
 				p.senderLastActivity[txn.SenderID] = blockNum
 				p.frameAccountsToRefresh[sender] = struct{}{}
 				parked = append(parked, mt)

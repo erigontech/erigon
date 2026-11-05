@@ -19,11 +19,14 @@
 package iouring
 
 import (
+	"errors"
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // Pool of small rings for blocking async reads. Each goroutine borrows a ring,
@@ -86,12 +89,38 @@ func BlockingRead(fd int, off int64, length int) {
 		length = MaxReadSize
 	}
 	pr := <-ringPool
+	if pr.r == nil {
+		ringPool <- pr
+		return
+	}
 	pr.offs[0], pr.lens[0], pr.bufs[0] = off, length, pr.buf
-	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil {
-		pr.r.reset()
+	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil && !errors.Is(err, ErrRingReset) {
+		pr = replaceBroken(pr, err)
 	}
 	ringPool <- pr
 }
+
+var abandonedPooled atomic.Int32 // rings this pool abandoned
+
+// replaceBroken abandons a failed ring and gives its slot a new one while no more rings than the pool size are
+// abandoned; after that, or when a new ring cannot be made, the slot stops reading.
+func replaceBroken(pr *pooledRing, err error) *pooledRing {
+	pr.r.Abandon(pr.buf)
+	if abandonedPooled.Add(1) > int32(cap(ringPool)) {
+		brokenLog.Do(func() { log.Warn("[iouring] read ring failed, slot falls back to mmap faults", "err", err) })
+		return &pooledRing{}
+	}
+	r, newErr := New(8)
+	if newErr != nil {
+		brokenLog.Do(func() {
+			log.Warn("[iouring] read ring failed, slot falls back to mmap faults", "err", err, "recreate", newErr)
+		})
+		return &pooledRing{}
+	}
+	return &pooledRing{r: r, buf: make([]byte, MaxReadSize)}
+}
+
+var brokenLog sync.Once
 
 // Available reports whether io_uring can be set up in this process (kernel support,
 // not blocked by seccomp). Used to warn at startup and to skip io_uring tests.
