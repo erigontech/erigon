@@ -55,6 +55,17 @@ func forkAt(chain []*types.Block, n int) []*types.Block {
 	return fork
 }
 
+func targetSeq(last uint64, seq ...uint64) func() uint64 {
+	return func() uint64 {
+		if len(seq) == 0 {
+			return last
+		}
+		n := seq[0]
+		seq = seq[1:]
+		return n
+	}
+}
+
 func downloadChain(t *testing.T, svc *fakeP2P) downloadRun {
 	return downloadChainTo(t, svc, func() uint64 { return uint64(len(svc.chain) - 1) })
 }
@@ -294,21 +305,10 @@ func TestDownloadRangesShrinksRangeAboveDroppedTarget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		chain := rangesChain(3)[:3001]
 		svc := &fakeP2P{peers: 4, chain: chain}
-		targets := []uint64{3072}
-		target := func() uint64 {
-			if len(targets) == 0 {
-				return 2968
-			}
-			next := targets[0]
-			targets = targets[1:]
-			return next
-		}
 
-		run := downloadChainTo(t, svc, target)
+		run := downloadChainTo(t, svc, targetSeq(2968, 3072))
 
-		require.NoError(t, run.err)
-		require.Len(t, run.inserted, 2968)
-		require.Equal(t, chain[2968].Hash(), run.inserted[len(run.inserted)-1].Hash())
+		requireDownloaded(t, chain[:2969], run)
 	})
 }
 
@@ -317,17 +317,8 @@ func TestDownloadRangesFetchesRemainderWhenTargetRisesAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		chain := rangesChain(3)
 		svc := &fakeP2P{peers: 1, chain: chain}
-		targets := []uint64{3072, 2968, 2968}
-		target := func() uint64 {
-			if len(targets) == 0 {
-				return 3072
-			}
-			next := targets[0]
-			targets = targets[1:]
-			return next
-		}
 
-		run := downloadChainTo(t, svc, target)
+		run := downloadChainTo(t, svc, targetSeq(3072, 3072, 2968, 2968))
 
 		require.Equal(t, []uint64{1}, svc.headerFetchers(2969))
 		requireDownloaded(t, chain, run)
@@ -344,21 +335,11 @@ func TestDownloadRangesHoldsRangeAboveDroppedTarget(t *testing.T) {
 			}
 			return nil, nil
 		}}
-		targets := []uint64{3072}
-		target := func() uint64 {
-			if len(targets) == 0 {
-				return 2000
-			}
-			next := targets[0]
-			targets = targets[1:]
-			return next
-		}
 
-		run := downloadChainTo(t, svc, target)
+		run := downloadChainTo(t, svc, targetSeq(2000, 3072))
 
 		require.Empty(t, svc.headerFetchers(rangeStart(2)))
-		require.NoError(t, run.err)
-		require.Len(t, run.inserted, 2048)
+		requireDownloaded(t, chain[:2049], run)
 	})
 }
 
@@ -375,15 +356,6 @@ func TestDownloadRangesReturnsWithMoreFetchesInFlightThanRanges(t *testing.T) {
 			}
 			return nil, common.Sleep(ctx, time.Hour)
 		}}
-		targets := []uint64{2048, 1100, 1050, 2048}
-		target := func() uint64 {
-			if len(targets) == 0 {
-				return 1024
-			}
-			next := targets[0]
-			targets = targets[1:]
-			return next
-		}
 		var inserted int
 		insert := func(_ context.Context, blocks []*types.Block) error {
 			inserted += len(blocks)
@@ -392,7 +364,7 @@ func TestDownloadRangesReturnsWithMoreFetchesInFlightThanRanges(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			done <- downloadRanges(t.Context(), testlog.Logger(t, log.LvlCrit), svc, 1, target, chain[0].HeaderNoCopy(), 2, insert)
+			done <- downloadRanges(t.Context(), testlog.Logger(t, log.LvlCrit), svc, 1, targetSeq(1024, 2048, 1100, 1050, 2048), chain[0].HeaderNoCopy(), 2, insert)
 		}()
 		select {
 		case err := <-done:
