@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,9 +71,18 @@ func newFillFixture(t *testing.T) *fillFixture {
 // addBlock makes slot hold a canonical Deneb block with valid sidecars for blobs blobs, which the
 // endpoint serves. It returns the block root.
 func (f *fillFixture) addBlock(slot uint64, blobs int) common.Hash {
+	return f.addBlockWithTransactions(slot, blobs, false)
+}
+
+// addBlockWithTransactions gives the block payload transactions when txs is set. The reader then
+// serves the block as storage does, without them, so its own hash is not the canonical root.
+func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool) common.Hash {
 	t := f.t
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = slot
+	if txs {
+		block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x02, 0x01}})
+	}
 	data := make([]goethkzg.Blob, blobs)
 	commitments := make([]goethkzg.KZGCommitment, blobs)
 	for i := range data {
@@ -99,6 +109,17 @@ func (f *fillFixture) addBlock(slot uint64, blobs int) common.Hash {
 	require.NoError(t, f.db.Update(t.Context(), func(tx kv.RwTx) error {
 		return beacon_indicies.MarkRootCanonical(tx, slot, root)
 	}))
+	if txs {
+		stored := block.Clone().(*cltypes.SignedBeaconBlock)
+		encoded, err := block.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.NoError(t, stored.DecodeSSZ(encoded, int(clparams.DenebVersion)))
+		stored.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+		storedRoot, err := stored.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NotEqual(t, root, common.Hash(storedRoot))
+		block = stored
+	}
 	f.blocks.blocks[slot] = block
 	return root
 }
@@ -154,7 +175,7 @@ func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
 	f.addBlock(fillTestSlot+2, 0)
 	url, requests := f.endpoint(false)
 
-	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 3}, nil))
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2}, nil))
 
 	require.True(t, f.storedValid(fillTestSlot, missing))
 	require.EqualValues(t, 1, requestsFor(requests, missing))
@@ -191,9 +212,10 @@ func TestBlobArchiveStoreFillReplacesInvalidSidecars(t *testing.T) {
 func TestBlobArchiveStoreFillReportsASlotWithoutCanonicalRoot(t *testing.T) {
 	f := newFillFixture(t)
 	f.blocks.blocks[fillTestSlot] = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	f.addBlock(fillTestSlot+1, 0)
 	url, _ := f.endpoint(false)
 
-	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil)
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}, nil)
 	require.ErrorContains(t, err, fmt.Sprint(fillTestSlot))
 }
 
@@ -229,6 +251,55 @@ func TestBlobArchiveStoreFillReportsSlotsNoEndpointHas(t *testing.T) {
 	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}, nil)
 	require.ErrorContains(t, err, fmt.Sprint(fillTestSlot))
 	require.True(t, f.storedValid(fillTestSlot+1, served))
+}
+
+// Past the local head every slot reads as empty, so a range there would pass unchecked.
+func TestBlobArchiveStoreFillRejectsARangePastTheLocalHead(t *testing.T) {
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot, 1)
+	url, requests := f.endpoint(false)
+
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}, nil)
+	require.ErrorContains(t, err, "past the local chain")
+	n := 0
+	requests.Range(func(any, any) bool { n++; return true })
+	require.Zero(t, n)
+}
+
+// Storage keeps no transactions, so the stored block hashes to another root; the fill must fetch
+// and verify under the canonical one.
+func TestBlobArchiveStoreFillUsesTheCanonicalRootOfAStoredBlock(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlockWithTransactions(fillTestSlot, 2, true)
+	url, requests := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+	require.EqualValues(t, 1, requestsFor(requests, root))
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+// A dry run on a datadir without a blob store must report the slot and create nothing.
+func TestBlobArchiveStoreFillDryRunCreatesNoBlobStore(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = fillTestSlot
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	db, err := openCaplinDB(t.Context(), dirs.CaplinIndexing, false)
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
+	}))
+	db.Close()
+
+	cmd := &BlobArchiveStoreFill{
+		chainCfg:     chainCfg{Chain: networkname.Mainnet},
+		outputFolder: outputFolder{Datadir: dirs.DataDir},
+		FromSlot:     fillTestSlot,
+		ToSlot:       fillTestSlot,
+		DryRun:       true,
+	}
+	require.NoError(t, cmd.Run(t.Context()))
+	require.NoDirExists(t, filepath.Join(dirs.CaplinBlobs, "chaindata"))
 }
 
 type failingWrites struct{ blob_storage.BlobStorage }

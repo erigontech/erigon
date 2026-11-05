@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -89,30 +88,26 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 		return errors.New("--endpoint is required unless --dry-run is set")
 	}
 
-	dirs := datadir.New(b.Datadir)
+	// Open, not New: New creates the datadir's directories, and a dry run writes nothing.
+	dirs := datadir.Open(b.Datadir)
 	unlock, err := dirs.TryFlock()
 	if err != nil {
 		return fmt.Errorf("stop the node that uses the datadir first: %w", err)
 	}
 	defer unlock()
 
-	// Closed before the lock is released: closing syncs the blob store's count rows.
-	db, err := caplin1.OpenCaplinIndexDb(ctx, dirs.CaplinIndexing)
+	// Both databases are closed before the lock is released: closing syncs the blob store's rows.
+	// The index is only read.
+	db, err := openCaplinDB(ctx, dirs.CaplinIndexing, true)
 	if err != nil {
-		return err
+		return fmt.Errorf("open the beacon index: %w", err)
 	}
 	defer db.Close()
-	blobPath := filepath.Join(dirs.CaplinBlobs, "chaindata")
-	if err := os.MkdirAll(blobPath, 0o700); err != nil {
-		return err
-	}
-	blobDB, err := mdbx.New(dbcfg.CaplinDB, log.New()).Path(blobPath).
-		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Open(ctx)
+	blobStore, closeBlobs, err := b.openBlobStore(ctx, dirs)
 	if err != nil {
 		return err
 	}
-	defer blobDB.Close()
-	blobStore := blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
+	defer closeBlobs()
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = b.Chain
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
@@ -128,7 +123,48 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 	return b.fill(ctx, db, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig), blobStore)
 }
 
+func openCaplinDB(ctx context.Context, path string, readonly bool) (kv.RwDB, error) {
+	return mdbx.New(dbcfg.CaplinDB, log.New()).Path(path).Readonly(readonly).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Open(ctx)
+}
+
+// openBlobStore opens the blob store for writing, or read-only for a dry run, where a missing
+// store reads as empty.
+func (b *BlobArchiveStoreFill) openBlobStore(ctx context.Context, dirs datadir.Dirs) (blob_storage.BlobStorage, func(), error) {
+	path := filepath.Join(dirs.CaplinBlobs, "chaindata")
+	if b.DryRun {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			return emptyBlobStore{}, func() {}, nil
+		}
+	} else if err := os.MkdirAll(path, 0o700); err != nil {
+		return nil, nil, err
+	}
+	db, err := openCaplinDB(ctx, path, b.DryRun)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open the blob store: %w", err)
+	}
+	return blob_storage.NewBlobStore(db, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs)), db.Close, nil
+}
+
+// emptyBlobStore stands in for a blob store that does not exist yet; a dry run only reads it.
+type emptyBlobStore struct{ blob_storage.BlobStorage }
+
+func (emptyBlobStore) ReadBlobSidecars(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+	return nil, false, nil
+}
+
 func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, store blob_storage.BlobStorage) error {
+	// Past the local head a slot reads as empty, so it would pass without being checked.
+	var head uint64
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
+		head, _, err = beacon_indicies.ReadCanonicalHead(tx)
+		return err
+	}); err != nil {
+		return err
+	}
+	if b.ToSlot > head {
+		return fmt.Errorf("--to-slot %d is past the local chain, which ends at slot %d", b.ToSlot, head)
+	}
 	recorder := &writeErrRecorder{BlobStorage: store}
 	report := &fillReport{}
 	g, gctx := errgroup.WithContext(ctx)
