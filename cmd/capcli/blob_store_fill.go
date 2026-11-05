@@ -22,13 +22,15 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -38,10 +40,11 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -93,12 +96,23 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 	}
 	defer unlock()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	db, blobStore, err := caplin1.OpenCaplinDatabase(ctx, dirs.CaplinIndexing, dirs.CaplinBlobs, false)
+	// Closed before the lock is released: closing syncs the blob store's count rows.
+	db, err := caplin1.OpenCaplinIndexDb(ctx, dirs.CaplinIndexing)
 	if err != nil {
 		return err
 	}
+	defer db.Close()
+	blobPath := filepath.Join(dirs.CaplinBlobs, "chaindata")
+	if err := os.MkdirAll(blobPath, 0o700); err != nil {
+		return err
+	}
+	blobDB, err := mdbx.New(dbcfg.CaplinDB, log.New()).Path(blobPath).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer blobDB.Close()
+	blobStore := blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinBlobs))
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = b.Chain
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
@@ -138,7 +152,7 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 		return err
 	}
 	if len(report.failed) > 0 {
-		return fmt.Errorf("%d slots could not be filled from any endpoint: %s", len(report.failed), formatSlots(report.failed))
+		return fmt.Errorf("%d slots could not be checked or filled: %s", len(report.failed), formatSlots(report.failed))
 	}
 	return nil
 }
@@ -151,13 +165,19 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 	var block *cltypes.SignedBeaconBlock
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		if root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot); err != nil || root == (common.Hash{}) {
+		if root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot); err != nil {
 			return err
 		}
 		block, err = blocks.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
 		return err
 	}); err != nil {
 		return fmt.Errorf("read slot %d: %w", slot, err)
+	}
+	// An empty slot has neither; with only one of them the slot cannot be checked.
+	if (root == common.Hash{}) != (block == nil) {
+		log.Warn("Slot has a block without a canonical root, or a root without a block, cannot be checked", "slot", slot, "blockRoot", root)
+		report.fail(slot)
+		return nil
 	}
 	if block == nil || block.Version() < clparams.DenebVersion {
 		return nil
@@ -167,7 +187,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		return nil
 	}
 	report.withBlobs.Add(1)
-	if storedBlobsValid(ctx, store, slot, root, commitments) {
+	if storedBlobsValid(ctx, store, slot, root, block) {
 		report.valid.Add(1)
 		return nil
 	}
@@ -182,7 +202,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if err := store.err(); err != nil {
 			return fmt.Errorf("blob store write failed, stopping: %w", err)
 		}
-		if lastErr == nil && !storedBlobsValid(ctx, store, slot, root, commitments) {
+		if lastErr == nil && !storedBlobsValid(ctx, store, slot, root, block) {
 			lastErr = errors.New("the stored sidecars do not read back")
 		}
 		if lastErr == nil {
@@ -225,26 +245,28 @@ func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, end
 	return storeRemoteBlobs(ctx, store, ids, sidecars, block)
 }
 
-// storedBlobsValid reports whether the store serves one sidecar per commitment, each carrying its
-// commitment and a valid KZG proof for its blob. A read error counts as invalid, so the slot is
-// rewritten; a store that cannot write then stops the run.
-func storedBlobsValid(ctx context.Context, store blob_storage.BlobStorage, slot uint64, root common.Hash, commitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+// storedBlobsValid reports whether the store serves one valid sidecar per commitment: each carries
+// its commitment, a header of this block with its signature, and valid inclusion and KZG proofs. A
+// read error counts as invalid, so the slot is rewritten; a store that cannot write then stops the
+// run.
+func storedBlobsValid(ctx context.Context, store blob_storage.BlobStorage, slot uint64, root common.Hash, block *cltypes.SignedBeaconBlock) bool {
+	commitments := block.Block.Body.GetBlobKzgCommitments()
 	sidecars, found, err := store.ReadBlobSidecars(ctx, slot, root)
 	if err != nil || !found || len(sidecars) != commitments.Len() {
 		return false
 	}
-	blobs := make([]*goethkzg.Blob, len(sidecars))
-	kzgCommitments := make([]goethkzg.KZGCommitment, len(sidecars))
-	proofs := make([]goethkzg.KZGProof, len(sidecars))
 	for i, sidecar := range sidecars {
 		if sidecar.Index != uint64(i) || common.Bytes48(*commitments.Get(i)) != sidecar.KzgCommitment {
 			return false
 		}
-		blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
-		kzgCommitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
-		proofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
 	}
-	return kzg.Ctx().VerifyBlobKZGProofBatch(blobs, kzgCommitments, proofs) == nil
+	return blob_storage.VerifyBlobSidecars(sidecars, block.Version(), func(header *cltypes.SignedBeaconBlockHeader) error {
+		headerRoot, err := header.Header.HashSSZ()
+		if err != nil || headerRoot != root || header.Signature != block.Signature {
+			return errors.New("the sidecar header is not the block's")
+		}
+		return nil
+	}) == nil
 }
 
 // writeErrRecorder keeps the first failed store write. The insert path reports it like a bad

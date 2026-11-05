@@ -108,7 +108,7 @@ func (f *fillFixture) storeValid(root common.Hash) {
 }
 
 func (f *fillFixture) storedValid(slot uint64, root common.Hash) bool {
-	return storedBlobsValid(f.t.Context(), f.store, slot, root, f.blocks.blocks[slot].Block.Body.BlobKzgCommitments)
+	return storedBlobsValid(f.t.Context(), f.store, slot, root, f.blocks.blocks[slot])
 }
 
 // endpoint serves the fixture's sidecars, or 404s when missing is set, and counts requests per root.
@@ -162,16 +162,39 @@ func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
 }
 
 func TestBlobArchiveStoreFillReplacesInvalidSidecars(t *testing.T) {
+	for name, corrupt := range map[string]func(*cltypes.BlobSidecar){
+		"blob":            func(s *cltypes.BlobSidecar) { s.Blob[0] ^= 0xff },
+		"header":          func(s *cltypes.BlobSidecar) { s.SignedBlockHeader.Header.ProposerIndex++ },
+		"signature":       func(s *cltypes.BlobSidecar) { s.SignedBlockHeader.Signature[0] ^= 0xff },
+		"inclusion proof": func(s *cltypes.BlobSidecar) { s.CommitmentInclusionProof.Set(0, common.Hash{0xff}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			root := f.addBlock(fillTestSlot, 2)
+			bad := f.sidecars[root][1].Clone().(*cltypes.BlobSidecar)
+			encoded, err := f.sidecars[root][1].EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.NoError(t, bad.DecodeSSZ(encoded, int(clparams.DenebVersion)))
+			corrupt(bad)
+			require.NoError(t, f.store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{f.sidecars[root][0], bad}))
+			require.False(t, f.storedValid(fillTestSlot, root))
+			url, _ := f.endpoint(false)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+			require.True(t, f.storedValid(fillTestSlot, root))
+		})
+	}
+}
+
+// A block the reader serves without a canonical root cannot be checked, so the run must not
+// report success over it.
+func TestBlobArchiveStoreFillReportsASlotWithoutCanonicalRoot(t *testing.T) {
 	f := newFillFixture(t)
-	root := f.addBlock(fillTestSlot, 2)
-	bad := *f.sidecars[root][1]
-	bad.Blob[0] ^= 0xff // the proof no longer matches
-	require.NoError(t, f.store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{f.sidecars[root][0], &bad}))
-	require.False(t, f.storedValid(fillTestSlot, root))
+	f.blocks.blocks[fillTestSlot] = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	url, _ := f.endpoint(false)
 
-	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
-	require.True(t, f.storedValid(fillTestSlot, root))
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil)
+	require.ErrorContains(t, err, fmt.Sprint(fillTestSlot))
 }
 
 func TestBlobArchiveStoreFillDryRunFetchesAndWritesNothing(t *testing.T) {
