@@ -87,15 +87,9 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	case topic == gossip.TopicNameVoluntaryExit:
 		return g.staticTopicParams(voluntaryExitWeight, 2, 5)
 	case gossip.IsTopicBeaconAttestation(topic):
-		if params := g.defaultAggregateSubnetTopicParams(); params != nil {
-			return params
-		}
-		return g.rateBasedTopicParams(attestationTotalWeight/float64(g.networkConfig.AttestationSubnetCount), 0)
+		return g.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
-		if params := g.defaultSyncSubnetTopicParams(g.activeIndicies); params != nil {
-			return params
-		}
-		return g.rateBasedTopicParams(syncCommitteesTotalWeight/float64(g.beaconConfig.SyncCommitteeSubnetCount), 0)
+		return g.defaultSyncSubnetTopicParams(g.activeIndicies)
 	default:
 		return nil
 	}
@@ -252,6 +246,7 @@ func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *p
 	subnetCount := g.beaconConfig.SyncCommitteeSubnetCount
 	// Get weight for each specific subnet.
 	topicWeight := syncCommitteesTotalWeight / float64(subnetCount)
+	params := g.rateBasedTopicParams(topicWeight, 0)
 	syncComSize := g.beaconConfig.SyncCommitteeSize
 	// Set the max as the sync committee size
 	if activeValidators > syncComSize {
@@ -260,7 +255,7 @@ func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *p
 	subnetWeight := activeValidators / subnetCount
 	if subnetWeight == 0 {
 		log.Debug("Skipping sync subnet delivery scoring: subnet weight is 0")
-		return nil
+		return params
 	}
 	firstDecayDuration := 1 * g.oneEpochDuration()
 	meshDecayDuration := 4 * g.oneEpochDuration()
@@ -269,37 +264,30 @@ func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *p
 	// Determine expected first deliveries based on the message rate.
 	firstMessageCap, err := decayLimit(g.scoreDecay(firstDecayDuration), rate)
 	if err != nil {
-		log.Warn("Skipping initializing topic scoring")
-		return nil
+		log.Warn("Skipping sync subnet delivery scoring")
+		return params
 	}
 	firstMessageWeight := maxFirstDeliveryScore / firstMessageCap
 	// Determine expected mesh deliveries based on message rate applied with a dampening factor.
 	meshThreshold, err := decayThreshold(g.scoreDecay(meshDecayDuration), float64(subnetWeight)/dampeningFactor)
 	if err != nil {
-		log.Warn("Skipping initializing topic scoring")
-		return nil
+		log.Warn("Skipping sync subnet delivery scoring")
+		return params
 	}
 	meshCap := 4 * meshThreshold
 
-	return &pubsub.TopicScoreParams{
-		TopicWeight:                     topicWeight,
-		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
-		TimeInMeshQuantum:               g.oneSlotDuration(),
-		TimeInMeshCap:                   g.inMeshCap(),
-		FirstMessageDeliveriesWeight:    firstMessageWeight,
-		FirstMessageDeliveriesDecay:     g.scoreDecay(firstDecayDuration),
-		FirstMessageDeliveriesCap:       firstMessageCap,
-		MeshMessageDeliveriesWeight:     0,
-		MeshMessageDeliveriesDecay:      g.scoreDecay(meshDecayDuration),
-		MeshMessageDeliveriesCap:        meshCap,
-		MeshMessageDeliveriesThreshold:  meshThreshold,
-		MeshMessageDeliveriesWindow:     2 * time.Second,
-		MeshMessageDeliveriesActivation: g.oneEpochDuration(),
-		MeshFailurePenaltyWeight:        0,
-		MeshFailurePenaltyDecay:         g.scoreDecay(meshDecayDuration),
-		InvalidMessageDeliveriesWeight:  -maxScore() / topicWeight,
-		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
-	}
+	params.TimeInMeshWeight = maxInMeshScore / g.inMeshCap()
+	params.TimeInMeshCap = g.inMeshCap()
+	params.FirstMessageDeliveriesWeight = firstMessageWeight
+	params.FirstMessageDeliveriesDecay = g.scoreDecay(firstDecayDuration)
+	params.FirstMessageDeliveriesCap = firstMessageCap
+	params.MeshMessageDeliveriesDecay = g.scoreDecay(meshDecayDuration)
+	params.MeshMessageDeliveriesCap = meshCap
+	params.MeshMessageDeliveriesThreshold = meshThreshold
+	params.MeshMessageDeliveriesWindow = 2 * time.Second
+	params.MeshMessageDeliveriesActivation = g.oneEpochDuration()
+	params.MeshFailurePenaltyDecay = g.scoreDecay(meshDecayDuration)
+	return params
 }
 
 // decayLimit provides the value till which a decay process will
@@ -351,16 +339,17 @@ func (g *GossipManager) defaultAggregateSubnetTopicParams() *pubsub.TopicScorePa
 	subnetCount := g.networkConfig.AttestationSubnetCount
 	// Get weight for each specific subnet.
 	topicWeight := float64(attestationTotalWeight) / float64(subnetCount)
+	params := g.rateBasedTopicParams(topicWeight, 0)
 	subnetWeight := g.activeIndicies / subnetCount
 	if subnetWeight == 0 {
 		log.Debug("Skipping attestation subnet delivery scoring: subnet weight is 0", "activeValidatorCount", g.activeIndicies)
-		return nil
+		return params
 	}
 	// Determine the amount of validators expected in a subnet in a single slot.
 	numPerSlot := time.Duration(subnetWeight / g.beaconConfig.SlotsPerEpoch)
 	if numPerSlot == 0 {
 		log.Trace("Skipping attestation subnet delivery scoring: numPerSlot is 0")
-		return nil
+		return params
 	}
 	comsPerSlot := g.committeeCountPerSlot()
 	exceedsThreshold := comsPerSlot >= 2*subnetCount/g.beaconConfig.SlotsPerEpoch
@@ -374,35 +363,30 @@ func (g *GossipManager) defaultAggregateSubnetTopicParams() *pubsub.TopicScorePa
 	// Determine expected first deliveries based on the message rate.
 	firstMessageCap, err := decayLimit(g.scoreDecay(firstDecayDuration), rate)
 	if err != nil {
-		log.Trace("skipping initializing topic scoring", "err", err)
-		return nil
+		log.Trace("Skipping attestation subnet delivery scoring", "err", err)
+		return params
 	}
 	firstMessageWeight := float64(maxFirstDeliveryScore) / firstMessageCap
 	// Determine expected mesh deliveries based on message rate applied with a dampening factor.
 	meshThreshold, err := decayThreshold(g.scoreDecay(meshDecayDuration), float64(numPerSlot)/float64(dampeningFactor))
 	if err != nil {
-		log.Trace("skipping initializing topic scoring", "err", err)
-		return nil
+		log.Trace("Skipping attestation subnet delivery scoring", "err", err)
+		return params
 	}
 	meshCap := 4 * meshThreshold
 
-	return &pubsub.TopicScoreParams{
-		TopicWeight:                     topicWeight,
-		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
-		TimeInMeshQuantum:               g.oneSlotDuration(),
-		TimeInMeshCap:                   g.inMeshCap(),
-		FirstMessageDeliveriesWeight:    firstMessageWeight,
-		FirstMessageDeliveriesDecay:     g.scoreDecay(firstDecayDuration),
-		FirstMessageDeliveriesCap:       firstMessageCap,
-		MeshMessageDeliveriesDecay:      g.scoreDecay(meshDecayDuration),
-		MeshMessageDeliveriesCap:        meshCap,
-		MeshMessageDeliveriesThreshold:  meshThreshold,
-		MeshMessageDeliveriesWindow:     2 * time.Second,
-		MeshMessageDeliveriesActivation: 1 * g.oneEpochDuration(),
-		MeshFailurePenaltyDecay:         g.scoreDecay(meshDecayDuration),
-		InvalidMessageDeliveriesWeight:  -maxScore() / topicWeight,
-		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
-	}
+	params.TimeInMeshWeight = maxInMeshScore / g.inMeshCap()
+	params.TimeInMeshCap = g.inMeshCap()
+	params.FirstMessageDeliveriesWeight = firstMessageWeight
+	params.FirstMessageDeliveriesDecay = g.scoreDecay(firstDecayDuration)
+	params.FirstMessageDeliveriesCap = firstMessageCap
+	params.MeshMessageDeliveriesDecay = g.scoreDecay(meshDecayDuration)
+	params.MeshMessageDeliveriesCap = meshCap
+	params.MeshMessageDeliveriesThreshold = meshThreshold
+	params.MeshMessageDeliveriesWindow = 2 * time.Second
+	params.MeshMessageDeliveriesActivation = g.oneEpochDuration()
+	params.MeshFailurePenaltyDecay = g.scoreDecay(meshDecayDuration)
+	return params
 }
 
 func (g *GossipManager) oneSlotDuration() time.Duration {

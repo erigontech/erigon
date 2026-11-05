@@ -33,12 +33,11 @@ func TestAttestationSubnetScoringWithFewValidatorsPerMeshPeer(t *testing.T) {
 	newManager := func(activeValidators uint64) *GossipManager {
 		return &GossipManager{beaconConfig: beaconConfig, networkConfig: networkConfig, activeIndicies: activeValidators}
 	}
-	require.Nil(t, newManager(2047).defaultAggregateSubnetTopicParams())
 	topic := newScoredTopicForTest(t)
 	for _, tc := range []struct {
 		activeValidators uint64
 		rate             float64
-	}{{2048, 0.25}, {4096, 0.5}, {6144, 0.75}, {8191, 0.75}, {8192, 1}} {
+	}{{2047, 0}, {2048, 0.25}, {4096, 0.5}, {6144, 0.75}, {8191, 0.75}, {8192, 1}} {
 		requireAcceptedTopicScoreParams(t, topic, newManager(tc.activeValidators).defaultAggregateSubnetTopicParams(), tc.activeValidators, tc.rate)
 	}
 }
@@ -46,12 +45,11 @@ func TestAttestationSubnetScoringWithFewValidatorsPerMeshPeer(t *testing.T) {
 func TestSyncSubnetScoringWithFewValidatorsPerMeshPeer(t *testing.T) {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	g := &GossipManager{beaconConfig: beaconConfig, networkConfig: networkConfig}
-	require.Nil(t, g.defaultSyncSubnetTopicParams(3))
 	topic := newScoredTopicForTest(t)
 	for _, tc := range []struct {
 		activeValidators uint64
 		rate             float64
-	}{{4, 0.25}, {8, 0.5}, {15, 0.75}, {16, 1}} {
+	}{{3, 0}, {4, 0.25}, {8, 0.5}, {15, 0.75}, {16, 1}} {
 		requireAcceptedTopicScoreParams(t, topic, g.defaultSyncSubnetTopicParams(tc.activeValidators), tc.activeValidators, tc.rate)
 	}
 }
