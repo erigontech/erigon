@@ -81,7 +81,8 @@ func TestArchiveColumnRetryDoesNotWaitForOperationFeed(t *testing.T) {
 	}).AnyTimes()
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, block))
-	ctx, cancel := context.WithCancel(t.Context())
+	handle := &publishedBlockJobHandle{job: serviceJob(t, service, root)}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*blockJobExpiry)
 	defer cancel()
 	go service.loop(ctx)
 	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
@@ -89,10 +90,9 @@ func TestArchiveColumnRetryDoesNotWaitForOperationFeed(t *testing.T) {
 	writeDone := make(chan error, 1)
 	go func() { writeDone <- storage.WriteColumnSidecars(t.Context(), root, 0, sidecar) }()
 
-	require.Eventually(t, func() bool {
-		_, queued := service.blocksScheduledForLaterExecution.Load(root)
-		return !queued
-	}, 5*time.Second, time.Millisecond, "the retry waited for the operation feed")
+	require.NoError(t, handle.Wait(ctx))
+	_, queued := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, queued)
 	<-events
 	require.NoError(t, <-writeDone)
 }

@@ -1419,3 +1419,17 @@ func TestVersionedRead_CodeSizeServedBySharedStore(t *testing.T) {
 	require.Equal(t, len(code), size)
 	require.Zero(t, reader.codeReads+reader.codeSizeReads)
 }
+
+// A versioned read that finds a stateObject materialized before the IBS was bound to a
+// version map fails the read instead of panicking.
+func TestVersionedRead_MaterializedObjectFailsTheRead(t *testing.T) {
+	t.Parallel()
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xab"))
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	ibs.SetVersionMap(NewVersionMap(nil))
+	require.NotPanics(t, func() {
+		_, err := ibs.GetState(addr, accounts.InternKey(common.Hash{31: 1}))
+		require.Error(t, err)
+	})
+}

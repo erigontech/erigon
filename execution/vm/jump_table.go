@@ -69,6 +69,7 @@ var (
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
 	amsterdamInstructionSet        = newAmsterdamInstructionSet()
+	bogotaInstructionSet           = newBogotaInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -100,6 +101,19 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
+}
+
+func newBogotaInstructionSet() JumpTable {
+	instructionSet := newAmsterdamInstructionSet()
+	instructionSet[APPROVE] = operation{execute: opApprove, dynamicGas: gasReturn, memorySize: memoryReturn, numPop: 3}
+	instructionSet[TXPARAM] = operation{execute: opTxParam, constantGas: 2, numPop: 1, numPush: 1}
+	instructionSet[FRAMEDATALOAD] = operation{execute: opFrameDataLoad, constantGas: 3, numPop: 2, numPush: 1}
+	instructionSet[FRAMEDATACOPY] = operation{execute: opFrameDataCopy, constantGas: 3, dynamicGas: gasCallDataCopy, memorySize: memoryCallDataCopy, numPop: 4}
+	instructionSet[FRAMEPARAM] = operation{execute: opFrameParam, constantGas: 2, numPop: 2, numPush: 1}
+	instructionSet[SIGPARAM] = operation{execute: opSigParam, constantGas: 2, numPop: 2, numPush: 1}
+	instructionSet[SIGDATACOPY] = operation{execute: opSigDataCopy, constantGas: 3, dynamicGas: gasCallDataCopy, memorySize: memoryCallDataCopy, numPop: 4}
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
 }
 
 func newAmsterdamInstructionSet() JumpTable {
