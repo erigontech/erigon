@@ -1188,6 +1188,9 @@ func TestExecutionPayloadServiceReturnsGossipVerdictBeforeImportFinishes(t *test
 	case <-time.After(5 * time.Second):
 		t.Fatal("payload import did not start")
 	}
+	deadline, bounded := importCtx.Deadline()
+	require.True(t, bounded)
+	require.WithinDuration(t, time.Now().Add(executionPayloadImportTimeout), deadline, time.Second)
 	select {
 	case err := <-verdict:
 		require.NoError(t, err)
