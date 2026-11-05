@@ -964,8 +964,8 @@ func TestPooledTxnRequestHoldsAtMost256Hashes(t *testing.T) {
 	for i := range hashes {
 		hashes[i] = [32]byte{byte(i), byte(i >> 8), 0xcc}
 	}
-	a.announce(t, peerA, hashes[:150]...)
-	a.announce(t, peerA, hashes[150:]...)
+	a.announce(t, peerA, hashes...)
+	require.Equal(t, [][64]byte{peerA, peerA}, a.requestedFrom, "one announcement of 300 hashes needs two requests")
 	a.announce(t, peerB, hashes...)
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerA, peerB, peerB}, a.requestedFrom)
