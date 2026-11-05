@@ -529,6 +529,7 @@ func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
 func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
 	failed := errors.New("io_uring read failed")
 	require.Equal(t, failed, firstFailure(nil, kv.ErrPrefetchIncomplete, failed))
+	require.Equal(t, failed, firstFailure(context.Canceled, failed), "a cancelled chunk does not hide a read failure")
 	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
 	require.NoError(t, firstFailure(nil, nil))
 }

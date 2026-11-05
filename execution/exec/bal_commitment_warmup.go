@@ -334,10 +334,11 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 	return first
 }
 
-// firstFailure returns the first error that is a real read failure, else the first non-nil one.
+// firstFailure returns the first error that is a real read failure (not an incomplete batch or a cancellation),
+// else the first non-nil one.
 func firstFailure(errs ...error) error {
 	for _, err := range errs {
-		if err != nil && !errors.Is(err, kv.ErrPrefetchIncomplete) {
+		if err != nil && !errors.Is(err, kv.ErrPrefetchIncomplete) && !commonerrors.IsOnlyCanceled(err) {
 			return err
 		}
 	}
