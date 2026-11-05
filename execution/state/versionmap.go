@@ -257,9 +257,9 @@ type VersionMap struct {
 	// write-once, so it lives in lock-free maps separate from the per-account e.mu-guarded cells
 	// (which carry the mutable in-block/OCC writes). A cold read resolves the origin here lock-free
 	// at version originIndex; a hot account read by many workers no longer serializes on e.mu.
-	// readerCancel maps a reading tx index to the cancel of its speculative run: reading an unfinished write
-	// makes the run's result void, so it stops early.
-	readerCancel   sync.Map
+	// readerCancel[txIdx+1] is the abort flag of txIdx's speculative run: reading an unfinished write makes
+	// the run's result void, so it stops early. Sized by InitStamps.
+	readerCancel   []atomic.Pointer[atomic.Bool]
 	originAccounts atomic.Pointer[xsync.Map[accounts.Address, *accounts.Account]] // nil ptr = committed-absent
 	originStorage  atomic.Pointer[xsync.Map[originStorageKey, uint256.Int]]
 
@@ -291,6 +291,7 @@ type writeStamps struct {
 func (vm *VersionMap) InitStamps(lastTxIndex int) {
 	n := lastTxIndex + 2
 	vm.stamps = &writeStamps{n: n, inflight: make([]atomic.Int32, n+1), last: make([]atomic.Uint64, n+1)}
+	vm.readerCancel = make([]atomic.Pointer[atomic.Bool], n)
 	vm.writeSeq.Store(1)
 }
 
@@ -2358,20 +2359,17 @@ func (res ReadResult) resolved() bool {
 	return s == MVReadResultDone || s == MVReadResultValidated
 }
 
-// SetReaderCancel makes a read by txIdx of an unfinished write call cancel; nil removes it.
-func (vm *VersionMap) SetReaderCancel(txIdx int, cancel func()) {
-	if vm == nil {
-		return
+// SetReaderCancel makes a read by txIdx of an unfinished write set abort; nil removes it.
+func (vm *VersionMap) SetReaderCancel(txIdx int, abort *atomic.Bool) {
+	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.readerCancel) {
+		vm.readerCancel[txIdx+1].Store(abort)
 	}
-	if cancel == nil {
-		vm.readerCancel.Delete(txIdx)
-		return
-	}
-	vm.readerCancel.Store(txIdx, cancel)
 }
 
 func (vm *VersionMap) cancelReader(txIdx int) {
-	if c, ok := vm.readerCancel.Load(txIdx); ok {
-		c.(func())()
+	if txIdx+1 >= 0 && txIdx+1 < len(vm.readerCancel) {
+		if abort := vm.readerCancel[txIdx+1].Load(); abort != nil {
+			abort.Store(true)
+		}
 	}
 }

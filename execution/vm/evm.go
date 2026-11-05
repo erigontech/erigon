@@ -186,6 +186,9 @@ func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtype
 // It is safe to call concurrently and more than once.
 func (evm *EVM) Cancel() { evm.abort.Store(true) }
 
+// CancelFlag is the flag Cancel sets, for a caller that cancels the run without holding the EVM.
+func (evm *EVM) CancelFlag() *atomic.Bool { return &evm.abort }
+
 // Cancelled reports whether cancellation is currently requested.
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 

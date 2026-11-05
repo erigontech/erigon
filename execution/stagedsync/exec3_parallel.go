@@ -2460,7 +2460,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
 	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
-	ev.versionMap.SetReaderCancel(ev.Version().TxIndex, evm.Cancel)
+	ev.versionMap.SetReaderCancel(ev.Version().TxIndex, evm.CancelFlag())
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 	ev.versionMap.SetReaderCancel(ev.Version().TxIndex, nil)

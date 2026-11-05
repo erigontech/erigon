@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"math/rand"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2309,21 +2310,23 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 
 func TestReaderCancelRunsWhenTheReaderHitsAnUnfinishedWrite(t *testing.T) {
 	vm := NewVersionMap(nil)
+	vm.InitStamps(3)
 	addr := accounts.InternAddress(common.HexToAddress("0xca"))
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false) // tx 1 still runs
-	cancelled := map[int]int{}
-	for _, tx := range []int{2, 3} {
-		vm.SetReaderCancel(tx, func() { cancelled[tx]++ })
-	}
+	var abort2, abort3 atomic.Bool
+	vm.SetReaderCancel(2, &abort2)
+	vm.SetReaderCancel(3, &abort3)
 	vm.ReadBalance(addr, 2)
-	require.Equal(t, map[int]int{2: 1}, cancelled, "only the reader of the unfinished write is cancelled")
+	require.True(t, abort2.Load(), "the reader of the unfinished write is cancelled")
+	require.False(t, abort3.Load(), "other runs are not")
 
+	abort2.Store(false)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), true)
 	vm.ReadBalance(addr, 3)
-	require.Equal(t, map[int]int{2: 1}, cancelled, "a finished write cancels nothing")
+	require.False(t, abort3.Load(), "a finished write cancels nothing")
 
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(1), false)
 	vm.SetReaderCancel(2, nil)
 	vm.ReadBalance(addr, 2)
-	require.Equal(t, map[int]int{2: 1}, cancelled, "a removed cancel is not called")
+	require.False(t, abort2.Load(), "a removed cancel is not called")
 }
