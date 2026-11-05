@@ -121,7 +121,8 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 
 	// Charge from the requested identifier count, capped at the response limit.
 	// The stream wrapper has already consumed one token for admission.
-	if cost := max(min(req.Len(), maxBlobsThroughputPerRequest)-1, 0); !c.consumeRateLimit(s, cost) {
+	estimatedResponses := min(req.Len(), maxBlobsThroughputPerRequest)
+	if cost := max(estimatedResponses-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

@@ -46,7 +46,8 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 
 	// Consume additional rate-limit tokens proportional to the blocks we may serve.
 	// The wrapper already consumed 1 token for admission.
-	if cost := max(int(min(req.Count, MaxRequestsBlocks))-1, 0); !c.consumeRateLimit(s, cost) {
+	estimatedResponses := min(req.Count, MaxRequestsBlocks)
+	if cost := max(int(estimatedResponses)-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
