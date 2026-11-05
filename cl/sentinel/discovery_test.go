@@ -350,3 +350,75 @@ func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
 	peerSubnets.SetBitAt(3, false)
 	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
 }
+
+func coverageWith(peers int) [attestationSubnetCount]int {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = peers
+	}
+	return coverage
+}
+
+func subnetIdxs(subnets []subnetSearchState) []int {
+	idxs := make([]int, len(subnets))
+	for i, s := range subnets {
+		idxs[i] = s.idx
+	}
+	return idxs
+}
+
+func TestSubnetSearchBackoffLetsFillableSubnetsTakeTheirTurn(t *testing.T) {
+	coverage := coverageWith(minimumPeersPerSubnet)
+	for i := range maxSubnetsPerCycle {
+		coverage[i] = 0 // no node advertises these
+	}
+	for i := maxSubnetsPerCycle; i < maxSubnetsPerCycle+4; i++ {
+		coverage[i] = minimumPeersPerSubnet - 1
+	}
+	var backoff subnetSearchBackoff
+	now := time.Now()
+
+	first := backoff.next(&coverage, now)
+	require.Len(t, first, maxSubnetsPerCycle)
+	require.Equal(t, minimumPeersPerSubnet, first[0].wanted, "the emptiest subnets come first")
+	backoff.record(first, now) // nothing found
+
+	second := backoff.next(&coverage, now.Add(subnetSearchInterval/2))
+	require.Equal(t, []int{maxSubnetsPerCycle, maxSubnetsPerCycle + 1, maxSubnetsPerCycle + 2, maxSubnetsPerCycle + 3}, subnetIdxs(second))
+}
+
+func TestSubnetSearchBackoffDoublesUpToTheCap(t *testing.T) {
+	coverage := coverageWith(minimumPeersPerSubnet)
+	coverage[5] = 0
+	var backoff subnetSearchBackoff
+	now := time.Now()
+	for _, want := range []time.Duration{subnetSearchInterval, 2 * subnetSearchInterval, 4 * subnetSearchInterval, 8 * subnetSearchInterval, maxSubnetSearchBackoff, maxSubnetSearchBackoff} {
+		searched := backoff.next(&coverage, now)
+		require.Equal(t, []int{5}, subnetIdxs(searched))
+		backoff.record(searched, now)
+		require.Empty(t, backoff.next(&coverage, now.Add(want-time.Millisecond)), "searched again before %v", want)
+		now = now.Add(want)
+	}
+}
+
+func TestSubnetSearchBackoffClearsOnAPeerOrOnceServed(t *testing.T) {
+	coverage := coverageWith(minimumPeersPerSubnet)
+	coverage[1], coverage[2] = 0, 0
+	var backoff subnetSearchBackoff
+	now := time.Now()
+	for range 3 {
+		searched := backoff.next(&coverage, now)
+		backoff.record(searched, now)
+		now = now.Add(maxSubnetSearchBackoff)
+	}
+
+	searched := backoff.next(&coverage, now)
+	require.Equal(t, []int{1, 2}, subnetIdxs(searched))
+	searched[0].found = 1 // subnet 1 got a peer
+	backoff.record(searched, now)
+	coverage[2] = minimumPeersPerSubnet // subnet 2 was filled by other connections
+	backoff.next(&coverage, now)
+	coverage[2] = 0 // and lost them again
+
+	require.Equal(t, []int{1, 2}, subnetIdxs(backoff.next(&coverage, now.Add(time.Millisecond))))
+}
