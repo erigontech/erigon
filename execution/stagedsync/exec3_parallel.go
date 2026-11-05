@@ -1272,6 +1272,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				executor.sealSkippedPrefix(t.Version().TxIndex)
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -2700,6 +2701,14 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	}
 	be.committedFrontier.Store(-1)
 	return be
+}
+
+// sealSkippedPrefix seals the txs before firstTxIndex: on a mid-block resume they are already applied
+// to the base state and never run here, so nothing may wait for them.
+func (be *blockExecutor) sealSkippedPrefix(firstTxIndex int) {
+	if firstTxIndex > 0 {
+		be.versionMap.SealUpTo(firstTxIndex - 1)
+	}
 }
 
 // indexReads records taskIdx as a reader of every address and path in rs. Entries and path
