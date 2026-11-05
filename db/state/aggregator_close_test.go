@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -36,6 +37,28 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestAggregatorCloseDoesNotPoll(t *testing.T) {
+	testMaintenanceObserver(t, func(t *testing.T, agg *Aggregator) {
+		finishWork := make(chan struct{})
+		agg.buildingFiles.Store(true)
+		require.True(t, agg.background.TryGo(func() {
+			defer agg.buildingFiles.Store(false)
+			<-finishWork
+		}))
+		closed := make(chan struct{})
+		go func() {
+			agg.Close()
+			close(closed)
+		}()
+		synctest.Wait()
+
+		finishedAt := time.Now()
+		close(finishWork)
+		<-closed
+		require.Zero(t, time.Since(finishedAt), "Close must return when background work finishes")
+	})
+}
 
 // The merge goroutine BuildFiles2 spawns must register on wg before the build
 // goroutine's wg.Done, so wg.Wait (what Close does) never races that Add from zero.
