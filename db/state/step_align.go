@@ -184,7 +184,7 @@ func stepAlignedListsEnd(lists []visibleFiles, stepSize, limit uint64) (uint64, 
 		}
 	}
 	for _, files := range lists {
-		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
+		for i := 1; i < len(files) && files[i].startTxNum <= end; i++ {
 			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
 				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
 			}

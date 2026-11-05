@@ -74,6 +74,18 @@ func TestStepAlignedEndAllowsPlainCommitmentRangeMismatch(t *testing.T) {
 	require.Equal(t, uint64(20), end)
 }
 
+func TestStepAlignedEndRefusesGapAtAlignedEnd(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 40)
+	dirs := agg.Dirs()
+	generateAccountsFile(t, dirs, []testFileRange{{0, 1}, {2, 3}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 1}, {2, 3}})
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, agg.OpenFolder(db))
+	_, _, err := agg.StepAlignedEnd(80)
+	require.ErrorContains(t, err, "no visible file for txNum 40-80")
+}
+
 func TestStepAlignedEndRefusesReferencedCommitmentRangeMismatch(t *testing.T) {
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)

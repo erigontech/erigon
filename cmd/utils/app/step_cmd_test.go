@@ -237,6 +237,59 @@ func TestStepRebaseApplyRefusesNewFrozenCommitment(t *testing.T) {
 	require.Equal(t, uint64(16), untouched.StepSize)
 }
 
+func TestStepRebaseIncreaseHexV3FilesDoesNotPanic(t *testing.T) {
+	commitmentflags.Restore(t)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	variant := state.TrieVariantHex
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{
+		StepSize:          16,
+		StepsInFrozenFile: 4,
+		TrieVariant:       &variant,
+	}))
+	writeTestFile(t, filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"))
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	var plan stepRebasePlan
+	require.NotPanics(t, func() {
+		plan, err = planStepRebase(context.Background(), dirs, settings, 32, false, logger)
+	})
+	if err == nil {
+		require.Equal(t, uint64(32), plan.settings.StepSize)
+	}
+}
+
+func TestStepRebaseApplyRefusesChangedConversionPoint(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	writeTestErigonDBSettings(t, dirs, 16, 4)
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	torrent := filepath.Join(dirs.Snap, "erigondb.toml.torrent")
+	writeTestFile(t, torrent)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := buildStepRebasePlan(dirs, settings, 32, false, 0, nil, nil, logger)
+	require.NoError(t, err)
+	changed := *settings
+	conversionBlock, conversionTxNum := uint64(9), uint64(330)
+	changed.ConversionBlockNum = &conversionBlock
+	changed.ConversionTxNum = &conversionTxNum
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &changed))
+
+	err = applyStepRebasePlan(context.Background(), dirs, plan, logger)
+	require.ErrorContains(t, err, "conversion point")
+	require.FileExists(t, torrent)
+	untouched, err := state.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	require.Equal(t, uint64(16), untouched.StepSize)
+	_, _, converted, err := untouched.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, converted)
+}
+
 func TestStepRebaseIncreaseRefusesMisalignedFile(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	writeTestFile(t, filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-20.kv"))

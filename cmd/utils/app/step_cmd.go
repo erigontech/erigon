@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -33,14 +34,15 @@ import (
 )
 
 type stepRebasePlan struct {
-	renames      []string // flattened from/to pairs
-	deletions    []string
-	resetExec    bool
-	fromStepSize uint64
-	alignFactor  uint64
-	alignEnd     uint64
-	stoppedEnds  map[kv.Domain]uint64
-	settings     state.ErigonDBSettings
+	renames         []string // flattened from/to pairs
+	deletions       []string
+	resetExec       bool
+	fromStepSize    uint64
+	alignFactor     uint64
+	alignEnd        uint64
+	stoppedEnds     map[kv.Domain]uint64
+	plannedSettings state.ErigonDBSettings
+	settings        state.ErigonDBSettings
 }
 
 var stepFileRe = regexp.MustCompile(`^v(\d+(?:\.\d+)?)-(.+)\.(\d+)-(\d+)\.([^.]+)$`)
@@ -199,7 +201,7 @@ func buildStepRebasePlan(dirs datadir.Dirs, settings *state.ErigonDBSettings, ne
 	newSettings := *settings
 	newSettings.StepSize = newStepSize
 	newSettings.StepsInFrozenFile = newFrozenSteps
-	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, fromStepSize: currentStepSize, alignFactor: alignFactor, alignEnd: alignEnd, stoppedEnds: stoppedEnds, settings: newSettings}, nil
+	return stepRebasePlan{renames: rens, deletions: dels, resetExec: keepBlocks, fromStepSize: currentStepSize, alignFactor: alignFactor, alignEnd: alignEnd, stoppedEnds: stoppedEnds, plannedSettings: *settings, settings: newSettings}, nil
 }
 
 func stoppedCommitmentEnds(agg *state.Aggregator, end uint64) map[kv.Domain]uint64 {
@@ -300,6 +302,25 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 			return fmt.Errorf("%s domain is frozen, its files cannot be rebased", domain)
 		}
 	}
+	if plan.alignFactor != 0 {
+		if current.RefsInCommitmentBranches() {
+			return fmt.Errorf("references_in_commitment_branches is on: merged commitment files would be referenced, and read as plain at step size %d", plan.settings.StepSize)
+		}
+		_, conversionTxNum, converted, err := current.ConversionPoint()
+		if err != nil {
+			return err
+		}
+		keptEnd := plan.alignEnd
+		for _, end := range plan.stoppedEnds {
+			keptEnd = min(keptEnd, end)
+		}
+		if converted && keptEnd <= conversionTxNum {
+			return fmt.Errorf("the last file boundary at a multiple of %d txs is txNum %d, not past the PBT conversion point txNum %d", plan.settings.StepSize, keptEnd, conversionTxNum)
+		}
+	}
+	if !reflect.DeepEqual(current, &plan.plannedSettings) {
+		return fmt.Errorf("erigondb.toml changed since the plan")
+	}
 	stoppedEnds, err := readStoppedCommitmentEnds(ctx, dirs)
 	if err != nil {
 		return err
@@ -307,15 +328,31 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 	if !stoppedCommitmentSetsEqual(stoppedEnds, plan.stoppedEnds) {
 		return fmt.Errorf("commitment stop markers changed since the plan")
 	}
+	newSettings := *current
+	newSettings.StepSize = plan.settings.StepSize
+	factor := plan.settings.StepSize / plan.fromStepSize
+	if plan.settings.StepSize > plan.fromStepSize {
+		newSettings.StepsInFrozenFile = current.StepsInFrozenFile / factor
+	} else {
+		factor = plan.fromStepSize / plan.settings.StepSize
+		newSettings.StepsInFrozenFile = current.StepsInFrozenFile * factor
+	}
 	renames, deletions := plan.renames, slices.Clone(plan.deletions)
 	if plan.alignFactor != 0 {
 		if err := withStepRebaseAgg(ctx, dirs, plan.resetExec, logger, func(agg *state.Aggregator) error {
-			end, stoppedEnd, err := agg.AlignFilesToStepSize(ctx, plan.settings.StepSize)
+			alignedEnd, alignedStoppedEnd, err := agg.StepAlignedEnd(newSettings.StepSize)
 			if err != nil {
 				return err
 			}
-			if end != plan.alignEnd || !maps.Equal(stoppedCommitmentEnds(agg, stoppedEnd), plan.stoppedEnds) {
-				return fmt.Errorf("state files changed since the plan: aligned up to txNum %d (stopped commitment %d), planned %d %v", end, stoppedEnd, plan.alignEnd, plan.stoppedEnds)
+			if alignedEnd != plan.alignEnd || !maps.Equal(stoppedCommitmentEnds(agg, alignedStoppedEnd), plan.stoppedEnds) {
+				return fmt.Errorf("state files changed since the plan: aligned up to txNum %d (stopped commitment %d), planned %d %v", alignedEnd, alignedStoppedEnd, plan.alignEnd, plan.stoppedEnds)
+			}
+			_, stoppedEnd, err := agg.AlignFilesToStepSize(ctx, newSettings.StepSize)
+			if err != nil {
+				return err
+			}
+			if !maps.Equal(stoppedCommitmentEnds(agg, stoppedEnd), plan.stoppedEnds) {
+				return fmt.Errorf("commitment stop markers changed since the plan")
 			}
 			return nil
 		}); err != nil {
@@ -367,7 +404,7 @@ func applyStepRebasePlan(ctx context.Context, dirs datadir.Dirs, plan stepRebase
 		}
 		fmt.Printf("Renamed: %s => %s\n", from, to)
 	}
-	settingsBytes, err := toml.Marshal(plan.settings)
+	settingsBytes, err := toml.Marshal(newSettings)
 	if err != nil {
 		return err
 	}
@@ -444,6 +481,9 @@ func withStepRebaseAgg(ctx context.Context, dirs datadir.Dirs, keepBlocks bool, 
 		if hasCommitmentHistory {
 			statecfg.EnableHistoricalCommitment()
 		}
+	}
+	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
+		return err
 	}
 	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
