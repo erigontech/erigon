@@ -400,6 +400,7 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 	if customProvider != nil {
 		assembleParams.CustomTxnProvider = customProvider
+		assembleParams.RequireAllTransactions = true
 	}
 	if extraData != nil {
 		assembleParams.ExtraData = *extraData
@@ -479,8 +480,7 @@ func (t *testingImpl) assembleTestingBlock(
 }
 
 // staticTxnProvider keeps a fixed transaction list for the testing_ namespace.
-// The builder's filter tracks yielded hashes; removing a hash allows a retry once
-// execution closes a nonce gap, so the list must remain available across calls.
+// Keep the supplied list intact for the final check against the assembled block.
 type staticTxnProvider struct {
 	txns []types.Transaction
 }

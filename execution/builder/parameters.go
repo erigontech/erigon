@@ -39,6 +39,8 @@ type Parameters struct {
 	// CustomTxnProvider overrides the block's transaction source when non-nil.
 	// nil → use the injected TxnProvider (normal mempool path)
 	CustomTxnProvider txnprovider.TxnProvider
+	// RequireAllTransactions includes the provided list in order, without filtering or skipping.
+	RequireAllTransactions bool
 	// ExtraData overrides the builder's configured extra data when non-nil.
 	ExtraData []byte
 }

@@ -1174,10 +1174,14 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 		otherCreator bool
 		nonceOffset  int64
 		commit       bool
+		independent  bool
 	}{
 		{name: "legacy"},
+		{name: "legacy with independent successor", independent: true},
 		{name: "keyed", key: 5},
+		{name: "keyed with independent successor", key: 5, independent: true},
 		{name: "other creator", otherCreator: true},
+		{name: "other creator with independent successor", otherCreator: true, independent: true},
 		{name: "nonce gap", key: 5, nonceOffset: 1},
 		{name: "consumed nonce", key: 5, nonceOffset: -1},
 		{name: "commit nonce gap", key: 5, nonceOffset: 1, commit: true},
@@ -1201,6 +1205,10 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 				},
 			}
 			genesis.Alloc[creator] = types.GenesisAccount{Balance: big.NewInt(common.Ether), Code: code}
+			independent := common.HexToAddress("0x3000")
+			if tc.independent {
+				genesis.Alloc[independent] = types.GenesisAccount{Balance: big.NewInt(common.Ether), Code: code}
+			}
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
 			parentChain, err := m.GenerateChain(1, nil)
 			require.NoError(t, err)
@@ -1226,8 +1234,15 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: creator, Nonce: secondNonce,
 				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: []types.Frame{approval},
 			}
-			txs := make([]hexutil.Bytes, 0, 2)
-			for _, tx := range []*types.FrameTransaction{first, second} {
+			frames := []*types.FrameTransaction{first, second}
+			if tc.independent {
+				frames = append(frames, &types.FrameTransaction{
+					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: independent,
+					Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: []types.Frame{approval},
+				})
+			}
+			txs := make([]hexutil.Bytes, 0, len(frames))
+			for _, tx := range frames {
 				var encoded bytes.Buffer
 				require.NoError(t, tx.MarshalBinary(&encoded))
 				txs = append(txs, encoded.Bytes())

@@ -24,10 +24,11 @@ import (
 )
 
 type AssemblerCfg struct {
-	ChainConfig     *chain.Config
-	Engine          rules.Engine
-	BlockReader     dbservices.FullBlockReader
-	ExperimentalBAL bool
+	ChainConfig            *chain.Config
+	Engine                 rules.Engine
+	BlockReader            dbservices.FullBlockReader
+	ExperimentalBAL        bool
+	RequireAllTransactions bool
 }
 
 type AssembledBlock struct {
@@ -273,6 +274,9 @@ LOOP:
 		if stopped != nil {
 			select {
 			case <-stopped.C:
+				if ba.cfg.RequireAllTransactions {
+					return coalescedLogs, true, fmt.Errorf("transaction %d (%s): block building interrupted", txnIdx, txn.Hash())
+				}
 				done = true
 				break LOOP
 			default:
@@ -291,6 +295,9 @@ LOOP:
 		// Transactions can have a zero state gas limit, so only the execution
 		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), protocol.ErrGasLimitReached)
+			}
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
@@ -298,6 +305,9 @@ LOOP:
 
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
 		if rlpSpacePostTxn < 0 {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): exceeds block RLP size limit", txnIdx, txn.Hash())
+			}
 			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
 			logger.Debug(
 				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
@@ -311,6 +321,9 @@ LOOP:
 		// We use the eip155 signer regardless of the env hf.
 		from, err := txn.Sender(*signer)
 		if err != nil {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+			}
 			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
 			continue
 		}
@@ -318,6 +331,9 @@ LOOP:
 		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): replay protection is not active", txnIdx, txn.Hash())
+			}
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", ba.cfg.ChainConfig.SpuriousDragonBlock)
 			continue
 		}
@@ -330,6 +346,9 @@ LOOP:
 			}
 		} else {
 			clearTxIO()
+			if ba.cfg.RequireAllTransactions {
+				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+			}
 		}
 		switch {
 		case errors.Is(err, protocol.ErrGasLimitReached):
