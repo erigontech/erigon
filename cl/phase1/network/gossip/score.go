@@ -87,9 +87,15 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	case topic == gossip.TopicNameVoluntaryExit:
 		return g.staticTopicParams(voluntaryExitWeight, 2, 5)
 	case gossip.IsTopicBeaconAttestation(topic):
-		return g.defaultAggregateSubnetTopicParams()
+		if params := g.defaultAggregateSubnetTopicParams(); params != nil {
+			return params
+		}
+		return g.rateBasedTopicParams(attestationTotalWeight/float64(g.networkConfig.AttestationSubnetCount), 0)
 	case gossip.IsTopicSyncCommittee(topic):
-		return g.defaultSyncSubnetTopicParams(g.activeIndicies)
+		if params := g.defaultSyncSubnetTopicParams(g.activeIndicies); params != nil {
+			return params
+		}
+		return g.rateBasedTopicParams(syncCommitteesTotalWeight/float64(g.beaconConfig.SyncCommitteeSubnetCount), 0)
 	default:
 		return nil
 	}
@@ -218,10 +224,15 @@ func (g *GossipManager) staticTopicParams(topicWeight, firstMessageWeight, first
 // rateBasedTopicParams scores a topic by its expected message rate; mesh delivery stays
 // unscored, like the subnet topics.
 func (g *GossipManager) rateBasedTopicParams(topicWeight float64, messagesPerSlot uint64) *pubsub.TopicScoreParams {
+	params := &pubsub.TopicScoreParams{
+		TopicWeight:                    topicWeight,
+		TimeInMeshQuantum:              g.oneSlotDuration(),
+		InvalidMessageDeliveriesWeight: -maxScore() / topicWeight,
+		InvalidMessageDeliveriesDecay:  g.scoreDecay(50 * g.oneEpochDuration()),
+	}
 	rate := float64(messagesPerSlot) * 2 / gossip.GossipSubD
 	if rate == 0 {
-		log.Warn("rate is 0, skipping initializing topic scoring")
-		return nil
+		return params
 	}
 	firstMessageDecay := g.scoreDecay(g.oneEpochDuration())
 	firstMessageCap, err := decayLimit(firstMessageDecay, rate)
@@ -229,17 +240,12 @@ func (g *GossipManager) rateBasedTopicParams(topicWeight float64, messagesPerSlo
 		log.Warn("Skipping initializing topic scoring", "err", err)
 		return nil
 	}
-	return &pubsub.TopicScoreParams{
-		TopicWeight:                    topicWeight,
-		TimeInMeshWeight:               maxInMeshScore / g.inMeshCap(),
-		TimeInMeshQuantum:              g.oneSlotDuration(),
-		TimeInMeshCap:                  g.inMeshCap(),
-		FirstMessageDeliveriesWeight:   maxFirstDeliveryScore / firstMessageCap,
-		FirstMessageDeliveriesDecay:    firstMessageDecay,
-		FirstMessageDeliveriesCap:      firstMessageCap,
-		InvalidMessageDeliveriesWeight: -maxScore() / topicWeight,
-		InvalidMessageDeliveriesDecay:  g.scoreDecay(50 * g.oneEpochDuration()),
-	}
+	params.TimeInMeshWeight = maxInMeshScore / g.inMeshCap()
+	params.TimeInMeshCap = g.inMeshCap()
+	params.FirstMessageDeliveriesWeight = maxFirstDeliveryScore / firstMessageCap
+	params.FirstMessageDeliveriesDecay = firstMessageDecay
+	params.FirstMessageDeliveriesCap = firstMessageCap
+	return params
 }
 
 func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *pubsub.TopicScoreParams {
@@ -253,7 +259,7 @@ func (g *GossipManager) defaultSyncSubnetTopicParams(activeValidators uint64) *p
 	}
 	subnetWeight := activeValidators / subnetCount
 	if subnetWeight == 0 {
-		log.Warn("Subnet weight is 0, skipping initializing topic scoring")
+		log.Debug("Skipping sync subnet delivery scoring: subnet weight is 0")
 		return nil
 	}
 	firstDecayDuration := 1 * g.oneEpochDuration()
@@ -347,13 +353,13 @@ func (g *GossipManager) defaultAggregateSubnetTopicParams() *pubsub.TopicScorePa
 	topicWeight := float64(attestationTotalWeight) / float64(subnetCount)
 	subnetWeight := g.activeIndicies / subnetCount
 	if subnetWeight == 0 {
-		log.Warn("Subnet weight is 0, skipping initializing topic scoring", "activeValidatorCount", g.activeIndicies)
+		log.Debug("Skipping attestation subnet delivery scoring: subnet weight is 0", "activeValidatorCount", g.activeIndicies)
 		return nil
 	}
 	// Determine the amount of validators expected in a subnet in a single slot.
 	numPerSlot := time.Duration(subnetWeight / g.beaconConfig.SlotsPerEpoch)
 	if numPerSlot == 0 {
-		log.Trace("numPerSlot is 0, skipping initializing topic scoring")
+		log.Trace("Skipping attestation subnet delivery scoring: numPerSlot is 0")
 		return nil
 	}
 	comsPerSlot := g.committeeCountPerSlot()
