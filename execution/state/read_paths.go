@@ -1775,5 +1775,7 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 // its run is cancelled at the next jump or call.
 func (s *IntraBlockState) recordDep(dep int) {
 	s.dep = max(s.dep, dep)
-	s.versionMap.cancelRun(s.txIndex, s.version)
+	if s.HadInvalidRead() {
+		s.versionMap.cancelRun(s.txIndex, s.version)
+	}
 }

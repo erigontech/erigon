@@ -2357,6 +2357,24 @@ func TestSpecRunOwnWriteRecordsNoDependency(t *testing.T) {
 	require.Zero(t, run.n, "no dependency, no cancel")
 }
 
+// Block initialization writes at tx index -1: reading such a write is no dependency, so the run is valid
+// and must not be cut short.
+func TestSpecRunBlockInitWriteRecordsNoDependency(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xcd"))
+	vm := NewVersionMap(nil)
+	vm.InitStamps(3)
+	ibs := NewWithVersionMap(NewNoopReader(), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	run := &countingCanceller{}
+	vm.SetSpecRun(2, &SpecRun{Run: run})
+	vm.WriteBalance(addr, Version{TxIndex: -1}, *uint256.NewInt(1), false)
+	_, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.False(t, ibs.HadInvalidRead())
+	require.Zero(t, run.n, "a block-init write does not cancel the run")
+}
+
 // A worker reuses its EVM for the next incarnation: a dependency that the old incarnation records after
 // the new run is published must not cancel the new run.
 func TestSpecRunStaleIncarnationDoesNotCancelTheNextRun(t *testing.T) {
