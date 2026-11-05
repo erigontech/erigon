@@ -341,7 +341,7 @@ func logBatchPrefetch(ctx context.Context, what string, keys int, started time.T
 	if commonerrors.IsOnlyCanceled(err) || err == nil && ctx.Err() != nil {
 		return
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, kv.ErrPrefetchIncomplete) {
 		logPrefetchFailure("[warmBAL] batch prefetch failed", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
 		return
 	}
@@ -611,6 +611,9 @@ func sampleCold(ctx context.Context, p latestPrefetcher, domain kv.Domain, sampl
 		return false, nil
 	}
 	cold, err := p.PrefetchLatest(ctx, domain, sample)
+	if errors.Is(err, kv.ErrPrefetchIncomplete) {
+		err = nil // the pages it read are a lower bound of the cold ones
+	}
 	return cold*1000 >= len(sample)*coldPagesPerMille, err
 }
 

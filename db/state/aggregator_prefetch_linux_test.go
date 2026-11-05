@@ -148,3 +148,29 @@ func pageOut(t *testing.T, dir string, maps []fileMapping) {
 		require.Zero(t, errno)
 	}
 }
+
+// A prefetch that stops at its wave cap with lookups pending reports it, so a caller does not treat those keys as read.
+func TestPrefetchLatestReportsLookupsLeftAtTheWaveCap(t *testing.T) {
+	prev, prevWaves := mmap.BatchPrefetch, prefetchMaxWaves
+	mmap.BatchPrefetch, prefetchMaxWaves = true, 1
+	t.Cleanup(func() { mmap.BatchPrefetch, prefetchMaxWaves = prev, prevWaves })
+	db, d, txs := filledDomain(t, log.New())
+	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	}))
+	maps := fileMappings(t, d.dirs.SnapDomain)
+	require.NotEmpty(t, maps)
+	pageOut(t, d.dirs.SnapDomain, maps)
+
+	keys := make([][]byte, 0, 31)
+	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+		keys = append(keys, binary.BigEndian.AppendUint64(nil, keyNum))
+	}
+	dt := d.beginForTests()
+	defer dt.Close()
+	at := &AggregatorRoTx{}
+	at.d[kv.AccountsDomain] = dt
+	_, err := at.PrefetchLatest(t.Context(), kv.AccountsDomain, keys)
+	require.ErrorIs(t, err, kv.ErrPrefetchIncomplete)
+}

@@ -2751,7 +2751,7 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 	}
 	tried := map[uintptr]struct{}{}
-	for waves := 0; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
+	for waves := 0; len(pending) > 0 && waves < prefetchMaxWaves && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
 		wave := make(map[uintptr]struct{}, len(pending)) // keys sharing a page count it once
 		next := pending[:0:0]
@@ -2784,8 +2784,14 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 		}
 		pending = next
 	}
+	if len(pending) > 0 && ctx.Err() == nil {
+		err = cmp.Or(err, kv.ErrPrefetchIncomplete)
+	}
 	return pages, err
 }
+
+// prefetchMaxWaves bounds the waves of one PrefetchLatest call.
+var prefetchMaxWaves = 64
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
 	defer func() {
