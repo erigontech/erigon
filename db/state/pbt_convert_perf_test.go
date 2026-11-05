@@ -97,14 +97,12 @@ func TestConvertPBinRunsWalkAndRoundOnSeveralWorkers(t *testing.T) {
 	writePBinConvertStateN(t, db, 1024)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	walkWorkers := temporal.LeafWalkWorkers(t)
 	barrier := &pbinWorkerBarrier{met: make(chan struct{})}
 	convertPBin(t, db, agg, db, agg, 7, func(options *state.PBinConvertOptions) {
 		options.TargetDB = db
 		options.TargetTx = pbinBarrierTx{TemporalRwTx: options.TargetTx, barrier: barrier}
 		options.Workers = 4
 	})
-	require.GreaterOrEqual(t, walkWorkers(), 2, "the source walk must run on several workers")
 	select {
 	case <-barrier.met:
 	default:

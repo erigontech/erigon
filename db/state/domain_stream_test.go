@@ -138,6 +138,26 @@ func TestCommitmentDomain_DebugRangeLatestOffsetsSkipPrefix(t *testing.T) {
 	require.NoError(t, err)
 	defer empty.Close()
 	require.False(t, empty.HasNext(), "range reader rescanned a file after its end offset")
+	if len(fileEnds) > 1 {
+		partialOffsets := append([]uint64(nil), fileEnds...)
+		partialOffsets[0] = 0
+		partial, err := domainRoTx.DebugRangeLatestWithOffsets(readTx, starts[0], nil, kv.Unlim, partialOffsets)
+		require.NoError(t, err)
+		defer partial.Close()
+		var partialKeys [][]byte
+		firstFileStamp := domainRoTx.files[0].endTxNum - 1
+		for partial.HasNext() {
+			key, _, nextErr := partial.Next()
+			require.NoError(t, nextErr)
+			require.Equal(t, firstFileStamp, partial.Stamp())
+			partialKeys = append(partialKeys, key)
+		}
+		seen := make(map[string]struct{}, len(partialKeys))
+		for _, key := range partialKeys {
+			seen[string(key)] = struct{}{}
+		}
+		require.Len(t, seen, len(partialKeys))
+	}
 }
 
 func TestCursorHeapPriority_MaxUint64TieBreak(t *testing.T) {

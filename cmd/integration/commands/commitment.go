@@ -699,11 +699,22 @@ func linkSnapshotsExceptCommitmentWithSalt(srcRoot, dstRoot string, preserveSalt
 		if !d.Type().IsRegular() {
 			return fmt.Errorf("commitment rebuild: %s is not a regular file; the output can only be staged from a tree the hardlink walk can reproduce", p)
 		}
-		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
+		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE || d.Name() == "pbt-manifest.toml" {
 			return nil
 		}
 		if dstInfo, err := os.Lstat(dst); err == nil {
 			if preserveSalt && (d.Name() == "salt-state.txt" || d.Name() == "salt.txt") {
+				sourceSalt, readErr := os.ReadFile(p)
+				if readErr != nil {
+					return readErr
+				}
+				destinationSalt, readErr := os.ReadFile(dst)
+				if readErr != nil {
+					return readErr
+				}
+				if !bytes.Equal(sourceSalt, destinationSalt) {
+					return fmt.Errorf("commitment rebuild: existing output file %s differs from source", rel)
+				}
 				return nil
 			}
 			srcInfo, err := d.Info()

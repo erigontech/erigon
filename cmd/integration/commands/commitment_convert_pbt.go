@@ -1257,7 +1257,7 @@ func pbtResumeBaseMergeRanges(sourceDirs, outputDirs datadir.Dirs, sourceSetting
 		if _, ok := exact[key]; ok || !pbtResumeRangeCovered(want, outputFiles, sourceSettings.StepSize) {
 			continue
 		}
-		ranges = append(ranges, [2]uint64{file.from * sourceSettings.StepSize, file.to * sourceSettings.StepSize})
+		ranges = append(ranges, [2]uint64{want.from * sourceSettings.StepSize, want.to * sourceSettings.StepSize})
 	}
 	if len(sourceRanges) == 0 {
 		return nil, errors.New("commitment convert-pbt: resume source commitment ranges are missing")

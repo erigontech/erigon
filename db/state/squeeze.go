@@ -1397,20 +1397,11 @@ func pbinSameMergeGroup(a, b pbt.Op) bool {
 }
 
 func clonePBinOps(ops []pbt.Op) []pbt.Op {
-	cloned := make([]pbt.Op, len(ops))
-	for i := range ops {
-		cloned[i] = ops[i]
-		cloned[i].Key = bytes.Clone(ops[i].Key)
-	}
-	return cloned
+	return append([]pbt.Op(nil), ops...)
 }
 
 func clonePBinKeys(keys [][]byte) [][]byte {
-	cloned := make([][]byte, len(keys))
-	for i := range keys {
-		cloned[i] = bytes.Clone(keys[i])
-	}
-	return cloned
+	return append([][]byte(nil), keys...)
 }
 
 func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(batch []pbt.Op, stamps []uint64, lookahead [][]byte, final bool) error, stream func(func(pbt.Op, uint64) error) error) error {

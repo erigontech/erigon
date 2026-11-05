@@ -201,6 +201,20 @@ func TestBackgroundRetainedSlices(t *testing.T) {
 	}
 }
 
+func TestBackgroundLoadAppendDoesNotOverwriteRows(t *testing.T) {
+	collector, _ := backgroundMergeCollector(t, 2, false, true)
+	var got []mergeTestEntry
+	err := backgroundMergeLoad(collector, false, func(k, v []byte) error {
+		got = append(got, mergeTestEntry{bytes.Clone(k), bytes.Clone(v)})
+		_ = append(k, 1)
+		_ = append(v, 2)
+		return nil
+	}, TransformArgs{})
+	require.NoError(t, err)
+	want := []mergeTestEntry{{key: make([]byte, 8), value: make([]byte, 8)}, {key: binary.BigEndian.AppendUint64(nil, 1), value: binary.BigEndian.AppendUint64(nil, 1)}}
+	require.Equal(t, want, got)
+}
+
 type backgroundFailingProvider struct {
 	dataProvider
 	reads  int

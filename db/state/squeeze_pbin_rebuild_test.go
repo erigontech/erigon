@@ -53,6 +53,19 @@ func pbinSortedOps(ops []pbt.Op) []pbt.Op {
 	return sorted
 }
 
+func TestPBinRebuildBatchCopiesContainersOnly(t *testing.T) {
+	key := []byte{1, 2, 3}
+	ops := []pbt.Op{{Key: key}}
+	clonedOps := clonePBinOps(ops)
+	require.NotSame(t, &ops[0], &clonedOps[0])
+	require.Same(t, &key[0], &clonedOps[0].Key[0])
+
+	keys := [][]byte{key}
+	clonedKeys := clonePBinKeys(keys)
+	require.NotSame(t, &keys[0], &clonedKeys[0])
+	require.Same(t, &key[0], &clonedKeys[0][0])
+}
+
 func TestPBinRebuildBatchesRejectUnorderedStream(t *testing.T) {
 	addressA := bytes.Repeat([]byte{0x01}, 20)
 	addressB := bytes.Repeat([]byte{0x02}, 20)

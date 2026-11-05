@@ -183,6 +183,7 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 	}
 
 	for i, item := range domainRoTx.files {
+		key, value = nil, nil
 		if item.endTxNum <= hi.minFileEndTxNum {
 			continue
 		}

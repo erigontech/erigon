@@ -207,6 +207,8 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		resume := *opts.Resume
 		writer, err = newPBinRangeWriterForResume(opts.TargetAggregator, opts.TargetDomain, resume.BaseTxNum, opts.EndTxNum, resume.BaseState, resume.BaseStateEnd, resume.SourceRanges)
 		if writer != nil {
+			writer.maxOps = limits.MaxOps
+			writer.maxBytes = limits.MaxBytes
 			writer.workers = workers
 		}
 	} else {

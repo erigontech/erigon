@@ -1638,6 +1638,10 @@ func (a *Aggregator) MergePBinRange(ctx context.Context, domain kv.Domain, from,
 	if from >= to {
 		return fmt.Errorf("pbin merge: invalid range %d-%d", from, to)
 	}
+	stepSize := a.StepSize()
+	if stepSize == 0 || from%stepSize != 0 || to%stepSize != 0 {
+		return fmt.Errorf("pbin merge: range %d-%d is not aligned to step size %d", from, to, stepSize)
+	}
 	if !a.background.TryAdd() {
 		return errors.New("pbin merge: aggregator is closing")
 	}
@@ -1655,6 +1659,26 @@ func (a *Aggregator) MergePBinRange(ctx context.Context, domain kv.Domain, from,
 	files, err := at.filesInRange(ranges)
 	if err != nil {
 		return err
+	}
+	selected := slices.Clone(files.DomainFiles(domain))
+	slices.SortFunc(selected, func(left, right *FilesItem) int {
+		if left.startTxNum < right.startTxNum {
+			return -1
+		}
+		if left.startTxNum > right.startTxNum {
+			return 1
+		}
+		return 0
+	})
+	next := from
+	for _, file := range selected {
+		if file.startTxNum != next {
+			return fmt.Errorf("pbin merge: files do not tile range %d-%d at txNum %d", from, to, next)
+		}
+		next = file.endTxNum
+	}
+	if next != to {
+		return fmt.Errorf("pbin merge: files do not tile range %d-%d; ended at txNum %d", from, to, next)
 	}
 	in, err := at.mergeFiles(ctx, files, ranges)
 	if err != nil {

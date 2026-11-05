@@ -129,7 +129,7 @@ func pbinResumeValidateSource(at *AggregatorRoTx, opts PBinResumeOptions) error 
 			continue
 		}
 		for _, file := range domainRoTx.files {
-			if file.endTxNum <= opts.BaseTxNum {
+			if file.endTxNum <= baseEnd {
 				continue
 			}
 			hasGap = true
@@ -221,7 +221,7 @@ func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange p
 			slotKey := bytes.Clone(slot32[:])
 			storageSlots = append(storageSlots, slotKey)
 			storageStamp = max(storageStamp, cursors[2].stamp)
-			storageStamps[string(eip8297.TreeKeyStorage(address, slotKey))] = cursors[2].stamp
+			storageStamps[string(slotKey)] = cursors[2].stamp
 			if err := cursors[2].advance(); err != nil {
 				return err
 			}
@@ -261,7 +261,8 @@ func pbinResumeEmitAddress(address []byte, accountStamp, codeStamp, storageStamp
 			}
 		}
 		for _, slot := range storageSlots {
-			if collectErr := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyStorage(address, slot)}, storageStamps[string(eip8297.TreeKeyStorage(address, slot))]); collectErr != nil {
+			treeKey := eip8297.TreeKeyStorage(address, slot)
+			if collectErr := pbinResumeCollectOp(collector, pbt.Op{Key: treeKey}, storageStamps[string(slot)]); collectErr != nil {
 				return collectErr
 			}
 		}
@@ -300,8 +301,9 @@ func pbinResumeEmitAddress(address []byte, accountStamp, codeStamp, storageStamp
 		storageValues[string(normalized[:])] = slot.Value
 	}
 	for _, slotKey := range storageSlots {
-		stamp := storageStamps[string(eip8297.TreeKeyStorage(address, slotKey))]
-		if err := pbinResumeCollectOp(collector, pbt.Op{Key: eip8297.TreeKeyStorage(address, slotKey), Value: eip8297.EncodeStorageValue(storageValues[string(slotKey)])}, stamp); err != nil {
+		treeKey := eip8297.TreeKeyStorage(address, slotKey)
+		stamp := storageStamps[string(slotKey)]
+		if err := pbinResumeCollectOp(collector, pbt.Op{Key: treeKey, Value: eip8297.EncodeStorageValue(storageValues[string(slotKey)])}, stamp); err != nil {
 			return err
 		}
 	}

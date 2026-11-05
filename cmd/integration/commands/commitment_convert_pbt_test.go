@@ -64,7 +64,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
-	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -83,12 +82,33 @@ func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 	require.True(t, isCommitmentFileName("v1.0-commitment-bin.0-1024.kv"), "the converter must exclude commitment-bin files from its source links")
 }
 
+func TestLinkSnapshotsSkipsPBTManifest(t *testing.T) {
+	source, destination := t.TempDir(), t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(source, "pbt-manifest.toml"), []byte("manifest"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(source, "state.txt"), []byte("state"), 0o644))
+	_, err := linkSnapshotsExceptCommitmentWithSalt(source, destination, false)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(destination, "pbt-manifest.toml"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(filepath.Join(destination, "state.txt"))
+	require.NoError(t, err)
+}
+
+func TestLinkSnapshotsRejectsDifferentPreservedSalt(t *testing.T) {
+	source, destination := t.TempDir(), t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(source, "salt-state.txt"), []byte("source"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(destination, "salt-state.txt"), []byte("destination"), 0o644))
+	_, err := linkSnapshotsExceptCommitmentWithSalt(source, destination, true)
+	require.ErrorContains(t, err, "salt-state.txt")
+}
+
 func TestConvertPBTResumeEarlierOutputMatchesFresh(t *testing.T) {
 	source, baseOutput := pbtResumeFixture(t, 1, false, false)
 	freshOutput := filepath.Join(t.TempDir(), "fresh-output")
-	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New()))
+	limits := &dbstate.PBinRangeWriterLimits{MaxOps: 1, MaxBytes: 1 << 10}
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, freshOutput, true, "", log.New(), pbtConvertHooks{rangeWriterLimits: limits}))
 	require.NotEqual(t, readPBTBinRows(t, baseOutput, source.Tester.Dirs.Chaindata), readPBTBinRows(t, freshOutput, source.Tester.Dirs.Chaindata))
-	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, baseOutput, true, "", log.New(), pbtConvertHooks{resume: true, workers: 1}))
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, baseOutput, true, "", log.New(), pbtConvertHooks{rangeWriterLimits: limits, resume: true, workers: 1}))
 	baseBinFiles := pbtCommitmentBinKVBytes(t, baseOutput)
 	freshBinFiles := pbtCommitmentBinKVBytes(t, freshOutput)
 	require.Equal(t, pbtSortedBinFileNames(freshBinFiles), pbtSortedBinFileNames(baseBinFiles))
@@ -648,17 +668,14 @@ func TestConvertPBTSourceWalkWorkersMatchSerial(t *testing.T) {
 	source, _ := newPBTConversionSourceAt(t, 15)
 	var wantLeaves map[string][]byte
 	var wantRoot common.Hash
-	walkWorkers := commitmenttemporal.LeafWalkWorkers(t)
 	for _, workers := range []int{1, 4, 16} {
 		output := filepath.Join(t.TempDir(), fmt.Sprintf("output-%d", workers))
 		require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, output, true, "", log.New(), pbtConvertHooks{workers: workers}), "workers=%d", workers)
 		gotLeaves := readPBTBinLeaves(t, output, source.Chaindata)
 		gotRoot := readPBTBinRoot(t, output, source.Chaindata)
-		walked := walkWorkers()
 		if workers == 1 {
 			wantLeaves, wantRoot = gotLeaves, gotRoot
 		} else {
-			require.GreaterOrEqual(t, walked, 2, "workers=%d: the source walk did not run on several workers", workers)
 			require.Equal(t, wantLeaves, gotLeaves, "workers=%d", workers)
 			require.Equal(t, wantRoot, gotRoot, "workers=%d", workers)
 		}

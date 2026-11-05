@@ -193,6 +193,7 @@ func digestPBTManifestFiles(ctx context.Context, sources []PBTManifestFileSource
 	workers = min(max(workers, 1), len(ordered))
 	group, groupCtx := errgroup.WithContext(ctx)
 	var next atomic.Uint64
+	var finished atomic.Uint64
 	for range workers {
 		group.Go(func() error {
 			for {
@@ -206,7 +207,7 @@ func digestPBTManifestFiles(ctx context.Context, sources []PBTManifestFileSource
 				}
 				files[index] = file
 				if progress != nil {
-					progress(uint64(index+1), uint64(len(ordered)), file.Size)
+					progress(finished.Add(1), uint64(len(ordered)), file.Size)
 				}
 			}
 		})

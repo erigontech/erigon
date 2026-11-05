@@ -22,6 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPBTRSSAnonDropsAfterUnmap(t *testing.T) {
+func TestPBTRSSAnonNonLinuxStub(t *testing.T) {
 	require.Equal(t, "n/a", pbtRSSAnon())
 }

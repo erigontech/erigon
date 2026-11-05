@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -429,9 +428,8 @@ func TestVerifyPBTResumeStreamRootDefaultsWorkers(t *testing.T) {
 	previousWorkers := dbg.PBTWorkers
 	dbg.PBTWorkers = 2
 	t.Cleanup(func() { dbg.PBTWorkers = previousWorkers })
-	walkWorkers := commitmenttemporal.LeafWalkWorkers(t)
 	require.ErrorContains(t, verifyPBTResumeStreamRoot(t.Context(), agg, common.Hash{}, 0), "differs from resumed root")
-	require.GreaterOrEqual(t, walkWorkers(), 2, "--workers 0 must use the same default as the conversion")
+	require.Equal(t, dbg.PBTWorkers, dbstate.PBinConvertWorkers(0))
 }
 
 func pbtManifestWithoutField(t *testing.T, data []byte, field string) []byte {

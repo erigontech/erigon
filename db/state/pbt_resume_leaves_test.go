@@ -145,6 +145,27 @@ func TestPBinResumeLeavesSkipsFileEndingAtBase(t *testing.T) {
 	require.NotContains(t, emitted, string(eip8297.TreeKeyAccount(converted, eip8297.BasicDataLeafKey)), "a file ending at the inclusive base txNum is already converted")
 }
 
+func TestPBinResumeLeavesIgnoresOnlyBaseFileBeforeCancun(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1}})
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+
+	at := agg.BeginFilesRo()
+	t.Cleanup(at.Close)
+	var emitted int
+	require.NoError(t, state.PBinResumeLeaves(t.Context(), at, state.PBinResumeOptions{
+		BaseTxNum:   pbinLeafStreamStepSize - 1,
+		SourceTxNum: 2*pbinLeafStreamStepSize - 1,
+		Workers:     2,
+	}, func(state.PBinLeaf) error {
+		emitted++
+		return nil
+	}))
+	require.Zero(t, emitted)
+}
+
 func TestPBinResumeLeavesRefusesUnsafeSource(t *testing.T) {
 	selectPBinLeafStreamHash(t)
 	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)

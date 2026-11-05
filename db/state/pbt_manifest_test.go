@@ -17,11 +17,15 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -145,4 +149,30 @@ func TestPBTManifestRoundTripAndTamperChecks(t *testing.T) {
 		_, err := state.ReadPBTManifest(path)
 		require.ErrorContains(t, err, "unknown format 0")
 	})
+}
+
+func TestPBTManifestProgressCountsFinishedFiles(t *testing.T) {
+	root := t.TempDir()
+	sources := make([]state.PBTManifestFileSource, 8)
+	for i := range sources {
+		name := fmt.Sprintf("%02d.kv", i)
+		path := filepath.Join(root, name)
+		size := i + 1
+		if i == 0 {
+			size = 32 << 20
+		}
+		require.NoError(t, os.WriteFile(path, bytes.Repeat([]byte{byte(i)}, size), 0o644))
+		sources[i] = state.PBTManifestFileSource{Name: name, Path: path}
+	}
+	var done []uint64
+	var doneLock sync.Mutex
+	_, err := state.BuildPBTManifest(t.Context(), state.PBTManifestPoint{}, "pbt", "hex", "hash", false, sources, 4, func(value, _, _ uint64) {
+		doneLock.Lock()
+		defer doneLock.Unlock()
+		done = append(done, value)
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), done[0])
+	slices.Sort(done)
+	require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7, 8}, done)
 }

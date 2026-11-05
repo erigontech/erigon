@@ -90,6 +90,18 @@ func TestPBinResumeMatchesFreshConversion(t *testing.T) {
 	requireResumeStateFile(t, targetAgg, 16, 24)
 }
 
+func TestMergePBinRangeRejectsUnalignedAndUntiledRanges(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	t.Run("unaligned", func(t *testing.T) {
+		_, agg := testDbAndAggregatorv3(t, 8)
+		require.ErrorContains(t, agg.MergePBinRange(t.Context(), kv.CommitmentDomain, 1, 8), "not aligned")
+	})
+	t.Run("untiled", func(t *testing.T) {
+		_, agg := testDbAndAggregatorv3(t, 8)
+		require.ErrorContains(t, agg.MergePBinRange(t.Context(), kv.CommitmentDomain, 0, 8), "do not tile")
+	})
+}
+
 func convertPBin(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, configure func(*state.PBinConvertOptions)) common.Hash {
 	t.Helper()
 	sourceTx, err := sourceDB.BeginTemporalRo(t.Context())
