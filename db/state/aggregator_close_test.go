@@ -46,22 +46,23 @@ func TestAggregatorCloseWaitsForMaintenance(t *testing.T) {
 			defer agg.buildingFiles.Store(false)
 			<-finishWork
 		}))
-		closed := make(chan struct{}, 2)
-		for range cap(closed) {
+		const closeCallers = 2
+		closed := make(chan struct{}, closeCallers)
+		for range closeCallers {
 			go func() {
 				agg.Close()
 				closed <- struct{}{}
 			}()
 			synctest.Wait()
 		}
-		returned := len(closed)
+		earlyReturns := len(closed)
 
 		finishedAt := time.Now()
 		close(finishWork)
-		for range cap(closed) {
+		for range closeCallers {
 			<-closed
 		}
-		require.Zero(t, returned, "every Close caller must wait for active maintenance")
+		require.Zero(t, earlyReturns, "every Close caller must wait for active maintenance")
 		require.Zero(t, time.Since(finishedAt), "Close must return when background work finishes")
 	})
 }
