@@ -147,10 +147,6 @@ func (v *VersionedAccountView) exists() bool {
 	if v.destroyed() {
 		return false
 	}
-	return v.recordExists()
-}
-
-func (v *VersionedAccountView) recordExists() bool {
 	if v.vm != nil {
 		if _, ok := versionedUpdateBalance(v.vm, v.addr, v.txIdx); ok {
 			return true
@@ -190,16 +186,6 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil
 	}
-	acc := v.compose()
-	return &acc
-}
-
-// compose overlays the version-map field cells on the base record, reading raw
-// cells (no destroyed() gate) — the caller has already decided existence, so a
-// destroyed-but-preserved account (EIP-8246 no-burn) keeps its surviving fields.
-// For a non-destroyed account this equals the lifecycle getters. A field with no
-// cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
-func (v *VersionedAccountView) compose() accounts.Account {
 	v.ensureBase()
 	acc := accounts.NewAccount()
 	if v.baseAcc != nil {
@@ -219,7 +205,7 @@ func (v *VersionedAccountView) compose() accounts.Account {
 			acc.CodeHash = ch
 		}
 	}
-	return acc
+	return &acc
 }
 
 var _ accounts.AccountView = (*VersionedAccountView)(nil)
