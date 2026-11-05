@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"bytes"
 	"cmp"
 	"os"
 	"path/filepath"
@@ -260,6 +261,36 @@ func TestCaplinStateBuildMissingIndicesWithGlobPath(t *testing.T) {
 			require.Equal(t, []Range{{from: 0, to: 50_000}}, s.visibleRangesForType(table))
 		})
 	}
+}
+
+func TestCaplinStateBuildMissingIndicesIndexesNewestEqualRangeVersion(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	for _, f := range []struct {
+		v     version.Version
+		words [][]byte
+	}{
+		{version.V1_0, [][]byte{bytes.Repeat([]byte{'a'}, 300), []byte("OLD")}},
+		{version.V1_1, [][]byte{[]byte("N"), []byte("NEW")}},
+	} {
+		segPath := filepath.Join(dirs.SnapCaplin, strings.ReplaceAll(snaptype.BeaconBlocks.FileName(f.v, 0, 2), "beaconblocks", table))
+		c, err := seg.NewCompressor(t.Context(), "test", segPath, dirs.SnapCaplin, seg.DefaultCfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		c.DisableFsync()
+		for _, w := range f.words {
+			require.NoError(t, c.AddWord(w))
+		}
+		require.NoError(t, c.Compress())
+		c.Close()
+	}
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+	got, err := s.Get(table, 1)
+	require.NoError(t, err)
+	require.Equal(t, "NEW", string(got))
 }
 
 func TestCaplinStateRemoveOverlapsIgnoresUnknownType(t *testing.T) {

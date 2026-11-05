@@ -1794,25 +1794,23 @@ func (s *BaseRoSnapshots) claimIndexJobs() []indexJob {
 
 	var jobs []indexJob
 	for _, t := range s.enums {
-		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
-			for _, segment := range segs {
-				if segment.IsIndexed() {
-					continue
-				}
-				// Skip if a merge/dump/another recovery is already building this
-				// (type, range); otherwise claim it so we don't double-build.
-				from, to := segment.From(), segment.To()
-				if !s.TryAcquireRange(t, from, to) {
-					continue
-				}
-				info, _, ok := snaptype.ParseFileName(s.dir, segment.FileName())
-				if !ok {
-					s.ReleaseRange(t, from, to)
-					continue
-				}
-				segment.closeIdx()
-				jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
+		s.dirty[t].Reverse(func(segment *DirtySegment) bool {
+			if segment.IsIndexed() {
+				return true
 			}
+			// Skip if a merge/dump/another recovery is already building this
+			// (type, range); otherwise claim it so we don't double-build.
+			from, to := segment.From(), segment.To()
+			if !s.TryAcquireRange(t, from, to) {
+				return true
+			}
+			info, _, ok := snaptype.ParseFileName(s.dir, segment.FileName())
+			if !ok {
+				s.ReleaseRange(t, from, to)
+				return true
+			}
+			segment.closeIdx()
+			jobs = append(jobs, indexJob{t: t, from: from, to: to, info: info, indexBuilder: s.IndexBuilder(t.Type())})
 			return true
 		})
 	}
