@@ -2501,6 +2501,12 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
 		r.SetBlock(ev.version.BlockNum)
 	}
+	// A history reader at the task's own txNum already holds the writes of the block's earlier
+	// tasks, which the version map supplies; reading where the block's first task starts keeps
+	// the origins it seeds the same for every task.
+	if h, ok := state.HistoryReaderOf(ibs.StateReader()); ok {
+		h.SetTxNum(ev.version.TxNum - uint64(ev.index))
+	}
 	ibs.SetVersion(ev.version.Incarnation)
 	return nil
 }
