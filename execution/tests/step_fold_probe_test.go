@@ -47,7 +47,7 @@ func TestProbeParallelStepEdgeFuzz(t *testing.T) {
 			}
 			dbg.Exec3Parallel = false
 			ethconfig.Defaults.Sync.ExecWorkerCount = 4
-			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]), execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc}),
+			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]), execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
 				execmoduletester.WithExperimentalBAL(), execmoduletester.WithStepSize(8))
 			signer := types.LatestSignerForChainID(config.ChainID)
 			nonces := make([]uint64, len(keys))
