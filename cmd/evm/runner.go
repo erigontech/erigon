@@ -214,7 +214,6 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	// The dump commits the state, which the versioned path does not materialize.
 	if dbg.CallNoMaterialize && !ctx.Bool(DumpFlag.Name) {
 		statedb.SetVersionMap(state.NewVersionMap(nil))
-		statedb.SetNoMaterialize(true)
 		statedb.SetTxContext(0, 0)
 		statedb.SetNoConflictDetection()
 	}

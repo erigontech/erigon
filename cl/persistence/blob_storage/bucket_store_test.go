@@ -219,6 +219,32 @@ func TestBucketStorePruneBelowKeepsABucketItCannotList(t *testing.T) {
 	require.Equal(t, []string{"0"}, rootEntryNames(t, mem), "an unlisted bucket's roots would leak with it")
 }
 
+// goneBucketFs reports a bucket as removed after pruneBelow listed it, as an overlapping
+// pruneBelow does.
+type goneBucketFs struct {
+	afero.Fs
+	name string
+}
+
+func (f goneBucketFs) Open(name string) (afero.File, error) {
+	if name == f.name {
+		return nil, os.ErrNotExist
+	}
+	return f.Fs.Open(name)
+}
+
+func TestBucketStorePruneBelowTreatsABucketRemovedConcurrentlyAsPruned(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "0", "1")
+	b := newBucketStore(t, goneBucketFs{Fs: mem, name: "0"})
+	var dropped int
+	b.dropRows = func(roots []common.Hash) error { dropped++; return nil }
+
+	require.NoError(t, b.pruneBelow(2*subdivisionSlot), "the other prune already removed the bucket and its rows")
+	require.Equal(t, 1, dropped)
+	require.Equal(t, []string{"0"}, rootEntryNames(t, mem))
+}
+
 func TestBucketStoreLowerPruneRetriesTheEstablishedFloor(t *testing.T) {
 	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
 	fs.failOn["1"] = errInducedFailure
@@ -252,7 +278,6 @@ func TestSlotLocksStripesBySlot(t *testing.T) {
 	var s slotLocks
 	s.initLocks()
 
-	require.Same(t, s.forSlot(7), s.forSlot(7))
 	require.Same(t, s.forSlot(7), s.forSlot(7+rwLocksCount))
 	require.NotSame(t, s.forSlot(7), s.forSlot(8))
 }
@@ -533,7 +558,7 @@ func TestBucketStoreFailedSyncLeavesNothingBehind(t *testing.T) {
 func TestFacadePruneRejectsAWriteIntoTheBucketItRemoves(t *testing.T) {
 	fs := newPruneRaceFs(afero.NewMemMapFs())
 	fs.removePath = "0"
-	storage := NewDataColumnStore(setupTestDB(t), fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 	require.NoError(t, fs.MkdirAll("0", 0o755))
 
 	const liveSlot = 5*subdivisionSlot + 1
@@ -568,7 +593,7 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := newPruneRaceFs(afero.NewBasePathFs(afero.NewOsFs(), t.TempDir()))
-			storage := NewDataColumnStore(setupTestDB(t), fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+			storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 			const slot = 1000
 			root := common.Hash{3}
 			_, file := (&bucketStore{fs: fs}).path(slot, root, 0)
@@ -620,7 +645,7 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 
 func TestFacadeConcurrentWritesUseOneTempFileAtATime(t *testing.T) {
 	fs := newSerializedCreateFs(afero.NewMemMapFs())
-	storage := NewDataColumnStore(setupTestDB(t), fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 	const slot = 1000
 	root := common.Hash{4}
 	_, file := (&bucketStore{fs: fs}).path(slot, root, 0)

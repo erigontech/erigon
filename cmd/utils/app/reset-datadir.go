@@ -92,7 +92,7 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 
 	dirs := datadir.Open(dataDirPath)
 
-	configChainName, chainNameErr := getChainNameFromChainData(ctx, cliCtx, logger, dirs.Chaindata)
+	configChainName, chainNameErr := getChainNameFromChainData(ctx, logger, dirs.Chaindata)
 
 	chainName := cliCtx.String(utils.ChainFlag.Name)
 	// Check the lineage, we don't want to use the mainnet default, but due to how urfave/cli@v2
@@ -176,7 +176,7 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	return
 }
 
-func getChainNameFromChainData(ctx context.Context, cliCtx *cli.Command, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
+func getChainNameFromChainData(ctx context.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
 	_, err = os.Stat(chainDataDir)
 	if err != nil {
 		return

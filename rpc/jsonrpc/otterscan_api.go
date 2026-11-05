@@ -178,8 +178,9 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 		return nil, err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 
-	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +295,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+func delegateGetBlockByNumber(b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
 	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
@@ -318,7 +319,7 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader) (internalIssuance, error) {
+func delegateIssuance(block *types.Block, chainConfig *chain.Config, engine rules.EngineReader) (internalIssuance, error) {
 	// TODO: aura seems to be already broken in the original version of this RPC method
 	rewards, err := engine.CalculateRewards(chainConfig, block.HeaderNoCopy(), block.Uncles(), func(contract accounts.Address, data []byte) ([]byte, error) {
 		return nil, nil
@@ -347,7 +348,7 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	return ret, nil
 }
 
-func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
+func delegateBlockFees(block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
 	var fee, gasUsed, totalFees uint256.Int
 	isLondon := chainConfig.IsLondon(block.NumberU64())
 	baseFee := block.BaseFee()
@@ -410,7 +411,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
+	getBlockRes, err := delegateGetBlockByNumber(b, number, false)
 	if err != nil {
 		return nil, err
 	}

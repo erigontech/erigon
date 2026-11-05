@@ -96,3 +96,75 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 		})
 	}
 }
+
+// A balance-preserving SELFDESTRUCT to a non-self beneficiary sends the whole
+// balance away, so the account is empty at destruct time. Under EIP-8246 it must
+// still exist, so a later same-block credit lands on it: the created contract
+// ends with the post-destruct credit and the beneficiary keeps the swept
+// balance. Covers the zero-balance preserve path across serial and parallel exec.
+func TestEIP8246PreserveToNonSelfBeneficiaryThenCredited(t *testing.T) {
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+		workers  int
+	}{
+		{"serial", false, 1},
+		{"parallel/workers=1", true, 1},
+		{"parallel/workers=4", true, 4},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			previousWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+			ethconfig.Defaults.Sync.ExecWorkerCount = mode.workers
+			t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = previousWorkers })
+			previousParallel := dbg.Exec3Parallel
+			dbg.Exec3Parallel = mode.parallel
+			t.Cleanup(func() { dbg.Exec3Parallel = previousParallel })
+
+			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			config := chain.TestChainOsakaConfig.Copy()
+			config.AmsterdamTime = common.NewUint64(0)
+			genesis := &types.Genesis{
+				Config:   config,
+				GasLimit: 30_000_000,
+				Alloc:    types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000)}},
+			}
+			signer := types.LatestSignerForChainID(config.ChainID)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+			contract := types.CreateAddress(sender, 1)
+			beneficiary := common.Address{0xbe, 0xef}
+			gasPrice := uint256.NewInt(10_000_000_000)
+			sign := func(txn types.Transaction) types.Transaction {
+				signed, err := types.SignTx(txn, *signer, key)
+				require.NoError(t, err)
+				return signed
+			}
+			// PUSH20 <beneficiary>; SELFDESTRUCT — sweeps the created contract's
+			// whole balance to a different account at destruct time.
+			initCode := append(append([]byte{0x73}, beneficiary[:]...), byte(vm.SELFDESTRUCT))
+			chainPack, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
+				block.SetCoinbase(common.Address{1})
+				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(5), 300_000, gasPrice, nil)))
+				block.AddTx(sign(types.NewContractCreation(block.TxNonce(sender), uint256.NewInt(0), 2_000_000, gasPrice, initCode)))
+				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(3), 300_000, gasPrice, nil)))
+			})
+			require.NoError(t, err)
+			for _, receipt := range chainPack.Receipts[0] {
+				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
+			}
+			require.NoError(t, m.InsertChain(chainPack))
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				st := state.New(m.NewStateReader(tx))
+				defer st.Close()
+				contractBal, err := st.GetBalance(accounts.InternAddress(contract))
+				require.NoError(t, err)
+				require.Equal(t, *uint256.NewInt(3), contractBal, "post-destruct credit must land on the preserved account")
+				beneficiaryBal, err := st.GetBalance(accounts.InternAddress(beneficiary))
+				require.NoError(t, err)
+				require.Equal(t, *uint256.NewInt(5), beneficiaryBal, "beneficiary keeps the swept balance")
+				return nil
+			}))
+		})
+	}
+}

@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,9 +58,9 @@ type bucketStore struct {
 	pruneFloor uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
-	bucketLocks    []sync.RWMutex
-	dropRows       func(roots []common.Hash) error
-	durableBuckets sync.Map
+	bucketLocks []sync.RWMutex
+	// dropRows, when set, deletes the index rows of a bucket's roots before the bucket is removed.
+	dropRows func(roots []common.Hash) error
 }
 
 func (b *bucketStore) init(fs afero.Fs) {
@@ -142,36 +141,6 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 		return false, nil
 	}
 	return created, nil
-}
-
-func (b *bucketStore) syncBucket(slot uint64) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	dir, _ := b.path(slot, common.Hash{}, 0)
-	if err := b.syncDir(dir); err != nil {
-		return err
-	}
-	if _, ok := b.durableBuckets.Load(dir); ok {
-		return nil
-	}
-	if err := b.syncDir("."); err != nil {
-		return err
-	}
-	b.durableBuckets.Store(dir, struct{}{})
-	return nil
-}
-
-func (b *bucketStore) syncDir(name string) error {
-	d, err := b.fs.Open(name)
-	if err != nil {
-		return err
-	}
-	if err := d.Sync(); err != nil {
-		_ = d.Close()
-		return err
-	}
-	return d.Close()
 }
 
 // removeTemp best-effort deletes the temp file; the caller already holds the
@@ -362,6 +331,10 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 func (b *bucketStore) removeBucket(bucket uint64, name string) error {
 	if b.dropRows != nil {
 		roots, err := b.bucketRoots(name)
+		if errors.Is(err, os.ErrNotExist) {
+			// An overlapping pruneBelow removed it first.
+			return nil
+		}
 		if err != nil {
 			return err
 		}

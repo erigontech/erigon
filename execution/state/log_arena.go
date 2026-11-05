@@ -60,17 +60,15 @@ type logArena struct {
 	indexInBlock uint
 }
 
-// alloc journals the allocation for revertLast, then returns txIndex's next
-// entry sized for numTopics/dataSize. The caller must write every topic and data
+// alloc returns txIndex's next entry sized for numTopics/dataSize. The caller must write every topic and data
 // byte; what it leaves unwritten is the previous transaction's. The arena owns
 // the entry, so it must never be handed out without copying.
-func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
-	j.addLogChange(txIndex)
+func (a *logArena) alloc(addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	logIdx := len(a.entries)
 	entries := slices.Grow(a.entries, 1)[:logIdx+1]
 	a.entries = entries
 
-	// Always take: reset and revertLast empty a slot before shrinking past it, so
+	// Always take: reset and truncate empty a slot before shrinking past it, so
 	// a slot that still held an entry would be one two transactions share.
 	lp := a.take()
 	entries[logIdx] = lp
@@ -132,19 +130,19 @@ func (a *logArena) reset() {
 	}
 }
 
-// revertLast drops the entry allocated last, returning it to the pool.
-func (a *logArena) revertLast(txIndex int) {
+// truncate drops the entries past the first n, returning them to the pool.
+func (a *logArena) truncate(n int) {
 	entries := a.entries
-	last := len(entries) - 1
-	if last < 0 {
-		panic(fmt.Sprintf("can't revert log of tx %d: none were emitted", txIndex))
+	for i := n; i < len(entries); i++ {
+		if lp := entries[i]; lp != nil {
+			a.put(lp)
+			entries[i] = nil
+		}
+		a.indexInBlock--
 	}
-	if lp := entries[last]; lp != nil {
-		a.put(lp)
-		entries[last] = nil
+	if n < len(entries) {
+		a.entries = entries[:n]
 	}
-	a.entries = entries[:last]
-	a.indexInBlock--
 }
 
 // forTx returns the entries txIndex emitted, owned by the arena. They are held

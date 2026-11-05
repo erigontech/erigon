@@ -66,8 +66,9 @@ func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
-func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *mockIBS) GetRefund() uint64                    { return 0 }
+func (m *mockIBS) Exist(accounts.Address) (bool, error)             { return false, nil }
+func (m *mockIBS) HasSelfdestructed(accounts.Address) (bool, error) { return false, nil }
+func (m *mockIBS) GetRefund() uint64                                { return 0 }
 
 // captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
@@ -627,4 +628,65 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
 		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
 	}
+}
+
+// Consecutive steps reuse a slot's encoding while its value is unchanged, so a
+// slot whose value changes, including back to zero, must be re-encoded.
+func TestJsonStreamLogger_StackFollowsValueChanges(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStorage: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	steps := [][]uint64{{0, 1}, {0, 1}, {0, 2}, {5, 0}, {5, 0, 7}, {5}}
+	for i, step := range steps {
+		stack := make([]uint256.Int, len(step))
+		for j, v := range step {
+			stack[j].SetUint64(v)
+		}
+		l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, &mockOpContext{stack: stack}, nil, 1, nil)
+	}
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var decoded struct {
+		StructLogs []struct {
+			Stack []string `json:"stack"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "produced %s", buf.Bytes())
+	require.Len(t, decoded.StructLogs, len(steps))
+	for i, step := range steps {
+		want := make([]string, len(step))
+		for j, v := range step {
+			want[j] = uint256.NewInt(v).Hex()
+		}
+		require.Equal(t, want, decoded.StructLogs[i].Stack, "step %d", i)
+	}
+}
+
+func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(nil, t.Context(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	haltedSstore := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(7), *uint256.NewInt(1)}}
+	haltedSload := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(3)}}
+	sstore := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(9), *uint256.NewInt(2)}}
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSstore, nil, 1, vm.ErrWriteProtection)
+	l.OnOpcodeV2(1, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSload, nil, 1, vm.ErrOutOfGas)
+	l.OnOpcodeV2(2, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, sstore, nil, 1, nil)
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var result struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result.StructLogs, 3)
+	require.NotContains(t, result.StructLogs[0], "storage")
+	require.NotContains(t, result.StructLogs[1], "storage")
+	require.JSONEq(t, `{"0x0000000000000000000000000000000000000000000000000000000000000002":"0x0000000000000000000000000000000000000000000000000000000000000009"}`,
+		string(result.StructLogs[2]["storage"]))
 }

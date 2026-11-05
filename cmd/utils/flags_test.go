@@ -319,8 +319,14 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	t.Run("no-merge and no-prune set to true", func(t *testing.T) {
 		dbg.SetNoMerge(false)
 		dbg.SetNoPrune(false)
-		run("--exec.no-merge=true", "--exec.no-prune=true")
+		run("--exec.no-merge=true", "--debug.exec.no-prune=true")
 		require.True(t, dbg.NoMerge())
+		require.True(t, dbg.NoPrune())
+	})
+
+	t.Run("deprecated exec.no-prune alias still sets NoPrune", func(t *testing.T) {
+		dbg.SetNoPrune(false)
+		run("--exec.no-prune=true")
 		require.True(t, dbg.NoPrune())
 	})
 
@@ -348,6 +354,26 @@ func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 		cfg := newCfg(true)
 		require.True(t, cfg.NoDiscovery)
 		require.False(t, cfg.DiscoveryV5)
+	})
+}
+
+func TestNewP2PConfig_NetRestrictList(t *testing.T) {
+	newCfg := func(netRestrict string) (*p2p.Config, error) {
+		return NewP2PConfig(false, datadir.New(t.TempDir()), netRestrict, "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
+	}
+
+	t.Run("comma separated list", func(t *testing.T) {
+		cfg, err := newCfg("10.0.0.0/8, 192.168.0.0/16")
+		require.NoError(t, err)
+		require.NotNil(t, cfg.NetRestrict)
+		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
+		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("192.168.1.1")))
+		require.False(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("172.16.0.1")))
+	})
+
+	t.Run("invalid mask", func(t *testing.T) {
+		_, err := newCfg("10.0.0.1")
+		require.Error(t, err)
 	})
 }
 
@@ -485,24 +511,4 @@ func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	require.True(t, ethCfg.TxPool.Disable)
 	require.False(t, builderCfg.EnabledPOS)
 	require.Equal(t, ethashcfg.ModeFake, ethCfg.Ethash.PowMode)
-}
-
-func TestNewP2PConfig_NetRestrictList(t *testing.T) {
-	newCfg := func(netRestrict string) (*p2p.Config, error) {
-		return NewP2PConfig(false, datadir.New(t.TempDir()), netRestrict, "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
-	}
-
-	t.Run("comma separated list", func(t *testing.T) {
-		cfg, err := newCfg("10.0.0.0/8, 192.168.0.0/16")
-		require.NoError(t, err)
-		require.NotNil(t, cfg.NetRestrict)
-		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("10.1.2.3")))
-		require.True(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("192.168.1.1")))
-		require.False(t, cfg.NetRestrict.ContainsAddr(netip.MustParseAddr("172.16.0.1")))
-	})
-
-	t.Run("invalid mask", func(t *testing.T) {
-		_, err := newCfg("10.0.0.1")
-		require.Error(t, err)
-	})
 }

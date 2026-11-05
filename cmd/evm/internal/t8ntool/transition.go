@@ -328,15 +328,15 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	}
 	defer sd.Close()
 
-	blockNum, txNum := uint64(0), uint64(0)
-	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
-	blockNum, txNum = uint64(1), uint64(2)
+	txNum := uint64(0)
+	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, txNum)
+	blockNum, txNum := uint64(1), uint64(2)
 
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number
 	engine := merge.New(&ethash.FakeEthash{})
 
-	t8logger := log.New("t8ntool")
+	t8logger := log.New("component", "t8ntool")
 	chainReader := consensuschain.NewReader(chainConfig, tx, nil, t8logger)
 	result, err := protocol.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
 

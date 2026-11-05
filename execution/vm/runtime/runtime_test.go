@@ -506,43 +506,6 @@ func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 	}
 }
 
-// FakeChainHeaderReader implements consensus.ChainHeaderReader interface
-type FakeChainHeaderReader struct{}
-
-func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-
-func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
-	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
-}
-func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
-func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
-
-// GetHeader returns a fake header with the parentHash equal to the number - 1
-func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return &types.Header{
-		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     *uint256.NewInt(number),
-		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
-		Time:       number,
-		Nonce:      types.BlockNonce{0x1},
-		Extra:      []byte{},
-		GasLimit:   100000,
-	}
-}
-
-func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return nil
-}
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	return nil
-}
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64 { return 0 }
-
 type dummyChain struct {
 	counter int
 }
@@ -1196,7 +1159,6 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 	}
 	versioned := func() *state.IntraBlockState {
 		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
 		return ibs
 	}
 	was := dbg.TraceTransactionIO
@@ -1265,4 +1227,18 @@ func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
 			require.True(t, exists, "the origin must exist in the post-state")
 		})
 	}
+}
+
+// Execute re-creates the contract on every run, so a Config reused across runs must not
+// carry the previous run's storage into the new contract.
+func TestExecuteReusedConfigStartsWithEmptyStorage(t *testing.T) {
+	cfg := &Config{}
+	_, _, err := Execute(program.New().Sstore(0, 1).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	p := program.New()
+	loadTo(p, 0, 0)
+	ret, _, err := Execute(p.Return(0, 32).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	require.Zero(t, new(uint256.Int).SetBytes(ret).Uint64())
 }

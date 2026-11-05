@@ -81,6 +81,10 @@ func (forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, e
 	return nil, nil
 }
 
+func (forkChoiceSpectestEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	return nil, nil
+}
+
 func (forkChoiceSpectestEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
@@ -92,6 +96,10 @@ func (forkChoiceSpectestEngine) GetBodiesByRange(context.Context, uint64, uint64
 }
 
 func (forkChoiceSpectestEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
+	return nil, nil
+}
+
+func (forkChoiceSpectestEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
 	return nil, nil
 }
 
@@ -306,7 +314,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
 	blobStorage := blob_storage.NewBlobStore(mdbxtest.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs())
-	columnStorage := blob_storage.NewDataColumnStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &clparams.MainnetBeaconConfig, emitters)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &clparams.MainnetBeaconConfig, emitters)
 	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig, &clparams.NetworkConfig{})
 	peerDas := das.NewPeerDas(nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil, nil, nil)
 	localValidators := validator_params.NewValidatorParams()

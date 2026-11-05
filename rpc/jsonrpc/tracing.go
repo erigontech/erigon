@@ -18,7 +18,9 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -177,13 +179,16 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
-			if traceErr != nil {
-				return traceErr
-			}
-			return ethapi.FinalizeCallTx(ibs, rules)
+			return traceErr
 		})
 
 		stream.WriteObjectEnd()
+
+		// Trace output can fail after execution. Finalize even then so the next
+		// transaction starts with its own storage originals, journal and refunds.
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+			return err
+		}
 
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
@@ -284,7 +289,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 	}
 
-	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, txnIndex)
 	if err != nil {
 		return err
 	}
@@ -327,6 +332,22 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return fmt.Errorf("get block number: %w", err)
 	}
 
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return err
+	}
+
+	var txIndex int
+	if config != nil && config.TxIndex != nil {
+		txIndex = int(min(*config.TxIndex, math.MaxInt))
+		if _, err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+			if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+				err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", *config.TxIndex, blockNumber)}
+			}
+			return err
+		}
+	}
+
 	postState := config == nil || config.TxIndex == nil || isLatest
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
@@ -337,16 +358,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
-	if err != nil {
-		return err
-	}
-
 	var stateReader state.StateReader
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
+		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, txIndex, api._txNumReader)
 	}
 	if err != nil {
 		return fmt.Errorf("create state reader: %w", err)
@@ -402,7 +418,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	return err
 }
 
-// TraceCall implements debug_traceCallMany. Returns Geth style call traces.
+// TraceCallMany implements debug_traceCallMany and returns Geth-style call traces.
+// A transaction index of -1 selects post-block state, including the final system transaction.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
 		return err
@@ -443,6 +460,15 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
+		return err
+	}
+	if simulateContext.TransactionIndex != nil {
+		if _, err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
+			return err
+		}
+	}
+
 	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
@@ -463,11 +489,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	var stateReader state.StateReader
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
-	if err != nil {
-		return err
-	}
 
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
@@ -496,11 +517,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()
 
-	var precompiles vm.PrecompiledContracts
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		err = config.StateOverrides.Override(ibs, precompiles, rules)
+		err = config.StateOverrides.Override(ibs, vm.ActivePrecompiledContracts(rules), rules)
 		if err != nil {
 			return err
 		}
@@ -513,6 +532,10 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
+		precompiles, err := config.StateOverrides.ActivePrecompiles(blockCtx.Rules(chainConfig))
+		if err != nil {
+			return err
+		}
 		// A bundle is a block of its own, so its logs number from zero. Only the
 		// logs are reset: the overrides and state changes have to survive.
 		ibs.ResetLogs()

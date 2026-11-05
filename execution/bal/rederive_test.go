@@ -135,23 +135,7 @@ func TestRederiveBlockAccessListReportsRecoveredPanic(t *testing.T) {
 	t.Parallel()
 	getHeader := func(common.Hash, uint64) (*types.Header, error) { panic("header read panicked") }
 	err := rederiveCall(t, []byte{byte(vm.PUSH1), 1, byte(vm.BLOCKHASH), byte(vm.STOP)}, nil, getHeader)
-	_, isPanic := errors.AsType[*protocol.ErrExecPanic](err)
-	require.True(t, isPanic, "%v", err)
-	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-}
-
-// TestRederiveBlockAccessListRefusesAccountAbstractionTx pins that a RIP-7560
-// transaction, which the live executor runs on its own path, is reported as the
-// node's failure: the replay cannot judge it.
-func TestRederiveBlockAccessListRefusesAccountAbstractionTx(t *testing.T) {
-	t.Parallel()
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-	header := &types.Header{Number: *uint256.NewInt(5), GasLimit: 10_000_000, Difficulty: *uint256.NewInt(1)}
-	txns := types.Transactions{&types.AccountAbstractionTransaction{ChainID: uint256.NewInt(1), GasLimit: 100_000, Tip: new(uint256.Int), FeeCap: new(uint256.Int)}}
-	_, err := RederiveBlockAccessList(context.Background(), chain.TestChainBerlinConfig, ethash.NewFaker(), nil, noHeader, header, txns, nil, nil, ibs, log.New())
-	require.Error(t, err)
+	require.ErrorIs(t, err, protocol.ErrExecPanic)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
 

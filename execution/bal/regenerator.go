@@ -151,7 +151,6 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 		return nil, err
 	}
 	bal := vio.AsBlockAccessList()
-	vio.ReleaseOutputMaps()
 	computedHash := bal.Hash()
 	if computedHash != *header.BlockAccessListHash {
 		// A canonical block whose replay diverges from its commitment is a

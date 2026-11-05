@@ -381,8 +381,8 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
-	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, i)
+func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (common.Hash, bool, error) {
+	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

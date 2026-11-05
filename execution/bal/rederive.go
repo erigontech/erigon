@@ -83,7 +83,7 @@ func RederiveBlockAccessList(
 		if headerErr != nil {
 			return headerErr
 		}
-		if _, ok := errors.AsType[*protocol.ErrExecPanic](err); ok {
+		if errors.Is(err, protocol.ErrExecPanic) {
 			return err
 		}
 		if err != nil {
@@ -98,27 +98,29 @@ func RederiveBlockAccessList(
 	// cross-tx carrier the parallel executor and block builder also use. Without
 	// it a later tx's balance write (e.g. the accumulating coinbase fee) can't
 	// see the running value and the per-tx BAL change is lost.
-	record := func() {
-		writes := ibs.FinalizedWrites(blockRules)
+	record := func() error {
+		writes, err := ibs.FinalizedWrites(blockRules)
+		if err != nil {
+			return err
+		}
 		ibs.MergeTxIOInto(balIO, writes)
 		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
+		return nil
 	}
 	ibs.SetTxContext(blockNum, -1)
 	err := protocol.InitializeBlockExecution(engine, chainReader, header, cfg, ibs, noopWriter, logger, nil)
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
-	record()
+	if err := record(); err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
+	}
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 	vmCfg := vm.Config{}
 	receipts := make(types.Receipts, 0, len(txns))
 	for i, txn := range txns {
-		// The live executor runs RIP-7560 transactions on their own path.
-		if txn.Type() == types.AccountAbstractionTxType {
-			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: account abstraction transactions are not replayed", i, blockNum)
-		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
@@ -127,7 +129,9 @@ func RederiveBlockAccessList(
 		if err = phaseErr(err); err != nil {
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)
 		}
-		record()
+		if err := record(); err != nil {
+			return nil, fmt.Errorf("bal.RederiveBlockAccessList: replay tx %d of block %d: %w", i, blockNum, err)
+		}
 		receipts = append(receipts, receipt)
 	}
 	ibs.SetTxContext(blockNum, len(txns))
@@ -136,6 +140,10 @@ func RederiveBlockAccessList(
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}
-	ibs.MergeTxIOInto(balIO, ibs.FinalizedWrites(blockRules))
+	finalWrites, err := ibs.FinalizedWrites(blockRules)
+	if err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
+	}
+	ibs.MergeTxIOInto(balIO, finalWrites)
 	return balIO, nil
 }

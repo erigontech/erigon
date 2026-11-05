@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // run is runTraced without the tracing code and with the fast path.
@@ -48,7 +47,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
 		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
@@ -209,6 +208,15 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
+					if y[0]&(y[0]-1) == 0 {
+						if n, ok := log2Exact(y); ok {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							y.Rsh(x, n)
+							gasLeft, pc = callContext.gas, callContext.savedPC
+							pc++
+							continue run
+						}
+					}
 					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Div(x, y)
 					gasLeft, pc = callContext.gas, callContext.savedPC
@@ -295,6 +303,13 @@ run:
 					pc++
 					continue run
 				}
+			case PUSH0:
+				if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().Clear()
+					pc++
+					continue run
+				}
 			case MCOPY:
 				if sLen >= 3 && jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
 					gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
@@ -308,10 +323,17 @@ run:
 			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
 				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
-						callContext.gas, callContext.savedPC = gasLeft, pc
-						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
-						gasLeft, pc = callContext.gas, callContext.savedPC
+					code := callContext.Contract.Code
+					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(code)) {
+						if end < 32 {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							callContext.Stack.pushRef().SetBytes(code[pc+1 : end])
+							gasLeft, pc = callContext.gas, callContext.savedPC
+							pc = pc + uint64(op-PUSH0)
+							pc++
+							continue run
+						}
+						setBytes32Masked(callContext.Stack.pushRef(), (*[32]byte)(code[end-32:end]), &pushMasks[uint64(op-PUSH0)])
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
@@ -659,13 +681,6 @@ run:
 						pc++
 						continue run
 					}
-				case PUSH0:
-					if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
-						gasLeft -= GasQuickStep
-						callContext.Stack.pushRef().Clear()
-						pc++
-						continue run
-					}
 				case PC:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
@@ -687,6 +702,66 @@ run:
 						pc++
 						continue run
 					}
+				case CALLDATACOPY:
+					if sLen >= 3 && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
+						memOffset, dataOffset, length := callContext.Stack.pop3()
+						dataOffset64, overflow := dataOffset.Uint64WithOverflow()
+						if overflow {
+							dataOffset64 = math.MaxUint64
+						}
+
+						memOffset64 := memOffset.Uint64()
+						length64 := length.Uint64()
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Memory.SetFromData(memOffset64, length64, dataOffset64, callContext.input)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case CODECOPY:
+					if sLen >= 3 && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
+						memOffset, codeOffset, length := callContext.Stack.pop3()
+						uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
+						if overflow {
+							uint64CodeOffset = math.MaxUint64
+						}
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Memory.SetFromData(memOffset.Uint64(), length.Uint64(), uint64CodeOffset, callContext.Contract.Code)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
+				case RETURNDATACOPY:
+					if sLen >= 3 && jt[RETURNDATACOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
+						memOffset, dataOffset, length := callContext.Stack.pop3()
+
+						offset64, overflow := dataOffset.Uint64WithOverflow()
+						if overflow {
+							res, err = nil, ErrReturnDataOutOfBounds
+							break run
+						}
+
+						end := dataOffset
+						_, overflow = end.AddOverflow(end, length)
+						if overflow {
+							res, err = nil, ErrReturnDataOutOfBounds
+							break run
+						}
+
+						end64, overflow := end.Uint64WithOverflow()
+						if overflow || uint64(len(evm.returnData)) < end64 {
+							res, err = nil, ErrReturnDataOutOfBounds
+							break run
+						}
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						callContext.Memory.Set(memOffset.Uint64(), length.Uint64(), evm.returnData[offset64:end64])
+						gasLeft, pc = callContext.gas, callContext.savedPC
+						pc++
+						continue run
+					}
 				case BLOBHASH:
 					if jt[BLOBHASH].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastestStep {
 						gasLeft -= GasFastestStep
@@ -697,6 +772,15 @@ run:
 						} else {
 							idx.Clear()
 						}
+						pc++
+						continue run
+					}
+				case CLZ:
+					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
+						gasLeft -= GasFastStep
+						x := callContext.Stack.peek()
+
+						x.SetUint64(256 - uint64(x.BitLen()))
 						pc++
 						continue run
 					}
@@ -849,13 +933,8 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 
@@ -906,11 +985,14 @@ var isColdOp = [256]bool{
 	CHAINID:        true,
 	BASEFEE:        true,
 	BLOBBASEFEE:    true,
-	PUSH0:          true,
 	PC:             true,
 	MSIZE:          true,
 	GAS:            true,
+	CALLDATACOPY:   true,
+	CODECOPY:       true,
+	RETURNDATACOPY: true,
 	BLOBHASH:       true,
+	CLZ:            true,
 	DUPN:           true,
 	SWAPN:          true,
 	EXCHANGE:       true,

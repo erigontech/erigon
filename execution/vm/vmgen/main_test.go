@@ -26,3 +26,12 @@ func TestReturnsFindsNestedReturn(t *testing.T) {
 		t.Fatal("found a return in return-free code")
 	}
 }
+
+func TestCallsOutOfLineSetOnlyOnMemory(t *testing.T) {
+	if !callsOutOfLine(mustStmt("callContext.Memory.Set(a, b, c)")) {
+		t.Fatal("Memory.Set is not inlined by Go and needs the gas and pc save")
+	}
+	if callsOutOfLine(mustStmt("callContext.Stack.pushRef().Set(chainId)")) {
+		t.Fatal("uint256's Set is inlined by Go and needs no save")
+	}
+}

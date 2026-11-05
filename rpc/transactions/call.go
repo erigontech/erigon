@@ -203,13 +203,21 @@ func (r *ReusableCaller) Message() *types.Message { return r.message }
 // VersionedCallState puts a one-shot call on the versioned state path block execution
 // uses. Reset clears the flags, so a reused state calls this again.
 func VersionedCallState(ibs *state.IntraBlockState) {
+	VersionedBlockState(ibs)
+	if ibs.IsVersioned() {
+		ibs.SetNoConflictDetection()
+	}
+}
+
+// VersionedBlockState is VersionedCallState for a state that runs several txs in order:
+// a later tx may re-create an account an earlier one destroyed, so CreateAccount keeps
+// the read that carries the balance it was given in between.
+func VersionedBlockState(ibs *state.IntraBlockState) {
 	if !dbg.CallNoMaterialize {
 		return
 	}
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
-	ibs.SetNoConflictDetection()
 }
 
 // InitialState returns the state every call runs against, rewound to the request's
