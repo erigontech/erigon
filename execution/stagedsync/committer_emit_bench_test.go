@@ -54,6 +54,9 @@ func BenchmarkEmitTouched(b *testing.B) {
 			u := newTestUpdates()
 			b.ReportAllocs()
 			for b.Loop() {
+				b.StopTimer()
+				u.Reset()
+				b.StartTimer()
 				if err := cc.emitTouched(vm.View(1, base), u); err != nil {
 					b.Fatal(err)
 				}
