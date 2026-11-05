@@ -19,6 +19,7 @@ package execmodule
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -162,22 +163,41 @@ func (e *ExecModule) GetHeadersByRange(ctx context.Context, start, count uint64)
 	}
 	defer cleanup()
 
+	// The head marker and its number survive header pruning. Read them in the
+	// same view so gaps in the headers do not look like the end of the chain.
+	headHash, err := tx.GetOne(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey))
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: read head hash: %w", err)
+	}
+	if len(headHash) == 0 {
+		return nil, nil
+	}
+	headNumber, err := tx.GetOne(kv.HeaderNumber, headHash)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: read head number: %w", err)
+	}
+	if len(headNumber) != 8 {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: invalid head number length: %d", len(headNumber))
+	}
+	head := binary.BigEndian.Uint64(headNumber)
+
 	headers := make([]*types.Header, 0, count)
 	for i := range count {
 		number := start + i
+		if number < start || number > head {
+			break
+		}
 		hash, err := e.canonicalHash(ctx, tx, number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: canonicalHash error %w", err)
 		}
 		if hash == (common.Hash{}) {
-			break
+			headers = append(headers, nil)
+			continue
 		}
 		header, err := e.getHeader(ctx, tx, hash, number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetHeadersByRange: getHeader error %w", err)
-		}
-		if header == nil {
-			break
 		}
 		headers = append(headers, header)
 	}

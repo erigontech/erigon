@@ -82,13 +82,17 @@ func (m *bodiesExecutionModule) GetHeader(_ context.Context, hash *common.Hash, 
 }
 
 func (m *bodiesExecutionModule) GetHeadersByRange(_ context.Context, start, count uint64) ([]*types.Header, error) {
+	var head uint64
+	for number := range m.headers {
+		head = max(head, number)
+	}
 	headers := make([]*types.Header, 0, count)
 	for i := range count {
-		header := m.headers[start+i]
-		if header == nil {
+		number := start + i
+		if number < start || number > head {
 			break
 		}
-		headers = append(headers, header)
+		headers = append(headers, m.headers[number])
 	}
 	return headers, nil
 }
@@ -658,33 +662,33 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 	}
 }
 
-func TestSSZRESTBodiesByRangePreservesForkBoundaryPositions(t *testing.T) {
+func TestSSZRESTBodiesByRangePreservesPositions(t *testing.T) {
 	headers := map[uint64]*types.Header{
 		10: {Number: *uint256.NewInt(10), Time: 199},
 		11: {Number: *uint256.NewInt(11), Time: 200},
-		12: {Number: *uint256.NewInt(12), Time: 299},
-		13: {Number: *uint256.NewInt(13), Time: 300},
+		13: {Number: *uint256.NewInt(13), Time: 299},
+		14: {Number: *uint256.NewInt(14), Time: 300},
 	}
 	module := &bodiesExecutionModule{
 		bodies: map[common.Hash]*execmodule.PayloadBody{
 			headers[10].Hash(): {Transactions: [][]byte{{0x01}}},
 			headers[11].Hash(): {Transactions: [][]byte{{0x02}}},
-			headers[12].Hash(): {Transactions: [][]byte{{0x03}}},
 			headers[13].Hash(): {Transactions: [][]byte{{0x04}}},
+			headers[14].Hash(): {Transactions: [][]byte{{0x05}}},
 		},
 		headers: headers,
 	}
 	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec,
-		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=5", "cancun", nil))
+		newSSZRequest(t.Context(), http.MethodGet, "/engine/v1/bodies?from=10&count=6", "cancun", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Equal(t, [][]common.Hash{{headers[11].Hash(), headers[12].Hash()}}, module.bodyRequests)
+	require.Equal(t, [][]common.Hash{{headers[11].Hash(), headers[13].Hash()}}, module.bodyRequests)
 	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
 	require.NoError(t, err)
-	require.Len(t, entries, 4)
-	for i, available := range []bool{false, true, true, false} {
+	require.Len(t, entries, 5)
+	for i, available := range []bool{false, true, false, true, false} {
 		require.Equal(t, available, entries[i].Available, "entry %d", i)
 		if available {
 			require.Equal(t, []hexutil.Bytes{{byte(i + 1)}}, entries[i].Transactions)
