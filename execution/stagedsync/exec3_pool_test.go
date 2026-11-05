@@ -265,7 +265,8 @@ func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
 		if pending {
 			require.False(t, pt.parked, "a task parked although a re-exec signal arrived before it parked")
 			require.False(t, pt.pending, "the latched signal was not consumed")
-			require.Equal(t, []*poolTask{pt}, be.wakeValidated[1], "the task was not queued to re-run after its predecessor validates")
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "a re-exec signal re-runs the task after its predecessor commits")
+			require.Empty(t, be.wakeValidated, "a predecessor wait is not a named-writer wait")
 		} else {
 			require.True(t, pt.parked, "a task with no signal must park")
 			require.Empty(t, be.wakeAt)

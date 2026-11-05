@@ -184,6 +184,13 @@ func (pt *poolTask) rerunAfter(named int) bool {
 	return pt.waitThen(pt.tv.index-1, psReexec)
 }
 
+// rerunAfterPredecessor re-runs the task once its predecessor commits: the predecessor's deferred sender charge
+// (pre-Amsterdam) lands only at commit, so waking on its validation could repeat the same failure.
+func (pt *poolTask) rerunAfterPredecessor() bool {
+	pt.reruns++
+	return pt.waitThen(pt.tv.index-1, psReexec)
+}
+
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 	be, tv := pt.be, pt.tv
 	defer func() {
@@ -241,14 +248,14 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	result := wk.w.RunTxTask(tv)
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
-		return pt.rerunAfter(tv.index - 1)
+		return pt.rerunAfterPredecessor()
 	}
 	if result.Err != nil {
 		if finalExec {
 			pt.send(p, result)
 			return false
 		}
-		return pt.rerunAfter(tv.index - 1)
+		return pt.rerunAfterPredecessor()
 	}
 	if result.Dep >= 0 {
 		return pt.rerunAfter(be.taskIndexOf(result.Dep))
@@ -279,7 +286,7 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	if pt.pending {
 		pt.pending = false
 		pt.mu.Unlock()
-		return pt.rerunAfter(pt.tv.index - 1)
+		return pt.rerunAfterPredecessor()
 	}
 	pt.parked = true
 	pt.mu.Unlock()
