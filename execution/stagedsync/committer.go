@@ -545,8 +545,8 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
 		return
 	}
-	if len(req.bal) > 0 && !dbg.IgnoreBAL {
-		cc.branchPrefetch.addBAL(req.bal)
+	if len(req.bal) > 0 && !dbg.IgnoreBAL && cc.branchPrefetch != nil {
+		cc.prefetchWrites(bal.ToWriteSet(req.bal, math.MaxUint32))
 	}
 	mode := calcModeIncremental
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {

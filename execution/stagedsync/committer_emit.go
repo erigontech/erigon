@@ -119,9 +119,12 @@ func (cc *commitmentCalculator) prefetchTouched(plainKey, account, slot []byte) 
 		}
 		return
 	}
-	if cc.balBlock {
-		return
+	if !cc.balBlock {
+		cc.queueBranch(account, slot)
 	}
+}
+
+func (cc *commitmentCalculator) queueBranch(account, slot []byte) {
 	it := prefetchItem{account: [32]byte(account)}
 	if slot != nil {
 		it.slot, it.storage = [32]byte(slot), true

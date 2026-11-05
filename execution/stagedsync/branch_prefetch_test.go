@@ -122,6 +122,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	p := &branchPrefetcher{work: make(chan prefetchItem, 16)}
 	cc := &commitmentCalculator{
 		branchPrefetch: p,
+		balBlock:       true,
 		signalCtx:      context.Background(),
 		pending:        map[uint64]*pendingBlock{},
 		computedAhead:  map[uint64]bool{},
@@ -152,7 +153,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	for len(p.work) > 0 {
 		got = append(got, <-p.work)
 	}
-	require.ElementsMatch(t, want, got, "BAL writes queue their account and slot walks; storage-only accounts get the account walk, read-only accounts get nothing")
+	require.ElementsMatch(t, want, got, "BAL writes queue their account and slot walks at the request, whatever block came before; storage-only accounts get the account walk, read-only accounts get nothing")
 }
 
 func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {

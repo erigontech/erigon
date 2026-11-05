@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func (cc *commitmentCalculator) feeds() bool {
@@ -42,6 +43,31 @@ func (cc *commitmentCalculator) setInput(updates *commitment.Updates) {
 		return
 	}
 	cc.doms.GetCommitmentContext().SetUpdates(updates)
+}
+
+func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
+	seen := map[accounts.Address][]byte{}
+	account := func(a accounts.Address) []byte {
+		hash, ok := seen[a]
+		if !ok {
+			address := a.Value()
+			hash = cc.touchHash(address[:])
+			seen[a] = hash
+			cc.queueBranch(hash, nil)
+		}
+		return hash
+	}
+	for a := range writes.AccountChanges() {
+		account(a)
+	}
+	for a, slots := range writes.StorageChanges() {
+		hash := account(a)
+		address := a.Value()
+		for k := range slots {
+			slot := k.Value()
+			cc.queueBranch(hash, cc.touchHash(slices.Concat(address[:], slot[:])))
+		}
+	}
 }
 
 type feedBuffer struct {
