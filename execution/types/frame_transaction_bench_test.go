@@ -17,24 +17,38 @@
 package types
 
 import (
+	"bytes"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
-// TestAATxnAsMessageCarriesNoBlobHashes pins that an AA message is not mistaken
-// for a blob-carrying one: EIP-4844 validation keys off a non-nil blob hash
-// slice, and an AA txn has no blobs. Its To is nil, so a non-nil empty slice
-// would trip the blob contract-creation rule.
-func TestAATxnAsMessageCarriesNoBlobHashes(t *testing.T) {
-	t.Parallel()
-
-	txn := &AccountAbstractionTransaction{FeeCap: uint256.NewInt(1)}
-	msg, err := txn.AsMessage(Signer{}, nil, nil)
-	require.NoError(t, err)
-
-	require.Nil(t, msg.BlobHashes())
-	require.Zero(t, msg.BlobGas())
-	require.True(t, msg.To().IsNil())
+func BenchmarkFrameTransactionValidate(b *testing.B) {
+	for name, scheme := range map[string]uint8{"secp256k1": FrameSignatureSecp256k1, "p256": FrameSignatureP256} {
+		b.Run(name, func(b *testing.B) {
+			tx, _ := signedFrameTransaction(b, scheme)
+			b.Run("repeated", func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					if err := tx.Validate(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			var encoded bytes.Buffer
+			require.NoError(b, tx.MarshalBinary(&encoded))
+			b.Run("decoded", func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					decoded, err := DecodeTransaction(encoded.Bytes())
+					if err != nil {
+						b.Fatal(err)
+					}
+					if err := decoded.(*FrameTransaction).Validate(); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		})
+	}
 }

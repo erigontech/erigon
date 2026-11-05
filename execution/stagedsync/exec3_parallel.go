@@ -1132,6 +1132,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"valSkip", blockExecutor.cntValidationSkip,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -1745,6 +1746,7 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // out of order rather than behind the whole linear prefix. valid=false forces
 // re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
+	result.ValStamp = be.versionMap.WriteSeq()
 	blocker = -1
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
@@ -2273,14 +2275,6 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	txIndex := task.Version().TxIndex
 	chainRules := txTask.EvmBlockContext.Rules(txTask.Config)
 	execResult := result.ExecutionResult
-	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
-	coinbase, err := cbReader.ReadAccountData(result.Coinbase)
-	if err != nil {
-		return err
-	}
-	if coinbase != nil {
-		execResult.CoinbaseInitBalance = coinbase.Balance
-	}
 	message, err := task.TxMessage()
 	if err != nil {
 		return err
@@ -2519,7 +2513,9 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntValidationFail int
+	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
+
+	oracleHook func()
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
@@ -2596,6 +2592,8 @@ type blockExecutor struct {
 	// each task exactly once. Touched only on the exec-loop goroutine.
 	selfLoopDispatched map[int]bool
 }
+
+var validationSkipHook func(int)
 
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
 // order: exec-complete and not already validated. The self-loop worker only sends a
@@ -2774,8 +2772,11 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	}
 
 	if txn := txTask.Tx(); txn != nil {
-		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
-		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution, txn.GetBlobGas()); err != nil {
+		limits, err := protocol.TransactionGasLimits(txn, txTask.Rules().IsAmsterdam)
+		if err != nil {
+			return be.invalidBlockResult(fmt.Errorf("%w: invalid transaction gas limits at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+		}
+		if err := protocol.CheckBlockGasInclusion(be.gasPool, limits.Execution, limits.State, txn.GetBlobGas()); err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 		}
 	}
@@ -2869,13 +2870,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			dirty := be.revalidate[tx]
 			if dirty || dbg.AssertEnabled {
-				if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-					func(rv, wv state.Version) state.VersionValidity {
-						if rv != wv {
-							return state.VersionInvalid
-						}
-						return state.VersionValid
-					}, false, "") != state.VersionValid {
+				if !be.validateNow(txVersion.TxIndex) {
 					if !dirty {
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
@@ -3065,13 +3060,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 			continue
 		}
 		txVersion := txResult.Task.Version()
-		if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-			func(rv, wv state.Version) state.VersionValidity {
-				if rv != wv {
-					return state.VersionInvalid
-				}
-				return state.VersionValid
-			}, false, "") == state.VersionValid {
+		if be.validateNow(txVersion.TxIndex) {
 			continue
 		}
 		be.cntValidationFail++
@@ -3114,6 +3103,35 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return slices.Sorted(maps.Keys(set))
 }
 
+func (be *blockExecutor) validateNow(txIdx int) bool {
+	return be.versionMap.ValidateVersion(txIdx, be.blockIO,
+		func(rv, wv state.Version) state.VersionValidity {
+			if rv != wv {
+				return state.VersionInvalid
+			}
+			return state.VersionValid
+		}, false, "") == state.VersionValid
+}
+
+func (be *blockExecutor) arrivalValid(txIdx int, valStamp uint64) bool {
+	if !be.versionMap.QuietBelow(txIdx, valStamp) {
+		return be.validateNow(txIdx)
+	}
+	be.cntValidationSkip++
+	if validationSkipHook != nil {
+		validationSkipHook(txIdx)
+	}
+	if dbg.AssertEnabled {
+		if be.oracleHook != nil {
+			be.oracleHook()
+		}
+		if !be.validateNow(txIdx) && be.versionMap.QuietBelow(txIdx, valStamp) {
+			panic(fmt.Sprintf("validation skip oracle: tx %d skipped arrival validation but is stale", txIdx))
+		}
+	}
+	return true
+}
+
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
 // contiguous validated-but-not-finalized prefix, then validates the dependency-ready
 // txs out of order, committing each or cascading a re-validation of successors on
@@ -3139,17 +3157,12 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			// Re-validate against the CURRENT versionMap, not the worker's verdict: a
-			// predecessor may have changed or sealed since (including an in-flight
-			// Validated cell the reader early-broke on), so trusting the stale verdict
-			// would commit against a value that has moved.
-			valid := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(rv, wv state.Version) state.VersionValidity {
-					if rv != wv {
-						return state.VersionInvalid
-					}
-					return state.VersionValid
-				}, false, "") == state.VersionValid
+			// Trust the worker's verdict only when no tx below this one wrote since it was
+			// stamped. Otherwise re-validate against the CURRENT versionMap: a predecessor
+			// may have changed or sealed since (including an in-flight Validated cell the
+			// reader early-broke on), so a stale verdict would commit against a value that
+			// has moved.
+			valid := be.arrivalValid(txVersion.TxIndex, txResult.ValStamp)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3581,6 +3594,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
+		be.versionMap.InitStamps(be.tasks[len(be.tasks)-1].Version().TxIndex)
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}

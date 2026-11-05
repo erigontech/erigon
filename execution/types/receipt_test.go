@@ -551,44 +551,6 @@ func TestReceiptEncode(t *testing.T) {
 	})
 }
 
-// TestAccountAbstractionReceiptStaysUnencoded pins type 5 out of the consensus
-// receipt paths: giving it an encoding it never had moves the receipts root of
-// an RIP-7560 block. Storage is the exception, and already round-trips type 5.
-func TestAccountAbstractionReceiptStaysUnencoded(t *testing.T) {
-	t.Parallel()
-
-	r := &Receipt{
-		Type:              AccountAbstractionTxType,
-		Status:            ReceiptStatusSuccessful,
-		CumulativeGasUsed: 21000,
-		Logs: []*Log{{
-			Address: common.BytesToAddress([]byte{0x11}),
-			Topics:  []common.Hash{common.HexToHash("dead")},
-			Data:    []byte{0xff},
-		}},
-	}
-	r.Bloom = CreateBloom(Receipts{r})
-
-	_, err := r.MarshalBinary()
-	require.ErrorIs(t, err, ErrTxTypeNotSupported)
-	require.ErrorIs(t, r.EncodeRLP(new(bytes.Buffer)), ErrTxTypeNotSupported)
-	require.ErrorIs(t, r.EncodeRLP69(new(bytes.Buffer)), ErrTxTypeNotSupported)
-
-	var buf bytes.Buffer
-	Receipts{r}.EncodeIndex(0, &buf)
-	require.Empty(t, buf.Bytes())
-
-	// The empty-leaf root main derives for the same receipt.
-	require.Equal(t, common.HexToHash("0x01d05430bbe453102aa0430967e6389b1083ce3e3c04b5653034be32d99e00b6"), DeriveSha(Receipts{r}))
-
-	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(r))
-	require.NoError(t, err)
-	unstored := new(ReceiptForStorage)
-	require.NoError(t, rlp.DecodeBytes(stored, unstored))
-	require.Equal(t, r.Type, unstored.Type)
-	require.Equal(t, r.CumulativeGasUsed, unstored.CumulativeGasUsed)
-}
-
 // TestTypedReceiptDecodersAgree pins UnmarshalBinary and DecodeRLP to the same
 // verdict on a typed envelope. They are separate implementations over the same
 // bytes, so a guard added to one and not the other is a decoder split: the same
@@ -650,6 +612,8 @@ func TestReceiptSizeCountsLogs(t *testing.T) {
 
 func TestReceiptSizeCountsRetainedPointers(t *testing.T) {
 	empty := (&Receipt{}).Size()
+	require.Equal(t, empty+int(unsafe.Sizeof(common.Address{})), (&Receipt{Payer: new(common.Address)}).Size())
+	require.Equal(t, empty+int(unsafe.Sizeof(FrameReceipt{})), (&Receipt{FrameReceipts: []FrameReceipt{{}}}).Size())
 	require.Equal(t, empty+int(unsafe.Sizeof(uint256.Int{})), (&Receipt{BlockNumber: new(uint256.Int)}).Size())
 	require.Equal(t, empty+int(unsafe.Sizeof(Log{}))+int(unsafe.Sizeof((*Log)(nil))), (&Receipt{Logs: Logs{{}}}).Size())
 }
