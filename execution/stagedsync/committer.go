@@ -433,9 +433,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if !r.execEndedAt.IsZero() {
 				lag = time.Since(r.execEndedAt)
 			}
-			cc.logger.Info("[np-phase] committer", "blk", r.BlockNum, "cpAcc", cpAcc, "cpEdge", cpEdge, "cpIdle", cpIdle, "cpLagAfterExec", lag)
+			cc.logger.Info("[np-phase] committer", "blk", r.BlockNum, "cpAcc", cpAcc, "cpEdge", cpEdge, "cpIdle", cpIdle, "cpLagAfterExec", lag, "cpHash", cpHash, "cpBase", cpBase, "cpPrefetch", cpPrefetch)
 		}
-		cpAcc, cpEdge, cpIdle = 0, 0, 0
+		cpAcc, cpEdge, cpIdle, cpHash, cpBase, cpPrefetch = 0, 0, 0, 0, 0, 0
 		cc.lastBlockResult = r
 		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true

@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"slices"
+	"time"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -93,7 +94,9 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 		return
 	}
 	address := a.Value()
+	t0 := time.Now()
 	cc.touchedAccounts[a] = cc.touchHash(address[:])
+	t1 := time.Now()
 	if base != nil {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
@@ -101,9 +104,13 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 			cc.baseErr = err
 		}
 	}
+	t2 := time.Now()
 	if cc.prefetchFn != nil {
 		cc.prefetchFn(address[:])
 	}
+	cpHash += t1.Sub(t0)
+	cpBase += t2.Sub(t1)
+	cpPrefetch += time.Since(t2)
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value
@@ -183,3 +190,6 @@ func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 	}
 	return r.StateReader.ReadAccountData(addr)
 }
+
+// probe: accumulateTouched split.
+var cpHash, cpBase, cpPrefetch time.Duration
