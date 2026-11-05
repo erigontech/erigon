@@ -193,7 +193,7 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		// An announcement flood: forget the oldest request before the insert, so a full LRU evicts no other
 		// pending request, and the forgotten hash is asked again on its next announcement.
 		if len(f.pending) >= maxFetchRequests {
-			if old, ok := f.requested.Get(f.pending[0].hash[:]); ok && old.at.Equal(f.pending[0].at) {
+			if old, found := f.requested.Get(f.pending[0].hash[:]); found && old.at.Equal(f.pending[0].at) {
 				f.requested.Delete(f.pending[0].hash[:])
 			}
 			f.pending = f.pending[1:]
