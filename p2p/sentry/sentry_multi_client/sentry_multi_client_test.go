@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -81,10 +80,9 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	}
 
 	cs := &MultiClient{
-		blockReader:                      mockBlockReader,
-		ethApiWrapper:                    mockReceiptsGenerator,
-		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
-		logger:                           log.New(),
+		blockReader:   mockBlockReader,
+		ethApiWrapper: mockReceiptsGenerator,
+		logger:        log.New(),
 	}
 
 	request := eth.GetReceiptsPacket66{

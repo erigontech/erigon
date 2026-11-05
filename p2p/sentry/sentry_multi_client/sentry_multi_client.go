@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -77,6 +76,19 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	sentry sentryproto.SentryClient,
 	wg *sync.WaitGroup,
 ) {
+	var handlers sync.WaitGroup
+	defer handlers.Wait()
+	done := func() {
+		if wg != nil {
+			wg.Done()
+		}
+		handlers.Done()
+	}
+	handle := func(ctx context.Context, message *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+		handlers.Add(1)
+		cs.enqueueUpload(uploadTask{ctx: ctx, message: message, sentry: sentry, done: done})
+		return nil
+	}
 	ids := []sentryproto.MessageId{
 		eth.ToProto[direct.ETH68][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
@@ -84,10 +96,11 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
+		context.AfterFunc(streamCtx, func() { cs.cancelUploads(streamCtx) })
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
-	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, handle, nil, cs.logger)
 }
 
 func (cs *MultiClient) RecvUploadBlockAccessListsMessageLoop(
@@ -167,12 +180,12 @@ type MultiClient struct {
 	statusDataProvider StatusGetter
 	logPeerInfo        bool
 
-	logger                           log.Logger
-	getReceiptsActiveGoroutineNumber *semaphore.Weighted
-	ethApiWrapper                    eth.ReceiptsGetter
-	balGenerator                     eth.BlockAccessListGetter
-	balReplayLimiter                 *rate.Limiter
-	balReplayMu                      sync.Mutex
+	logger           log.Logger
+	uploads          uploadQueue
+	ethApiWrapper    eth.ReceiptsGetter
+	balGenerator     eth.BlockAccessListGetter
+	balReplayLimiter *rate.Limiter
+	balReplayMu      sync.Mutex
 }
 
 var (
@@ -192,18 +205,18 @@ func NewMultiClient(
 	logger log.Logger,
 ) (*MultiClient, error) {
 	cs := &MultiClient{
-		sentries:                         sentries,
-		ChainConfig:                      chainConfig,
-		db:                               db,
-		Engine:                           engine,
-		blockReader:                      blockReader,
-		statusDataProvider:               statusDataProvider,
-		logPeerInfo:                      logPeerInfo,
-		logger:                           logger,
-		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
-		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
-		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
-		balReplayLimiter:                 rate.NewLimiter(rate.Every(balReplayInterval), 1),
+		sentries:           sentries,
+		ChainConfig:        chainConfig,
+		db:                 db,
+		Engine:             engine,
+		blockReader:        blockReader,
+		statusDataProvider: statusDataProvider,
+		logPeerInfo:        logPeerInfo,
+		logger:             logger,
+		uploads:            uploadQueue{peers: make(map[[64]byte]*uploadPeer)},
+		ethApiWrapper:      receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balGenerator:       bal.NewRegenerator(blockReader, engine, logger),
+		balReplayLimiter:   rate.NewLimiter(rate.Every(balReplayInterval), 1),
 	}
 
 	return cs, nil
@@ -453,12 +466,6 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 		lastBlockIncomplete = cached.LastBlockIncomplete
 	}
 	if needMore {
-		err = cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
-		if err != nil {
-			return err
-		}
-		defer cs.getReceiptsActiveGoroutineNumber.Release(1)
-
 		tx, err := cs.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
