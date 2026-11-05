@@ -6,6 +6,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -54,6 +55,10 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 			require.NoError(t, err)
 			token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()}).SignedString(secret)
 			require.NoError(t, err)
+			wrongSecret := bytes.Clone(secret)
+			wrongSecret[0] ^= 0xff
+			invalidToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()}).SignedString(wrongSecret)
+			require.NoError(t, err)
 			for _, protocol := range []int{1, 2} {
 				t.Run("HTTP"+strconv.Itoa(protocol), func(t *testing.T) {
 					transport := &http.Transport{
@@ -67,26 +72,55 @@ func TestEngineRESTHTTPTransports(t *testing.T) {
 					t.Cleanup(transport.CloseIdleConnections)
 					client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 					body := bytes.Repeat([]byte{0, 1, 0xff}, 400_000)
-					for _, authorized := range []bool{true, false, true} {
-						req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost/engine/v1/payloads", bytes.NewReader(body))
-						require.NoError(t, err)
-						req.Header.Set("Content-Type", "application/octet-stream")
-						req.Header.Set("Eth-Execution-Version", "amsterdam")
-						if authorized {
-							req.Header.Set("Authorization", "Bearer "+token)
-						}
-						resp, err := client.Do(req)
-						require.NoError(t, err)
-						got, err := io.ReadAll(resp.Body)
-						require.NoError(t, resp.Body.Close())
-						require.NoError(t, err)
-						require.Equal(t, protocol, resp.ProtoMajor)
-						if authorized {
-							require.Equal(t, http.StatusOK, resp.StatusCode)
-							require.Equal(t, body, got)
-						} else {
+					const payloadPath = "/engine/v1/payloads"
+					for _, tc := range []struct {
+						name, path, token, detail string
+					}{
+						{"authorized", payloadPath, token, ""},
+						{"missing token", payloadPath, "", "missing token"},
+						{"invalid signature", payloadPath, invalidToken, "signature is invalid"},
+						{"JSON-RPC missing token", "/", "", "missing token"},
+						{"JSON-RPC invalid signature", "/", invalidToken, "signature is invalid"},
+						{"authorized after failures", payloadPath, token, ""},
+					} {
+						t.Run(tc.name, func(t *testing.T) {
+							requestBody, contentType := body, "application/octet-stream"
+							if tc.path == "/" {
+								requestBody = []byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}`)
+								contentType = "application/json"
+							}
+							req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost"+tc.path, bytes.NewReader(requestBody))
+							require.NoError(t, err)
+							req.Header.Set("Content-Type", contentType)
+							req.Header.Set("Eth-Execution-Version", "amsterdam")
+							if tc.token != "" {
+								req.Header.Set("Authorization", "Bearer "+tc.token)
+							}
+							resp, err := client.Do(req)
+							require.NoError(t, err)
+							got, err := io.ReadAll(resp.Body)
+							require.NoError(t, resp.Body.Close())
+							require.NoError(t, err)
+							require.Equal(t, protocol, resp.ProtoMajor)
+							if tc.detail == "" {
+								require.Equal(t, http.StatusOK, resp.StatusCode)
+								require.Equal(t, body, got)
+								return
+							}
 							require.Equal(t, http.StatusForbidden, resp.StatusCode)
-						}
+							if tc.path == "/" {
+								require.Equal(t, "text/plain; charset=utf-8", resp.Header.Get("Content-Type"))
+								require.Equal(t, tc.detail+"\n", string(got))
+								return
+							}
+							require.Equal(t, "application/problem+json", resp.Header.Get("Content-Type"))
+							var problem map[string]string
+							require.NoError(t, json.Unmarshal(got, &problem))
+							require.Equal(t, map[string]string{
+								"type":   "/engine-api/errors/authentication-error",
+								"detail": tc.detail,
+							}, problem)
+						})
 					}
 				})
 			}
