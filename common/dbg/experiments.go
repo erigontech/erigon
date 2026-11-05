@@ -138,7 +138,6 @@ var (
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
 	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
-	RerunWaitsForWriter           = EnvBool("RERUN_WAITS_FOR_WRITER", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)

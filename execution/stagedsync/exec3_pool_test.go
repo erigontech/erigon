@@ -14,7 +14,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/exec"
@@ -253,8 +252,6 @@ func requireOperational(t *testing.T, pe *parallelExecutor, msg string) *exec.Tx
 }
 
 func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
-	defer func(prev bool) { dbg.RerunWaitsForWriter = prev }(dbg.RerunWaitsForWriter)
-	dbg.RerunWaitsForWriter = true
 	for _, pending := range []bool{true, false} {
 		pe, be := newPoolUnit(t, 3)
 		pt := newPoolUnitTask(be, 2)
@@ -306,8 +303,6 @@ func TestPoolIncarnationLimitIsOperational(t *testing.T) {
 }
 
 func TestPoolRerunAfterWaitsForPredecessorAfterNamedReruns(t *testing.T) {
-	defer func(prev bool) { dbg.RerunWaitsForWriter = prev }(dbg.RerunWaitsForWriter)
-	dbg.RerunWaitsForWriter = true
 	for _, tc := range []struct {
 		reruns, target int
 		named          bool
@@ -329,8 +324,6 @@ func TestPoolRerunAfterWaitsForPredecessorAfterNamedReruns(t *testing.T) {
 // A named re-run waits for its writer to validate, not for every lower task to commit: waiting on
 // the in-order commit frontier runs the readers of independent writers one after another.
 func TestPoolNamedRerunWakesWhenWriterValidates(t *testing.T) {
-	defer func(prev bool) { dbg.RerunWaitsForWriter = prev }(dbg.RerunWaitsForWriter)
-	dbg.RerunWaitsForWriter = true
 	pe, be := newPoolUnit(t, 4)
 	pt := newPoolUnitTask(be, 3)
 
