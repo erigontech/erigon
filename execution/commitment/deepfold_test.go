@@ -876,25 +876,25 @@ func TestDeepConcurrent_WhaleParity(t *testing.T) {
 	require.Equal(t, seqRoot, conRoot, "concurrent storage-fold root != sequential")
 }
 
-// A storage fold must not overwrite the account cell's hashedExtension with the storage
-// extension: only a plain-key-less cell navigates by its extension.
-func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
+// An account cell at depth 64 navigates its storage by the extension of the branch that
+// folds into it, like a cell without a plain key.
+func TestFillFromLowerCell_StorageBranchSyncsAccountNavPath(t *testing.T) {
 	t.Parallel()
 
 	accountCell := &cell{accountAddrLen: length.Addr, hashLen: 32}
-	navPath := []byte{0x3, 0xc, 0x1, 0x9, 0xe}
-	copy(accountCell.hashedExtension[:], navPath)
-	accountCell.hashedExtLen = int16(len(navPath))
+	accountCell.hashedExtension[0] = 0xa
+	accountCell.hashedExtension[1] = 0xb
+	accountCell.hashedExtLen = 2
 
-	storageBranch := &cell{hashLen: 32}
+	storageBranch := &cell{hashLen: 32, extLen: 1}
+	storageBranch.extension[0] = 0xc
 
-	accountCell.fillFromLowerCell(storageBranch, 65, nil, 0x7)
+	accountCell.fillFromLowerCell(storageBranch, 66, []byte{0xa}, 0xb)
 
-	require.Equalf(t, navPath, accountCell.hashedExtension[:accountCell.hashedExtLen],
-		"account cell must keep its account navigation path across a storage propagate fold; "+
-			"got hashedExtLen=%d", accountCell.hashedExtLen)
+	want := []byte{0xa, 0xb, 0xc}
+	require.Equal(t, want, accountCell.extension[:accountCell.extLen])
+	require.Equal(t, want, accountCell.hashedExtension[:accountCell.hashedExtLen])
 	require.EqualValues(t, length.Addr, accountCell.accountAddrLen, "fold must not drop the account plain key")
-	require.EqualValues(t, 1, accountCell.extLen, "storage extension still travels up in extension space")
 }
 
 func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
