@@ -811,6 +811,8 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
+	cc.asOfReader.cur, cc.asOfReader.curTxNum = cc.curVersionMap, t.lastTxNum
+	defer func() { cc.asOfReader.cur = nil }()
 	emitErr := cc.emitTouched(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
 	if os.Getenv("STEP_FOLD_TRACE") != "" {
 		sfCheckStale(cc, t)
@@ -1031,6 +1033,11 @@ type asOfStateReader struct {
 	// window over sd.mem + files). It carries its own files-fallback tx, so
 	// concurrent users never share one.
 	dr *state.LayeredDomainReader
+
+	// cur layers the folding block's own writes up to curTxNum: the trie also reads
+	// untouched siblings, and dr sees them only after the apply loop lands them in sd.mem.
+	cur      *state.VersionMap
+	curTxNum uint64
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1047,6 +1054,25 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 		}
 		return r.sd.GetLatest(d, r.roTx, plainKey)
 	}
+	if stepSize > 0 {
+		step = kv.Step(r.txNum / stepSize)
+	}
+	if r.cur != nil && d == kv.AccountsDomain {
+		view := r.cur.View(r.curTxNum, r.dr.StateReaderAt(r.txNum))
+		acc, ok := view.GetAccount(accounts.InternAddress(common.BytesToAddress(plainKey)))
+		if !ok {
+			return nil, step, view.Err()
+		}
+		return accounts.SerialiseV3(&acc), step, view.Err()
+	}
+	if r.cur != nil && d == kv.StorageDomain {
+		view := r.cur.View(r.curTxNum, r.dr.StateReaderAt(r.txNum))
+		val, ok := view.GetStorage(accounts.InternAddress(common.BytesToAddress(plainKey[:20])), accounts.InternKey(common.BytesToHash(plainKey[20:])))
+		if !ok || val.IsZero() {
+			return nil, step, view.Err()
+		}
+		return val.Bytes(), step, view.Err()
+	}
 	// Account/storage/code: the window layered over sd.mem + files.
 	enc, ok, err := r.dr.ReadDomain(d, plainKey, r.txNum)
 	if err != nil {
@@ -1055,21 +1081,18 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	if !ok {
 		enc = nil
 	}
-	if stepSize > 0 {
-		step = kv.Step(r.txNum / stepSize)
-	}
 	return enc, step, nil
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, dr: r.dr.CloneWithTx(tx)}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, dr: r.dr.CloneWithTx(tx), cur: r.cur, curTxNum: r.curTxNum}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
 // accumulator carried by workerCtx, so a clone used during block assembly (where
 // trie-warmup runs concurrently) doesn't write the shared main accumulator.
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx)}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), cur: r.cur, curTxNum: r.curTxNum}
 }
 
 // BindsWorkerTx: CloneForWorker rebinds roTx and the domain reader to the handed
