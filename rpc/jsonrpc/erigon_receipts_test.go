@@ -19,10 +19,12 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -33,8 +35,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -46,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 )
 
 // TestGetLogsFromPersistedReceipts serves eth_getLogs from the persistent receipt cache, where
@@ -846,6 +851,109 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 	require.NotZero(t, seen)
 }
 
+// newLatestLogsTestChain inserts one block with three txs that each emit one log.
+func newLatestLogsTestChain(t *testing.T) *execmoduletester.ExecModuleTester {
+	t.Helper()
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		for _, topic := range []common.Hash{{0x11}, {0x22}, {0x33}} {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	return m
+}
+
+func TestErigonGetLatestLogsBlockLogIndex(t *testing.T) {
+	for _, rcache := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rcache=%t", rcache), func(t *testing.T) {
+			if rcache {
+				enableHistoricalRCache(t)
+			}
+			m := newLatestLogsTestChain(t)
+			crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+			want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, crit)
+			require.NoError(t, err)
+			require.Len(t, want, 3)
+			slices.Reverse(want)
+
+			api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+			if rcache {
+				requirePersistedReceipt(t, m, api.BaseAPI)
+			}
+			got, err := api.GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func enableHistoricalRCache(t *testing.T) {
+	saved, assertEnabled := statecfg.Schema.RCacheDomain, dbg.AssertEnabled
+	statecfg.EnableHistoricalRCache()
+	dbg.AssertEnabled = false // asserts turn off serving persisted receipts
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain, dbg.AssertEnabled = saved, assertEnabled })
+}
+
+// requirePersistedReceipt checks that block 1's first receipt is served from the persistent cache.
+func requirePersistedReceipt(t *testing.T, m *execmoduletester.ExecModuleTester, base *BaseAPI) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header, err := base._blockReader.HeaderByNumber(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	_, ok, err := base.receiptsGenerator.PersistedReceipt(m.Ctx, tx, header, 0, txNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+type pinnedHeaderByNumberReader struct {
+	dbservices.FullBlockReader
+}
+
+func (r pinnedHeaderByNumberReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNumber uint64) (*types.Header, error) {
+	if !carriesOverlayView(tx) {
+		return nil, errors.New("header read outside the pinned overlay view")
+	}
+	return r.FullBlockReader.HeaderByNumber(ctx, tx, blockNumber)
+}
+
+// TestErigonGetLatestLogsPinsOverlayView pins that headers and receipts come
+// from one view: a header read from the committed tx next to a receipt read
+// through a newer overlay can mix two forks during a reorg.
+func TestErigonGetLatestLogsPinsOverlayView(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	base, _, _, _ := newPublishedOverlayTestBase(t, m)
+	base._blockReader = pinnedHeaderByNumberReader{FullBlockReader: base._blockReader}
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}
+
+	t.Run("erigon_getLatestLogs", func(t *testing.T) {
+		got, err := NewErigonAPI(base, m.DB, nil).GetLatestLogs(m.Ctx, crit, filters.LogFilterOptions{LogCount: 3})
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+	})
+	t.Run("eth_getLogs", func(t *testing.T) {
+		got, err := newEthApiForTest(base, m.DB, nil, nil).GetLogs(m.Ctx, crit)
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+	})
+}
+
 func TestErigonGetLogsFromLatest(t *testing.T) {
 	m := execmoduletester.New(
 		t,
@@ -870,4 +978,78 @@ func TestErigonGetLogsFromLatest(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, logs, 1)
 	require.Equal(t, hexutil.Uint64(2), logs[0].BlockNumber)
+}
+
+func TestGetReceiptDoesNotCacheReceiptReadFromAnotherFork(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	base, doms, _, _ := newPublishedOverlayTestBase(t, m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block, err := base.blockByNumberWithSenders(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum++
+	chainConfig, err := base.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteCanonicalHash(doms.BlockOverlay(), common.Hash{0xf0}, 1))
+
+	_, err = base.receiptsGenerator.GetReceipt(m.Ctx, chainConfig, tx, block.HeaderNoCopy(), block.Transactions()[0], 0, txNum, nil)
+	require.NoError(t, err)
+	_, cached := base.receiptsGenerator.TryGetCachedReceipt(block.Hash(), txNum, 0)
+	require.False(t, cached)
+}
+
+// liveCanonicalReader answers CanonicalHash from outside the read view, like RemoteBlockReader.
+type liveCanonicalReader struct {
+	dbservices.FullBlockReader
+	hash common.Hash
+}
+
+func (r liveCanonicalReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return r.hash, true, nil
+}
+
+func TestPersistedReceiptDoesNotCacheReceiptReadFromAnotherFork(t *testing.T) {
+	enableHistoricalRCache(t)
+	m := newLatestLogsTestChain(t)
+	base, doms, _, _ := newPublishedOverlayTestBase(t, m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header, err := base._blockReader.HeaderByNumber(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum++
+	require.NoError(t, rawdb.WriteCanonicalHash(doms.BlockOverlay(), common.Hash{0xf0}, 1))
+
+	_, ok, err := base.receiptsGenerator.PersistedReceipt(m.Ctx, tx, header, 0, txNum)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, cached := base.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, 0)
+	require.False(t, cached)
+}
+
+func TestGetReceiptChecksCanonicalInReadViewNotLiveBackend(t *testing.T) {
+	m := newLatestLogsTestChain(t)
+	base, doms, _, _ := newPublishedOverlayTestBase(t, m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block, err := base.blockByNumberWithSenders(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	txNum++
+	chainConfig, err := base.chainConfig(m.Ctx, tx)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteCanonicalHash(doms.BlockOverlay(), common.Hash{0xf0}, 1))
+	gen := receipts.NewGenerator(m.Dirs, liveCanonicalReader{m.BlockReader, block.Hash()}, m.Engine, base.stateCache, time.Minute, base.filters)
+
+	_, err = gen.GetReceipt(m.Ctx, chainConfig, tx, block.HeaderNoCopy(), block.Transactions()[0], 0, txNum, nil)
+	require.NoError(t, err)
+	_, cached := gen.TryGetCachedReceipt(block.Hash(), txNum, 0)
+	require.False(t, cached)
 }
