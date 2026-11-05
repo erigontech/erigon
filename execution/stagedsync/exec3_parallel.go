@@ -1134,7 +1134,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
-						"valSkip", blockExecutor.cntValidationSkip,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -1773,7 +1772,6 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // out of order rather than behind the whole linear prefix. valid=false forces
 // re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
-	result.ValStamp = be.versionMap.WriteSeq()
 	blocker = -1
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
@@ -2579,7 +2577,7 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
+	cntExec, cntSpecExec, cntValidationFail int
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
@@ -3177,8 +3175,9 @@ func (be *blockExecutor) validateNow(txIdx int) bool {
 		}, false, "") == state.VersionValid
 }
 
-func (be *blockExecutor) arrivalValid(txIdx int, _ uint64) bool {
-	// The write-stamp skip let stale results through (its oracle fired), so every arrival is validated.
+func (be *blockExecutor) arrivalValid(txIdx int) bool {
+	// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
+	// write stamp does not imply an unchanged read set.
 	return be.validateNow(txIdx)
 }
 
@@ -3212,7 +3211,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// may have changed or sealed since (including an in-flight Validated cell the
 			// reader early-broke on), so a stale verdict would commit against a value that
 			// has moved.
-			valid := be.arrivalValid(txVersion.TxIndex, txResult.ValStamp)
+			valid := be.arrivalValid(txVersion.TxIndex)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3643,7 +3642,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
-		be.versionMap.InitStamps(be.tasks[len(be.tasks)-1].Version().TxIndex)
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}

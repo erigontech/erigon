@@ -35,7 +35,6 @@ var arrivalAddr = accounts.InternAddress(common.HexToAddress("0x0a"))
 
 func newArrivalExecutor(t *testing.T) (*blockExecutor, *exec.TxResult) {
 	vm := state.NewVersionMap(nil)
-	vm.InitStamps(arrivalReader + 1)
 	vm.WriteBalance(arrivalAddr, state.Version{TxIndex: arrivalWriter}, *uint256.NewInt(1), true)
 
 	var rs state.ReadSet
@@ -54,7 +53,6 @@ func newArrivalExecutor(t *testing.T) (*blockExecutor, *exec.TxResult) {
 	res := &exec.TxResult{TxIn: rs}
 	valid, _, _ := be.selfLoopEvaluate(tv, res)
 	require.True(t, valid)
-	require.NotZero(t, res.ValStamp, "the worker stamps before validating")
 	return be, res
 }
 
@@ -67,12 +65,12 @@ func writeBalanceBelowReader(vm *state.VersionMap) {
 	vm.FlushVersionedWrites(ws, true)
 }
 
-// A stamp that misses a lower write must not let the stale read commit, with or without asserts.
-func TestArrivalValidRejectsStaleReadUnderQuietStamp(t *testing.T) {
+// A stale read must not commit on arrival, with or without asserts.
+func TestArrivalValidRejectsStaleRead(t *testing.T) {
 	prev := dbg.AssertEnabled
 	dbg.AssertEnabled = false
 	t.Cleanup(func() { dbg.AssertEnabled = prev })
 	be, _ := newArrivalExecutor(t)
 	writeBalanceBelowReader(be.versionMap)
-	require.False(t, be.arrivalValid(arrivalReader, be.versionMap.WriteSeq()))
+	require.False(t, be.arrivalValid(arrivalReader))
 }
