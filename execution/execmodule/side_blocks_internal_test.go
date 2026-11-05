@@ -41,3 +41,32 @@ func TestSideBlocksToRetain(t *testing.T) {
 		require.NotContains(t, side, hash(i))
 	}
 }
+
+func TestDropBadChainWithUnknownLatestValidHashKeepsAncestors(t *testing.T) {
+	c := common.Hash{1}
+	p := common.Hash{2}
+	s := common.Hash{3}
+	b := common.Hash{4}
+
+	e := &ExecModule{pendingBlocks: map[common.Hash]pendingBlock{
+		p: {parent: c},
+		s: {parent: p},
+		b: {parent: s},
+	}}
+	e.dropBadChain(b, common.Hash{})
+	require.NotContains(t, e.pendingBlocks, b)
+	require.Contains(t, e.pendingBlocks, p)
+	require.Contains(t, e.pendingBlocks, s)
+
+	e.pendingBlocks = map[common.Hash]pendingBlock{
+		c: {},
+		p: {parent: c},
+		s: {parent: p},
+		b: {parent: s},
+	}
+	e.dropBadChain(b, c)
+	require.NotContains(t, e.pendingBlocks, b)
+	require.NotContains(t, e.pendingBlocks, p)
+	require.NotContains(t, e.pendingBlocks, s)
+	require.Contains(t, e.pendingBlocks, c)
+}

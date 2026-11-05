@@ -22,14 +22,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -235,6 +238,73 @@ func TestRetainedSideBlockVisibleThroughInsertsAndForkChoices(t *testing.T) {
 	require.Zero(t, misses.Load())
 }
 
+type forkChoiceLogProbe struct {
+	next    log.Handler
+	onDebug func()
+}
+
+func (p *forkChoiceLogProbe) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (p *forkChoiceLogProbe) Log(record *log.Record) error {
+	if record.Msg == "[updateForkChoice] dispatching notifications" {
+		p.onDebug()
+	}
+	return p.next.Log(record)
+}
+
+func TestAdoptedSideBlockRemainsVisibleDuringForkChoice(t *testing.T) {
+	for _, withOverlay := range []bool{false, true} {
+		name := "without overlay"
+		if withOverlay {
+			name = "with overlay"
+		}
+		t.Run(name, func(t *testing.T) {
+			m, key, _ := newMetricsTester(t)
+			side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
+			canonical := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
+			insertAndValidateBlocks(t, m, side, canonical)
+			updateForkChoiceTo(t, m, canonical)
+
+			if withOverlay {
+				pendingPack, err := m.GenerateChainFrom(canonical, 1, func(_ int, block *blockgen.BlockGen) {
+					block.SetExtra([]byte{0x0c})
+				})
+				require.NoError(t, err)
+				pending := pendingPack.Blocks[0]
+				_, err = m.InsertBlocks(t.Context(), []*types.Block{pending})
+				require.NoError(t, err)
+			}
+
+			hash := side.Hash()
+			observed := make(chan struct {
+				has bool
+				err error
+			}, 1)
+			previous := m.Log.GetHandler()
+			m.Log.SetHandler(&forkChoiceLogProbe{
+				next: previous,
+				onDebug: func() {
+					has, err := m.ExecModule.HasBlock(context.Background(), &hash, nil)
+					observed <- struct {
+						has bool
+						err error
+					}{has: has, err: err}
+				},
+			})
+			t.Cleanup(func() { m.Log.SetHandler(previous) })
+
+			updateForkChoiceTo(t, m, side)
+			select {
+			case result := <-observed:
+				require.NoError(t, result.err)
+				require.True(t, result.has)
+			case <-time.After(5 * time.Second):
+				t.Fatal("fork choice dispatch log was not observed")
+			}
+		})
+	}
+}
+
 func TestDeepSideChainSurvivesForkChoice(t *testing.T) {
 	m, key, _ := newMetricsTester(t)
 	side := generateTransferBlocks(t, m, key, 20, 0x0b)
@@ -293,6 +363,45 @@ func TestForkChoicePersistsSideBlockBeyondReorgDepth(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
 	m.ExecModule.WaitIdle(t.Context())
+}
+
+func TestForkChoiceBoundsRetainedSideBlocks(t *testing.T) {
+	const maxReorgDepth = 4
+	m, _, _ := newMetricsTester(t, execmoduletester.WithMaxReorgDepth(maxReorgDepth))
+	parent := m.Genesis
+	unused := make([]*types.Block, 0, maxReorgDepth+4)
+	for i := range maxReorgDepth + 4 {
+		canonicalPack, err := m.GenerateChainFrom(parent, 1, func(_ int, block *blockgen.BlockGen) {
+			block.SetExtra([]byte{byte(i), 0x0a})
+		})
+		require.NoError(t, err)
+		sidePack, err := m.GenerateChainFrom(parent, 1, func(_ int, block *blockgen.BlockGen) {
+			block.SetExtra([]byte{byte(i), 0x0b})
+		})
+		require.NoError(t, err)
+		canonical, side := canonicalPack.Blocks[0], sidePack.Blocks[0]
+		insertAndValidateBlocks(t, m, side, canonical)
+		updateForkChoiceTo(t, m, canonical)
+		unused = append(unused, side)
+		parent = canonical
+	}
+
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		for _, block := range unused[:maxReorgDepth] {
+			require.NotNil(t, rawdb.ReadHeaderNumber(tx, block.Hash()))
+			requireStoredTransactions(t, tx, block)
+		}
+		for _, block := range unused[maxReorgDepth:] {
+			require.Nil(t, rawdb.ReadHeaderNumber(tx, block.Hash()))
+		}
+		return nil
+	}))
+	for _, block := range unused {
+		hash := block.Hash()
+		has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
+		require.NoError(t, err)
+		require.True(t, has)
+	}
 }
 
 func TestFinalizedForkChoiceDropsRetainedSideBlock(t *testing.T) {

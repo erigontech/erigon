@@ -784,11 +784,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		if err := e.retainSideBlocks(roTx, tx, headPath, common.Deref(finalizedNumber), *headNumber); err != nil {
+		side, retained, err := e.prepareSideBlocks(roTx, tx, headPath, common.Deref(finalizedNumber), *headNumber)
+		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
-		if hasOverlay {
-			e.closeModuleContext()
 		}
 
 		// Dispatch notifications from the SD overlay (before flush/commit).
@@ -803,7 +801,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		published, dispatchErr := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore, prevUnwindPoint)
 		overlayPublished = published
 		if dispatchErr != nil {
+			if retained != nil {
+				retained.Close()
+			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
+		}
+		e.swapSideBlocks(side, retained)
+		if hasOverlay {
+			e.closeModuleContext()
 		}
 
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,

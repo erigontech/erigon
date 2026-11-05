@@ -17,8 +17,10 @@
 package execmodule
 
 import (
+	"bytes"
 	"fmt"
 	"maps"
+	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -66,36 +68,42 @@ func (e *ExecModule) copyPendingChain(tx kv.Tx, dst kv.RwTx, head common.Hash) (
 	return chain, raiseTxSequence(src, dst)
 }
 
-func (e *ExecModule) retainSideBlocks(tx kv.TemporalTx, commit kv.RwTx, committed []common.Hash, finalized, head uint64) error {
+func (e *ExecModule) prepareSideBlocks(tx kv.TemporalTx, commit kv.RwTx, committed []common.Hash, finalized, head uint64) (map[common.Hash]pendingBlock, *membatchwithdb.MemoryMutation, error) {
 	side := sideBlocksToRetain(e.pendingBlocks, committed, finalized)
 	src := e.pendingBlocksView(tx)
 	if src != nil && commit != nil {
 		if err := persistDeepSideBlocks(src, commit, side, head, e.syncCfg.MaxReorgDepth); err != nil {
-			return err
+			return nil, nil, err
 		}
 	}
 	if len(side) == 0 || src == nil {
-		e.dropPendingBlocks()
-		return nil
+		return nil, nil, nil
 	}
 	retained, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	for hash, block := range side {
 		if err := copyBlockRows(src, retained, hash, block.number); err != nil {
 			retained.Close()
-			return err
+			return nil, nil, err
 		}
 	}
 	if err := raiseTxSequence(src, retained); err != nil {
 		retained.Close()
-		return err
+		return nil, nil, err
 	}
 	retained.DetachDB()
+	return side, retained, nil
+}
+
+func (e *ExecModule) swapSideBlocks(side map[common.Hash]pendingBlock, retained *membatchwithdb.MemoryMutation) {
+	if len(side) == 0 {
+		e.dropPendingBlocks()
+		return
+	}
 	e.pendingBlocks = side
 	e.swapRetainedBlocks(retained)
-	return nil
 }
 
 func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common.Hash, finalized uint64) map[common.Hash]pendingBlock {
@@ -118,6 +126,31 @@ func persistDeepSideBlocks(src kv.Tx, dst kv.RwTx, side map[common.Hash]pendingB
 		}
 		delete(side, hash)
 		persisted = true
+	}
+	if uint64(len(side)) > maxReorgDepth {
+		blocks := make([]struct {
+			hash  common.Hash
+			block pendingBlock
+		}, 0, len(side))
+		for hash, block := range side {
+			blocks = append(blocks, struct {
+				hash  common.Hash
+				block pendingBlock
+			}{hash: hash, block: block})
+		}
+		sort.Slice(blocks, func(i, j int) bool {
+			if blocks[i].block.number != blocks[j].block.number {
+				return blocks[i].block.number < blocks[j].block.number
+			}
+			return bytes.Compare(blocks[i].hash[:], blocks[j].hash[:]) < 0
+		})
+		for _, item := range blocks[:len(blocks)-int(maxReorgDepth)] {
+			if err := copyBlockRows(src, dst, item.hash, item.block.number); err != nil {
+				return err
+			}
+			delete(side, item.hash)
+			persisted = true
+		}
 	}
 	if !persisted {
 		return nil
@@ -161,6 +194,10 @@ func (e *ExecModule) publishSeededContext(sd *execctx.SharedDomains) {
 }
 
 func (e *ExecModule) dropBadChain(badHead, latestValidHash common.Hash) {
+	if latestValidHash == (common.Hash{}) {
+		delete(e.pendingBlocks, badHead)
+		return
+	}
 	for hash := badHead; hash != latestValidHash; {
 		block, ok := e.pendingBlocks[hash]
 		if !ok {

@@ -711,9 +711,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		validationStatus = ExecutionStatusBadBlock
 		e.dropBadChain(blockHash, lvh)
 		if e.retainedBlocks != nil {
-			if err := e.retainSideBlocks(roTx, nil, nil, 0, 0); err != nil {
+			side, retained, err := e.prepareSideBlocks(roTx, nil, nil, 0, 0)
+			if err != nil {
 				return ValidationResult{}, err
 			}
+			e.swapSideBlocks(side, retained)
 		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
