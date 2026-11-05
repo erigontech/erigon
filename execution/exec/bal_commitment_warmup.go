@@ -344,13 +344,16 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 	return first
 }
 
-// logBatchPrefetch logs a finished batch prefetch, as a warning when it failed for a reason other than cancellation.
+// logBatchPrefetch logs a finished batch prefetch, as a warning when it failed; a cancelled one is not logged.
 func logBatchPrefetch(what string, keys int, started time.Time, err error) {
-	if err != nil && !errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if err != nil {
 		log.Warn("[warmBAL] batch prefetch failed", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
 		return
 	}
-	log.Debug("[warmBAL] batch prefetch", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
+	log.Debug("[warmBAL] batch prefetch", "what", what, "keys", keys, "elapsed", time.Since(started))
 }
 
 // prefetchBALState reads into the page cache, in io_uring batches, the file pages of the BAL's accounts and storage
