@@ -27,6 +27,10 @@ var (
 	// while an out-of-memory error should not.
 	ErrInvalidBlock = errors.New("invalid block")
 
+	// ErrInvalidHeader marks a block rejected by header or uncle verification, before execution.
+	// Wrap with InvalidHeader, which keeps the error text unchanged.
+	ErrInvalidHeader = errors.New("invalid header")
+
 	// ErrUnknownAncestor is returned when validating a block requires an ancestor
 	// that is unknown.
 	ErrUnknownAncestor = errors.New("unknown ancestor")
@@ -65,3 +69,12 @@ var (
 	// ErrMissingBlockAccessListHash is returned if a post-Amsterdam block has a missing EIP-7928 blockAccessListHash.
 	ErrMissingBlockAccessListHash = errors.New("missing bal hash")
 )
+
+// InvalidHeader marks err as ErrInvalidHeader without changing its text: exception mappers match that text.
+func InvalidHeader(err error) error { return invalidHeaderError{err} }
+
+type invalidHeaderError struct{ err error }
+
+func (e invalidHeaderError) Error() string      { return e.err.Error() }
+func (e invalidHeaderError) Unwrap() error      { return e.err }
+func (invalidHeaderError) Is(target error) bool { return target == ErrInvalidHeader }
