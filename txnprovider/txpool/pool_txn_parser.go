@@ -224,8 +224,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 3: Decode the transaction using standard types.
-	// Parse type-3 and frame wrappers separately to keep large blob data zero-copy.
-	// Only the inner transaction body goes through the standard decoder.
+	// Parse type-3 and frame wrappers separately. Only the inner transaction body
+	// goes through the standard decoder.
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
 	wrapped := !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs
@@ -269,6 +269,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
+		// The hash covers only the inner tx, so a known txn is rejected before its blobs are copied.
+		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
+		if validateHash != nil {
+			err = validateHash(slot.IDHash[:])
+			if err != nil {
+				return p, err
+			}
+		}
+		// Blobs outlive the payload (often a whole p2p message), so they must not alias it.
+		txBytes = bytes.Clone(txBytes)
 
 		// Now parse the remaining wrapper elements: [wrapper_version], blobs, commitments, proofs.
 		wp := innerBodyPos + innerBodyLen // position after inner tx body
@@ -289,7 +299,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: frame blobs require a nonempty version 1 wrapper", ErrParseTxn)
 		}
 
-		// Parse blobs list (zero-copy: slices point into original payload).
+		// Parse blobs list (slices point into the cloned txBytes).
 		var blobListPos, blobListLen int
 		blobListPos, blobListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
@@ -396,20 +406,17 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 5: Store the decoded transaction and compute hash.
 	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
-	// Wrapped transactions include the type byte and inner body in the hash, but no sidecar.
+	// Wrapped transactions were hashed in step 3, over the type byte and inner body.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
 	slot.validatedFrame = nil
-	hashInput := txBytes
-	if innerTxBytes != nil {
-		hashInput = innerTxBytes
-	}
-	slot.IDHash = crypto.Keccak256Hash(hashInput)
-
-	if validateHash != nil {
-		err = validateHash(slot.IDHash[:])
-		if err != nil {
-			return p, err
+	if innerTxBytes == nil {
+		slot.IDHash = crypto.Keccak256Hash(txBytes)
+		if validateHash != nil {
+			err = validateHash(slot.IDHash[:])
+			if err != nil {
+				return p, err
+			}
 		}
 	}
 
