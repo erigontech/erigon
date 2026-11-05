@@ -257,7 +257,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			return nil, err
 		}
 	}
-	tipped, err := st.payCoinbase(paid, tx.GetEffectiveGasTip(&st.evm.Context.BaseFee))
+	tipped, err := st.payCoinbase(paid)
 	if err != nil {
 		return nil, err
 	}

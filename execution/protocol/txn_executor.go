@@ -645,11 +645,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 	}
 
-	effectiveTip := *st.gasPrice
-	if rules.IsLondon {
-		effectiveTip = types.CalcEffectiveGasTip(&st.evm.Context.BaseFee, st.msg.TipCap, st.msg.FeeCap)
-	}
-	tipAmount, err := st.payCoinbase(st.txnGasUsed, effectiveTip)
+	tipAmount, err := st.payCoinbase(st.txnGasUsed)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
@@ -855,7 +851,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
-func (st *TxnExecutor) payCoinbase(gasUsed uint64, effectiveTip uint256.Int) (uint256.Int, error) {
+func (st *TxnExecutor) payCoinbase(gasUsed uint64) (uint256.Int, error) {
+	effectiveTip := *st.gasPrice
+	if st.evm.ChainRules().IsLondon {
+		effectiveTip = types.CalcEffectiveGasTip(&st.evm.Context.BaseFee, st.msg.TipCap, st.msg.FeeCap)
+	}
 	tipAmount := u256.Mul(u256.U64(gasUsed), effectiveTip)
 	if st.noFeeBurnAndTip {
 		return tipAmount, nil

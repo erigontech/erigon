@@ -472,8 +472,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	p.restoreFramesLocked(block, unwindFrames)
 
 	var announcements Announcements
-	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, unwindTxns, cells, /* newTxns */
-		stateChanges.BlockGasLimit, p.logger)
+	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, unwindTxns, cells)
 	if err != nil {
 		return frames, err
 	}
@@ -1676,7 +1675,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 			p.kickKZGOffenders(ctx, reasons, sources)
 
 			announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, goodTxns, cells,
-				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
+				p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), true, p.logger)
 			if err != nil {
 				return err
 			}
@@ -1709,7 +1708,7 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 }
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
-	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger,
+	newTxns TxnSlots, cells blobCells, pendingBaseFee, pendingBlobFee uint64, collect bool, logger log.Logger,
 ) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1755,7 +1754,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		if _, ok := p.senderLastActivity[senderID]; !ok {
 			p.senderLastActivity[senderID] = blockNum
 		}
-		if err := p.refreshSender(cacheView, senderID, blockGasLimit, logger); err != nil {
+		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, discardReasons, err
 		}
 	}
@@ -1768,7 +1767,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	newTxns TxnSlots, cells blobCells, blockGasLimit uint64, logger log.Logger,
+	newTxns TxnSlots, cells blobCells,
 ) (Announcements, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
@@ -1831,7 +1830,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for senderID := range sendersWithChangedState {
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
-		if err := p.refreshSender(cacheView, senderID, blockGasLimit, logger); err != nil {
+		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err
 		}
 	}
@@ -1839,7 +1838,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// Don't touch senderLastActivity for queuedSenders — these senders did not
 	// change state on-chain, so the dormancy timer should not be reset.
 	for senderID := range queuedSenders {
-		if err := p.refreshSender(cacheView, senderID, blockGasLimit, logger); err != nil {
+		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err
 		}
 	}
@@ -2315,12 +2314,12 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 	}
 }
 
-func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID, blockGasLimit uint64, logger log.Logger) error {
+func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) error {
 	nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
 	if err != nil {
 		return err
 	}
-	p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
+	p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load(), p.logger)
 	return nil
 }
 
@@ -3080,7 +3079,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
+		pendingBaseFee, pendingBlobFee, false, p.logger); err != nil {
 		return err
 	}
 

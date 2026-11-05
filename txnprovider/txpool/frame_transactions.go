@@ -523,7 +523,7 @@ func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
 				delete(p.frameAccountsToRefresh, address)
 				continue
 			}
-			if err := p.refreshSender(cacheView, senderID, p.blockGasLimit.Load(), p.logger); err != nil {
+			if err := p.refreshSender(cacheView, senderID); err != nil {
 				return err
 			}
 		}

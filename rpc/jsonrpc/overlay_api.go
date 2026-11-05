@@ -103,6 +103,13 @@ func checkTransactionGasCap(txn types.Transaction, gasCap uint64) error {
 	return nil
 }
 
+func (api *OverlayAPIImpl) applyGasBudget(msg *types.Message) {
+	msg.ChangeGas(api.GasCap, api.GasCap)
+	// The RPC budget may exceed the transaction gas-limit ceilings.
+	msg.SetCheckGas(false)
+	msg.SetSkipExecutionGasCap(true)
+}
+
 func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
@@ -242,10 +249,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		// CREATE: adapt message with new code so it's replaced instantly
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	}
-	msg.ChangeGas(api.GasCap, api.GasCap)
-	// The replacement's RPC allowance may exceed the transaction gas-limit ceiling.
-	msg.SetCheckGas(false)
-	msg.SetSkipExecutionGasCap(true)
+	api.applyGasBudget(msg)
 	txCtx = protocol.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: msg.Gas()}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
@@ -529,10 +533,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if hasStateOverrides {
 			// Gas bailout can charge the full RPC budget, which applies per transaction.
 			gp.Reset(math.MaxUint64, math.MaxUint64)
-			msg.ChangeGas(api.GasCap, api.GasCap)
-			// The override budget is an RPC limit, not the signed transaction's gas limit.
-			msg.SetCheckGas(false)
-			msg.SetSkipExecutionGasCap(true)
+			api.applyGasBudget(msg)
 		}
 
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)
