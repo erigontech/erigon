@@ -66,8 +66,9 @@ func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
-func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *mockIBS) GetRefund() uint64                    { return 0 }
+func (m *mockIBS) Exist(accounts.Address) (bool, error)             { return false, nil }
+func (m *mockIBS) HasSelfdestructed(accounts.Address) (bool, error) { return false, nil }
+func (m *mockIBS) GetRefund() uint64                                { return 0 }
 
 // captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.

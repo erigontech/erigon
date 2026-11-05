@@ -22,13 +22,11 @@ func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs
 				t.Parallel()
 				runner, ok := app[value.RunnerName]
 				if !ok {
-					t.Skipf("runner not found: %s", value.RunnerName)
-					return
+					t.Fatalf("runner not found: %s", value.RunnerName)
 				}
 				handler, err := runner.GetHandler(value.HandlerName)
 				if err != nil {
-					t.Skipf("handler not found: %s/%s", value.RunnerName, value.HandlerName)
-					return
+					t.Fatalf("handler not found: %s/%s", value.RunnerName, value.HandlerName)
 				}
 				path := value.path()
 				subfs, err := fs.Sub(root, filepath.Join(path[:]...))

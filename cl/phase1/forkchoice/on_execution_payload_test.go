@@ -314,6 +314,8 @@ func (g dataAvailabilityForkGraph) ReplayState(common.Hash) (*state2.CachingBeac
 	return g.state, nil
 }
 
+func (dataAvailabilityForkGraph) IsBlockInvalid(common.Hash) bool { return false }
+
 func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return g.block, g.block != nil
 }
@@ -5500,4 +5502,21 @@ func resignAdmissionEnvelope(
 ) {
 	t.Helper()
 	signAdmissionEnvelopeWithKey(t, cfg, blockState, envelope, admissionSigningKey)
+}
+
+type invalidBlockForkGraph struct {
+	dataAvailabilityForkGraph
+}
+
+func (invalidBlockForkGraph) IsBlockInvalid(common.Hash) bool { return true }
+
+func TestValidateExecutionPayloadEnvelopeForGossipRejectsInvalidBlock(t *testing.T) {
+	cfg, _, _, envelope := validAdmissionCancellationFixture(t)
+	store := &ForkChoiceStore{beaconCfg: cfg, forkGraph: invalidBlockForkGraph{}}
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err := store.ValidateExecutionPayloadEnvelopeForGossip(envelope)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
 }

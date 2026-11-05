@@ -229,8 +229,16 @@ func (m *Merger) Merge(
 
 		built := make([]*DirtySegment, 0, len(snapTypes))
 		outputs := make([]snaptype.FileInfo, 0, len(snapTypes))
+		builtFileNames := make([]string, 0, len(snapTypes))
+		samePathTypes := make(map[snaptype.Enum]struct{})
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
+			if len(toMerge[t.Enum()]) == 1 && toMerge[t.Enum()][0].FilePath() == output.Path {
+				samePathTypes[t.Enum()] = struct{}{}
+				out[t.Enum()] = nil
+				mergedFileNames = append(mergedFileNames, toMerge[t.Enum()][0].FilePath())
+				continue
+			}
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
 				output,
@@ -248,7 +256,9 @@ func (m *Merger) Merge(
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
 			built = append(built, newDirtySegment)
 			outputs = append(outputs, output)
-			mergedFileNames = append(mergedFileNames, newDirtySegment.FilePath())
+			fileName := newDirtySegment.FilePath()
+			mergedFileNames = append(mergedFileNames, fileName)
+			builtFileNames = append(builtFileNames, fileName)
 		}
 
 		snapshots.LogStat("merge")
@@ -259,7 +269,7 @@ func (m *Merger) Merge(
 					sn.close()
 				}
 				if onDelete != nil {
-					_ = onDelete(ctx, slices.Clone(mergedFileNames))
+					_ = onDelete(ctx, slices.Clone(builtFileNames))
 				}
 				for i := range outputs {
 					removeMergedFiles(outputs[i])
@@ -269,7 +279,10 @@ func (m *Merger) Merge(
 		}
 
 		toMergeFileNames := make([]string, 0, 16)
-		for _, segments := range toMerge {
+		for enum, segments := range toMerge {
+			if _, ok := samePathTypes[enum]; ok {
+				continue
+			}
 			for _, segment := range segments {
 				toMergeFileNames = append(toMergeFileNames, segment.FilePaths(snapDir)...)
 			}
