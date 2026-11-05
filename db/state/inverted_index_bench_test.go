@@ -79,6 +79,7 @@ func requireIISeekCache(b *testing.B) {
 		b.Fatal("the II seek cache is disabled (II_LRU_ENABLED=false or II_LRU=0): nothing to measure")
 	}
 }
+
 func BenchmarkInvertedIndexIntersectOnFiles(b *testing.B) {
 	const txs, sparseEvery = 1 << 16, 1000
 	db, ii := testDbAndInvertedIndex(b, 1024, log.New())
