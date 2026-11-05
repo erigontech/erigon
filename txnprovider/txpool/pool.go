@@ -645,7 +645,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if rejection, ok := p.frameRejections.Get(hashS); ok {
 		// Expired rejections permit a retry even if the discarded transaction's
 		// persisted pool row has not been removed yet.
-		return rejection.valid(p, p.stateGeneration), nil
+		return rejection.applies(p, p.stateGeneration), nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
 		// Retryable failures may clear before the discarded pool row is removed.

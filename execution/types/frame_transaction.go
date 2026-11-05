@@ -509,10 +509,11 @@ func (tx *FrameTransaction) EncodingSize() int {
 	framesSize := 0
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
-		frameSize := rlp.U64Len(uint64(frame.Mode)) + rlp.U64Len(uint64(frame.Flags)) + 1
+		targetSize := 1
 		if frame.Target != nil {
-			frameSize += len(*frame.Target)
+			targetSize += len(*frame.Target)
 		}
+		frameSize := rlp.U64Len(uint64(frame.Mode)) + rlp.U64Len(uint64(frame.Flags)) + targetSize
 		frameSize += rlp.ListLen(rlp.U64Len(frame.Limits.Execution) + rlp.U64Len(frame.Limits.State))
 		frameSize += rlp.Uint256Len(frame.Value) + rlp.StringLen(frame.Data)
 		framesSize += rlp.ListLen(frameSize)

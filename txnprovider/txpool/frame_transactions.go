@@ -53,7 +53,7 @@ type frameRejection struct {
 	blocker    common.Hash
 }
 
-func (r frameRejection) valid(p *TxPool, generation uint64) bool {
+func (r frameRejection) applies(p *TxPool, generation uint64) bool {
 	if r.blocker != (common.Hash{}) {
 		_, pooled := p.byHash[string(r.blocker[:])]
 		return pooled
@@ -208,7 +208,7 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 		if txn.TxType() != FrameTxnType {
 			continue
 		}
-		if rejection, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && rejection.valid(p, batch.generation) {
+		if rejection, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && rejection.applies(p, batch.generation) {
 			batch.results[txn] = frameValidationResult{reason: txpoolcfg.InvalidFrame}
 			continue
 		}
@@ -309,7 +309,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	hash := string(txn.IDHash[:])
 	p.lock.Lock()
 	rejection, rejected := p.frameRejections.Get(hash)
-	rejected = rejected && rejection.valid(p, generation)
+	rejected = rejected && rejection.applies(p, generation)
 	p.lock.Unlock()
 	if rejected {
 		return nil, nil
