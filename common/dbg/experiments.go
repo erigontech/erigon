@@ -136,7 +136,11 @@ var (
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
+	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
+	// Parallel execution of BAL blocks that call contracts deployed in the same block; each part is off by default.
+	BALDeployerDependency         = EnvBool("BAL_DEPLOYER_DEPENDENCY", false)
+	RerunWaitsForWriter           = EnvBool("RERUN_WAITS_FOR_WRITER", false)
+	AbortOnReadDependency         = EnvBool("ABORT_ON_READ_DEPENDENCY", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)

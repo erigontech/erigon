@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -257,6 +258,8 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 // A speculative run whose state recorded a read dependency is discarded, so the executor that
 // opts in cancels it at the next call frame; any other caller keeps running.
 func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
+	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
+	dbg.BALDeployerDependency = true
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
@@ -294,6 +297,8 @@ func TestCancelledOnReadDependencyOnlyWhenOptedIn(t *testing.T) {
 }
 
 func TestZeroValueCallToUnflushedDeployCancelsOptedInRun(t *testing.T) {
+	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
+	dbg.BALDeployerDependency = true
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xc0df"))

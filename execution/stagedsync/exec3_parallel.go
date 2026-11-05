@@ -1266,7 +1266,9 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
-				executor.sealSkippedPrefix(t.Version().TxIndex)
+				if dbg.BALDeployerDependency {
+					executor.sealSkippedPrefix(t.Version().TxIndex)
+				}
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -2406,7 +2408,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
-	evm.SetAbortOnDependency(true)
+	evm.SetAbortOnDependency(dbg.AbortOnReadDependency)
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 	evm.SetAbortOnDependency(false)

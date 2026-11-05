@@ -2162,6 +2162,8 @@ func TestFlushNetZeroRerunInvalidatesReaderOfEarlierRun(t *testing.T) {
 // AddressPath must wait for the deployer the BAL names instead of reading the pre-block
 // absence and running the contract's code against it.
 func TestBALReadAddressOfInBlockDeployIsDependency(t *testing.T) {
+	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
+	dbg.BALDeployerDependency = true
 	addr := accounts.InternAddress([20]byte{0xcd, 0x03})
 	vm := NewVersionMap([]types.AccountChanges{{
 		Address:     addr.Value(),
@@ -2180,6 +2182,8 @@ func TestBALReadAddressOfInBlockDeployIsDependency(t *testing.T) {
 }
 
 func TestBALReadAddressOfPrefundedInBlockDeployIsDependency(t *testing.T) {
+	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
+	dbg.BALDeployerDependency = true
 	addr := accounts.InternAddress([20]byte{0xcd, 0x05})
 	vm := NewVersionMap([]types.AccountChanges{{
 		Address:     addr.Value(),
@@ -2195,6 +2199,8 @@ func TestBALReadAddressOfPrefundedInBlockDeployIsDependency(t *testing.T) {
 }
 
 func TestBALReadAddressFundedBeforeInBlockDeployIsDependency(t *testing.T) {
+	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
+	dbg.BALDeployerDependency = true
 	addr := accounts.InternAddress([20]byte{0xcd, 0x06})
 	vm := NewVersionMap([]types.AccountChanges{{
 		Address:     addr.Value(),

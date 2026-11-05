@@ -333,6 +333,9 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		bal:    changes,
 	}
 	for i := range changes {
+		if !dbg.BALDeployerDependency {
+			break
+		}
 		acc := &changes[i]
 		for _, c := range acc.CodeChanges {
 			if len(c.Bytecode) > 0 && c.Index > 0 {

@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1906,6 +1907,8 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 }
 
 func TestResumedBlockDoesNotWaitForDeployerInSkippedPrefix(t *testing.T) {
+	defer func(prev bool) { dbg.BALDeployerDependency = prev }(dbg.BALDeployerDependency)
+	dbg.BALDeployerDependency = true
 	addr := accounts.InternAddress([20]byte{0xcd, 0x04})
 	bal := types.BlockAccessList{{
 		Address:     addr.Value(),
