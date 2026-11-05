@@ -88,13 +88,16 @@ func (a *Aggregator) readCommitmentStopKeys(db kv.RoDB) (stopped [kv.DomainLen]b
 	return stopped, err
 }
 
-func (a *Aggregator) restoreCommitmentStopFile(stoppedInDB [kv.DomainLen]bool) error {
-	if a.trieVariant != TrieVariantHexBin {
-		return nil
+func (a *Aggregator) readCommitmentStopPoints(db kv.RoDB) (map[string]bool, error) {
+	if a.trieVariant != TrieVariantHexBin || db == nil {
+		return nil, nil
 	}
-	points, err := readCommitmentStopFile(a.dirs)
-	if err != nil || len(points) == 0 {
-		return err
+	return readCommitmentStopFile(a.dirs)
+}
+
+func (a *Aggregator) restoreCommitmentStopFile(points map[string]bool, stoppedInDB [kv.DomainLen]bool) error {
+	if len(points) == 0 {
+		return nil
 	}
 	var applied, dropped bool
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {

@@ -705,6 +705,10 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 }
 
 func (a *Aggregator) OpenFolder(db kv.RoDB) error {
+	stopPoints, err := a.readCommitmentStopPoints(db)
+	if err != nil {
+		return err
+	}
 	stoppedInDB, err := a.readCommitmentStopKeys(db)
 	if err != nil {
 		return err
@@ -724,7 +728,7 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 		if db == nil {
 			return nil
 		}
-		return a.restoreCommitmentStopFile(stoppedInDB)
+		return a.restoreCommitmentStopFile(stopPoints, stoppedInDB)
 	}(); err != nil {
 		return err
 	}
