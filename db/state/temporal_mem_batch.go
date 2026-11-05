@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/puzpuzpuz/xsync/v4"
 	"maps"
 	"slices"
 	"sync"
@@ -61,6 +62,7 @@ type TemporalMemBatch struct {
 	inMemHistoryReads bool
 
 	latestStateLocks [kv.DomainLen]paddedRWMutex
+	shadow           [kv.DomainLen]*xsync.Map[string, dataWithTxNum]
 	domains          [kv.DomainLen]map[string][]dataWithTxNum
 	storage          *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
@@ -112,6 +114,9 @@ func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalM
 		sd.iiWriters[id] = ii.NewWriter(db)
 	}
 
+	for id := range sd.shadow {
+		sd.shadow[id] = xsync.NewMap[string, dataWithTxNum]()
+	}
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string][]dataWithTxNum{}
 		sd.domainWriters[id] = d.NewWriter(db)
@@ -202,6 +207,9 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
 
+	if ablMemRLock {
+		sd.shadow[domain].Store(key, valWithStep)
+	}
 	val, txNum := valWithStep.data, valWithStep.txNum
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
@@ -275,10 +283,14 @@ func (sd *TemporalMemBatch) updatePutMetrics(domain kv.Domain, putKeySize int, p
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	if !ablMemRLock {
-		sd.latestStateLocks[domain].RLock()
-		defer sd.latestStateLocks[domain].RUnlock()
+	if ablMemRLock && sd.unwindChangeset == nil {
+		if latest, ok := sd.shadow[domain].Load(common.ToStringZeroCopy(key)); ok {
+			return latest.data, kv.Step(latest.txNum / sd.stepSize), true
+		}
+		return nil, kv.NoStepBound, false
 	}
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
 	return sd.getLatest(domain, key)
 }
 
@@ -569,6 +581,14 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 			}
 		}
 	}
+	if ablMemRLock {
+		for d := range sd.shadow {
+			sd.shadow[d].Clear()
+			for k, entries := range sd.domains[d] {
+				sd.shadow[d].Store(k, entries[len(entries)-1])
+			}
+		}
+	}
 	// Collect first, mutate after: btree.Scan doesn't allow Set/Delete during traversal.
 	type storageEdit struct {
 		key  string
@@ -655,6 +675,11 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	for domain, otherEntries := range other.domains {
 		entries := sd.domains[domain]
 		maps.Copy(entries, otherEntries)
+	}
+	if ablMemRLock {
+		for domain := range other.shadow {
+			other.shadow[domain].Range(func(k string, v dataWithTxNum) bool { sd.shadow[domain].Store(k, v); return true })
+		}
 	}
 
 	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
