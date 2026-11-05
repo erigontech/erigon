@@ -720,10 +720,14 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
+	cc.branchPrefetch.pause()
+	defer cc.branchPrefetch.resume()
+	if cc.feeds() {
+		defer raiseGCPercent()()
+	}
 	cc.setInput(updates)
-	sdCtx := cc.doms.GetCommitmentContext()
 	reader.txNum = t.lastTxNum + 1
-	sdCtx.SetStateReader(reader)
+	cc.doms.GetCommitmentContext().SetStateReader(reader)
 	if !cc.ownsChangeset(t.blockNum) {
 		return cc.computeIsolated(ctx, t)
 	}
@@ -893,9 +897,6 @@ func raiseGCPercent() (restore func()) {
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
 	cc.finishPrefetch()
-	cc.branchPrefetch.pause()
-	defer cc.branchPrefetch.resume()
-	sdCtx := cc.doms.GetCommitmentContext()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
 	// from the view with no EIP knowledge. In a cross-block batch the touched union
@@ -914,21 +915,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 
-	if sdCtx.AcceptsFeed() {
-		defer raiseGCPercent()()
-	}
-	cc.setInput(cc.handOffUpdates())
-
-	sdCtx.SetStateReader(cc.asOfReader)
-
-	var rh []byte
-	var flushOwn func() error
-	var err error
-	if !cc.ownsChangeset(t.blockNum) {
-		rh, flushOwn, err = cc.computeIsolated(ctx, t)
-	} else {
-		rh, err = cc.computeWithBlockAccumulator(ctx, t)
-	}
+	rh, flushOwn, err := cc.computeRootFromUpdates(ctx, t, cc.handOffUpdates(), cc.asOfReader)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: t.blockNum, txNum: t.lastTxNum,

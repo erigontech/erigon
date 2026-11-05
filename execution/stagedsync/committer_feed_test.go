@@ -216,11 +216,24 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 		}
 		bal = append(bal, ac)
 	}
+	const queued = 3
+	if wantFeed {
+		cc.branchPrefetch.close()
+		p := newPrefetchRecords()
+		p.work = make(chan prefetchItem, 64)
+		cc.branchPrefetch, cc.asOfReader.prefetched = p, p
+		for range queued {
+			p.add(prefetchItem{})
+		}
+	}
 	req := &blockRequest{blockNum: 2, firstTxNum: 2, lastTxNum: 3, bal: bal}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
 	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
 	require.NoError(t, err)
 	require.Equal(t, wantFeed, cc.feed.Keys > 0, "v3 compute-ahead folds through the feed")
+	if wantFeed {
+		require.Equal(t, uint64(queued), cc.branchPrefetch.drained.Load(), "compute-ahead pauses the prefetcher like a block compute, and queues nothing the BAL request already queued")
+	}
 	return rh
 }

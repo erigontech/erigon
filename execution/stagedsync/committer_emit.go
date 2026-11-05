@@ -77,12 +77,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			address, slot := a.Value(), k.Value()
 			plainKey := slices.Concat(address[:], slot[:])
 			m[k] = cc.touchHash(plainKey)
-			if cc.branchPrefetch != nil {
-				cc.branchPrefetch.add(prefetchItem{account: [32]byte(cc.touchedAccounts[a]), slot: [32]byte(m[k]), storage: true})
-			}
-			if cc.prefetchFn != nil {
-				cc.prefetchFn(plainKey)
-			}
+			cc.prefetchTouched(plainKey, cc.touchedAccounts[a], m[k])
 		}
 	}
 }
@@ -107,9 +102,6 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	}
 	address := a.Value()
 	cc.touchedAccounts[a] = cc.touchHash(address[:])
-	if cc.branchPrefetch != nil {
-		cc.branchPrefetch.add(prefetchItem{account: [32]byte(cc.touchedAccounts[a])})
-	}
 	if base != nil {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
@@ -117,9 +109,24 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 			cc.baseErr = err
 		}
 	}
-	if cc.prefetchFn != nil {
-		cc.prefetchFn(address[:])
+	cc.prefetchTouched(address[:], cc.touchedAccounts[a], nil)
+}
+
+func (cc *commitmentCalculator) prefetchTouched(plainKey, account, slot []byte) {
+	if cc.branchPrefetch == nil {
+		if cc.prefetchFn != nil {
+			cc.prefetchFn(plainKey)
+		}
+		return
 	}
+	if cc.balBlock {
+		return
+	}
+	it := prefetchItem{account: [32]byte(account)}
+	if slot != nil {
+		it.slot, it.storage = [32]byte(slot), true
+	}
+	cc.branchPrefetch.add(it)
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value

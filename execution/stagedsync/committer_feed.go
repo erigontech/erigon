@@ -19,14 +19,13 @@ package stagedsync
 import (
 	"slices"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 )
 
 func (cc *commitmentCalculator) feeds() bool {
-	return cc.doms.GetCommitmentContext().AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0
+	return cc.doms.GetCommitmentContext().AcceptsFeed()
 }
 
 func (cc *commitmentCalculator) emit(view *state.VersionMapView, updates *commitment.Updates) error {
