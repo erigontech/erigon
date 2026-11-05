@@ -52,6 +52,8 @@ const txFetchTimeout = 5 * time.Second
 
 const maxFetchAlternates = 4
 
+const maxFetchRequests = 64 * 1024
+
 type fetchPeer struct {
 	sentry sentryproto.SentryClient
 	peerID [64]byte
@@ -125,7 +127,7 @@ func NewFetch(
 	// reply is typically seconds, at worst minutes), and bounded so a DoSing
 	// peer spamming unique hashes can't grow this unboundedly.
 	announcements, _ := maphash.NewLRU[announceInfo](64 * 1024)
-	requested, _ := maphash.NewLRU[*fetchRequest](64 * 1024)
+	requested, _ := maphash.NewLRU[*fetchRequest](maxFetchRequests)
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -194,6 +196,9 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		} else {
 			f.requested.Set(h, &fetchRequest{at: now, peer: peer})
 		}
+		if len(f.pending) >= maxFetchRequests { // an announcement flood: the oldest request loses only its retry
+			f.pending = f.pending[1:]
+		}
 		f.pending = append(f.pending, pendingFetch{[32]byte(h), now})
 		toRequest = append(toRequest, h...)
 	}
@@ -234,7 +239,10 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 
 	for peer, hashes := range retries {
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
-		if err != nil || len(unknownHashes) == 0 {
+		if err != nil {
+			unknownHashes = hashes // the alternate is already taken; asking for a known txn costs only a dup
+		}
+		if len(unknownHashes) == 0 {
 			continue
 		}
 		if err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), unknownHashes); err != nil {

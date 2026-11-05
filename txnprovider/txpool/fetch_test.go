@@ -18,7 +18,9 @@ package txpool
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -845,6 +847,7 @@ type announceFetchTest struct {
 	sentryClient  sentryproto.SentryClient
 	now           *time.Time
 	requestedFrom [][64]byte
+	filterErr     error
 }
 
 func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
@@ -852,10 +855,10 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 	ctrl := gomock.NewController(t)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
+	a := &announceFetchTest{ctx: ctx}
 	pool.EXPECT().Started().Return(true).AnyTimes()
 	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, nil }).AnyTimes()
-	a := &announceFetchTest{ctx: ctx}
+		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, a.filterErr }).AnyTimes()
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
@@ -1084,4 +1087,31 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 		messages <- nil
 		require.NoError(t, <-done)
 	})
+}
+
+func TestAlternateRequestedWhenKnownHashLookupFails(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+
+	a.filterErr = errors.New("db down")
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "a failed lookup must not drop the last alternate")
+}
+
+func TestPendingFetchesAreBounded(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hashes := make([][32]byte, 0, 1000)
+	for i := range maxFetchRequests + 2000 {
+		var h [32]byte
+		binary.BigEndian.PutUint64(h[:], uint64(i)+1)
+		if hashes = append(hashes, h); len(hashes) == cap(hashes) {
+			a.announce(t, [64]byte{0xa}, hashes...)
+			hashes = hashes[:0]
+		}
+	}
+	require.LessOrEqual(t, len(a.fetch.pending), maxFetchRequests)
 }
