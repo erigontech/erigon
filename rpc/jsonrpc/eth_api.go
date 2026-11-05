@@ -209,7 +209,7 @@ func headerHeapSize(h *types.Header) int64 {
 	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
 }
 
-// shareCodeByHash lets a replay keep code across requests in the node's code store. A store keyed
+// shareCodeByHash lets a replay read committed code from the node's code store. A store keyed
 // by codeHash cannot mix snapshots: the hash itself comes from the replay's own tx.
 func (api *BaseAPI) shareCodeByHash(ibs *state.IntraBlockState) {
 	if src, ok := api.stateCache.(interface{ CodeByHash() state.CodeByHash }); ok {

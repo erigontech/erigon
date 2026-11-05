@@ -161,7 +161,7 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 
 // CodeByHash is the execution's code store for RPC replays.
 func (c *Cache) CodeByHash() state.CodeByHash {
-	if c.execModule == nil || c.execModule.stateCache == nil || !dbg.UseStateCache {
+	if c.execModule == nil || c.execModule.stateCache == nil {
 		return nil
 	}
 	return c.execModule.stateCache

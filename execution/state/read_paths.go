@@ -9,7 +9,6 @@
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"time"
 
@@ -118,9 +117,6 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	ibs.recordStateReadError(err)
 	if len(code) == 0 {
 		return accounts.EmptyCode, err
-	}
-	if err == nil {
-		ibs.shareCode(codeHash, code)
 	}
 	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
@@ -1751,15 +1747,4 @@ func (ibs *IntraBlockState) sharedCode(codeHash accounts.CodeHash) ([]byte, bool
 	}
 	h := codeHash.Value()
 	return ibs.codeByHash.GetCodeByHash(h[:])
-}
-
-// shareCode publishes code read at a historical txNum. The store outlives the read tx,
-// whose value may point into its pages, so it gets a copy.
-func (ibs *IntraBlockState) shareCode(codeHash accounts.CodeHash, code []byte) {
-	hr, ok := ibs.stateReader.(interface{ GetTxNum() uint64 })
-	if !ok || ibs.codeByHash == nil {
-		return
-	}
-	h := codeHash.Value()
-	ibs.codeByHash.PutCodeByHash(h[:], bytes.Clone(code), hr.GetTxNum())
 }

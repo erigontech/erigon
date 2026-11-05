@@ -163,7 +163,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 	return cache.GetWithTxNum(key)
 }
 
-// getCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
 // when the code domain cache is not a CodeCache (defensive fallback).
 //
@@ -171,23 +171,12 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 // for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
 // patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
 // entry.
-func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return nil, false
 	}
 	return cc.GetByCodeHash(codeHash)
-}
-
-// GetCodeByHash serves code by its codeHash to readers outside block execution.
-func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) { return c.getCodeByHash(codeHash) }
-
-// PutCodeByHash fills only the content-addressed layers: the address binding is left
-// alone, so a code read at a past txNum never answers a latest read of its address.
-func (c *StateCache) PutCodeByHash(codeHash, code []byte, txNum uint64) {
-	if cc, ok := c.caches[kv.CodeDomain].(*CodeCache); ok && !c.disableFills {
-		cc.PutWithCodeHash(nil, code, codeHash, txNum)
-	}
 }
 
 // getCodeSizeByHash returns the size of code by its Ethereum codeHash

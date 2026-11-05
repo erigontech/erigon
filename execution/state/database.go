@@ -52,11 +52,10 @@ type StateReader interface {
 	TracePrefix() string
 }
 
-// CodeByHash is a code store shared across requests. Code is content-addressed, so any reader
-// may serve from it; txNum stamps a fill so an unwind below it drops the entry.
+// CodeByHash is a code store shared across requests. Code is content-addressed, so a reader at
+// any txNum may serve from it.
 type CodeByHash interface {
 	GetCodeByHash(codeHash []byte) ([]byte, bool)
-	PutCodeByHash(codeHash, code []byte, txNum uint64)
 }
 
 type HistoricalStateReader interface {
