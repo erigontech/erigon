@@ -103,6 +103,11 @@ func BenchmarkColumnLookups(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+		// The first lookup seeds the root's bitmap; the sub-benchmarks measure the steady state,
+		// whichever of them runs alone.
+		if _, err := store.GetSavedColumnIndex(b.Context(), slot, root); err != nil {
+			b.Fatal(err)
+		}
 		b.Run(fmt.Sprintf("GetSavedColumnIndex/stored=%d", stored), func(b *testing.B) {
 			for b.Loop() {
 				saved, err := store.GetSavedColumnIndex(b.Context(), slot, root)
