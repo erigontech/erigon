@@ -27,8 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon/common"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
@@ -317,7 +315,7 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	return next
 }
 
-// prefetchKeys spreads keys over prefetchPar read txs and returns the first read error.
+// prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure).
 func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte) error {
 	par := prefetchPar
 	if len(keys) < 2*prefetchPar {
@@ -329,11 +327,21 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 		if p, ok := tx.AggTx().(latestPrefetcher); ok {
 			_, err := p.PrefetchLatest(ctx, domain, keys[from:to])
 			mu.Lock()
-			first = cmp.Or(first, err)
+			first = firstFailure(first, err)
 			mu.Unlock()
 		}
 	})
 	return first
+}
+
+// firstFailure returns the first error that is a real read failure, else the first non-nil one.
+func firstFailure(errs ...error) error {
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, kv.ErrPrefetchIncomplete) {
+			return err
+		}
+	}
+	return cmp.Or(errs...)
 }
 
 // logBatchPrefetch logs a finished batch prefetch; a cancelled one is not logged.
@@ -379,22 +387,20 @@ func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList
 			accs[i] = bal[i].Address[:]
 		}
 	}
-	var g errgroup.Group
+	var wg sync.WaitGroup
+	var accErr, slotErr error
 	keys := 0
 	if cold.accounts {
 		keys += len(accs)
-		g.Go(func() error { return prefetchDomain(ctx, db, kv.AccountsDomain, accs) })
+		wg.Go(func() { accErr = prefetchDomain(ctx, db, kv.AccountsDomain, accs) })
 	}
 	if cold.storage {
 		keys += len(slots)
-		g.Go(func() error {
-			err := prefetchDomain(ctx, db, kv.StorageDomain, slots)
-			storageRead = err == nil
-			return err
-		})
+		wg.Go(func() { slotErr = prefetchDomain(ctx, db, kv.StorageDomain, slots) })
 	}
-	logBatchPrefetch(ctx, "state", keys, started, g.Wait())
-	return storageRead
+	wg.Wait()
+	logBatchPrefetch(ctx, "state", keys, started, firstFailure(accErr, slotErr))
+	return cold.storage && slotErr == nil
 }
 
 // prefetchBALCommitment reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie,

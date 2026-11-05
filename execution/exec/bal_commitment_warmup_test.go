@@ -525,3 +525,10 @@ func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
 	got := keysWithChild(context.Background(), nil, tx, keys, 1)
 	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
 }
+
+func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
+	failed := errors.New("io_uring read failed")
+	require.Equal(t, failed, firstFailure(nil, kv.ErrPrefetchIncomplete, failed))
+	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
+	require.NoError(t, firstFailure(nil, nil))
+}
