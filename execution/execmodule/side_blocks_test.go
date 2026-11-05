@@ -17,8 +17,10 @@
 package execmodule_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -239,15 +241,16 @@ func TestRetainedSideBlockVisibleThroughInsertsAndForkChoices(t *testing.T) {
 }
 
 type forkChoiceLogProbe struct {
-	next    log.Handler
-	onDebug func()
+	next     log.Handler
+	onSample func(string)
 }
 
 func (p *forkChoiceLogProbe) Enabled(context.Context, log.Lvl) bool { return true }
 
 func (p *forkChoiceLogProbe) Log(record *log.Record) error {
-	if record.Msg == "[updateForkChoice] dispatching notifications" {
-		p.onDebug()
+	switch record.Msg {
+	case "[updateForkChoice] dispatching notifications", "[dispatchNotifications] dispatching":
+		p.onSample(record.Msg)
 	}
 	return p.next.Log(record)
 }
@@ -277,29 +280,48 @@ func TestAdoptedSideBlockRemainsVisibleDuringForkChoice(t *testing.T) {
 
 			hash := side.Hash()
 			observed := make(chan struct {
-				has bool
-				err error
-			}, 1)
+				message string
+				has     bool
+				err     error
+			}, 2)
 			previous := m.Log.GetHandler()
 			m.Log.SetHandler(&forkChoiceLogProbe{
 				next: previous,
-				onDebug: func() {
+				onSample: func(message string) {
 					has, err := m.ExecModule.HasBlock(context.Background(), &hash, nil)
 					observed <- struct {
-						has bool
-						err error
-					}{has: has, err: err}
+						message string
+						has     bool
+						err     error
+					}{message: message, has: has, err: err}
 				},
 			})
 			t.Cleanup(func() { m.Log.SetHandler(previous) })
 
 			updateForkChoiceTo(t, m, side)
-			select {
-			case result := <-observed:
+			samples := make(map[string]struct {
+				has bool
+				err error
+			}, 2)
+			for range 2 {
+				select {
+				case result := <-observed:
+					samples[result.message] = struct {
+						has bool
+						err error
+					}{has: result.has, err: result.err}
+				case <-time.After(5 * time.Second):
+					t.Fatal("fork choice dispatch logs were not observed")
+				}
+			}
+			for _, message := range []string{
+				"[updateForkChoice] dispatching notifications",
+				"[dispatchNotifications] dispatching",
+			} {
+				result, ok := samples[message]
+				require.True(t, ok, message)
 				require.NoError(t, result.err)
-				require.True(t, result.has)
-			case <-time.After(5 * time.Second):
-				t.Fatal("fork choice dispatch log was not observed")
+				require.True(t, result.has, message)
 			}
 		})
 	}
@@ -368,14 +390,21 @@ func TestForkChoicePersistsSideBlockBeyondReorgDepth(t *testing.T) {
 func TestForkChoiceBoundsRetainedSideBlocks(t *testing.T) {
 	const maxReorgDepth = 4
 	m, _, _ := newMetricsTester(t, execmoduletester.WithMaxReorgDepth(maxReorgDepth))
-	parent := m.Genesis
+	basePack, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
+		block.SetExtra([]byte{0x01})
+	})
+	require.NoError(t, err)
+	base := basePack.Blocks[0]
+	insertAndValidateBlocks(t, m, base)
+	updateForkChoiceTo(t, m, base)
+
 	unused := make([]*types.Block, 0, maxReorgDepth+4)
 	for i := range maxReorgDepth + 4 {
-		canonicalPack, err := m.GenerateChainFrom(parent, 1, func(_ int, block *blockgen.BlockGen) {
+		canonicalPack, err := m.GenerateChainFrom(base, 1, func(_ int, block *blockgen.BlockGen) {
 			block.SetExtra([]byte{byte(i), 0x0a})
 		})
 		require.NoError(t, err)
-		sidePack, err := m.GenerateChainFrom(parent, 1, func(_ int, block *blockgen.BlockGen) {
+		sidePack, err := m.GenerateChainFrom(base, 1, func(_ int, block *blockgen.BlockGen) {
 			block.SetExtra([]byte{byte(i), 0x0b})
 		})
 		require.NoError(t, err)
@@ -383,8 +412,11 @@ func TestForkChoiceBoundsRetainedSideBlocks(t *testing.T) {
 		insertAndValidateBlocks(t, m, side, canonical)
 		updateForkChoiceTo(t, m, canonical)
 		unused = append(unused, side)
-		parent = canonical
 	}
+	sort.Slice(unused, func(i, j int) bool {
+		left, right := unused[i].Hash(), unused[j].Hash()
+		return bytes.Compare(left[:], right[:]) < 0
+	})
 
 	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 		for _, block := range unused[:maxReorgDepth] {
