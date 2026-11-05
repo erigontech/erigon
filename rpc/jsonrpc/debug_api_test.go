@@ -2198,3 +2198,32 @@ func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
 	require.ErrorAs(t, err, &invalidParams)
 }
+
+type recordingCodeStore map[string]int
+
+func (s recordingCodeStore) GetCodeByHash(h []byte) ([]byte, bool) {
+	s[string(h)]++
+	return nil, false
+}
+
+type codeSharingCache struct {
+	kvcache.Cache
+	store recordingCodeStore
+}
+
+func (c codeSharingCache) CodeByHash() state.CodeByHash { return c.store }
+
+func TestTraceBlockLooksUpSharedCodeByHash(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	cache := codeSharingCache{Cache: kvcache.New(kvcache.DefaultCoherentConfig), store: recordingCodeStore{}}
+	baseApi := NewBaseApi(nil, cache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	for n := rpc.BlockNumber(1); n <= rpc.BlockNumber(chain.Length()); n++ {
+		var buf bytes.Buffer
+		s := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, n, &tracersConfig.TraceConfig{}, s))
+		require.NoError(t, s.Flush())
+	}
+	require.NotEmpty(t, cache.store, "a block replay must look committed code up in the shared store")
+}

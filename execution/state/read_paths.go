@@ -98,6 +98,9 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	if codeHash.IsEmpty() {
 		return accounts.EmptyCode, nil
 	}
+	if code, ok := ibs.sharedCode(codeHash); ok {
+		return accounts.Code{Hash: codeHash, Bytes: code}, nil
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
@@ -164,6 +167,9 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 	}
 	if codeHash.IsEmpty() {
 		return 0, nil
+	}
+	if code, ok := ibs.sharedCode(codeHash); ok {
+		return len(code), nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
@@ -1769,4 +1775,12 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
+}
+
+func (ibs *IntraBlockState) sharedCode(codeHash accounts.CodeHash) ([]byte, bool) {
+	if ibs.codeByHash == nil {
+		return nil, false
+	}
+	h := codeHash.Value()
+	return ibs.codeByHash.GetCodeByHash(h[:])
 }
