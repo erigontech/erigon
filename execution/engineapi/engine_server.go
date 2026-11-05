@@ -430,14 +430,12 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	if !e.config.AllowAA {
-		minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
-		if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
-			}, nil
-		}
+	minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
+	if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
+		return &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
+		}, nil
 	}
 
 	txs := make([][]byte, len(req.Transactions))
@@ -465,10 +463,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			continue
 		}
-		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
+		limits, gasErr := protocol.TransactionGasLimits(transactions[i], e.config.IsAmsterdam(uint64(req.Timestamp)))
+		if gasErr == nil && (limits.Execution > uint64(req.GasLimit) || limits.State > uint64(req.GasLimit)) {
+			gasErr = protocol.ErrGasLimitReached
+		}
+		if gasErr != nil {
 			invalidTransactionStatus = &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
+				ValidationError: engine_types.NewStringifiedError(gasErr),
 			}
 		}
 	}
@@ -526,7 +528,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
-				LatestValidHash: &latestValidHash,
+				LatestValidHash: latestValidOrNull(latestValidHash),
 			}, nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
@@ -692,7 +694,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			e.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
 		} else {
 			e.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
-			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash), ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
 		}
 	}
 
@@ -1157,14 +1159,24 @@ func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmod
 	}
 
 	resp := &engine_types.PayloadStatus{Status: convertGrpcStatusToEngineStatus(status)}
-	if resp.Status == engine_types.ValidStatus || resp.Status == engine_types.InvalidStatus {
+	switch resp.Status {
+	case engine_types.ValidStatus:
 		resp.LatestValidHash = &latestValidHash
+	case engine_types.InvalidStatus:
+		resp.LatestValidHash = latestValidOrNull(latestValidHash)
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 
 	return resp
+}
+
+func latestValidOrNull(h common.Hash) *common.Hash {
+	if h == (common.Hash{}) {
+		return nil
+	}
+	return &h
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {
@@ -1264,7 +1276,7 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	if status == execmodule.ExecutionStatusMissingSegment && result.MissingHash != (common.Hash{}) {
 		if bad, lastValidHash, validationErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
-			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}
+			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash)}
 			if validationErr != "" {
 				invalid.ValidationError = engine_types.NewStringifiedErrorFromString(validationErr)
 			}
@@ -1281,7 +1293,17 @@ func (e *EngineServer) HandleForkChoice(
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("Invalid chain after execution")}, nil
+		// The executor reports its head, which is the last valid ancestor only when it is the parent.
+		var lastValid common.Hash
+		if result.LatestValidHash == header.ParentHash {
+			lastValid = header.ParentHash
+		}
+		e.blockDownloader.ReportBadHeader(headerHash, lastValid, result.ValidationError)
+		invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValid)}
+		if result.ValidationError != "" {
+			invalid.ValidationError = engine_types.NewStringifiedErrorFromString(result.ValidationError)
+		}
+		return invalid, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
@@ -1339,9 +1361,13 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 			if len(indices) == 0 {
 				continue
 			}
-			cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
-			if err != nil {
-				return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+			cells := bundle.Cells
+			if cells == nil {
+				computed, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+				if err != nil {
+					return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+				}
+				cells = &computed
 			}
 			for j, index := range indices {
 				cell := hexutil.Bytes(cells[index][:])
@@ -1435,7 +1461,7 @@ func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, e
 	list := make([]hexutil.Bytes, 0, len(encodedTxns))
 	total := 0
 	for i, tx := range encodedTxns {
-		if txns[i].Type() == types.BlobTxType || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
+		if (txns[i].Type() == types.BlobTxType || txns[i].GetBlobGas() != 0) || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
 			continue
 		}
 		list = append(list, tx)

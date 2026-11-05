@@ -48,6 +48,7 @@ type JsonStreamLogger struct {
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
+	stack        stackJSON
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
@@ -89,6 +90,40 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
+// stackJSON is the JSON array of the stack last written. Between steps only the top
+// of the stack changes, so the encoding of the unchanged bottom is kept.
+type stackJSON struct {
+	vals []uint256.Int
+	ends []int // len(json) after each value
+	json []byte
+}
+
+// encode returns stack as a JSON array, valid until the next call.
+func (s *stackJSON) encode(stack []uint256.Int) []byte {
+	k := 0
+	for k < len(stack) && k < len(s.vals) && s.vals[k] == stack[k] {
+		k++
+	}
+	s.vals = append(s.vals[:k], stack[k:]...)
+	s.ends = s.ends[:k]
+	if k == 0 {
+		s.json = append(s.json[:0], '[')
+	} else {
+		s.json = s.json[:s.ends[k-1]]
+	}
+	for i := k; i < len(stack); i++ {
+		if i > 0 {
+			s.json = append(s.json, ',')
+		}
+		s.json = append(s.json, '"')
+		s.json, _ = hexutil.U256(stack[i]).AppendText(s.json)
+		s.json = append(s.json, '"')
+		s.ends = append(s.ends, len(s.json))
+	}
+	s.json = append(s.json, ']')
+	return s.json
+}
+
 // hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
 // rather than a slice so the result is known to fit; the buffer is not resized.
 func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
@@ -96,13 +131,6 @@ func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
 	l.hexEncodeBuf[1] = 'x'
 	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
-}
-
-// hexQuoted encodes v as a complete JSON string, quotes included, for WriteRaw.
-func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
-	l.hexEncodeBuf[0] = '"'
-	b, _ := hexutil.U256(*v).AppendText(l.hexEncodeBuf[:1])
-	return common.ToStringZeroCopy(append(b, '"'))
 }
 
 // writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes.
@@ -208,11 +236,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 	}
 	if !l.cfg.DisableStack {
 		l.stream.Field("stack")
-		l.stream.WriteArrayStart()
-		for i := range stack {
-			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
-		}
-		l.stream.WriteArrayEnd()
+		l.stream.WriteRawBytes(l.stack.encode(stack))
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.Field("memory")

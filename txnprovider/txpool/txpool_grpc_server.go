@@ -183,7 +183,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	defer tx.Rollback()
 
 	var slots TxnSlots
-	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired()
+	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired().WithPoolRules()
 	parseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
@@ -193,7 +193,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		slots.Resize(uint(j + 1))
 		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
+		if _, err = parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
 			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
 				return ErrAlreadyKnown
 			}
@@ -206,6 +206,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 				reply.Imported[i] = txpoolproto.ImportResult_ALREADY_EXISTS
 			case errors.Is(err, ErrRlpTooBig): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
+				reply.Imported[i] = txpoolproto.ImportResult_INVALID
+			case errors.Is(err, ErrParseTxn):
+				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpoolproto.ImportResult_INVALID
 			default:
 				reply.Errors[i] = err.Error()
@@ -260,10 +263,10 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_ALREADY_EXISTS
 	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
-	case txpoolcfg.InvalidSender, txpoolcfg.NegativeValue, txpoolcfg.OversizedData, txpoolcfg.InitCodeTooLarge,
+	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.TipAboveFeeCap:
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
 		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
 		return txpoolproto.ImportResult_INVALID
 	default:

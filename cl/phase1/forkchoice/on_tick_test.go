@@ -466,6 +466,21 @@ func TestOnTickDoesNotMoveTimeBackwards(t *testing.T) {
 	}
 }
 
+func TestSetTimeForSpecTestMovesTimeBackwardsAndDropsSlotCaches(t *testing.T) {
+	f := buildExAnteStore(t)
+	require.NotZero(t, f.ProposerBoostRoot())
+	_, _, err := f.GetHead(nil)
+	require.NoError(t, err)
+	require.NotZero(t, f.headHash)
+	earlierTimeMs := f.timeMs.Load() - f.beaconCfg.SecondsPerSlot*1000
+
+	f.SetTimeForSpecTest(earlierTimeMs)
+
+	assert.Equal(t, earlierTimeMs, f.timeMs.Load())
+	assert.Zero(t, f.ProposerBoostRoot())
+	assert.Zero(t, f.headHash)
+}
+
 func TestOnTickAdvancesSlotWhileForkChoiceLocked(t *testing.T) {
 	f := buildExAnteStore(t)
 	nextSlot := f.Slot() + 1

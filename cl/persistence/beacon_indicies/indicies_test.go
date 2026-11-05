@@ -56,6 +56,24 @@ func setupTestDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestCustodyRaiseSlotNeverDecreases(t *testing.T) {
+	db := setupTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := WriteCustodyRaiseSlot(tx, 1000); err != nil {
+			return err
+		}
+		return WriteCustodyRaiseSlot(tx, 0)
+	}))
+
+	var got uint64
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, err = ReadCustodyRaiseSlot(tx)
+		return err
+	}))
+	require.Equal(t, uint64(1000), got)
+}
+
 func TestHighestCustodyGroupCountNeverDecreases(t *testing.T) {
 	db := setupTestDB(t)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
