@@ -2027,6 +2027,7 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	acc, ok = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
+}
 
 func TestResumedBlockDoesNotWaitForDeployerInSkippedPrefix(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x04})
