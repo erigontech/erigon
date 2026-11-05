@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -393,43 +394,58 @@ func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
 	require.NoError(t, frame.Validate())
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
+	frame.BlobVersionedHashes = []common.Hash{{1}}
+	wrapper := &types.FrameTxWrapper{
+		FrameTransaction: frame, WrapperVersion: 1,
+		Blobs: types.Blobs{{}}, Commitments: types.BlobKzgs{{}},
+		Proofs: make(types.KZGProofs, params.CellsPerExtBlob),
+	}
+	var wrapped bytes.Buffer
+	require.NoError(t, wrapper.MarshalBinaryWrapped(&wrapped))
 	ordinary := tpEncodeTests[1].txns
-	txns := [][]byte{ordinary[0], encoded.Bytes(), ordinary[1]}
+	for _, tc := range []struct {
+		name string
+		wire []byte
+	}{
+		{"unwrapped", encoded.Bytes()},
+		{"wrapped", wrapped.Bytes()},
+	} {
+		for _, id := range []sentryproto.MessageId{sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66} {
+			t.Run(tc.name+"/"+id.String(), func(t *testing.T) {
+				ctx := t.Context()
+				ctrl := gomock.NewController(t)
+				sentryServer := sentryproto.NewMockSentryServer(ctrl)
+				sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+				pool := NewMockPool(ctrl)
+				pool.EXPECT().Started().Return(true)
+				pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+				pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil).
+					DoAndReturn(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient, _ *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error) {
+						require.Len(t, slots.Txns, len(ordinary))
+						var handled Hashes
+						for i, txn := range slots.Txns {
+							require.Equal(t, ordinary[i], txn.Rlp)
+							handled = append(handled, txn.IDHash[:]...)
+						}
+						return handled, nil, nil
+					})
 
-	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66} {
-		t.Run(id.String(), func(t *testing.T) {
-			ctx := t.Context()
-			ctrl := gomock.NewController(t)
-			sentryServer := sentryproto.NewMockSentryServer(ctrl)
-			sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
-			pool := NewMockPool(ctrl)
-			pool.EXPECT().Started().Return(true)
-			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
-			pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil).
-				DoAndReturn(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient, _ *RemoteTxnsRetry) (Hashes, *RemoteTxnsResult, error) {
-					require.Len(t, slots.Txns, len(ordinary))
-					var handled Hashes
-					for i, txn := range slots.Txns {
-						require.Equal(t, ordinary[i], txn.Rlp)
-						handled = append(handled, txn.IDHash[:]...)
-					}
-					return handled, nil, nil
-				})
-
-			m := NewMockSentry(ctx, sentryServer)
-			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
-			require.NoError(t, err)
-			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
-			payload := EncodeTransactions(txns, nil)
-			if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
-				payload = EncodePooledTransactions66(txns, 1, nil)
-			}
-			entry, err := fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
-				Id: id, Data: payload, PeerId: peerID,
-			}, sentryClient, nil)
-			require.NoError(t, err)
-			require.Empty(t, entry.unsubmitted, "a frame rejected by static policy must not trigger a packet retry")
-		})
+				m := NewMockSentry(ctx, sentryServer)
+				sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+				require.NoError(t, err)
+				fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+				txns := [][]byte{ordinary[0], tc.wire, ordinary[1]}
+				payload := EncodeTransactions(txns, nil)
+				if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
+					payload = EncodePooledTransactions66(txns, 1, nil)
+				}
+				entry, err := fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+					Id: id, Data: payload, PeerId: peerID,
+				}, sentryClient, nil)
+				require.NoError(t, err)
+				require.Empty(t, entry.unsubmitted, "a frame rejected by static policy must not trigger a packet retry")
+			})
+		}
 	}
 }
 
