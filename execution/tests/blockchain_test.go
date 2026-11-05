@@ -2545,9 +2545,9 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 							runtime = destruct
 						}
 						deployed = append(deployed, types.CreateAddress(from, nonces[s]))
-						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 200_000, gasPrice, deployCode(runtime))
+						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, deployCode(runtime))
 					} else {
-						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(uint64(rng.IntN(2))), 100_000, gasPrice, nil)
+						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(uint64(rng.IntN(2))), 300_000, gasPrice, nil)
 					}
 					signed, err := types.SignTx(txn, *signer, keys[s])
 					require.NoError(t, err)
@@ -2556,9 +2556,12 @@ func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
 				}
 			})
 			require.NoError(t, err)
-			for _, blk := range chainPack.Blocks {
+			for i, blk := range chainPack.Blocks {
 				require.Equal(t, 16, blk.Transactions().Len())
 				require.NotNil(t, blk.Header().BlockAccessListHash, "every block carries a BAL")
+				for _, r := range chainPack.Receipts[i] {
+					require.Equal(t, types.ReceiptStatusSuccessful, r.Status, "every deploy and call succeeds")
+				}
 			}
 			dbg.Exec3Parallel = true
 			require.NoError(t, m.InsertChain(chainPack))
