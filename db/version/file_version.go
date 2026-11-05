@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -258,7 +259,7 @@ type VersionedFile struct {
 // multiple versions. Pass "<dir>/*" to scan a whole directory. Unversioned matches
 // (e.g. salt-blocks.txt, subdirectories) and .tmp leftovers are skipped.
 func GroupByMaskedName(pattern string) (map[string][]VersionedFile, error) {
-	matches, err := filepath.Glob(pattern)
+	matches, err := dir.Glob(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid pattern: %w", err)
 	}
