@@ -68,7 +68,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	f.addPruneMu.Lock()
 	defer f.addPruneMu.Unlock()
 
-	seg, result, err := f.beginChainSegmentLocked(signedBlock, fullValidation, true)
+	blockRoot, err := signedBlock.Block.HashSSZ()
+	if err != nil {
+		return nil, LogisticError, err
+	}
+	seg, result, err := f.beginChainSegmentLocked(signedBlock, common.Hash(blockRoot), fullValidation, true)
 	if seg == nil {
 		return nil, result, err
 	}
@@ -81,13 +85,13 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 }
 
 // BeginChainSegment starts the import of a block. It returns a segment only with
-// Started; any other result is final, except ReplayRequired, which means the parent
-// state is not the current state and the block needs AddChainSegment. A started
-// segment leaves the fork graph without a current state until it is committed.
-func (f *forkGraphDisk) BeginChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*ChainSegment, ChainSegmentInsertionResult, error) {
+// Started; ReplayRequired and PrecomputedEpochStateAvailable require AddChainSegment.
+// Other results are final. A started segment leaves the fork graph without a current
+// state until it is committed.
+func (f *forkGraphDisk) BeginChainSegment(signedBlock *cltypes.SignedBeaconBlock, blockRoot common.Hash, fullValidation bool) (*ChainSegment, ChainSegmentInsertionResult, error) {
 	f.addPruneMu.Lock()
 	defer f.addPruneMu.Unlock()
-	return f.beginChainSegmentLocked(signedBlock, fullValidation, false)
+	return f.beginChainSegmentLocked(signedBlock, blockRoot, fullValidation, false)
 }
 
 // CommitChainSegment publishes a segment. Called before Transition has returned, it
@@ -98,24 +102,20 @@ func (f *forkGraphDisk) CommitChainSegment(s *ChainSegment) (*state.CachingBeaco
 	return f.commitChainSegmentLocked(s)
 }
 
-func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaconBlock, fullValidation, allowReplay bool) (*ChainSegment, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaconBlock, blockRoot common.Hash, fullValidation, allowReplay bool) (*ChainSegment, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
-	blockRoot, err := block.HashSSZ()
-	if err != nil {
-		return nil, LogisticError, err
-	}
 
-	if _, ok := f.GetHeader(common.Hash(blockRoot)); ok {
+	if _, ok := f.GetHeader(blockRoot); ok {
 		return nil, PreValidated, nil
 	}
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
-		log.Debug("block below anchor slot", "slot", block.Slot, "hash", common.Hash(blockRoot))
-		f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+		log.Debug("block below anchor slot", "slot", block.Slot, "hash", blockRoot)
+		f.badBlocks.Store(blockRoot, block.Slot)
 		return nil, BelowAnchor, nil
 	}
 	if isBelowPrunedBoundary(block.Slot, f.lowestAvailableBlock.Load()) {
-		f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
+		f.badBlocks.Store(blockRoot, block.Slot)
 		return nil, BelowAnchor, nil
 	}
 
@@ -128,10 +128,11 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 	} else if !allowReplay {
 		return nil, ReplayRequired, nil
 	} else {
-		parentState, err = f.replayState(block.ParentRoot, true)
+		replayedState, err := f.replayState(block.ParentRoot, true)
 		if err != nil {
 			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
 		}
+		parentState = replayedState
 	}
 
 	if parentState == nil {
@@ -144,7 +145,7 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 		log.Debug(
 			"AddChainSegment: missing segment",
 			"slot", block.Slot,
-			"blockRoot", common.Hash(blockRoot),
+			"blockRoot", blockRoot,
 			"parentRoot", block.ParentRoot,
 			"currentStateRoot", currentStateRoot,
 			"currentStateSlot", currentStateSlot,
@@ -153,16 +154,20 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 		)
 		return nil, MissingSegment, nil
 	}
+	runTransition := !isBlockRootTheCurrentState
+	if !allowReplay && runTransition && f.nextEpochState != nil && block.Slot >= f.nextEpochState.Slot() {
+		return nil, PrecomputedEpochStateAvailable, nil
+	}
 	finalizedBlock, hasFinalized := f.GetBlock(parentState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 	seg := &ChainSegment{
 		signedBlock:    signedBlock,
-		blockRoot:      common.Hash(blockRoot),
+		blockRoot:      blockRoot,
 		fullValidation: fullValidation,
 		beaconCfg:      f.beaconCfg,
 		parentState:    parentState,
 		parentSlot:     parentState.Slot(),
-		runTransition:  !isBlockRootTheCurrentState,
+		runTransition:  runTransition,
 		storeDiffs:     f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse,
 		buildLCUpdate:  block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState,
 		finalizedBlock: finalizedBlock,
@@ -186,6 +191,14 @@ func (s *ChainSegment) Transition() {
 		s.err = s.transition()
 		s.transitioned.Store(true)
 	})
+}
+
+// PostState returns the completed valid transition state.
+func (s *ChainSegment) PostState() *state.CachingBeaconState {
+	if !s.transitioned.Load() || s.err != nil || s.transitionErr != nil {
+		return nil
+	}
+	return s.postState
 }
 
 func (s *ChainSegment) transition() error {
@@ -285,8 +298,7 @@ func (s *ChainSegment) transition() error {
 }
 
 // commitChainSegmentLocked re-checks what may have changed since Begin and then
-// publishes what Transition prepared. The light-client update is stored even when
-// the transition failed.
+// publishes what Transition prepared.
 func (f *forkGraphDisk) commitChainSegmentLocked(s *ChainSegment) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	if !s.transitioned.Load() {
 		return nil, LogisticError, errors.New("chain segment committed before its transition")
@@ -300,6 +312,16 @@ func (f *forkGraphDisk) commitChainSegmentLocked(s *ChainSegment) (*state.Cachin
 		return nil, BelowAnchor, nil
 	}
 
+	if s.err != nil {
+		f.blocks.Delete(s.blockRoot)
+		return nil, LogisticError, s.err
+	}
+	if s.transitionErr != nil {
+		f.blocks.Delete(s.blockRoot)
+		f.badBlocks.Store(s.blockRoot, block.Slot)
+		return nil, InvalidBlock, s.transitionErr
+	}
+
 	if s.lcUpdate != nil {
 		// The caller emits the corresponding light client events: fork graph
 		// methods run under the fork choice store's lock, where event sends
@@ -311,15 +333,6 @@ func (f *forkGraphDisk) commitChainSegmentLocked(s *ChainSegment) (*state.Cachin
 			log.Info("Adding light client update", "period", period)
 			f.lightClientUpdates.Store(period, s.lcUpdate)
 		}
-	}
-	if s.err != nil {
-		f.blocks.Delete(s.blockRoot)
-		return nil, LogisticError, s.err
-	}
-	if s.transitionErr != nil {
-		f.blocks.Delete(s.blockRoot)
-		f.badBlocks.Store(s.blockRoot, block.Slot)
-		return nil, InvalidBlock, s.transitionErr
 	}
 
 	newState := s.postState

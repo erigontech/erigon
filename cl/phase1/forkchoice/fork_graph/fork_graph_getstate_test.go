@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -14,6 +15,52 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReplayStateUsesSyncedHead(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		headMatches bool
+		headerKnown bool
+		wantState   bool
+		wantOwned   bool
+	}{
+		{name: "head match", headMatches: true, headerKnown: true, wantState: true, wantOwned: true},
+		{name: "head mismatch", headerKnown: true},
+		{name: "header unknown", headMatches: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := &clparams.MainnetBeaconConfig
+			manager := synced_data.NewSyncedDataManager(cfg, true)
+			head := state.New(cfg)
+			require.NoError(t, head.SetSlot(1))
+			queryRoot := common.Hash{0x11}
+			headRoot := common.Hash{0x22}
+			if testCase.headMatches {
+				headRoot = queryRoot
+			}
+			require.NoError(t, manager.OnHeadStateWithBlockRoot(head, headRoot))
+			graph := &forkGraphDisk{syncedData: manager, beaconCfg: cfg, fs: afero.NewMemMapFs()}
+			if testCase.headerKnown {
+				graph.headers.Store(queryRoot, &cltypes.BeaconBlockHeader{Slot: 1})
+			}
+
+			got, owned, err := graph.ReplayStateWithOwnership(queryRoot)
+			require.NoError(t, err)
+			require.Equal(t, testCase.wantOwned, owned)
+			if !testCase.wantState {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.NotSame(t, head, got)
+			wantHash, err := head.HashSSZ()
+			require.NoError(t, err)
+			gotHash, err := got.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, wantHash, gotHash)
+		})
+	}
+}
 
 // TestGetState_InfiniteLoopOnMissingStateFile reproduces the infinite loop in
 // getState when a header exists at a dump slot but the corresponding state file
