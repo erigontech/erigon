@@ -2459,8 +2459,10 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
+	evm.SetAbortOnDependency(true)
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+	evm.SetAbortOnDependency(false)
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so
 	// occupancy reveals whether workers are starved or compute-bound.
