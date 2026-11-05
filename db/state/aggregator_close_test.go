@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-func TestAggregatorCloseDoesNotPoll(t *testing.T) {
+func TestAggregatorCloseWaitsForMaintenance(t *testing.T) {
 	testMaintenanceObserver(t, func(t *testing.T, agg *Aggregator) {
 		finishWork := make(chan struct{})
 		agg.buildingFiles.Store(true)
@@ -46,16 +46,22 @@ func TestAggregatorCloseDoesNotPoll(t *testing.T) {
 			defer agg.buildingFiles.Store(false)
 			<-finishWork
 		}))
-		closed := make(chan struct{})
-		go func() {
-			agg.Close()
-			close(closed)
-		}()
-		synctest.Wait()
+		closed := make(chan struct{}, 2)
+		for range cap(closed) {
+			go func() {
+				agg.Close()
+				closed <- struct{}{}
+			}()
+			synctest.Wait()
+		}
+		returned := len(closed)
 
 		finishedAt := time.Now()
 		close(finishWork)
-		<-closed
+		for range cap(closed) {
+			<-closed
+		}
+		require.Zero(t, returned, "every Close caller must wait for active maintenance")
 		require.Zero(t, time.Since(finishedAt), "Close must return when background work finishes")
 	})
 }

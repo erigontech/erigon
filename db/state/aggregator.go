@@ -724,10 +724,11 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
+	firstClose := a.background.BeginClose()
+	a.background.Wait()
+	if !firstClose {
 		return
 	}
-	a.background.Wait()
 	a.ctxCancel()
 	if a.metricsCollector != nil {
 		a.metricsCollector.Stop()
