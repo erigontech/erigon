@@ -18,13 +18,13 @@ package stagedsync
 
 import (
 	"errors"
-	"github.com/erigontech/erigon/common"
 	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
