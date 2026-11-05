@@ -2592,7 +2592,7 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
 	// probe: spine time in the fee credit and the finalize tail; named re-run parks.
 	spFee, spFin, spNext, spDep, spVal, spSched time.Duration
-	spParks      int
+	spParks                                     int
 
 	oracleHook func()
 
