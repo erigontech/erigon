@@ -116,7 +116,7 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
 	}
 	if encodedLn > clparams.MaxPayloadSize {
-		return errors.New("payload too big")
+		return fmt.Errorf("%w: payload too big", ErrPayloadExceedsLimit)
 	}
 	if encodedLn > maxSize {
 		return fmt.Errorf("%w: got %d, max %d", ErrPayloadExceedsLimit, encodedLn, maxSize)

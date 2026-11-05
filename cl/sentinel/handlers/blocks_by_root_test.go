@@ -291,3 +291,10 @@ func TestBlocksByRootHandlerRejectsOversizedLengthPrefix(t *testing.T) {
 	prefix := binary.AppendUvarint(nil, (clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb+1)*length.Hash)
 	requireInvalidRequest(t, b.requestRaw(prefix))
 }
+
+func TestBlocksByRootHandlerRejectsLengthPrefixAboveMaxPayloadSize(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+
+	prefix := binary.AppendUvarint(nil, clparams.MaxPayloadSize+1)
+	requireInvalidRequest(t, b.requestRaw(prefix))
+}
