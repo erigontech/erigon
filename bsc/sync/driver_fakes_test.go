@@ -18,6 +18,7 @@ package bscsync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -61,13 +62,24 @@ func fakeChain(n int) []*types.Block {
 	return blocks
 }
 
+var errNoHeaders = errors.New("fake: no headers")
+
+type headerFetch struct {
+	peer, start uint64
+}
+
 type fakeP2P struct {
 	*fakeTipRegistrar
 	peers int
+	// serve runs before each header fetch. A non-nil chain replaces the served chain;
+	// errNoHeaders or a deadline marks the peer as missing blocks from start on, like TrackingFetcher.
+	serve func(ctx context.Context, peer, start uint64) ([]*types.Block, error)
 
 	mu        sync.Mutex
 	chain     []*types.Block
 	penalized []*p2p.PeerId
+	fetches   []headerFetch
+	missing   map[uint64]uint64
 }
 
 func (f *fakeP2P) Penalize(_ context.Context, peerId *p2p.PeerId) error {
@@ -93,16 +105,56 @@ func (f *fakeP2P) blocks() []*types.Block {
 	return f.chain
 }
 
-func (f *fakeP2P) ListPeersMayHaveBlockNum(uint64) []*p2p.PeerId {
-	ids := make([]*p2p.PeerId, f.peers)
-	for i := range ids {
-		ids[i] = p2p.PeerIdFromUint64(uint64(i + 1))
+func (f *fakeP2P) ListPeersMayHaveBlockNum(blockNum uint64) []*p2p.PeerId {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var ids []*p2p.PeerId
+	for peer := uint64(1); peer <= uint64(f.peers); peer++ {
+		if missing, ok := f.missing[peer]; ok && missing <= blockNum {
+			continue
+		}
+		ids = append(ids, p2p.PeerIdFromUint64(peer))
 	}
 	return ids
 }
 
-func (f *fakeP2P) FetchHeaders(_ context.Context, start, end uint64, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+func (f *fakeP2P) headerFetchers(start uint64) []uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var peers []uint64
+	for _, fetch := range f.fetches {
+		if fetch.start == start {
+			peers = append(peers, fetch.peer)
+		}
+	}
+	return peers
+}
+
+func (f *fakeP2P) FetchHeaders(ctx context.Context, start, end uint64, peerId *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
+	peer := binary.BigEndian.Uint64(peerId[:8])
+	f.mu.Lock()
+	f.fetches = append(f.fetches, headerFetch{peer: peer, start: start})
+	f.mu.Unlock()
 	chain := f.blocks()
+	if f.serve != nil {
+		served, err := f.serve(ctx, peer, start)
+		if errors.Is(err, errNoHeaders) || errors.Is(err, context.DeadlineExceeded) {
+			f.mu.Lock()
+			if missing, ok := f.missing[peer]; !ok || start < missing {
+				if f.missing == nil {
+					f.missing = map[uint64]uint64{}
+				}
+				f.missing[peer] = start
+			}
+			f.mu.Unlock()
+		}
+		if err != nil {
+			return p2p.FetcherResponse[[]*types.Header]{}, err
+		}
+		if served != nil {
+			chain = served
+		}
+	}
 	var headers []*types.Header
 	for n := start; n < end && n < uint64(len(chain)); n++ {
 		headers = append(headers, chain[n].HeaderNoCopy())

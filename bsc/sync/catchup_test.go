@@ -82,10 +82,8 @@ func TestCatchUpAnnouncedHeadDropsBelowCursor(t *testing.T) {
 	chainRW := newFakeChainRW(network[:1])
 	cfg := Config{ChainRW: chainRW, Svc: &fakeP2P{peers: 2, chain: network}}
 
-	calls := 0
 	announced := func() (uint64, bool) {
-		calls++
-		if calls < 5 {
+		if chainRW.numInserted() < 3999-tipHandoverDistance {
 			return 3999, true
 		}
 		return 1000, true
