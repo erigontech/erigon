@@ -1135,7 +1135,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
 						"valSkip", blockExecutor.cntValidationSkip,
-						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
+						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3),
+						"spFee", blockExecutor.spFee, "spFin", blockExecutor.spFin, "parks", blockExecutor.spParks)
 					npWait, npProc = 0, 0
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
@@ -2585,6 +2586,9 @@ type blockExecutor struct {
 
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
+	// probe: spine time in the fee credit and the finalize tail; named re-run parks.
+	spFee, spFin time.Duration
+	spParks      int
 
 	oracleHook func()
 
@@ -2996,6 +3000,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
 				txResult.TxOut = txResult.TxOut.Merge(senderWrites)
 			}
+			feeStart := time.Now()
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
 				return nil, err
@@ -3009,6 +3014,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
 				be.markReadersDirty(tx, tipWrites)
 			}
+			be.spFee += time.Since(feeStart)
 		}
 		be.coinbaseFlushedUpTo = tx
 		// Promote the whole tx Estimate->Done and seal in one step. Done is granted
@@ -3020,7 +3026,10 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			be.versionMap.SealUpTo(txVersion.TxIndex)
 		}
 
-		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
+		finStart := time.Now()
+		r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader)
+		be.spFin += time.Since(finStart)
+		if ferr != nil || r != nil {
 			return r, ferr
 		}
 		be.signalCommitted(tx)
@@ -3108,6 +3117,7 @@ func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
 		be.wakeValidated = map[int][]*poolTask{}
 	}
 	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
+	be.spParks++
 	return true
 }
 
