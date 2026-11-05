@@ -461,6 +461,7 @@ type PoolBlobBundle struct {
 	Commitment goethkzg.KZGCommitment
 	Blob       []byte
 	Proofs     []goethkzg.KZGProof // Can be 1 or more Proofs/CellProofs
+	Cells      *[goethkzg.CellsPerExtBlob]*goethkzg.Cell
 }
 
 // TxnSlot holds an unwrapped transaction and its pool metadata.
