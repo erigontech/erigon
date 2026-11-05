@@ -295,8 +295,7 @@ func TestZeroValueCallReadingUnfinishedWriteCancelsOptedInRun(t *testing.T) {
 
 	addr := accounts.InternAddress(common.HexToAddress("0xc0df"))
 	vm := state.NewVersionMap(nil)
-	created := accounts.NewAccount()
-	vm.WriteAddress(addr, state.Version{TxIndex: 1}, &created, false) // tx 1 still creates it
+	vm.WriteSelfDestruct(addr, state.Version{TxIndex: 1}, true, false) // tx 1 still self-destructs it
 	ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 2)
