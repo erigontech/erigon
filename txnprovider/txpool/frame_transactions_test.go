@@ -1070,6 +1070,40 @@ func TestFramePoolValidationBatchDeadline(t *testing.T) {
 	require.Equal(t, backend.deadlines[0], backend.deadlines[1], "one slow batch must not get a new timeout for every frame")
 }
 
+func TestFramePoolStaleBatchPreservesPrecheckRejection(t *testing.T) {
+	_, pool, sender := keyedFramePoolEnv(t)
+	invalid := framePoolSlot(t, sender, 3, 2, uint256.Int{1})
+	rejected := framePoolSlot(t, common.Address{2}, 1, 2, uint256.Int{1})
+	pending := framePoolSlot(t, common.Address{3}, 1, 2, uint256.Int{1})
+	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	ordinary.IDHash[0] = 4
+	pool.frameRejections.Add(string(rejected.IDHash[:]), frameRejection{generation: pool.stateGeneration})
+	var txns TxnSlots
+	for _, frame := range []*TxnSlot{invalid, rejected, pending} {
+		address := frame.Txn.(*types.FrameTransaction).SenderAddress
+		txns.Append(frame, address[:], true)
+	}
+	txns.Append(ordinary, sender[:], true)
+	calls := 0
+	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+		calls++
+		require.Equal(t, pending.Rlp, req.Transaction)
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	synctest.Test(t, func(t *testing.T) {
+		reasons, err := pool.AddLocalTxns(t.Context(), txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{
+			txpoolcfg.TipAboveFeeCap, txpoolcfg.FrameValidationUnavailable,
+			txpoolcfg.FrameValidationUnavailable, txpoolcfg.Success,
+		}, reasons)
+		require.Equal(t, 1, calls, "precheck failures must not reach simulation")
+		require.Contains(t, pool.byHash, string(ordinary.IDHash[:]))
+	})
+}
+
 func TestFramePoolHeadNotificationTimeout(t *testing.T) {
 	_, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)

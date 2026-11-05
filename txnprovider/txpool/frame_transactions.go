@@ -162,10 +162,8 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 	if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
 		return txpoolcfg.InvalidFrame
 	}
-	if txn.validatedFrame != frame {
-		if err := frame.Validate(); err != nil {
-			return txpoolcfg.InvalidFrame
-		}
+	if err := frame.Validate(); err != nil {
+		return txpoolcfg.InvalidFrame
 	}
 	if frame.GetFeeCap().Lt(frame.GetTipCap()) {
 		return txpoolcfg.TipAboveFeeCap
@@ -239,10 +237,10 @@ func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64)
 	return generation != p.stateGeneration
 }
 
-// applyFrameValidation requires the pool lock. Stale results trigger another
-// simulation while time remains; after the deadline, they cause retryable rejection
-// of frame transactions while ordinary transactions can proceed. Results for the
-// current state generation remain usable after the deadline.
+// applyFrameValidation requires the pool lock. Stale batches are retried while time
+// remains. After the deadline, current precheck failures keep their reason and frames
+// requiring simulation receive a retryable rejection. Results for the current state
+// generation remain usable after the deadline.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason) ([]txpoolcfg.DiscardReason, error) {
 	if len(batch.results) == 0 {
 		return precheckReasons, nil
@@ -261,7 +259,11 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 			continue
 		}
 		if stale {
-			result = frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
+			reason := p.validateFrame(txn, txns.IsLocal[i])
+			if reason == txpoolcfg.Success {
+				reason = txpoolcfg.FrameValidationUnavailable
+			}
+			result = frameValidationResult{reason: reason}
 		}
 		if result.reason == txpoolcfg.Success {
 			// A pooled slot's validation must match its active reservation.

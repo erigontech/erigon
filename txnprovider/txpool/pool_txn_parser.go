@@ -409,7 +409,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Wrapped transactions were hashed in step 3, over the type byte and inner body.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
-	slot.validatedFrame = nil
 	if innerTxBytes == nil {
 		slot.IDHash = crypto.Keccak256Hash(txBytes)
 		if validateHash != nil {
@@ -433,7 +432,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err := frame.Validate(); err != nil {
 			return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
 		}
-		slot.validatedFrame = frame
 		if wrappedWithBlobs && frame.GetBlobGas() > 0 && !wrapped {
 			return 0, fmt.Errorf("%w: missing frame blob sidecar", ErrParseTxn)
 		}
@@ -496,9 +494,6 @@ type TxnSlot struct {
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
 	AuthAndNonces []AuthAndNonce
-	// Admission reuses stateless validation only while Txn refers to this parsed
-	// object. The object must not be modified after validation.
-	validatedFrame *types.FrameTransaction
 	// A pooled frame without a validation result is restored and parked. It has
 	// no payer reservation until its first successful validation.
 	frameValidation *protocol.FrameValidation
