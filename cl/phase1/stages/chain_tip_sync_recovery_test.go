@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -78,6 +79,7 @@ type chainTipBatchForkGraph struct {
 	added       map[common.Hash]int
 	insertOnAdd bool
 	envReads    map[common.Hash]int
+	anchorSlot  *uint64
 }
 
 type chainTipBatchEnvelopeSentinel struct {
@@ -110,6 +112,13 @@ func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBloc
 		return g.parentState, fork_graph.Success, nil
 	}
 	return nil, fork_graph.PreValidated, nil
+}
+
+func (g *chainTipBatchForkGraph) AnchorSlot() uint64 {
+	if g.anchorSlot != nil {
+		return *g.anchorSlot
+	}
+	return g.ForkGraph.AnchorSlot()
 }
 
 func (g *chainTipBatchForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -658,12 +667,19 @@ func newChainTipBatchEnvelopeRPC(t *testing.T, cfg *clparams.BeaconChainConfig, 
 	t.Helper()
 
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	sentinel := &chainTipBatchEnvelopeSentinel{response: encodeEnvelopeResponse(t, cfg, envelope)}
+	return rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock), sentinel
+}
+
+func encodeEnvelopeResponse(t *testing.T, cfg *clparams.BeaconChainConfig, envelope *cltypes.SignedExecutionPayloadEnvelope) []byte {
+	t.Helper()
+
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
 	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)
 	var response bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
-	sentinel := &chainTipBatchEnvelopeSentinel{response: response.Bytes()}
-	return rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock), sentinel
+	return response.Bytes()
 }
 
 func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
@@ -1291,20 +1307,8 @@ func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
 	cfg, _, _, fullChild, _, _ := newChainTipBatchFixture(t, execution_client.PayloadStatusInvalidated)
 	fullRoot, err := fullChild.Block.HashSSZ()
 	require.NoError(t, err)
-	// Each descendant builds on the EMPTY variant, so no parent envelope is fetched for it.
-	child := func(parent *cltypes.SignedBeaconBlock) (*cltypes.SignedBeaconBlock, common.Hash) {
-		parentRoot, err := parent.Block.HashSSZ()
-		require.NoError(t, err)
-		block := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
-		block.Block.Slot = parent.Block.Slot + 1
-		block.Block.ParentRoot = parentRoot
-		block.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parent.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
-		root, err := block.Block.HashSSZ()
-		require.NoError(t, err)
-		return block, root
-	}
-	grandchild, grandchildRoot := child(fullChild)
-	greatGrandchild, greatGrandchildRoot := child(grandchild)
+	grandchild, grandchildRoot := newChildOnEmptyParent(t, cfg.beaconCfg, fullChild, fullChild.Block.Slot+1)
+	greatGrandchild, greatGrandchildRoot := newChildOnEmptyParent(t, cfg.beaconCfg, grandchild, grandchild.Block.Slot+1)
 	seen := make(map[common.Hash]struct{})
 	rejected := make(map[common.Hash]error)
 	args := Args{targetSlot: greatGrandchild.Block.Slot + 1}
@@ -1433,4 +1437,766 @@ func TestChainTipBatchWithoutImportsRequestsNoCustodyBackfill(t *testing.T) {
 	orphan.Block.ParentRoot = common.Hash{0xde, 0xad}
 
 	processChainTipBatch(t.Context(), cfg, Args{targetSlot: orphan.Block.Slot}, []*cltypes.SignedBeaconBlock{orphan}, make(map[common.Hash]struct{}), make(map[common.Hash]error))
+}
+
+// newChildOnEmptyParent builds a block that does not build on the payload of its parent, so that no
+// parent envelope is needed to import it.
+func newChildOnEmptyParent(t *testing.T, beaconCfg *clparams.BeaconChainConfig, parent *cltypes.SignedBeaconBlock, slot uint64) (*cltypes.SignedBeaconBlock, common.Hash) {
+	t.Helper()
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parentRoot
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parent.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return block, root
+}
+
+const ancestorPeer = "orphan-peer"
+
+type ancestorRequest struct {
+	pid          string
+	start, count uint64
+}
+
+// chainTipAncestorSentinel answers blocks_by_range sent to its one peer and nothing else.
+type chainTipAncestorSentinel struct {
+	chainTipBatchEnvelopeSentinel
+	t        *testing.T
+	clock    eth_clock.EthereumClock
+	cfg      *clparams.BeaconChainConfig
+	serve    func(call int, start, count uint64) []*cltypes.SignedBeaconBlock
+	requests []ancestorRequest
+	// onRequest runs once the request is recorded.
+	onRequest func(ctx context.Context)
+}
+
+func (s *chainTipAncestorSentinel) SendPeerRequest(ctx context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	require.NoError(s.t, ctx.Err())
+	wire := &cltypes.BeaconBlocksByRangeRequest{}
+	require.NoError(s.t, ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(req.Data), wire, clparams.GloasVersion))
+	s.requests = append(s.requests, ancestorRequest{pid: req.Pid, start: wire.StartSlot, count: wire.Count})
+	if s.onRequest != nil {
+		s.onRequest(ctx)
+	}
+	if req.Pid != ancestorPeer || s.serve == nil {
+		return nil, errors.New("peer does not answer")
+	}
+	var response bytes.Buffer
+	for i, block := range s.serve(len(s.requests)-1, wire.StartSlot, wire.Count) {
+		digest, err := s.clock.ComputeForkDigest(block.Block.Slot / s.cfg.SlotsPerEpoch)
+		require.NoError(s.t, err)
+		if i > 0 {
+			require.NoError(s.t, response.WriteByte(0))
+		}
+		require.NoError(s.t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+	}
+	return &sentinelproto.ResponseData{Data: response.Bytes(), Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
+}
+
+// servingChain answers with the blocks of chain inside the requested range, at most limit of them when limit is not zero.
+func servingChain(limit int, chain ...*cltypes.SignedBeaconBlock) func(int, uint64, uint64) []*cltypes.SignedBeaconBlock {
+	return func(_ int, start, count uint64) []*cltypes.SignedBeaconBlock {
+		var answer []*cltypes.SignedBeaconBlock
+		for _, block := range chain {
+			if block.Block.Slot >= start && block.Block.Slot < start+count && (limit == 0 || len(answer) < limit) {
+				answer = append(answer, block)
+			}
+		}
+		return answer
+	}
+}
+
+type ancestorLookupFixture struct {
+	t         *testing.T
+	cfg       *Cfg
+	graph     *chainTipBatchForkGraph
+	sentinel  *chainTipAncestorSentinel
+	parent    *cltypes.SignedBeaconBlock
+	fullChild *cltypes.SignedBeaconBlock
+}
+
+// newAncestorLookupFixture imports one block, parent, at slot 64 above an anchor at slot 63.
+func newAncestorLookupFixture(t *testing.T) *ancestorLookupFixture {
+	t.Helper()
+	f := newAncestorLookupFixtureWithoutParent(t)
+	require.NoError(t, f.cfg.forkChoice.OnBlock(t.Context(), f.parent, false, false, false))
+	return f
+}
+
+// newAncestorLookupFixtureWithoutParent is the fixture before parent is imported; fullChild builds on
+// parent's payload.
+func newAncestorLookupFixtureWithoutParent(t *testing.T) *ancestorLookupFixture {
+	t.Helper()
+	cfg, graph, parentRoot, fullChild, _, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	parent := graph.parents[parentRoot]
+	delete(graph.parents, parentRoot)
+	graph.insertOnAdd = true
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
+	sentinel := &chainTipAncestorSentinel{t: t, clock: clock, cfg: cfg.beaconCfg}
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg.beaconCfg, clock)
+	cfg.ethClock = clock
+	return &ancestorLookupFixture{t: t, cfg: cfg, graph: graph, sentinel: sentinel, parent: parent, fullChild: fullChild}
+}
+
+func (f *ancestorLookupFixture) child(parent *cltypes.SignedBeaconBlock, slot uint64) (*cltypes.SignedBeaconBlock, common.Hash) {
+	return newChildOnEmptyParent(f.t, f.cfg.beaconCfg, parent, slot)
+}
+
+func (f *ancestorLookupFixture) tickTo(slot uint64) {
+	f.cfg.forkChoice.OnTick(slot * f.cfg.beaconCfg.SecondsPerSlot * 1000)
+}
+
+func (f *ancestorLookupFixture) pinCurrentSlot(slot *uint64) {
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(f.t))
+	clock.EXPECT().GetCurrentSlot().DoAndReturn(func() uint64 { return *slot }).AnyTimes()
+	f.cfg.ethClock = clock
+}
+
+func (f *ancestorLookupFixture) listen(targetSlot uint64, batches ...[]*cltypes.SignedBeaconBlock) error {
+	f.t.Helper()
+	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], len(batches))
+	for _, batch := range batches {
+		respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: batch, Peer: ancestorPeer}
+	}
+	ctx, cancel := context.WithTimeout(f.t.Context(), 2*time.Second)
+	defer cancel()
+	return listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), f.cfg, Args{targetSlot: targetSlot}, respCh, make(chan error))
+}
+
+// process runs one batch from the serving peer through the lookup and the import, as the chain tip loop does.
+func (f *ancestorLookupFixture) process(targetSlot uint64, rejected map[common.Hash]error, batch ...*cltypes.SignedBeaconBlock) bool {
+	f.t.Helper()
+	ctx, cancel := context.WithTimeout(f.t.Context(), 2*time.Second)
+	defer cancel()
+	served := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: batch, Peer: ancestorPeer}
+	return processChainTipBatch(ctx, f.cfg, Args{targetSlot: targetSlot}, withMissingAncestors(ctx, f.cfg, served, rejected), make(map[common.Hash]struct{}), rejected)
+}
+
+// The peer that served a block whose parent is unknown is asked for the slots below it, and the
+// ancestors it returns are imported before the block.
+func TestChainTipSyncImportsAnOrphanAfterFetchingItsAncestorsFromItsPeer(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	require.EqualValues(t, 63, f.cfg.forkChoice.AnchorSlot())
+	require.EqualValues(t, 64, f.parent.Block.Slot)
+	middle, middleRoot := f.child(f.parent, 65)
+	tip, tipRoot := f.child(middle, 66)
+	f.sentinel.serve = servingChain(0, middle)
+	f.tickTo(tip.Block.Slot)
+
+	err := f.listen(tip.Block.Slot, []*cltypes.SignedBeaconBlock{tip})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, f.graph.added[middleRoot])
+	require.Equal(t, 1, f.graph.added[tipRoot])
+	require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 64, count: 2}}, f.sentinel.requests)
+	require.Zero(t, f.sentinel.calls, "the request must not go to a random peer")
+}
+
+// The fetched branch is a branch like any other: it takes the head once it outweighs the node's own.
+func TestChainTipBatchSwitchesHeadToTheHeavierFetchedBranch(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	own, ownRoot := f.child(f.parent, 65)
+	middle, _ := f.child(f.parent, 66)
+	tip, tipRoot := f.child(middle, 67)
+	f.tickTo(tip.Block.Slot)
+	require.NoError(t, f.cfg.forkChoice.OnBlock(t.Context(), own, false, false, false))
+	vote := func(root common.Hash, slot uint64) common.Hash {
+		f.cfg.forkChoice.ProcessAttestingIndicies(&solid.Attestation{
+			Data: &solid.AttestationData{Slot: slot, BeaconBlockRoot: root},
+		}, []uint64{0})
+		head, _, err := f.cfg.forkChoice.GetHead(nil)
+		require.NoError(t, err)
+		return head
+	}
+	require.Equal(t, ownRoot, vote(ownRoot, own.Block.Slot))
+	f.sentinel.serve = servingChain(0, middle)
+
+	require.NoError(t, f.listen(tip.Block.Slot, []*cltypes.SignedBeaconBlock{tip}))
+
+	require.Contains(t, f.graph.added, tipRoot)
+	head, _, err := f.cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, ownRoot, head, "the fetched branch has no votes yet")
+	require.Equal(t, tipRoot, vote(tipRoot, tip.Block.Slot))
+}
+
+func TestChainTipAncestorLookupLinksAForkRootedAtTheAnchor(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	anchorRoot := f.parent.Block.ParentRoot
+	_, anchorHasBlock := f.cfg.forkChoice.GetBlock(anchorRoot)
+	_, anchorHasHeader := f.cfg.forkChoice.GetHeader(anchorRoot)
+	require.False(t, anchorHasBlock)
+	require.True(t, anchorHasHeader)
+	fork, _ := f.child(f.parent, f.parent.Block.Slot+1)
+	fork.Block.ParentRoot = anchorRoot
+	forkRoot, err := fork.Block.HashSSZ()
+	require.NoError(t, err)
+	tip, tipRoot := f.child(fork, fork.Block.Slot+1)
+	f.sentinel.serve = servingChain(0, fork)
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Equal(t, 1, f.graph.added[forkRoot])
+	require.Equal(t, 1, f.graph.added[tipRoot])
+}
+
+func TestChainTipAncestorLookupImportsOnlyTheBlocksLinkedToTheOrphan(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	unrelated, unrelatedRoot := f.child(f.parent, 65)
+	missing, missingRoot := f.child(f.parent, 66)
+	tip, tipRoot := f.child(missing, 67)
+	f.sentinel.serve = servingChain(0, unrelated, missing)
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Equal(t, 1, f.graph.added[missingRoot])
+	require.Equal(t, 1, f.graph.added[tipRoot])
+	require.NotContains(t, f.graph.added, unrelatedRoot)
+}
+
+// Fork choice admits blocks above the first slot of the finalized epoch, not above its last slot.
+func TestChainTipAncestorLookupStartsRightAboveTheFinalizedEpochStart(t *testing.T) {
+	for name, tc := range map[string]struct {
+		orphanSlotsAboveFinalizedStart uint64
+		windowWouldUnderflow           bool
+		justifiedEpoch                 uint64
+	}{
+		"an orphan above the window":                 {10, false, 7},
+		"a one slot window":                          {2, true, 7},
+		"a window that would underflow":              {4, true, 7},
+		"a justified checkpoint above the finalized": {10, false, 8},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			noAnchorFloor := uint64(0)
+			f.graph.anchorSlot = &noAnchorFloor
+			finalized := f.cfg.forkChoice.FinalizedCheckpoint()
+			require.EqualValues(t, 7, finalized.Epoch)
+			finalizedStart := finalized.Epoch * f.cfg.beaconCfg.SlotsPerEpoch
+			orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
+			orphan.Block.Slot = finalizedStart + tc.orphanSlotsAboveFinalizedStart
+			orphan.Block.ParentRoot = common.Hash{0xde, 0xad}
+			require.Equal(t, tc.windowWouldUnderflow, orphan.Block.Slot < uint64(ancestorLookupWindow))
+			if tc.justifiedEpoch != finalized.Epoch {
+				parentRoot, err := f.parent.Block.HashSSZ()
+				require.NoError(t, err)
+				f.graph.parentState.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: tc.justifiedEpoch, Root: parentRoot})
+				justifying, _ := f.child(f.parent, (tc.justifiedEpoch+1)*f.cfg.beaconCfg.SlotsPerEpoch)
+				f.tickTo(justifying.Block.Slot + 1)
+				require.NoError(t, f.cfg.forkChoice.OnBlock(t.Context(), justifying, false, false, false))
+			}
+			require.Equal(t, tc.justifiedEpoch, f.cfg.forkChoice.JustifiedCheckpoint().Epoch)
+			f.sentinel.serve = servingChain(0)
+
+			f.process(orphan.Block.Slot, make(map[common.Hash]error), orphan)
+
+			require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: finalizedStart + 1, count: tc.orphanSlotsAboveFinalizedStart - 1}}, f.sentinel.requests)
+		})
+	}
+}
+
+// No slot is left to ask for when the orphan is at or right above the anchor, such as the anchor
+// block itself.
+func TestChainTipAncestorLookupAsksNothingWhenTheWindowIsEmpty(t *testing.T) {
+	for name, slotAboveAnchor := range map[string]uint64{"at the anchor": 0, "right above the anchor": 1} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
+			orphan.Block.Slot = f.cfg.forkChoice.AnchorSlot() + slotAboveAnchor
+			orphan.Block.ParentRoot = common.Hash{0xde, 0xad}
+			f.tickTo(f.parent.Block.Slot)
+
+			f.process(orphan.Block.Slot, make(map[common.Hash]error), orphan)
+
+			require.Empty(t, f.sentinel.requests)
+		})
+	}
+}
+
+func TestChainTipAncestorLookupDropsAResponseOutsideTheRange(t *testing.T) {
+	const orphanSlot = 200
+	for name, servedSlots := range map[string][]uint64{
+		"below the range":        {100},
+		"at the orphan slot":     {orphanSlot},
+		"ending above the range": {orphanSlot - 1, orphanSlot + 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			served, servedRoot := f.child(f.parent, servedSlots[0])
+			response := []*cltypes.SignedBeaconBlock{served}
+			for _, slot := range servedSlots[1:] {
+				block, _ := f.child(served, slot)
+				response = append(response, block)
+			}
+			tip, tipRoot := f.child(served, orphanSlot)
+			f.sentinel.serve = func(int, uint64, uint64) []*cltypes.SignedBeaconBlock { return response }
+			f.tickTo(tip.Block.Slot)
+			rejected := make(map[common.Hash]error)
+
+			f.process(tip.Block.Slot, rejected, tip)
+
+			require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 136, count: 64}}, f.sentinel.requests)
+			require.NotContains(t, f.graph.added, servedRoot)
+			require.NotContains(t, f.graph.added, tipRoot)
+			require.Contains(t, rejected, tipRoot)
+		})
+	}
+}
+
+func TestChainTipAncestorLookupDropsAResponseWithSlotsNotIncreasing(t *testing.T) {
+	for name, order := range map[string][]int{"descending": {1, 0}, "repeated": {0, 0, 1}, "repeated after the first": {0, 1, 1}} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			first, firstRoot := f.child(f.parent, 65)
+			second, secondRoot := f.child(first, 66)
+			tip, tipRoot := f.child(second, 67)
+			ancestors := []*cltypes.SignedBeaconBlock{first, second}
+			f.sentinel.serve = func(int, uint64, uint64) []*cltypes.SignedBeaconBlock {
+				var answer []*cltypes.SignedBeaconBlock
+				for _, i := range order {
+					answer = append(answer, ancestors[i])
+				}
+				return answer
+			}
+			f.tickTo(tip.Block.Slot)
+
+			f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+			require.NotEmpty(t, f.sentinel.requests)
+			require.NotContains(t, f.graph.added, firstRoot)
+			require.NotContains(t, f.graph.added, secondRoot)
+			require.NotContains(t, f.graph.added, tipRoot)
+		})
+	}
+}
+
+// A peer may answer with fewer blocks than asked, so the lookup asks again above what it got.
+func TestChainTipAncestorLookupContinuesAfterAPartialRangeResponse(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	first, firstRoot := f.child(f.parent, 65)
+	second, secondRoot := f.child(first, 66)
+	third, thirdRoot := f.child(second, 67)
+	fourth, fourthRoot := f.child(third, 68)
+	tip, tipRoot := f.child(fourth, 69)
+	f.sentinel.serve = servingChain(3, first, second, third, fourth)
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Equal(t, []ancestorRequest{
+		{pid: ancestorPeer, start: 64, count: 5},
+		{pid: ancestorPeer, start: 68, count: 1},
+	}, f.sentinel.requests)
+	for _, root := range []common.Hash{firstRoot, secondRoot, thirdRoot, fourthRoot, tipRoot} {
+		require.Equal(t, 1, f.graph.added[root])
+	}
+}
+
+// Each response is checked against the range of its own request, not against the window.
+func TestChainTipAncestorLookupDropsAResponseBelowItsOwnRequest(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	first, _ := f.child(f.parent, 65)
+	second, _ := f.child(first, 66)
+	third, _ := f.child(second, 67)
+	tip, tipRoot := f.child(third, 68)
+	responses := [][]*cltypes.SignedBeaconBlock{{first}, {first, second}, {third}}
+	f.sentinel.serve = func(call int, _, _ uint64) []*cltypes.SignedBeaconBlock { return responses[call] }
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Len(t, f.sentinel.requests, 2)
+	require.NotContains(t, f.graph.added, tipRoot)
+}
+
+// The lookup links what it has before asking again, so a parent that is not at the slot below the
+// orphan is found with one request.
+func TestChainTipAncestorLookupLinksBeforeAskingAgain(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	middle, middleRoot := f.child(f.parent, 66)
+	tip, tipRoot := f.child(middle, 71)
+	f.sentinel.serve = servingChain(0, middle)
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Len(t, f.sentinel.requests, 1)
+	require.Equal(t, 1, f.graph.added[middleRoot])
+	require.Equal(t, 1, f.graph.added[tipRoot])
+}
+
+func TestChainTipAncestorLookupStopsWhenAResponseEndsRightBelowTheOrphan(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	missing, _ := f.child(f.parent, 65)
+	unrelated, unrelatedRoot := f.child(f.parent, 66)
+	tip, tipRoot := f.child(missing, 67)
+	f.sentinel.serve = servingChain(0, unrelated)
+	f.tickTo(tip.Block.Slot)
+	rejected := make(map[common.Hash]error)
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 64, count: 3}}, f.sentinel.requests)
+	require.NotContains(t, f.graph.added, unrelatedRoot)
+	require.NotContains(t, f.graph.added, tipRoot)
+	require.Contains(t, rejected, tipRoot)
+}
+
+// A peer that keeps answering with one block that does not reach the orphan's parent costs
+// at most four requests, the first of them for the whole 64 slot window.
+func TestChainTipAncestorLookupStopsAfterFourRequests(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	unknownParent, _ := f.child(f.parent, 150)
+	tip, tipRoot := f.child(unknownParent, 200)
+	f.sentinel.serve = func(_ int, start, _ uint64) []*cltypes.SignedBeaconBlock {
+		block := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = start
+		block.Block.ParentRoot = common.Hash{0xde, 0xad, byte(start)}
+		return []*cltypes.SignedBeaconBlock{block}
+	}
+	f.tickTo(tip.Block.Slot)
+	currentSlot := tip.Block.Slot
+	f.pinCurrentSlot(&currentSlot)
+	rejected := make(map[common.Hash]error)
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.Equal(t, []ancestorRequest{
+		{pid: ancestorPeer, start: 136, count: 64},
+		{pid: ancestorPeer, start: 137, count: 63},
+		{pid: ancestorPeer, start: 138, count: 62},
+		{pid: ancestorPeer, start: 139, count: 61},
+	}, f.sentinel.requests)
+	require.Contains(t, rejected, tipRoot)
+	require.NotContains(t, f.graph.added, tipRoot)
+
+	f.process(tip.Block.Slot, rejected, tip)
+	require.Len(t, f.sentinel.requests, 4, "reaching the cap is a failed lookup")
+}
+
+// A parent that was rejected for its own fault is not fetched again; the child inherits the cause.
+func TestChainTipAncestorLookupSkipsParentsRejectedInThisSync(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	middle, middleRoot := f.child(f.parent, 65)
+	tip, tipRoot := f.child(middle, 66)
+	f.sentinel.serve = servingChain(0, middle)
+	f.tickTo(tip.Block.Slot)
+	cause := errors.New("parent payload invalid")
+	rejected := map[common.Hash]error{middleRoot: cause}
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.Empty(t, f.sentinel.requests)
+	require.Equal(t, cause, rejected[tipRoot])
+}
+
+func TestChainTipSyncSkipsLookupForParentRejectedInAnEarlierBatch(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	f.tickTo(65)
+	tooEarly, _ := f.child(f.parent, 66)
+	child, _ := f.child(tooEarly, 67)
+	reachesTarget, _ := f.child(f.parent, 65)
+	f.sentinel.serve = servingChain(0, tooEarly)
+
+	err := f.listen(reachesTarget.Block.Slot, []*cltypes.SignedBeaconBlock{tooEarly}, []*cltypes.SignedBeaconBlock{child}, []*cltypes.SignedBeaconBlock{reachesTarget})
+
+	require.NoError(t, err)
+	require.Empty(t, f.sentinel.requests)
+}
+
+// A parent that was only rejected for its own missing parent is the thing to look up.
+func TestChainTipAncestorLookupFollowsAParentRejectedOnlyForItsOwnParent(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	middle, middleRoot := f.child(f.parent, 65)
+	tip, tipRoot := f.child(middle, 66)
+	f.sentinel.serve = servingChain(0, middle)
+	f.tickTo(tip.Block.Slot)
+	rejected := map[common.Hash]error{middleRoot: nil}
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.Len(t, f.sentinel.requests, 1)
+	require.Equal(t, 1, f.graph.added[middleRoot])
+	require.Equal(t, 1, f.graph.added[tipRoot])
+}
+
+// Every new orphan has another missing parent, so a fork deeper than the window would otherwise
+// start a lookup on each poll.
+func TestChainTipAncestorLookupWaitsASlotAfterAFailure(t *testing.T) {
+	type serveFunc = func(int, uint64, uint64) []*cltypes.SignedBeaconBlock
+	always := func(blocks ...*cltypes.SignedBeaconBlock) serveFunc {
+		return func(int, uint64, uint64) []*cltypes.SignedBeaconBlock { return blocks }
+	}
+	for name, serve := range map[string]func(chain []*cltypes.SignedBeaconBlock) serveFunc{
+		"an empty response": func([]*cltypes.SignedBeaconBlock) serveFunc { return servingChain(0) },
+		"a transport error": func([]*cltypes.SignedBeaconBlock) serveFunc { return nil },
+		"a chain that does not reach a known block": func(chain []*cltypes.SignedBeaconBlock) serveFunc {
+			return servingChain(0, chain...)
+		},
+		"a response outside the requested range": func(chain []*cltypes.SignedBeaconBlock) serveFunc {
+			return always(chain[0])
+		},
+		"a response with repeated slots": func(chain []*cltypes.SignedBeaconBlock) serveFunc {
+			return always(chain[1], chain[1])
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			belowWindow, _ := f.child(f.parent, 100)
+			missing, _ := f.child(belowWindow, 199)
+			tip, tipRoot := f.child(missing, 200)
+			f.sentinel.serve = serve([]*cltypes.SignedBeaconBlock{belowWindow, missing})
+			currentSlot := tip.Block.Slot + 3
+			f.tickTo(currentSlot)
+			f.pinCurrentSlot(&currentSlot)
+
+			f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+			rejected := make(map[common.Hash]error)
+			f.process(tip.Block.Slot, rejected, tip)
+			require.Len(t, f.sentinel.requests, 1)
+			require.Contains(t, rejected, tipRoot)
+
+			currentSlot++
+			f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+			require.Len(t, f.sentinel.requests, 2)
+		})
+	}
+}
+
+// The poll that delivers an orphan runs mid-slot, so a peer that stalls must not hold the caller
+// beyond half a slot, however long the stage context lasts.
+func TestChainTipAncestorLookupEndsWithinHalfASlot(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	shortSlots := *f.cfg.beaconCfg
+	shortSlots.SecondsPerSlot = 1
+	f.cfg.beaconCfg = &shortSlots
+	const (
+		halfSlot     = time.Second / 2
+		stageTimeout = 10 * time.Second
+	)
+	missing, _ := f.child(f.parent, 65)
+	tip, _ := f.child(missing, 66)
+	var requestedAt, deadline time.Time
+	var hasDeadline bool
+	f.sentinel.onRequest = func(ctx context.Context) {
+		requestedAt = time.Now()
+		deadline, hasDeadline = ctx.Deadline()
+		<-ctx.Done()
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), stageTimeout)
+	defer cancel()
+	batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
+
+	started := time.Now()
+	blocks := withMissingAncestors(ctx, f.cfg, batch, make(map[common.Hash]error))
+
+	require.Equal(t, []*cltypes.SignedBeaconBlock{tip}, blocks)
+	require.Len(t, f.sentinel.requests, 1)
+	require.False(t, requestedAt.IsZero())
+	require.True(t, hasDeadline)
+	require.LessOrEqual(t, deadline.Sub(requestedAt), halfSlot)
+	require.Less(t, time.Since(started), stageTimeout/2, "a stalled lookup outlived its half-slot deadline")
+}
+
+// A lookup that fails after the clock moved on throttles the slot it ended in.
+func TestChainTipAncestorLookupThrottlesTheSlotItFailedIn(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	missing, _ := f.child(f.parent, 199)
+	tip, _ := f.child(missing, 200)
+	f.sentinel.serve = servingChain(0)
+	f.tickTo(tip.Block.Slot)
+	currentSlot := tip.Block.Slot + 3
+	f.pinCurrentSlot(&currentSlot)
+	f.sentinel.onRequest = func(context.Context) { currentSlot++ }
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Len(t, f.sentinel.requests, 1)
+}
+
+// Sending nothing is not a failed lookup, so it must not hold back the next orphan of the slot.
+func TestChainTipAncestorLookupWithAnEmptyWindowDoesNotThrottleTheSlot(t *testing.T) {
+	for name, slotAboveAnchor := range map[string]uint64{"at the anchor": 0, "right above the anchor": 1} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			belowFloor := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
+			belowFloor.Block.Slot = f.cfg.forkChoice.AnchorSlot() + slotAboveAnchor
+			belowFloor.Block.ParentRoot = common.Hash{0xde, 0xad}
+			middle, middleRoot := f.child(f.parent, 65)
+			tip, tipRoot := f.child(middle, 66)
+			f.sentinel.serve = servingChain(0, middle)
+			f.tickTo(tip.Block.Slot)
+			currentSlot := tip.Block.Slot
+			f.pinCurrentSlot(&currentSlot)
+
+			f.process(belowFloor.Block.Slot, make(map[common.Hash]error), belowFloor)
+			require.Empty(t, f.sentinel.requests)
+			f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+			require.Len(t, f.sentinel.requests, 1)
+			require.Equal(t, 1, f.graph.added[middleRoot])
+			require.Equal(t, 1, f.graph.added[tipRoot])
+		})
+	}
+}
+
+// A fetched ancestor that its child builds on as FULL needs its envelope, which comes from a random
+// peer as for any other batch.
+func TestChainTipAncestorLookupFetchesTheEnvelopeOfAFullAncestor(t *testing.T) {
+	f := newAncestorLookupFixtureWithoutParent(t)
+	parentRoot, err := f.parent.Block.HashSSZ()
+	require.NoError(t, err)
+	fullChildRoot, err := f.fullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	tip, tipRoot := f.child(f.fullChild, 66)
+	f.sentinel.response = encodeEnvelopeResponse(t, f.cfg.beaconCfg, f.graph.envelopes[parentRoot])
+	delete(f.graph.envelopes, parentRoot)
+	f.sentinel.serve = servingChain(0, f.parent, f.fullChild)
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 64, count: 2}}, f.sentinel.requests)
+	require.Equal(t, 1, f.sentinel.calls)
+	for _, root := range []common.Hash{parentRoot, fullChildRoot, tipRoot} {
+		require.Equal(t, 1, f.graph.added[root])
+	}
+}
+
+func TestChainTipAncestorLookupDoesNotWaitAfterASuccess(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	firstMiddle, firstMiddleRoot := f.child(f.parent, 65)
+	firstTip, firstTipRoot := f.child(firstMiddle, 66)
+	secondMiddle, secondMiddleRoot := f.child(f.parent, 67)
+	secondTip, secondTipRoot := f.child(secondMiddle, 68)
+	f.sentinel.serve = servingChain(0, firstMiddle, secondMiddle)
+	f.tickTo(secondTip.Block.Slot)
+	currentSlot := secondTip.Block.Slot
+	f.pinCurrentSlot(&currentSlot)
+
+	f.process(firstTip.Block.Slot, make(map[common.Hash]error), firstTip)
+	f.process(secondTip.Block.Slot, make(map[common.Hash]error), secondTip)
+
+	require.Len(t, f.sentinel.requests, 2)
+	for _, root := range []common.Hash{firstMiddleRoot, firstTipRoot, secondMiddleRoot, secondTipRoot} {
+		require.Equal(t, 1, f.graph.added[root])
+	}
+}
+
+func TestChainTipAncestorLookupDoesNotWaitAfterABatchWithoutAnOrphan(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	linked, linkedRoot := f.child(f.parent, 65)
+	missing, missingRoot := f.child(f.parent, 66)
+	tip, tipRoot := f.child(missing, 67)
+	f.sentinel.serve = servingChain(0, missing)
+	f.tickTo(tip.Block.Slot)
+	currentSlot := tip.Block.Slot
+	f.pinCurrentSlot(&currentSlot)
+
+	f.process(linked.Block.Slot, make(map[common.Hash]error), linked)
+	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+
+	require.Len(t, f.sentinel.requests, 1)
+	for _, root := range []common.Hash{linkedRoot, missingRoot, tipRoot} {
+		require.Equal(t, 1, f.graph.added[root])
+	}
+}
+
+func TestChainTipAncestorLookupSkipsBatchesWithKnownParents(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	middle, middleRoot := f.child(f.parent, 65)
+	tip, tipRoot := f.child(middle, 66)
+	f.tickTo(tip.Block.Slot)
+
+	f.process(tip.Block.Slot, make(map[common.Hash]error), middle, tip)
+
+	require.Empty(t, f.sentinel.requests)
+	require.Equal(t, 1, f.graph.added[middleRoot])
+	require.Equal(t, 1, f.graph.added[tipRoot])
+}
+
+func TestChainTipBatchStillReportsUnknownParentWhenThePeerHasNoAncestors(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	missing, _ := f.child(f.parent, 65)
+	tip, tipRoot := f.child(missing, 66)
+	f.sentinel.serve = servingChain(0)
+	f.tickTo(tip.Block.Slot)
+	f.cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+	f.cfg.chainTipRejections.lastLog = time.Now()
+	rejected := make(map[common.Hash]error)
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.NotEmpty(t, f.sentinel.requests)
+	require.Contains(t, rejected, tipRoot)
+	reason := f.cfg.chainTipRejections.reasons["parent not in fork graph"]
+	require.NotNil(t, reason)
+	require.Equal(t, 1, reason.attempts)
+}
+
+func TestChainTipAncestorLookupNeedsAServingPeerAndAnRpcClient(t *testing.T) {
+	for name, tamper := range map[string]func(*ancestorLookupFixture, *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]){
+		"no serving peer": func(_ *ancestorLookupFixture, batch *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]) {
+			batch.Peer = ""
+		},
+		"no rpc client": func(f *ancestorLookupFixture, _ *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]) { f.cfg.rpc = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			missing, _ := f.child(f.parent, 65)
+			tip, _ := f.child(missing, 66)
+			f.sentinel.serve = servingChain(0, missing)
+			batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
+			tamper(f, batch)
+
+			blocks := withMissingAncestors(t.Context(), f.cfg, batch, make(map[common.Hash]error))
+
+			require.Equal(t, []*cltypes.SignedBeaconBlock{tip}, blocks)
+			require.Empty(t, f.sentinel.requests)
+		})
+	}
+}
+
+const pollPeer = "poll-peer"
+
+// pollSentinel fails the first `failures` poll requests, then answers them from pollPeer.
+type pollSentinel struct {
+	chainTipAncestorSentinel
+	failures int
+}
+
+func (s *pollSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	if s.failures > 0 {
+		s.failures--
+		return nil, errors.New("peer busy")
+	}
+	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: pollPeer}}, nil
+}
+
+func TestChainTipPollBatchCarriesThePeerThatServedIt(t *testing.T) {
+	for name, failures := range map[string]int{"first attempt": 0, "retry after a failed attempt": 1} {
+		t.Run(name, func(t *testing.T) {
+			f := newAncestorLookupFixture(t)
+			block, _ := f.child(f.parent, 65)
+			digest, err := f.sentinel.clock.ComputeForkDigest(block.Block.Slot / f.cfg.beaconCfg.SlotsPerEpoch)
+			require.NoError(t, err)
+			var response bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+			sentinel := &pollSentinel{chainTipAncestorSentinel: *f.sentinel, failures: failures}
+			sentinel.response = response.Bytes()
+			f.cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), sentinel, f.cfg.beaconCfg, f.sentinel.clock)
+
+			batch, err := fetchBlocksFromReqResp(t.Context(), f.cfg, block.Block.Slot, 1)
+
+			require.NoError(t, err)
+			require.Len(t, batch.Data, 1)
+			require.Equal(t, pollPeer, batch.Peer)
+		})
+	}
 }

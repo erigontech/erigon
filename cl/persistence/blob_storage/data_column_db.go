@@ -70,18 +70,17 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	columnData.BlockRoot = blockRoot
 	columnData.Slot = slot
 
-	lock := s.forSlot(slot)
-	lock.Lock()
-	defer lock.Unlock()
-	if !s.startWrite(slot) {
-		return nil
-	}
-	created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
-	s.finishWrite()
+	created, err := func() (bool, error) {
+		lock := s.forSlot(slot)
+		lock.Lock()
+		defer lock.Unlock()
+		return s.write(slot, blockRoot, uint64(columnIndex), columnData)
+	}()
 	if err != nil {
 		return err
 	}
 	if created {
+		s.emitters.NotifyDataColumnStored(blockRoot)
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 		log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	}

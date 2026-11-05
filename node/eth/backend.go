@@ -1151,11 +1151,12 @@ func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logge
 		return err
 	}); err != nil {
 		if _, ok := errors.AsType[*chain.ConfigCompatError](err); ok {
+			// The rejected config is not written, so starting would run this process on a schedule
+			// the database contradicts, with no path back to agreement short of a rewind.
 			return nil, nil, fmt.Errorf("incompatible chain config: %w", err)
 		}
 		return nil, nil, err
 	}
-	chainConfig.AllowAA = config.AllowAA
 	if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
 		tracer.Hooks.OnBlockchainInit(chainConfig)
 	}
