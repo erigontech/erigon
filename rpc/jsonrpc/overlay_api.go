@@ -530,6 +530,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, err
 		}
 		if hasStateOverrides {
+			// Gas bailout can charge the full RPC budget, which applies per transaction.
+			gp.Reset(math.MaxUint64, math.MaxUint64)
 			msg.ChangeGas(api.GasCap, api.GasCap)
 			// The override budget is an RPC limit, not the signed transaction's gas limit.
 			msg.SetCheckGas(false)

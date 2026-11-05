@@ -407,9 +407,13 @@ func TestOverlayGetLogsOverrideGasCeiling(t *testing.T) {
 			target: {Code: program.New().Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes()},
 		},
 	}), execmoduletester.WithKey(key))
-	txn, err := types.SignTx(types.NewTransaction(0, target, new(uint256.Int), 40_000, uint256.NewInt(2), nil), *types.LatestSigner(cfg), key)
-	require.NoError(t, err)
-	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		for nonce := range uint64(3) {
+			txn, err := types.SignTx(types.NewTransaction(nonce, target, new(uint256.Int), 40_000, uint256.NewInt(2), nil), *types.LatestSigner(cfg), key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
 	base := newBaseApiForTest(m)
@@ -420,7 +424,7 @@ func TestOverlayGetLogsOverrideGasCeiling(t *testing.T) {
 		api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: cap}, NewOtterscanAPI(base, m.DB, 25))
 		logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, &overrides, nil)
 		require.NoError(t, err, "gas cap %d", cap)
-		require.Len(t, logs, 1)
+		require.Len(t, logs, 3)
 	}
 }
 
