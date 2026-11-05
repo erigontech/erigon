@@ -47,6 +47,7 @@ type txPool interface {
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	HasTxn(hash []byte) bool
+	RejectFramePrefix(hash common.Hash)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
@@ -179,6 +180,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	var slots TxnSlots
 	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired().WithPoolRules()
 	parseCtx.ValidateRLP(ValidateSerializedTxn)
+	parseCtx.rejectPrefix = s.txPool.RejectFramePrefix
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
@@ -261,6 +263,8 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_SUCCESS
 	case txpoolcfg.AlreadyKnown:
 		return txpoolproto.ImportResult_ALREADY_EXISTS
+	case txpoolcfg.NonceTooLow:
+		return txpoolproto.ImportResult_STALE
 	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,

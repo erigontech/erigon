@@ -90,17 +90,14 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 }
 
 func checkTransactionGasCap(txn types.Transaction, gasCap uint64) error {
-	if gasCap == 0 {
-		return nil
-	}
 	// Ordinary transactions are bounded by their full gas limit on every fork.
 	limits, err := protocol.TransactionGasLimits(txn, false /* isAmsterdam */)
 	if err != nil {
-		return err
+		return &rpc.InvalidParamsError{Message: "invalid transaction gas limits: " + err.Error()}
 	}
 	// For frame transactions, apply the cap independently to execution and state
 	// gas, matching block inclusion.
-	if gasLimit := max(limits.Execution, limits.State); gasLimit > gasCap {
+	if gasLimit := max(limits.Execution, limits.State); gasCap != 0 && gasLimit > gasCap {
 		return clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, gasCap))
 	}
 	return nil

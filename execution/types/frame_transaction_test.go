@@ -271,11 +271,12 @@ func TestFrameTransactionSignatureValidation(t *testing.T) {
 func TestFrameTransactionSignatureValidationAfterMutation(t *testing.T) {
 	t.Parallel()
 	for name, mutate := range map[string]func(*FrameTransaction){
-		"nonce":   func(tx *FrameTransaction) { tx.Nonce++ },
-		"data":    func(tx *FrameTransaction) { tx.Frames[0].Data = []byte{1} },
-		"sender":  func(tx *FrameTransaction) { tx.SenderAddress[0] ^= 1 },
-		"signer":  func(tx *FrameTransaction) { tx.Signatures[0].Signer = make([]byte, 20) },
-		"message": func(tx *FrameTransaction) { tx.Signatures[0].Message = bytes.Repeat([]byte{1}, 32) },
+		"nonce":           func(tx *FrameTransaction) { tx.Nonce++ },
+		"data":            func(tx *FrameTransaction) { tx.Frames[0].Data = []byte{1} },
+		"sender":          func(tx *FrameTransaction) { tx.SenderAddress[0] ^= 1 },
+		"signer":          func(tx *FrameTransaction) { tx.Signatures[0].Signer = make([]byte, 20) },
+		"message":         func(tx *FrameTransaction) { tx.Signatures[0].Message = bytes.Repeat([]byte{1}, 32) },
+		"signature bytes": func(tx *FrameTransaction) { tx.Signatures[0].Signature[0] ^= 1 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			tx, _ := signedFrameTransaction(t, FrameSignatureSecp256k1, nil)
@@ -303,6 +304,25 @@ func TestFrameTransactionConcurrentValidation(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestFrameTransactionExplicitSignatureMutation(t *testing.T) {
+	for _, scheme := range []uint8{FrameSignatureSecp256k1, FrameSignatureP256} {
+		t.Run(string(rune('0'+scheme)), func(t *testing.T) {
+			tx, _ := signedFrameTransaction(t, scheme, nil)
+			hash := tx.SigningHash(nil)
+			tx.Signatures[0].Message = hash[:]
+			require.NoError(t, tx.Validate())
+			tx.Nonce++
+			require.NoError(t, tx.Validate(), "explicit-message signatures do not bind the transaction nonce")
+			tx.Signatures[0].Message[0] ^= 1
+			require.ErrorContains(t, tx.Validate(), "invalid frame signature 0")
+			tx.Signatures[0].Message[0] ^= 1
+			require.NoError(t, tx.Validate())
+			tx.Signatures[0].Signature[0] ^= 1
+			require.ErrorContains(t, tx.Validate(), "invalid frame signature 0")
 		})
 	}
 }

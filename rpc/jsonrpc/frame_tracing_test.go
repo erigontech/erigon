@@ -530,6 +530,7 @@ func TestFrameRawTransactionGasCap(t *testing.T) {
 		{name: "state exceeds cap", state: 50_000_001, cap: 50_000_000, wantErr: "exceeds the RPC gas cap"},
 		{name: "execution exceeds cap", execution: 1_000_000, cap: 500_000, wantErr: "exceeds the RPC gas cap"},
 		{name: "invalid budget", execution: math.MaxUint64, cap: 50_000_000, wantErr: "frame gas limit overflow"},
+		{name: "invalid budget without cap", execution: math.MaxUint64, wantErr: "frame gas limit overflow"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			txn.Frames[1].Limits = mdgas.MdGas{Execution: tc.execution, State: tc.state}
@@ -539,6 +540,10 @@ func TestFrameRawTransactionGasCap(t *testing.T) {
 			result, err := api.RawTransaction(m.Ctx, encoded.Bytes(), []string{TraceTypeTrace})
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
+				if tc.wantErr == "frame gas limit overflow" {
+					var invalidParams *rpc.InvalidParamsError
+					require.ErrorAs(t, err, &invalidParams)
+				}
 				require.Nil(t, result)
 				return
 			}

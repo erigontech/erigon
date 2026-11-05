@@ -212,7 +212,11 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 			batch.results[txn] = frameValidationResult{reason: txpoolcfg.InvalidFrame}
 			continue
 		}
-		batch.results[txn] = frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
+		reason := p.validateFrame(txn, txns.IsLocal[i])
+		if senderID, ok := p.senders.getID(txns.Senders.AddressAt(i)); reason == txpoolcfg.Success && ok {
+			reason = p.checkFrameSender(txn, senderID)
+		}
+		batch.results[txn] = frameValidationResult{reason: reason}
 	}
 	return batch, p.stateBlockHash
 }
@@ -364,15 +368,25 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	return v, nil
 }
 
-// checkFrameAdmission checks sender exclusivity and any payer reservation under
-// the pool lock. Restored frames remain parked without a validation result.
-func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
-	v := txn.frameValidation
-	pooledFrame := p.all.senderIDFrameTxn[txn.SenderID]
-	if pooledFrame != nil && pooledFrame != found {
+// checkFrameSender requires the pool lock. A matching nonce and key set may replace the existing frame.
+func (p *TxPool) checkFrameSender(txn *TxnSlot, senderID uint64) txpoolcfg.DiscardReason {
+	pooledFrame := p.all.senderIDFrameTxn[senderID]
+	if pooledFrame != nil && (pooledFrame.TxnSlot.Nonce != txn.Nonce ||
+		!slices.Equal(pooledFrame.TxnSlot.Txn.(*types.FrameTransaction).NonceKeys, txn.Txn.(*types.FrameTransaction).NonceKeys)) {
 		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{blocker: pooledFrame.TxnSlot.IDHash})
 		return txpoolcfg.InvalidFrame
 	}
+	return txpoolcfg.Success
+}
+
+// checkFrameAdmission checks sender exclusivity and any payer reservation under
+// the pool lock. Restored frames remain parked without a validation result.
+func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
+	// Simulation releases the pool lock, so sender conflicts must be checked again.
+	if reason := p.checkFrameSender(txn, txn.SenderID); reason != txpoolcfg.Success {
+		return reason
+	}
+	v := txn.frameValidation
 	if v == nil {
 		// A restored candidate cannot displace an admitted transaction before validation.
 		if found != nil {

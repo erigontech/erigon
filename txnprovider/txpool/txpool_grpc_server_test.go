@@ -71,6 +71,7 @@ func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]t
 func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
+func (m *addMockTxPool) RejectFramePrefix(common.Hash) {}
 func (m *addMockTxPool) HasTxn(hash []byte) bool {
 	i := m.hasTxnCalls
 	m.hasTxnCalls++
@@ -153,6 +154,21 @@ func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 	require.Equal(t, &txpoolproto.AddReply{
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},
+	}, reply)
+}
+
+func TestGrpcServerAddNonceTooLow(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := &addMockTxPool{addReasons: []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}}
+	server := NewGrpcServer(ctx, pool, mdbxtest.NewTestPoolDB(t), nil, uint256.Int{1}, log.New())
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{
+		RlpTxs: [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)},
+	})
+	require.NoError(t, err)
+	require.Equal(t, &txpoolproto.AddReply{
+		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_STALE},
+		Errors:   []string{txpoolcfg.NonceTooLow.String()},
 	}, reply)
 }
 
@@ -413,6 +429,31 @@ func TestGrpcServerRejectedFrameResubmission(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, duplicate.Imported)
 	}
+}
+
+func TestGrpcServerFramePrefixRejectionKnownToGossip(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	hash := crypto.Keccak256Hash(encoded.Bytes())
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+	request := &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}}
+	reply, err := server.Add(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, reply.Imported)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		known, readErr := pool.IdHashKnown(tx, hash[:])
+		require.True(t, known, "gossip must not fetch a prefix already rejected by RPC")
+		return readErr
+	}))
+	retry, err := server.Add(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, reply, retry)
+	require.False(t, pool.HasTxn(hash[:]))
+	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
 }
 
 // TestQueryAllWithoutPanicUnknown tries to reproduce https://github.com/erigontech/erigon/issues/18076 relying on

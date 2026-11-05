@@ -851,7 +851,7 @@ func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 			first := add(1, 0, txpoolcfg.Success)
 			rejected := add(2, nonce, txpoolcfg.InvalidFrame)
 			add(2, nonce, txpoolcfg.InvalidFrame)
-			require.Len(t, backend.calls, 2, "repeating a sender-policy rejection must not simulate again")
+			require.Len(t, backend.calls, 1, "sender conflicts must be rejected before simulation")
 			require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
 				known, err := pool.IdHashKnown(tx, rejected.IDHash[:])
 				require.NoError(t, err)
@@ -870,7 +870,7 @@ func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 				return nil
 			}))
 			add(2, nonce, txpoolcfg.Success)
-			require.Len(t, backend.calls, 3, "removing the conflicting frame must allow retry without waiting for a block")
+			require.Len(t, backend.calls, 2, "removing the conflicting frame must allow retry without waiting for a block")
 		})
 	}
 }
