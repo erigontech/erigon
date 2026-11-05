@@ -4284,6 +4284,8 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 			require.NoError(t, err)
 			executionPayloadGasLimit, err := lru.New[common.Hash, uint64](2)
 			require.NoError(t, err)
+			eth2Roots, err := lru.New[common.Hash, common.Hash](2)
+			require.NoError(t, err)
 			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
 			f := &ForkChoiceStore{
 				beaconCfg:                      cfg,
@@ -4294,6 +4296,7 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 				executionPayloadStatus:         executionPayloadStatus,
 				payloadStatusByRoot:            payloadStatusByRoot,
 				executionPayloadGasLimit:       executionPayloadGasLimit,
+				eth2Roots:                      eth2Roots,
 			}
 			f.finalizedCheckpoint.Store(solid.Checkpoint{})
 			f.MarkPayloadVerified(verifiedRoot, executionHash)
