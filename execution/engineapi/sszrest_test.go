@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
@@ -1286,26 +1287,48 @@ func TestSSZRESTNewPayloadRejectsExcessTransactionsBeforeDecoding(t *testing.T) 
 }
 
 func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
+	const blobLimit = 10
 	for _, tc := range []struct {
-		name       string
-		blobHash   common.Hash
-		frame      bool
-		wantStatus engine_types.EngineStatus
-		wantError  string
+		name           string
+		blobHash       common.Hash
+		blobCounts     []int
+		frame          bool
+		wrongBlockHash bool
+		wantStatus     engine_types.EngineStatus
+		wantError      string
 	}{
 		{name: "valid versioned hash", blobHash: common.Hash{0x01, 0x01}, wantStatus: engine_types.SyncingStatus},
 		{name: "invalid versioned hash", blobHash: common.Hash{0x02, 0x01}, wantStatus: engine_types.InvalidStatus, wantError: misc.ErrInvalidVersionedHash.Error()},
 		{name: "frame transaction", blobHash: common.Hash{0x01, 0x01}, frame: true, wantStatus: engine_types.SyncingStatus},
+		{name: "at configured limit", blobHash: common.Hash{0x01, 0x01}, blobCounts: []int{blobLimit}, wantStatus: engine_types.SyncingStatus},
+		{name: "at configured limit across transactions", blobHash: common.Hash{0x01, 0x01}, blobCounts: []int{4, blobLimit - 4}, wantStatus: engine_types.SyncingStatus},
+		{name: "too many blobs in one transaction", blobHash: common.Hash{0x01, 0x01}, blobCounts: []int{blobLimit + 1}, wantStatus: engine_types.InvalidStatus, wantError: misc.ErrMaxBlobGasUsed.Error()},
+		{name: "too many blobs across transactions", blobHash: common.Hash{0x01, 0x01}, blobCounts: []int{4, blobLimit - 3}, wantStatus: engine_types.InvalidStatus, wantError: misc.ErrMaxBlobGasUsed.Error()},
+		{name: "block hash checked before blob limit", blobHash: common.Hash{0x01, 0x01}, blobCounts: []int{blobLimit + 1}, wrongBlockHash: true, wantStatus: engine_types.InvalidStatus, wantError: "invalid block hash"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := prePragueChainConfig()
+			cfg.BlobSchedule = map[string]*params.BlobConfig{"cancun": {Max: blobLimit}}
 			version, fork := clparams.DenebVersion, "cancun"
-			txs := types.Transactions{&types.BlobTx{
-				DynamicFeeTransaction: types.DynamicFeeTransaction{
-					CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x01}},
-				},
-				BlobVersionedHashes: []common.Hash{tc.blobHash},
-			}}
+			blobCounts := tc.blobCounts
+			if blobCounts == nil {
+				blobCounts = []int{1}
+			}
+			var blobCount int
+			txs := make(types.Transactions, 0, len(blobCounts))
+			for _, count := range blobCounts {
+				hashes := make([]common.Hash, count)
+				for i := range hashes {
+					hashes[i] = tc.blobHash
+				}
+				txs = append(txs, &types.BlobTx{
+					DynamicFeeTransaction: types.DynamicFeeTransaction{
+						CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x01}},
+					},
+					BlobVersionedHashes: hashes,
+				})
+				blobCount += count
+			}
 			if tc.frame {
 				cfg = allForksChainConfig()
 				cfg.BogotaTime = common.NewUint64(0)
@@ -1323,7 +1346,7 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 			withdrawals := types.Withdrawals{}
 			withdrawalsHash := types.DeriveSha(withdrawals)
 			header.WithdrawalsHash = &withdrawalsHash
-			header.BlobGasUsed = common.NewUint64(misc.GetBlobGasUsed(1))
+			header.BlobGasUsed = common.NewUint64(misc.GetBlobGasUsed(blobCount))
 			header.ExcessBlobGas = new(uint64)
 			header.ParentBeaconBlockRoot = &common.Hash{}
 			if tc.frame {
@@ -1336,6 +1359,9 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
 			require.NoError(t, err)
 			payload.SSZVersion = version
+			if tc.wrongBlockHash {
+				payload.BlockHash[0] ^= 0xff
+			}
 			if tc.frame {
 				payload.BlockAccessList = &hexutil.Bytes{0xc0}
 			}
@@ -1357,6 +1383,9 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 			require.Equal(t, tc.wantStatus, status.Status, "validation error: %v", validationErr)
 			if tc.wantError != "" {
 				require.EqualError(t, status.ValidationError.Error(), tc.wantError)
+				if tc.wantError == misc.ErrMaxBlobGasUsed.Error() {
+					require.Equal(t, &header.ParentHash, status.LatestValidHash)
+				}
 				return
 			}
 			require.Nil(t, status.ValidationError)

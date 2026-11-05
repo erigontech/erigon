@@ -439,7 +439,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// The SSZ envelope omits blob hashes. Derive them during transaction decoding,
 	// after the transaction-count gas guard, to avoid decoding the payload twice.
 	if deriveBlobHashes {
-		expectedBlobHashes = []common.Hash{}
+		expectedBlobHashes = make([]common.Hash, 0, e.config.GetMaxBlobsPerBlock(header.Time))
 	}
 	txs := make([][]byte, len(req.Transactions))
 	transactions := make([]types.Transaction, len(req.Transactions))
@@ -467,7 +467,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			continue
 		}
 		if deriveBlobHashes {
-			expectedBlobHashes = append(expectedBlobHashes, transactions[i].GetBlobHashes()...)
+			// ValidateBlobs rejects excess blobs before comparing hashes, so retaining
+			// more than the block limit would only add an unnecessary copy.
+			hashes := transactions[i].GetBlobHashes()
+			remaining := cap(expectedBlobHashes) - len(expectedBlobHashes)
+			expectedBlobHashes = append(expectedBlobHashes, hashes[:min(len(hashes), remaining)]...)
 		}
 		limits, gasErr := protocol.TransactionGasLimits(transactions[i], e.config.IsAmsterdam(uint64(req.Timestamp)))
 		if gasErr == nil && (limits.Execution > uint64(req.GasLimit) || limits.State > uint64(req.GasLimit)) {
