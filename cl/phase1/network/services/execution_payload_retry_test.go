@@ -135,7 +135,7 @@ func TestExecutionPayloadServicePendingParksEnvelopeOnlyWhenGossipStateIsUnavail
 	}
 }
 
-func TestExecutionPayloadServicePendingKeepsJobAndImportsOnNextPassAfterStateReplayFailure(t *testing.T) {
+func TestExecutionPayloadServicePendingPacesRetryAfterStateReplayFailure(t *testing.T) {
 	service, fcu := newPendingEnvelopeTestService(t)
 	root := common.Hash{1}
 	envelope := newTestSignedEnvelope(100, root, 1)
@@ -162,6 +162,19 @@ func TestExecutionPayloadServicePendingKeepsJobAndImportsOnNextPassAfterStateRep
 	require.Equal(t, uint64(envelope.EncodingSizeSSZ()), service.pendingBytes.Load())
 
 	service.pending.processPending(t.Context())
+	require.Equal(t, int32(1), validations.Load())
+	require.Zero(t, imports.Load())
+	require.Equal(t, int32(1), service.pending.count.Load())
+	require.Equal(t, uint64(envelope.EncodingSizeSSZ()), service.pendingBytes.Load())
+
+	seenKey := seenEnvelopeKey{root, envelope.Message.BuilderIndex}
+	retryValue, ok := service.pendingLookupRetryAt.Load(seenKey)
+	require.True(t, ok)
+	retry := retryValue.(pendingEnvelopeLookupRetry)
+	retry.retryAt = time.Now().Add(-time.Second).UnixNano()
+	service.pendingLookupRetryAt.Store(seenKey, retry)
+
+	service.pending.processPending(t.Context())
 	require.Equal(t, int32(2), validations.Load())
 	require.Equal(t, int32(1), imports.Load())
 	require.Zero(t, service.pending.count.Load())
@@ -172,6 +185,62 @@ func TestExecutionPayloadServicePendingKeepsJobAndImportsOnNextPassAfterStateRep
 	}
 	require.Equal(t, int32(2), validations.Load())
 	require.Equal(t, int32(1), imports.Load())
+}
+
+func TestExecutionPayloadServicePendingClearsStateReplayRetryWhenJobIsRemoved(t *testing.T) {
+	service, fcu := newPendingEnvelopeTestService(t)
+	root := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, root, 1)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		return fmt.Errorf("%w: state replay failed", forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed)
+	}
+
+	service.pending.processPending(t.Context())
+	seenKey := seenEnvelopeKey{root, envelope.Message.BuilderIndex}
+	_, ok := service.pendingLookupRetryAt.Load(seenKey)
+	require.True(t, ok)
+	require.Equal(t, int32(1), service.pending.count.Load())
+	require.Equal(t, uint64(envelope.EncodingSizeSSZ()), service.pendingBytes.Load())
+
+	delete(fcu.Blocks, root)
+	fcu.InvalidBlocks = map[common.Hash]struct{}{root: {}}
+	service.pending.processPending(t.Context())
+	require.Zero(t, service.pending.count.Load())
+	require.Zero(t, service.pendingBytes.Load())
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
+	_, finish, ok := fcu.TryBeginPayloadPreparation(t.Context(), 100, 101)
+	require.True(t, ok)
+	finish()
+	_, ok = service.pendingLookupRetryAt.Load(seenKey)
+	require.False(t, ok)
+}
+
+func TestExecutionPayloadServicePendingClearsStateReplayRetryWhenJobExpires(t *testing.T) {
+	service, fcu := newPendingEnvelopeTestService(t)
+	root := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, root, 1)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		return fmt.Errorf("%w: state replay failed", forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed)
+	}
+
+	service.pending.processPending(t.Context())
+	seenKey := seenEnvelopeKey{root, envelope.Message.BuilderIndex}
+	_, ok := service.pendingLookupRetryAt.Load(seenKey)
+	require.True(t, ok)
+
+	hash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	stored, ok := service.pending.jobs.Load(pendingEnvelopeKey{root, hash})
+	require.True(t, ok)
+	stored.(*pendingJob[*pendingEnvelopeJob]).creationTime = time.Now().Add(-pendingEnvelopeExpiry - time.Second)
+	service.pending.processPending(t.Context())
+	require.Zero(t, service.pending.count.Load())
+	_, ok = service.pendingLookupRetryAt.Load(seenKey)
+	require.False(t, ok)
 }
 
 func TestExecutionPayloadServicePendingDropsTerminalResults(t *testing.T) {
