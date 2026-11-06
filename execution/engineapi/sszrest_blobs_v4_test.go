@@ -112,6 +112,12 @@ func TestSSZRESTBlobsV4Availability(t *testing.T) {
 	}
 }
 
+func TestSSZRESTBlobsV4DecodeRejectsTooManyHashes(t *testing.T) {
+	body := blobsV4RequestBytes(make([]common.Hash, 129), make([]byte, 16))
+	_, _, err := decodeBlobsV4Request(body)
+	require.ErrorContains(t, err, "too many blob hashes: 129")
+}
+
 func TestSSZRESTBlobsV4MalformedRequest(t *testing.T) {
 	valid := blobsV4RequestBytes([]common.Hash{{1}}, make([]byte, 16))
 	for _, tc := range []struct {

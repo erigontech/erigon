@@ -113,7 +113,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	}
 	block.Transactions = solid.NewTransactionsSSZFromTransactions(txs)
 	if version >= clparams.CapellaVersion {
-		block.Withdrawals = newWithdrawalList(p.Withdrawals)
+		block.Withdrawals = NewWithdrawalList(p.Withdrawals)
 	}
 	if p.BlobGasUsed != nil {
 		block.BlobGasUsed = uint64(*p.BlobGasUsed)
@@ -176,7 +176,7 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 	return p
 }
 
-func newWithdrawalList(ws []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
+func NewWithdrawalList(ws []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
 	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range ws {
 		l.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
@@ -298,7 +298,7 @@ func (a *PayloadAttributes) Static() bool { return false }
 
 func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 	version := a.payloadAttributesSSZVersion()
-	withdrawals := newWithdrawalList(a.Withdrawals)
+	withdrawals := NewWithdrawalList(a.Withdrawals)
 	var root common.Hash
 	if a.ParentBeaconBlockRoot != nil {
 		root = *a.ParentBeaconBlockRoot
@@ -355,7 +355,7 @@ func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeField
 
 func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) error {
 	a.SSZVersion = clparams.StateVersion(version)
-	fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+	fields := payloadAttributesDecodeFields{withdrawals: NewWithdrawalList(nil)}
 	unmarshal := ssz2.UnmarshalSSZ
 	if strict {
 		unmarshal = ssz2.UnmarshalSSZStrict

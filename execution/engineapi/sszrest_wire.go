@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -43,8 +42,6 @@ const (
 	sszCellsPerExtBlob             = 128
 	sszCellBitvectorBytes          = sszCellsPerExtBlob / 8
 	sszMaxBALBytes                 = 0x40000000
-	sszMaxWithdrawals              = 16
-	sszWithdrawalBytes             = 44
 )
 
 // These are implemented wire schemas, independent of the chain's fork schedule.
@@ -253,14 +250,6 @@ func encodeBuiltPayload(resp *engine_types.GetPayloadResponse, version clparams.
 	}
 }
 
-func newWithdrawalListSSZ(withdrawals []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
-	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](sszMaxWithdrawals, sszWithdrawalBytes)
-	for _, w := range withdrawals {
-		l.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
-	}
-	return l
-}
-
 // sszPayloadBody is the fork-scoped ExecutionPayloadBody: withdrawals exist
 // since Shanghai and block_access_list since Amsterdam.
 type sszPayloadBody struct {
@@ -274,7 +263,7 @@ func newSSZPayloadBody(version clparams.StateVersion) *sszPayloadBody {
 	return &sszPayloadBody{
 		version:         version,
 		transactions:    &solid.TransactionsSSZ{},
-		withdrawals:     solid.NewStaticListSSZ[*cltypes.Withdrawal](sszMaxWithdrawals, sszWithdrawalBytes),
+		withdrawals:     engine_types.NewWithdrawalList(nil),
 		blockAccessList: solid.NewByteListSSZ(sszMaxBALBytes),
 	}
 }
@@ -350,7 +339,7 @@ func encodeBodiesResponse(bodies []*engine_types.ExecutionPayloadBodyV2, version
 		if body != nil && (version < clparams.GloasVersion || body.BlockAccessList != nil) {
 			entry.Available = true
 			entry.Body.transactions = newTransactionsSSZ(body.Transactions)
-			entry.Body.withdrawals = newWithdrawalListSSZ(body.Withdrawals)
+			entry.Body.withdrawals = engine_types.NewWithdrawalList(body.Withdrawals)
 			if body.BlockAccessList != nil {
 				if err := entry.Body.blockAccessList.SetBytes(*body.BlockAccessList); err != nil {
 					return nil, err

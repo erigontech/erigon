@@ -113,7 +113,7 @@ func goldenSampleBody(t *testing.T, version clparams.StateVersion) *sszPayloadBo
 	b := newSSZPayloadBody(version)
 	b.transactions = newTransactionsSSZ([]hexutil.Bytes{{0x02, 0x03}, {0x04}})
 	if version >= clparams.CapellaVersion {
-		b.withdrawals = newWithdrawalListSSZ(goldenSampleWithdrawals())
+		b.withdrawals = engine_types.NewWithdrawalList(goldenSampleWithdrawals())
 	}
 	if version >= clparams.GloasVersion {
 		require.NoError(t, b.blockAccessList.SetBytes([]byte{0xde, 0xad, 0xbe, 0xef}))

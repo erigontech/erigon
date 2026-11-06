@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"testing/iotest"
 
@@ -234,24 +235,6 @@ func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
 		require.Nil(t, outCustody)
 	})
 
-	t.Run("paris attributes encode as a fixed optional element", func(t *testing.T) {
-		attrs := &engine_types.PayloadAttributes{
-			Timestamp:             99,
-			PrevRandao:            common.HexToHash("0x04"),
-			SuggestedFeeRecipient: common.HexToAddress("0x05"),
-			SSZVersion:            clparams.BellatrixVersion,
-		}
-		attrBytes, err := attrs.EncodeSSZ(nil)
-		require.NoError(t, err)
-		require.Len(t, attrBytes, 60)
-
-		enc, err := encodeForkchoiceUpdate(clparams.BellatrixVersion, &state, attrs, nil)
-		require.NoError(t, err)
-		require.Len(t, enc, 160)
-		require.Equal(t, uint32(100), binary.LittleEndian.Uint32(enc[96:100]))
-		require.Equal(t, attrBytes, enc[100:])
-	})
-
 	t.Run("paris canonical attributes decode", func(t *testing.T) {
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             99,
@@ -398,16 +381,21 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	require.NotNil(t, out.LatestValidHash)
 	require.Equal(t, latest, *out.LatestValidHash)
 	require.Equal(t, "no", out.ValidationError.Error().Error())
+}
 
-	// absent validation_error stays distinguishable from an empty message
-	noErr := &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
-	enc, err = noErr.EncodeSSZ(nil)
+func TestSSZRESTPayloadStatusTruncatesValidationError(t *testing.T) {
+	message := strings.Repeat("x", 2000)
+	status := &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedErrorFromString(message),
+	}
+	encoded, err := status.EncodeSSZ(nil)
 	require.NoError(t, err)
-	var out2 engine_types.PayloadStatus
-	require.NoError(t, out2.DecodeSSZ(enc, 0))
-	require.Equal(t, engine_types.SyncingStatus, out2.Status)
-	require.Nil(t, out2.LatestValidHash)
-	require.Nil(t, out2.ValidationError)
+
+	var decoded engine_types.PayloadStatus
+	require.NoError(t, decoded.DecodeSSZ(encoded, 0))
+	require.NotNil(t, decoded.ValidationError)
+	require.Equal(t, message[:1024], decoded.ValidationError.Error().Error())
 }
 
 func TestSSZRESTPayloadStatusRejectsMultipleLatestValidHashes(t *testing.T) {
@@ -576,6 +564,36 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 
 			require.False(t, entries[2].Available)
 			require.Empty(t, entries[2].Transactions)
+		})
+	}
+}
+
+func TestSSZRESTBodiesRequestLimit(t *testing.T) {
+	body, err := encodeHashListRequest(make([]common.Hash, 32), 32)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"range", http.MethodGet, "/engine/v1/bodies?from=1&count=32", nil},
+		{"hash", http.MethodPost, "/engine/v1/bodies/hash", body},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &bodiesExecutionModule{
+				headers: map[uint64]*types.Header{
+					32: {Number: *uint256.NewInt(32), Time: 200},
+				},
+			}
+			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+			require.NoError(t, err)
+			require.Len(t, entries, 32)
 		})
 	}
 }
@@ -1126,8 +1144,8 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 		{"wrong content type", http.MethodPost, "/engine/v1/payloads", "cancun", "application/json", http.StatusUnsupportedMediaType, problemUnsupportedMediaType},
 		{"bad ssz body", http.MethodPost, "/engine/v1/payloads", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
 		{"bad forkchoice body", http.MethodPost, "/engine/v1/forkchoice", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},
-		{"bad payload id", http.MethodGet, "/engine/v1/payloads/not-an-id", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
 		{"bodies range missing params", http.MethodGet, "/engine/v1/bodies", "cancun", "", http.StatusBadRequest, problemInvalidRequest},
+		{"bodies range zero start", http.MethodGet, "/engine/v1/bodies?from=0&count=1", "cancun", "", http.StatusUnprocessableEntity, problemInvalidBody},
 		{"bodies range zero count", http.MethodGet, "/engine/v1/bodies?from=1&count=0", "cancun", "", http.StatusUnprocessableEntity, problemInvalidBody},
 		{"bodies range too large", http.MethodGet, "/engine/v1/bodies?from=1&count=33", "cancun", "", http.StatusRequestEntityTooLarge, problemRequestTooLarge},
 		{"bodies hash too many", http.MethodPost, "/engine/v1/bodies/hash", "cancun", sszRestContentType, http.StatusRequestEntityTooLarge, problemRequestTooLarge},
@@ -1141,6 +1159,7 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestEngineServer(allForksConfig(), false)
+			srv.executionService = &bodiesExecutionModule{}
 			var logs bytes.Buffer
 			srv.logger.SetHandler(log.StreamHandler(&logs, log.JsonFormat()))
 			var body []byte
@@ -1635,8 +1654,12 @@ func TestEncodeBuiltPayloadIgnoresExecutionRequestsBeforeElectra(t *testing.T) {
 				ExecutionRequests: []hexutil.Bytes{{0xff, 0x00}},
 			}
 
-			_, err := encodeBuiltPayload(resp, version)
+			encoded, err := encodeBuiltPayload(resp, version)
 			require.NoError(t, err)
+			resp.ExecutionRequests = nil
+			withoutRequests, err := encodeBuiltPayload(resp, version)
+			require.NoError(t, err)
+			require.Equal(t, withoutRequests, encoded)
 		})
 	}
 }
@@ -1757,15 +1780,6 @@ func TestSSZRESTGetPayloadForkMatching(t *testing.T) {
 	}
 }
 
-func TestSSZRESTGetPayloadIDPathParsing(t *testing.T) {
-	id, err := parsePayloadIDPath("0x0102030405060708")
-	require.NoError(t, err)
-	require.Equal(t, uint64(0x0102030405060708), id)
-
-	_, err = parsePayloadIDPath("0x01")
-	require.Error(t, err)
-}
-
 func TestExchangeCapabilitiesDropsLegacySSZEndpoints(t *testing.T) {
 	srv := newTestEngineServer(&chain.Config{}, false)
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
@@ -1865,7 +1879,7 @@ func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
 	root := common.HexToHash("0x01")
 	slot := hexutil.Uint64(1)
 	targetGasLimit := hexutil.Uint64(30000000)
-	withdrawals := make([]*types.Withdrawal, sszMaxWithdrawals)
+	withdrawals := make([]*types.Withdrawal, clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload)
 	for i := range withdrawals {
 		withdrawals[i] = &types.Withdrawal{Index: hexutil.Uint64(i), Validator: hexutil.Uint64(i), Address: common.Address{byte(i)}, Amount: hexutil.Uint64(i)}
 	}

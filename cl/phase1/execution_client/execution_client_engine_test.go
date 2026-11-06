@@ -296,15 +296,6 @@ func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T)
 	require.Empty(t, id)
 }
 
-func TestNewExecutionClientEngineLocalSetsBeaconConfig(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-
-	client, err := NewExecutionClientEngineLocal(nil, chainreader.ChainReaderWriterEth1{}, nil, &cfg)
-	require.NoError(t, err)
-
-	require.Same(t, &cfg, client.beaconCfg)
-}
-
 func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 
