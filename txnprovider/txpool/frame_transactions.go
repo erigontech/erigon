@@ -339,7 +339,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		})
 	}
 	// Root storage references are derived locally from frame calldata. The RPC
-	// reply supplies the verifier's account dependency.
+	// reply records the verifier address so code changes also trigger revalidation.
 	v.RecentRoots, err = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
 	if err != nil {
 		return nil, err

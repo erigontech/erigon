@@ -74,6 +74,8 @@ func validateRecentRootDataLength(size int) error {
 	return nil
 }
 
+// ParseRecentRootReferences derives expected storage entries from encoded tuples.
+// It checks the encoding; the verifier contract checks age and stored values.
 func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
 	if err := validateRecentRootDataLength(len(data)); err != nil {
 		return nil, err

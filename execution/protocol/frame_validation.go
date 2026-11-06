@@ -57,11 +57,13 @@ type FrameCreationNonce struct {
 	MaxNonce uint64
 }
 
+// framePrefix records the result of shape and gas budget checks. Approval and
+// other state-dependent conditions still require simulation.
 type framePrefix struct {
 	paymentFrame    int
-	deploymentFrame int // -1 when the prefix has no deployment frame
-	recentRootFrame int // -1 when the prefix has no recent-root frame
-	deadline        uint64
+	deploymentFrame int    // -1 when the prefix has no deployment frame
+	recentRootFrame int    // -1 when the prefix has no recent-root frame
+	deadline        uint64 // meaningful only with an expiry frame; zero is a valid deadline
 }
 
 // frameValidationTracer enforces pool-only restrictions through EVM hooks, so
@@ -276,6 +278,8 @@ func (v *frameValidationTracer) beforeFrame() error {
 		if err != nil {
 			return err
 		}
+		// This exact runtime match is required for the opcode hook's extra
+		// SLOTNUM and SLOAD permissions in the top-level verifier call.
 		if !bytes.Equal(code, RecentRootCode) {
 			return errors.New("non-canonical recent root verifier code")
 		}
