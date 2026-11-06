@@ -390,23 +390,19 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 					break
 				}
 
-				blindedBlockRoot, err := block.Block.HashSSZ()
-				if err != nil {
-					return false, err
-				}
-				// check if we have all the blobs
+				// Look the blobs up under the walked root: the stored body has no execution transactions
+				// or withdrawals, so its own hash is not the block root.
 				kzgCommitments := 0
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, blindedBlockRoot)
+				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
-				if kzgCommitmentsInDB != uint32(kzgCommitments) {
+				if !stored {
 					break
 				}
-
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
@@ -1119,7 +1115,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantBlobs = c.Len()
 		}
-		// PruneBelow drops sidecar files but leaves their count rows, so a matching count is not
+		// A count row does not prove its sidecar files are on disk, so a matching count is not
 		// evidence the store can still serve the slot. Stat each expected file rather than reading
 		// it back: the scan runs to the Deneb fork, so decoding every blob is not affordable, and
 		// an absent file is the failure this has to catch.

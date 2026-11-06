@@ -2324,9 +2324,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 - `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
   - Default: `0`
 
-- `--vmdebug`: Records information for VM and contract debugging.
-  - Default: `false`
-
+- `--override.genesis value`: Loads the genesis block and chain configuration from this JSON file instead of the `--chain` network's. A fresh datadir is initialized from it on first start, as `erigon init` would; on an initialized datadir it must match the stored genesis, or Erigon refuses to start. Cannot be combined with `--chain`.
 - `--gdbme`: Restarts Erigon under gdb for debugging.
   - Default: `false`
 
@@ -2504,9 +2502,6 @@ Options for configuring the [transaction pool](https://docs.erigon.tech/fundamen
 - `--txpool.queued.dormancy value`: Evicts queued transactions from senders with no on-chain state changes for at least this duration (e.g. `3h`, `2h30m`).
   - Default: `3h0m0s`
   - Set to `0` to disable dormancy-based eviction.
-
-- `--aa`: Accepts account-abstraction (AA) transactions. Gates them both in the pool and during execution; with it unset they are rejected.
-  - Default: `false`
 
 ### Network and Peers
 
@@ -3013,7 +3008,7 @@ Flags for configuring the parallel block execution engine.
 - `--exec.serial`: Force serial execution by clamping the parallel executor to a single worker. Wins over `--exec.workers` and `EXEC3_WORKERS` — use to disable parallelism for diagnostics or like-for-like baseline comparisons.
   - Default: `false`
 
-- `--exec.no-prune`: Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only.
+- `--debug.exec.no-prune` *(renamed from `--exec.no-prune` in v3.9; the old name still works as a deprecated alias and will be removed in the next release)*: Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built). Equivalent to `NO_PRUNE=true`. Diagnostic / perf-comparison use only: chaindata grows without bound and `--prune.mode` is not enforced. Erigon logs a warning at startup while it is set.
   - Default: `false`
 
 - `--exec.no-merge`: Disable state-aggregator file merges for Domain / History / Inverted-Index. Equivalent to `NO_MERGE=true`. Diagnostic / perf-comparison use only.
@@ -3207,7 +3202,7 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 
 **Synchronization and Pruning:**
 
-- `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
+- `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--debug.exec.no-prune`)
 - `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 - `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 - `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.

@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -88,6 +87,21 @@ func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConf
 		OverlayReplayBlockTimeout: cfg.OverlayReplayBlockTimeout,
 		OtsAPI:                    otsApi,
 	}
+}
+
+func (api *OverlayAPIImpl) checkGasCap(txn types.Transaction, isAmsterdam bool) error {
+	if api.GasCap == 0 {
+		return nil
+	}
+	limits, err := protocol.TransactionGasLimits(txn, isAmsterdam)
+	if err != nil {
+		return err
+	}
+	// Match block inclusion: execution and state have separate limits.
+	if gasLimit := max(limits.Execution, limits.State); gasLimit > api.GasCap {
+		return fmt.Errorf("transaction gas limit %d exceeds the RPC gas cap %d", gasLimit, api.GasCap)
+	}
+	return nil
 }
 
 func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
@@ -156,6 +170,14 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("could not find txn hash")
 	}
 
+	creationTx := block.Transactions()[transactionIndex]
+	// Signed frame budgets cannot be clamped like an ordinary message's gas limit.
+	if creationTx.Type() == types.FrameTxType {
+		if err := api.checkGasCap(creationTx, chainConfig.IsAmsterdam(block.Time())); err != nil {
+			return nil, err
+		}
+	}
+
 	replayTransactions = block.Transactions()[:transactionIndex]
 
 	err = rpchelper.CheckBlockExecuted(tx, blockNum)
@@ -208,7 +230,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 	}
 
-	creationTx := block.Transactions()[transactionIndex]
 	statedb.SetTxContext(blockNum, transactionIndex)
 
 	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
@@ -218,19 +239,21 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
-	if creationTx.GetTo() == nil && contractAddr == address {
+	if creationTx.IsContractDeploy() && contractAddr == address {
 		// CREATE: adapt message with new code so it's replaced instantly
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
-	} else {
-		msg.ChangeGas(api.GasCap, api.GasCap)
 	}
+	msg.ChangeGas(api.GasCap, api.GasCap)
+	// The replacement's RPC allowance may exceed the transaction gas-limit ceiling.
+	msg.SetCheckGas(false)
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: api.GasCap}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: msg.Gas()}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
-	// Execute the transaction message
-	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
+	// Later frames may read the payer's balance after payment approval.
+	gasBailout := creationTx.Type() != types.FrameTxType
+	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
 	if ct.err != nil {
 		return nil, ct.err
 	}
@@ -452,6 +475,17 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+	// Without overrides, changing gas limits can change the replayed state.
+	// Frame budgets are signed and must stay unchanged even with overrides.
+	for _, txn := range replayTransactions {
+		if !hasStateOverrides || txn.Type() == types.FrameTxType {
+			if err := api.checkGasCap(txn, chainConfig.IsAmsterdam(block.Time())); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	header := block.HeaderNoCopy()
 
 	if header == nil {
@@ -469,9 +503,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	// State overrides can flip an originally failed txn to success, so failed
-	// txns must be re-executed instead of trusting the original receipt.
-	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
 	if hasStateOverrides {
 		if err := stateOverride.Override(statedb, nil, rules); err != nil {
 			return nil, err
@@ -483,10 +514,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
 	storeEVM(evm)
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, err
-	}
 
 	// On the versioned state the overrides took tx index 0; the block's txs follow them.
 	firstTxIndex := statedb.TxnIndex()
@@ -499,41 +526,17 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Error(err.Error())
 			return nil, err
 		}
-		msg.ChangeGas(api.GasCap, api.GasCap)
-
-		receipt := receipts[uint64(idx)]
-		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
-		if receipt.Status == types.ReceiptStatusFailed && !hasStateOverrides {
-			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
-
-			contractCreation := msg.To().IsNil()
-			if !contractCreation {
-				// bump the nonce of the sender
-				sender := vm.AccountRef(msg.From())
-				statedb.SetTxContext(blockNum, firstTxIndex+idx)
-				nonce, err := statedb.GetNonce(sender.Address())
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-				if err := ethapi.FinalizeCallTx(statedb, rules); err != nil {
-					return nil, err
-				}
-				continue
-			}
+		if hasStateOverrides {
+			msg.ChangeGas(api.GasCap, api.GasCap)
 		}
 
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		// Execute the transaction message
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
+		// Without overrides, later transactions must observe canonical fee effects,
+		// even when an earlier transaction failed.
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, hasStateOverrides /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
@@ -550,11 +553,12 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 
-		if res.Failed() {
+		// Frame transactions can keep logs even if a frame fails. Rollback has
+		// already removed logs from reverted frames and atomic batches.
+		if res.Failed() && txn.Type() != types.FrameTxType {
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
-			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			for _, l := range txLogs {
 				l.TxIndex = hexutil.Uint(idx)

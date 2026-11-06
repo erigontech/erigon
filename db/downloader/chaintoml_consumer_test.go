@@ -395,10 +395,10 @@ func TestVerifyChainTomlReportsChangedInputs(t *testing.T) {
 	const name = "domain/v1-accounts.0-64.kv"
 	previous := append([]byte{}, snapcfg.GetToml(network)...)
 	previousCfg, _ := snapcfg.KnownCfg(network)
-	t.Cleanup(func() { snapcfg.SetToml(network, previous, previousCfg.Local) })
+	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml(network, previous, previousCfg.Local)) })
 	localHash := strings.Repeat("a", 40)
 	peerHash := strings.Repeat("b", 40)
-	snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: localHash}), true)
+	require.NoError(t, snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: localHash}), true))
 	test := newDownloaderTest(t)
 	d := test.downloader
 	logs := &logBuffer{}
@@ -418,7 +418,7 @@ func TestVerifyChainTomlReportsChangedInputs(t *testing.T) {
 	d.verifyChainToml(t.Context(), network, ns)
 	require.Equal(t, 1, strings.Count(logs.String(), "hash mismatch"), "unchanged comparisons must not repeat warnings")
 
-	snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: strings.Repeat("c", 40)}), true)
+	require.NoError(t, snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: strings.Repeat("c", 40)}), true))
 	d.verifyChainToml(t.Context(), network, ns)
 	require.Equal(t, 2, strings.Count(logs.String(), "hash mismatch"), "local changes must be compared with the cached peer manifest")
 
@@ -431,8 +431,8 @@ func TestAcquireChainTomlReusesCacheAfterLocalChanges(t *testing.T) {
 	const network = "sepolia"
 	previous := append([]byte{}, snapcfg.GetToml(network)...)
 	previousCfg, _ := snapcfg.KnownCfg(network)
-	t.Cleanup(func() { snapcfg.SetToml(network, previous, previousCfg.Local) })
-	snapcfg.SetToml(network, []byte{}, false)
+	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml(network, previous, previousCfg.Local)) })
+	require.NoError(t, snapcfg.SetToml(network, []byte{}, false))
 	test := newDownloaderTest(t)
 	d := test.downloader
 	data := BuildTomlFromMap(map[string]string{"domain/v1-accounts.0-64.kv": strings.Repeat("a", 40)})
@@ -450,7 +450,7 @@ func TestAcquireChainTomlReusesCacheAfterLocalChanges(t *testing.T) {
 	require.Equal(t, data, snapcfg.GetToml(network))
 	manifest.Drop()
 	require.NoError(t, dir.RemoveFile(ChainTomlPath(test.dirs.Snap)))
-	snapcfg.SetToml(network, []byte{}, false)
+	require.NoError(t, snapcfg.SetToml(network, []byte{}, false))
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()

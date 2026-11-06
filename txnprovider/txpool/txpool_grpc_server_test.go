@@ -84,6 +84,23 @@ func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bo
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
+func TestMapFrameDiscardReasonToProto(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		want   txpoolproto.ImportResult
+	}{
+		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.FrameValidationUnavailable, txpoolproto.ImportResult_INTERNAL_ERROR},
+		{txpoolcfg.FrameStateChanged, txpoolproto.ImportResult_INTERNAL_ERROR},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			require.Equal(t, tc.want, mapDiscardReasonToProto(tc.reason))
+		})
+	}
+}
+
 func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	t.Parallel()
 
@@ -197,6 +214,59 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGrpcServerParkedFrame(t *testing.T) {
+	t.Parallel()
+
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+
+	checkContent := func(wantType txpoolproto.AllReply_TxnType, pending, queued uint32) {
+		t.Helper()
+		reply, err := server.All(ctx, &txpoolproto.AllRequest{})
+		require.NoError(t, err)
+		require.Len(t, reply.Txs, 1)
+		require.Equal(t, wantType, reply.Txs[0].TxnType)
+		require.Equal(t, sender, common.Address(gointerfaces.ConvertH160toAddress(reply.Txs[0].Sender)))
+		require.Equal(t, frame.Rlp, reply.Txs[0].RlpTx)
+		status, err := server.Status(ctx, &txpoolproto.StatusRequest{})
+		require.NoError(t, err)
+		require.Equal(t, pending, status.PendingCount)
+		require.Equal(t, queued, status.QueuedCount)
+		require.Zero(t, status.BaseFeeCount)
+	}
+	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
+
+	checkParked := func() {
+		t.Helper()
+		checkContent(txpoolproto.AllReply_QUEUED, 0, 1)
+		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+		require.Zero(t, pool.queued.Len(), "RPC classification must not put parked frames in a scheduling sub-pool")
+		var selected TxnsRlp
+		_, err := pool.PeekBest(ctx, 10, &selected, 0)
+		require.NoError(t, err)
+		require.Empty(t, selected.Txns)
+	}
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.onValidate = checkParked
+	backend.err = context.DeadlineExceeded
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.ChangeBatch[0].BlockHeight = 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	checkParked()
+
+	backend.err = nil
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.ChangeBatch[0].BlockHeight = 2
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
 }
 
 // TestQueryAllWithoutPanicUnknown tries to reproduce https://github.com/erigontech/erigon/issues/18076 relying on
