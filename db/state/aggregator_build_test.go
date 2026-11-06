@@ -18,6 +18,7 @@ package state
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,27 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 )
+
+func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 10)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		var writers sync.WaitGroup
+		writers.Go(func() {
+			for range 100 {
+				agg.EnableDomain(kv.RCacheDomain)
+			}
+		})
+		defer writers.Wait()
+		for range 100 {
+			step, err := at.firstStepToBuild(tx)
+			require.NoError(t, err)
+			require.Zero(t, step)
+		}
+		return nil
+	}))
+}
 
 func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	const stepSize = uint64(10)
