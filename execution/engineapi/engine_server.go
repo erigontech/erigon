@@ -623,16 +623,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 // the lookup fails or the execution module is busy: a forkchoice update can hide the blocks that it
 // commits.
 func (e *EngineServer) storedHeader(ctx context.Context, hash common.Hash, number uint64) (header *types.Header, known bool) {
-	if !e.executionIdle(ctx) {
-		return nil, false
-	}
-	header, err := e.executionService.GetHeader(ctx, &hash, &number)
-	return header, err == nil && e.executionIdle(ctx)
-}
-
-func (e *EngineServer) executionIdle(ctx context.Context) bool {
-	ready, err := e.chainRW.Ready(ctx)
-	return err == nil && ready
+	header, idle, err := e.executionService.GetHeaderIfIdle(ctx, &hash, &number)
+	return header, idle && err == nil
 }
 
 func (e *EngineServer) mayBeStored(ctx context.Context, hash common.Hash, number uint64) bool {

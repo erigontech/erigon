@@ -204,6 +204,15 @@ func (e *ExecModule) GetHeadersByRange(ctx context.Context, start, count uint64)
 	return headers, nil
 }
 
+func (e *ExecModule) GetHeaderIfIdle(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, bool, error) {
+	if !e.semaphore.TryAcquire(1) {
+		return nil, false, nil
+	}
+	defer e.semaphore.Release(1)
+	header, err := e.GetHeader(ctx, blockHash, blockNumber)
+	return header, true, err
+}
+
 func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
 	tx, cleanup, err := e.beginOverlayOrRo(ctx)
 	if err != nil {

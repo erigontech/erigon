@@ -784,18 +784,14 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 		storedGasLimit uint64
 		storedParent   common.Hash
 		l2             bool
-		// Whether the execution module is busy before and after the lookup of the stored block. The
-		// lookup misses the block when the module is busy at either point.
-		busyBefore, busyAfter bool
-		lookupErr             error // the lookup of the stored block fails with it
-		wantErr               string
+		busy           bool
+		lookupErr      error // the lookup of the stored block fails with it
+		wantErr        string
 	}{
 		{name: "stored block with a valid gas limit", txCount: 5, storedGasLimit: parent.GasLimit, storedParent: parentHash, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "stored block with another parent", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: common.Hash{0xaa}, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "stored block with an invalid gas limit", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, wantErr: "invalid block hash"},
-		{name: "stored block that a busy execution module hides", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyBefore: true, busyAfter: true, wantErr: "invalid block hash"},
-		{name: "stored block hidden by a forkchoice update that ends during the lookup", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyBefore: true, wantErr: "invalid block hash"},
-		{name: "stored block hidden by a forkchoice update that starts during the lookup", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busyAfter: true, wantErr: "invalid block hash"},
+		{name: "stored block while the execution module is busy", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, busy: true, wantErr: "invalid block hash"},
 		{name: "stored block whose lookup fails", txCount: 5, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, lookupErr: context.Canceled, wantErr: "invalid block hash"},
 		{name: "L2 chain, above the payload's own gas limit", txCount: 9, storedGasLimit: 2 * parent.GasLimit, storedParent: parentHash, l2: true, wantErr: "gas limit reached: 9 transactions use at least 16800 gas each"},
 	} {
@@ -831,19 +827,14 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 			require.NoError(t, err)
 			payload.BlockHash = storedHash
 
-			lookedUp := false
 			stub := &stubExecutionModule{
 				getHeaderFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
 					switch {
 					case hash != nil && *hash == parentHash:
 						return parent, nil
 					case hash != nil && *hash == storedHash && number != nil && *number == 100:
-						lookedUp = true
 						if test.lookupErr != nil {
 							return nil, test.lookupErr
-						}
-						if test.busyBefore || test.busyAfter {
-							return nil, nil
 						}
 						return stored, nil
 					}
@@ -851,12 +842,7 @@ func TestNewPayloadAboveTheCappedBoundNamingAStoredBlock(t *testing.T) {
 				},
 				currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
 				isValidatedFunc:   func(hash common.Hash) bool { return hash == parentHash },
-				readyFunc: func(context.Context) (bool, error) {
-					if lookedUp {
-						return !test.busyAfter, nil
-					}
-					return !test.busyBefore, nil
-				},
+				readyFunc:         func(context.Context) (bool, error) { return !test.busy, nil },
 			}
 			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
