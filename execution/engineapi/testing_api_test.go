@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -344,7 +345,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
-	return NewTestingImpl(srv, log.New(), nil)
+	return NewTestingImpl(srv)
 }
 
 // makeAssembledBlock builds a minimal BlockWithReceipts for use in stub
@@ -808,49 +809,6 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "withdrawals before Shanghai")
 	})
 
-	t.Run("nonce too high", func(t *testing.T) {
-		t.Parallel()
-		key, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		// State nonce is 0 (default stub), but tx nonce is 1 → too high.
-		rawTx := makeSignedRawTx(t, key, allForksChainConfig(), 1, 101, parentTimestamp+1)
-		stub := &stubExecutionModule{
-			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-		}
-		api := newTestingAPI(allForksChainConfig(), stub)
-		txs := []hexutil.Bytes{rawTx}
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		var rpcErr *rpc.CustomError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
-		assert.Contains(t, rpcErr.Message, "nonce too high")
-	})
-
-	t.Run("nonce too low", func(t *testing.T) {
-		t.Parallel()
-		key, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		cfg := allForksChainConfig()
-		// Two txs from the same sender with the same nonce (0, 0).
-		// After the first tx is accepted (expectedNonce→1), the second nonce=0 is too low.
-		rawTx0 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
-		rawTx1 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
-		stub := &stubExecutionModule{
-			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-		}
-		api := newTestingAPI(cfg, stub)
-		txs := []hexutil.Bytes{rawTx0, rawTx1}
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		var rpcErr *rpc.CustomError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
-		assert.Contains(t, rpcErr.Message, "nonce too low")
-	})
-
 	t.Run("valid explicit tx list reaches assembler with CustomTxnProvider set", func(t *testing.T) {
 		t.Parallel()
 		key, err := crypto.GenerateKey()
@@ -1115,7 +1073,7 @@ func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
 	})
 }
 
-func TestDecodeTxnProviderFrameNonces(t *testing.T) {
+func TestDecodeTxnProviderPreservesNonces(t *testing.T) {
 	t.Parallel()
 	cfg := allForksChainConfig()
 	cfg.BogotaTime = common.NewUint64(0)
@@ -1136,26 +1094,20 @@ func TestDecodeTxnProviderFrameNonces(t *testing.T) {
 	ordinary0 := makeSignedRawTx(t, key, cfg, 0, 101, 1001)
 	ordinary1 := makeSignedRawTx(t, key, cfg, 1, 101, 1001)
 	for _, tc := range []struct {
-		name    string
-		txs     []hexutil.Bytes
-		wantErr string
+		name string
+		txs  []hexutil.Bytes
 	}{
 		{name: "keyed sequence above account nonce", txs: []hexutil.Bytes{frame(1, 7)}},
 		{name: "keyed sequence below account nonce", txs: []hexutil.Bytes{ordinary0, frame(1, 0), ordinary1}},
 		{name: "keyed frame preserves account nonce", txs: []hexutil.Bytes{frame(1, 0), ordinary0}},
 		{name: "independent keys", txs: []hexutil.Bytes{frame(1, 0), frame(2, 0), ordinary0}},
 		{name: "legacy frame consumes account nonce", txs: []hexutil.Bytes{frame(0, 0), ordinary1}},
-		{name: "legacy frame nonce too high", txs: []hexutil.Bytes{frame(0, 1)}, wantErr: "nonce too high"},
-		{name: "legacy frame nonce too low", txs: []hexutil.Bytes{ordinary0, frame(0, 0)}, wantErr: "nonce too low"},
+		{name: "legacy frame with nonzero nonce", txs: []hexutil.Bytes{frame(0, 1)}},
+		{name: "legacy frame with repeated nonce", txs: []hexutil.Bytes{ordinary0, frame(0, 0)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := newTestingAPI(cfg, &stubExecutionModule{}).(*testingImpl)
-			provider, err := api.decodeTxnProvider(t.Context(), &tc.txs, 101, 1001)
-			if tc.wantErr != "" {
-				require.ErrorContains(t, err, tc.wantErr)
-				require.Nil(t, provider)
-				return
-			}
+			provider, err := api.decodeTxnProvider(&tc.txs, 101, 1001)
 			require.NoError(t, err)
 			provided, err := provider.ProvideTxns(t.Context())
 			require.NoError(t, err)
@@ -1255,7 +1207,7 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 				txs = append(txs, encoded.Bytes())
 			}
 			server := NewEngineServer(m.Log, cfg, m.ExecModule, nil, false, false, true, true, nil, nil, 0, 0)
-			api := NewTestingImpl(server, m.Log, m.DB)
+			api := NewTestingImpl(server)
 			attrs := validPayloadAttrs(parent.Time())
 			slot := hexutil.Uint64(parent.NumberU64() + 1)
 			attrs.SlotNumber = &slot
@@ -1285,70 +1237,122 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Multi-sender nonce tracking test
-// ---------------------------------------------------------------------------
+func TestBuildBlockV1FrameNonceAfterOrdinaryCreate(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	creator := common.HexToAddress("0x1000")
+	create := program.New().Push0().Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	code := append([]byte{byte(vm.CALLDATASIZE), byte(vm.PUSH1), byte(4 + len(create)), byte(vm.JUMPI)}, create...)
+	code = append(code, program.New().Op(vm.JUMPDEST).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()...)
+	genesis := &types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender:  {Balance: big.NewInt(common.Ether)},
+			creator: {Balance: big.NewInt(common.Ether), Code: code},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	parentChain, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(parentChain))
+	parent := parentChain.TopBlock
+	ordinary, err := types.SignTx(types.NewTransaction(0, creator, uint256.NewInt(0), 1_000_000, uint256.NewInt(1), nil),
+		*types.MakeSigner(cfg, parent.NumberU64()+1, parent.Time()+1), key)
+	require.NoError(t, err)
+	frame := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: creator, Nonce: 1,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{{
+			Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1},
+			Limits: mdgas.MdGas{Execution: 1_000},
+		}},
+	}
+	var txs []hexutil.Bytes
+	for _, tx := range []types.Transaction{ordinary, frame} {
+		var encoded bytes.Buffer
+		require.NoError(t, tx.MarshalBinary(&encoded))
+		txs = append(txs, encoded.Bytes())
+	}
+	server := NewEngineServer(m.Log, cfg, m.ExecModule, nil, false, false, true, true, nil, nil, 0, 0)
+	api := NewTestingImpl(server)
+	attrs := validPayloadAttrs(parent.Time())
+	slot := hexutil.Uint64(parent.NumberU64() + 1)
+	attrs.SlotNumber = &slot
+	response, err := api.BuildBlockV1(t.Context(), parent.Hash(), attrs, &txs, nil)
+	require.NoError(t, err)
+	require.Equal(t, txs, response.ExecutionPayload.Transactions)
+}
 
-func TestBuildBlockV1MultipleSendersNonce(t *testing.T) {
-	t.Parallel()
-
-	const parentTimestamp = 1000
-	parentHdr := makeParentHeader(parentTimestamp)
-	parentHash := parentHdr.Hash()
-
-	t.Run("two senders with sequential nonces accepted", func(t *testing.T) {
-		t.Parallel()
-		key1, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		key2, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		cfg := allForksChainConfig()
-		// Interleaved txs from two different senders, each starting at nonce 0.
-		rawTx0 := makeSignedRawTx(t, key1, cfg, 0, 101, parentTimestamp+1)
-		rawTx1 := makeSignedRawTx(t, key2, cfg, 0, 101, parentTimestamp+1)
-		rawTx2 := makeSignedRawTx(t, key1, cfg, 1, 101, parentTimestamp+1)
-		rawTx3 := makeSignedRawTx(t, key2, cfg, 1, 101, parentTimestamp+1)
-
-		var captured *builder.Parameters
-		stub := &stubExecutionModule{
-			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
-			assembleBlockFunc:     captureAssembleParams(&captured),
-			getAssembledBlockFunc: nilGetAssembledBlock,
-		}
-		api := newTestingAPI(cfg, stub)
-		txs := []hexutil.Bytes{rawTx0, rawTx1, rawTx2, rawTx3}
-		_, err = api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
-		// Fails at nil block, not at nonce check.
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no assembled block data")
-		require.NotNil(t, captured, "AssembleBlock should have been called")
-		require.NotNil(t, captured.CustomTxnProvider)
-	})
-
-	t.Run("second sender nonce gap detected independently", func(t *testing.T) {
-		t.Parallel()
-		key1, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		key2, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		cfg := allForksChainConfig()
-		rawTx0 := makeSignedRawTx(t, key1, cfg, 0, 101, parentTimestamp+1)
-		// key2 skips nonce 0 → nonce 1 (too high).
-		rawTx1 := makeSignedRawTx(t, key2, cfg, 1, 101, parentTimestamp+1)
-
-		stub := &stubExecutionModule{
-			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
-		}
-		api := newTestingAPI(cfg, stub)
-		txs := []hexutil.Bytes{rawTx0, rawTx1}
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		var rpcErr *rpc.CustomError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
-		assert.Contains(t, rpcErr.Message, "nonce too high")
-	})
+func TestTestingBlockNonceValidation(t *testing.T) {
+	type requestedTxn struct {
+		sender int
+		nonce  uint64
+	}
+	for _, tc := range []struct {
+		name    string
+		txns    []requestedTxn
+		wantErr string
+		commit  bool
+	}{
+		{name: "sequential nonces", txns: []requestedTxn{{0, 0}, {0, 1}}},
+		{name: "interleaved senders", txns: []requestedTxn{{0, 0}, {1, 0}, {0, 1}, {1, 1}}},
+		{name: "nonce too high", txns: []requestedTxn{{0, 1}}, wantErr: "nonce too high"},
+		{name: "nonce too low", txns: []requestedTxn{{0, 0}, {0, 0}}, wantErr: "nonce too low"},
+		{name: "second sender nonce gap", txns: []requestedTxn{{0, 0}, {1, 1}}, wantErr: "nonce too high"},
+		{name: "commit nonce gap", txns: []requestedTxn{{0, 1}}, wantErr: "nonce too high", commit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			keys := make([]*ecdsa.PrivateKey, 2)
+			alloc := make(types.GenesisAlloc)
+			for i := range keys {
+				key, err := crypto.GenerateKey()
+				require.NoError(t, err)
+				keys[i] = key
+				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
+			}
+			genesis := &types.Genesis{Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Alloc: alloc}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+			parentChain, err := m.GenerateChain(1, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(parentChain))
+			parent := parentChain.TopBlock
+			txs := make([]hexutil.Bytes, len(tc.txns))
+			for i, tx := range tc.txns {
+				txs[i] = makeSignedRawTx(t, keys[tx.sender], cfg, tx.nonce, parent.NumberU64()+1, parent.Time()+1)
+			}
+			server := NewEngineServer(m.Log, cfg, m.ExecModule, nil, false, false, true, true, nil, nil, 0, 0)
+			api := NewTestingImpl(server)
+			attrs := validPayloadAttrs(parent.Time())
+			slot := hexutil.Uint64(parent.NumberU64() + 1)
+			attrs.SlotNumber = &slot
+			if tc.commit {
+				var hash common.Hash
+				hash, err = api.CommitBlockV1(t.Context(), attrs, &txs, nil)
+				require.Zero(t, hash)
+			} else {
+				var response *engine_types.GetPayloadResponse
+				response, err = api.BuildBlockV1(t.Context(), parent.Hash(), attrs, &txs, nil)
+				if tc.wantErr == "" {
+					require.NoError(t, err)
+					require.Equal(t, txs, response.ExecutionPayload.Transactions)
+					return
+				}
+				require.Nil(t, response)
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+			invalidIndex := len(txs) - 1
+			invalidTx, decodeErr := types.DecodeTransaction(txs[invalidIndex])
+			require.NoError(t, decodeErr)
+			require.ErrorContains(t, err, fmt.Sprintf("transaction %d (%s)", invalidIndex, invalidTx.Hash()))
+			head, err := m.ExecModule.CurrentHeader(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, parent.Hash(), head.Hash())
+		})
+	}
 }
 
 func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T) {

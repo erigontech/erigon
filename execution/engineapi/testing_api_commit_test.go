@@ -336,25 +336,6 @@ func TestCommitBlockV1(t *testing.T) {
 		assert.Nil(t, captured.CustomTxnProvider, "nil transactions must draw from the mempool")
 	})
 
-	t.Run("nonce too high rejected before insertion", func(t *testing.T) {
-		t.Parallel()
-		key, err := crypto.GenerateKey()
-		require.NoError(t, err)
-		// State nonce is 0 (no DB in tests), tx nonce 1 → too high.
-		rawTx := makeSignedRawTx(t, key, allForksChainConfig(), 1, 101, parentTimestamp+1)
-		api, rec, _ := newEnv(nil)
-
-		txs := []hexutil.Bytes{rawTx}
-		hash, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), &txs, nil)
-		require.Error(t, err)
-		assert.Equal(t, common.Hash{}, hash)
-		var rpcErr *rpc.CustomError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "nonce too high")
-		assert.Empty(t, rec.inserted)
-		assert.False(t, rec.fcuCalled)
-	})
-
 	t.Run("missing parentBeaconBlockRoot for Cancun+", func(t *testing.T) {
 		t.Parallel()
 		api, rec, _ := newEnv(nil)
