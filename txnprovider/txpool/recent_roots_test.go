@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -57,7 +58,7 @@ func TestFramePoolRecentRootAddressAsPaymaster(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.payer, backend.paymaster = types.FrameRecentRootVerifier, true
-	backend.dependencies = [][]byte{types.FrameRecentRootVerifier[:]}
+	backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
 	tx := &types.FrameTransaction{
 		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{
@@ -137,7 +138,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			pool.chainConfig.BogotaTime = common.NewUint64(100)
 			backend := pool.ethBackend.(*frameValidationBackend)
-			backend.dependencies = [][]byte{types.FrameRecentRootVerifier[:]}
+			backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
 			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 			initial.ChangeBatch[0].BlockTime = tc.initialTime
 			initial.ChangeBatch[0].SlotNumber = common.NewUint64(tc.initialSlot)
@@ -189,7 +190,7 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			backend := pool.ethBackend.(*frameValidationBackend)
-			backend.dependencies = [][]byte{types.FrameRecentRootVerifier[:]}
+			backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
 			slot := recentRootPoolSlot(t, sender, 10, 1)
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)

@@ -114,9 +114,9 @@ func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 						}
 						prefix, err := frameValidationPrefix(tx)
 						require.NoError(t, err)
-						require.Equal(t, rootIndex, prefix.recentRoot)
-						require.Equal(t, deployIndex, prefix.deploy)
-						require.Equal(t, len(tx.Frames)-1, prefix.end)
+						require.Equal(t, rootIndex, prefix.recentRootFrame)
+						require.Equal(t, deployIndex, prefix.deploymentFrame)
+						require.Equal(t, len(tx.Frames)-1, prefix.paymentFrame)
 					})
 				}
 			}

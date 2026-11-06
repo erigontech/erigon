@@ -445,9 +445,8 @@ func (ot *OeTracer) OnTxEndV2(receipt *types.Receipt, usage mdgas.TxnGasUsage, e
 			trace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), StateGasUsed: &stateGas}
 		case 1:
 			i := trace.TraceAddress[0]
-			trace.Action.(*CallTraceAction).Gas = hexutil.U256(*uint256.NewInt(ot.frameTx.Frames[i].Limits.Total()))
 			if result, ok := trace.Result.(*TraceResult); ok {
-				result.GasUsed = (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[i].GasUsed.Total()))
+				result.GasUsed = (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[i].GasUsed.Execution))
 				stateGas := hexutil.Int64(receipt.FrameReceipts[i].GasUsed.State)
 				result.StateGasUsed = &stateGas
 			}
@@ -1409,6 +1408,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
+		transactions.VersionedCallState(initialIbs)
 		if traceConfig != nil && traceConfig.StateOverrides != nil {
 			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
@@ -1883,6 +1883,7 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	}
 	initialIbs := state.New(cloneReader)
 	defer initialIbs.Close()
+	transactions.VersionedCallState(initialIbs)
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
@@ -2102,6 +2103,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		}
 		initialIbs := state.New(stateReader)
 		defer initialIbs.Close()
+		transactions.VersionedCallState(initialIbs)
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}

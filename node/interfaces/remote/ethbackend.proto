@@ -293,12 +293,12 @@ message FrameValidationRequest {
 
 message FrameValidationReply {
   bool valid = 1;
-  bytes payer = 2;
-  bytes max_cost = 3;
-  bytes payer_balance = 4;
+  types.H160 payer = 2;
+  types.H256 max_cost = 3;
+  types.H256 payer_balance = 4;
   bool paymaster = 5;
   uint64 deadline = 6;
-  repeated bytes dependencies = 7;
+  repeated types.H160 dependencies = 7;
   repeated FrameCreationNonce creation_nonces = 8;
 }
 
@@ -333,7 +333,7 @@ message BlockBodyReply {
 }
 
 message FrameCreationNonce {
-  bytes address = 1;
+  types.H160 address = 1;
   uint64 min_nonce = 2;
   uint64 max_nonce = 3;
 }

@@ -224,6 +224,52 @@ func TestFrameTransactionKeyedNonce(t *testing.T) {
 	require.False(t, warm)
 }
 
+func TestFrameTransactionMissingNonceManager(t *testing.T) {
+	for _, versioned := range []bool{false, true} {
+		for _, mode := range []string{"execution", "call", "pool validation"} {
+			t.Run(fmt.Sprintf("versioned=%t/%s", versioned, mode), func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				if versioned {
+					ibs.SetVersionMap(state.NewVersionMap(nil))
+				}
+				cfg := chain.AllProtocolChanges.Copy()
+				cfg.BogotaTime = common.NewUint64(0)
+				evm := newTestEVM(ibs, cfg, 30_000_000)
+				sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+				balance := uint256.Int{10_000_000}
+				require.NoError(t, ibs.SetBalance(sender, balance, tracing.BalanceChangeUnspecified))
+				require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
+				tx := &types.FrameTransaction{
+					ChainID: *cfg.ChainID, SenderAddress: sender.Value(), NonceKeys: []uint256.Int{{1}},
+					Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000, State: params.StateGasPerStorageSet}}},
+					Fees:   types.FrameFees{FeeCap: uint256.Int{1}, TipCap: uint256.Int{1}},
+				}
+				if mode == "pool validation" {
+					result, err := ValidateFrameTransaction(evm, tx)
+					require.ErrorContains(t, err, "nonce manager does not exist")
+					require.Nil(t, result)
+				} else {
+					msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
+					require.NoError(t, err)
+					msg.SetCheckNonce(mode == "execution")
+					gp := NewGasPool(30_000_000, 0)
+					result, err := ApplyMessage(evm, msg, gp, true, false, nil)
+					require.ErrorContains(t, err, "nonce manager does not exist")
+					require.Nil(t, result)
+					require.EqualValues(t, 30_000_000, gp.Gas())
+				}
+				gotBalance, err := ibs.GetBalance(sender)
+				require.NoError(t, err)
+				require.Equal(t, balance, gotBalance)
+				exists, err := ibs.Exist(accounts.InternAddress(types.FrameNonceManager))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		}
+	}
+}
+
 func TestFrameTransactionKeyedNonceRefill(t *testing.T) {
 	for _, revert := range []bool{false, true} {
 		t.Run(fmt.Sprintf("revert=%t", revert), func(t *testing.T) {
@@ -301,13 +347,15 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 		name      string
 		noBaseFee bool
 		free      bool
+		service   bool
 		feeCap    uint64
 		wantError bool
 	}{
 		{name: "normal validation", wantError: true},
 		{name: "unpriced call", noBaseFee: true},
 		{name: "priced call", noBaseFee: true, feeCap: 1, wantError: true},
-		{name: "service transaction", free: true},
+		{name: "free message", free: true},
+		{name: "service transaction", service: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			evm, tx := frameTestEnv(t)
@@ -321,13 +369,14 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			config.NoBaseFee = test.noBaseFee
 			evm.ResetBetweenBlocks(blockCtx, evm.TxContext, ibs, config, evm.ChainRules())
 			burn := common.HexToAddress("0xb000")
-			if test.free {
+			if test.free || test.service {
 				evm.ChainConfig().BurntContract = map[string]common.Address{"0": burn}
 			}
 			msg, err := tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())
 			require.NoError(t, err)
 			msg.SetIsFree(test.free)
-			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, nil)
+			result, err := ApplyMessage(evm, msg, NewGasPool(30_000_000, 0), true, false, &serviceTxEngine{service: test.service})
+			require.Equal(t, test.free, msg.IsFree())
 			if test.wantError {
 				require.ErrorIs(t, err, ErrFeeCapTooLow)
 				return
@@ -335,7 +384,7 @@ func TestFrameTransactionRPCFeeChecks(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.True(t, msg.GasPrice().IsZero())
-			if test.free {
+			if test.free || test.service {
 				require.True(t, result.BurntContractAddress.IsNil())
 			}
 			balance, err := ibs.GetBalance(sender)
@@ -706,9 +755,7 @@ func TestFrameTransactionMakeReceipt(t *testing.T) {
 	tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
 	result, err := applyFrameTest(t, evm, tx)
 	require.NoError(t, err)
-	msg, err := tx.AsMessage(types.Signer{}, nil, evm.ChainRules())
-	require.NoError(t, err)
-	receipt := MakeReceipt(uint256.NewInt(1), common.Hash{}, msg, tx, result.ReceiptGasUsed, result, evm.IntraBlockState(), evm)
+	receipt := MakeReceipt(uint256.NewInt(1), common.Hash{}, tx, result.ReceiptGasUsed, result, evm.IntraBlockState(), evm)
 	require.Equal(t, result.Payer, receipt.Payer)
 	require.Equal(t, result.FrameReceipts, receipt.FrameReceipts)
 	require.Zero(t, receipt.ContractAddress)

@@ -95,7 +95,6 @@ type ReceiptNotification struct {
 	Receipt *types.Receipt
 	Tx      types.Transaction
 	Header  *types.Header
-	Removed bool
 }
 
 // Proto conversion methods — used at the gRPC boundary only.

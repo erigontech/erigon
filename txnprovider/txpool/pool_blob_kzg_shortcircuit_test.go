@@ -115,7 +115,7 @@ func TestValidateTxnsBlobKZGShortCircuit(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView, nil, nil)
+		reasons, goodTxns, _, err := pool.validateTxns(&slots, cacheView, nil, nil)
 		require.NoError(t, err)
 		return reasons, goodTxns
 	}
@@ -230,9 +230,13 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
+	badPeerFrame := framePoolSlot(t, common.Address(a0), 300_000, 300_000)
+	fromAttacker.Append(badPeerFrame, a0[:], false)
 	pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient)
 
 	var fromHonest TxnSlots
+	honestFrame := framePoolSlot(t, common.Address(a1), 300_000, 300_000)
+	fromHonest.Append(honestFrame, a1[:], false)
 	fromHonest.Append(&good, a1[:], false)
 	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient)
 
@@ -241,6 +245,11 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient)
 
 	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Len(t, pool.remoteFrames.ready, 1, "do not simulate frames from a peer whose KZG proof failed")
+	queued := <-pool.remoteFrames.ready
+	require.Same(t, honestFrame, queued.txn)
+	require.Equal(t, PeerID(honestPeerID), queued.source.peerID)
+	require.NotContains(t, pool.remoteFrames.pending, string(badPeerFrame.IDHash[:]))
 
 	select {
 	case <-kicked:
@@ -284,7 +293,7 @@ func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
 	fromHonest.Append(replacement, a2[:], false)
 	pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil)
 
-	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	reasons, err = pool.processRemoteBatch(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
@@ -298,7 +307,7 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 		reason txpoolcfg.DiscardReason
 	}{
 		{"total", func(cfg *txpoolcfg.Config) { cfg.TotalBlobPoolLimit = 0 }, txpoolcfg.BlobPoolOverflow},
-		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.Spammer},
+		{"per-sender", func(cfg *txpoolcfg.Config) { cfg.BlobSlots = 0 }, txpoolcfg.BlobSlotsOverflow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -313,9 +322,42 @@ func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 			slots.Append(&bad, a0[:], false)
 			pool.AddRemoteTxns(ctx, slots, nil, nil)
 
-			reasons, err := pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+			reasons, err := pool.processRemoteBatch(ctx)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
 		})
+	}
+}
+
+func TestBlobSlotsOverflowDoesNotPunishSender(t *testing.T) {
+	ctx := t.Context()
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	sender := common.Address{1}
+	var local TxnSlots
+	for nonce := range uint64(2) {
+		slot := makeBlobSlot(byte(nonce+1), false)
+		slot.Nonce = nonce
+		slot.Txn.(*types.BlobTx).Nonce = nonce
+		slot.Txn.(*types.BlobTx).GasLimit = 100_000
+		local.Append(&slot, sender[:], true)
+	}
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	pool.cfg.BlobSlots = pool.totalBlobsInPool.Load()
+	overflow := makeBlobSlot(3, false)
+	overflow.Nonce = 2
+	overflow.Txn.(*types.BlobTx).Nonce = 2
+	overflow.Txn.(*types.BlobTx).GasLimit = 100_000
+	var remote TxnSlots
+	remote.Append(&overflow, sender[:], false)
+	pool.AddRemoteTxns(ctx, remote, nil, nil)
+	reasons, err = pool.processRemoteBatch(ctx)
+	require.NoError(t, err)
+	require.Len(t, pool.byHash, 2)
+	require.Equal(t, txpoolcfg.BlobSlotsOverflow, reasons[0])
+	for _, slot := range local.Txns {
+		require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 	}
 }

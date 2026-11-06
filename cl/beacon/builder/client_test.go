@@ -488,7 +488,10 @@ func TestDynamicBuilderCallsShareBoundedAdmission(t *testing.T) {
 	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
 		current := active.Add(1)
 		defer active.Add(-1)
-		for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+		for previous := maximum.Load(); current > previous; previous = maximum.Load() {
+			if maximum.CompareAndSwap(previous, current) {
+				break
+			}
 		}
 		select {
 		case <-release:

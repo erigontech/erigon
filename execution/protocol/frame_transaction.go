@@ -57,6 +57,17 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if tx.Nonce == math.MaxUint64 {
 		return nil, ErrNonceMax
 	}
+	if !tx.UsesLegacyNonce() {
+		// EIP-8250 requires the manager to be predeployed. Otherwise nonce writes
+		// create an empty account that finalization deletes, allowing replay.
+		exists, err := st.state.Exist(accounts.InternAddress(types.FrameNonceManager))
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, errors.New("nonce manager does not exist")
+		}
+	}
 	if st.msg.CheckNonce() && tx.UsesLegacyNonce() {
 		if nonce < tx.Nonce {
 			return nil, &nonceError{ErrNonceTooHigh, sender, tx.Nonce, nonce}
@@ -80,7 +91,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	skipFeeCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 	if !skipFeeCheck {
-		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
+		if err := CheckEip1559TxGasFeeCap(sender, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.isFree); err != nil {
 			return nil, err
 		}
 	}
@@ -102,17 +113,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	maxCost, overflow = u256.AddOverflow(maxCost, blobCost)
 	if overflow {
 		return nil, ErrInsufficientFunds
-	}
-	senderBalance, err := st.state.GetBalance(sender)
-	if err != nil {
-		return nil, err
-	}
-	var coinbaseBalance uint256.Int
-	if !st.noFeeBurnAndTip {
-		coinbaseBalance, err = st.state.GetBalance(st.evm.Context.Coinbase)
-		if err != nil {
-			return nil, err
-		}
 	}
 	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if st.evm.Config().NoBAL {
@@ -204,7 +204,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			if err := validation.afterFrame(); err != nil {
 				return nil, err
 			}
-			if i == validation.end {
+			if i == validation.paymentFrame {
 				return nil, nil
 			}
 		}
@@ -266,7 +266,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	}
 	var burned uint256.Int
 	var burnAddress accounts.Address
-	if !st.msg.IsFree() {
+	if !st.isFree {
 		burnAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 	}
 	if !burnAddress.IsNil() {
@@ -294,8 +294,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		TxnGasUsage:    mdgas.TxnGasUsage{BlockExecutionGasUsed: blockExecution, BlockStateGasUsed: used.State, GasRefund: refund},
 		ReceiptGasUsed: paid, MaxGasUsed: blockExecution + used.State,
 		Payer: &payer, FrameReceipts: ctx.Receipts, Err: lastErr,
-		SenderInitBalance: senderBalance, CoinbaseInitBalance: coinbaseBalance, FeeTipped: tipped,
-		FeeBurnt: burned, BurntContractAddress: burnAddress,
+		FeeTipped: tipped, FeeBurnt: burned, BurntContractAddress: burnAddress,
 	}
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, sender, st.evm.Context.Coinbase, result, rules)

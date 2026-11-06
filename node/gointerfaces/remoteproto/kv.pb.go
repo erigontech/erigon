@@ -1468,6 +1468,196 @@ func (x *IndexRangeReply) GetNextPageToken() string {
 	return ""
 }
 
+type IndexJoinKey struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Table         string                 `protobuf:"bytes,1,opt,name=table,proto3" json:"table,omitempty"`
+	K             []byte                 `protobuf:"bytes,2,opt,name=k,proto3" json:"k,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexJoinKey) Reset() {
+	*x = IndexJoinKey{}
+	mi := &file_remote_kv_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexJoinKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexJoinKey) ProtoMessage() {}
+
+func (x *IndexJoinKey) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexJoinKey.ProtoReflect.Descriptor instead.
+func (*IndexJoinKey) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *IndexJoinKey) GetTable() string {
+	if x != nil {
+		return x.Table
+	}
+	return ""
+}
+
+func (x *IndexJoinKey) GetK() []byte {
+	if x != nil {
+		return x.K
+	}
+	return nil
+}
+
+type IndexJoinClause struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Keys          []*IndexJoinKey        `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexJoinClause) Reset() {
+	*x = IndexJoinClause{}
+	mi := &file_remote_kv_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexJoinClause) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexJoinClause) ProtoMessage() {}
+
+func (x *IndexJoinClause) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexJoinClause.ProtoReflect.Descriptor instead.
+func (*IndexJoinClause) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *IndexJoinClause) GetKeys() []*IndexJoinKey {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
+type IndexJoinReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	TxId  uint64                 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	// query params
+	Clauses     []*IndexJoinClause `protobuf:"bytes,2,rep,name=clauses,proto3" json:"clauses,omitempty"`
+	FromTs      int64              `protobuf:"zigzag64,3,opt,name=from_ts,json=fromTs,proto3" json:"from_ts,omitempty"` // -1 means Inf
+	ToTs        int64              `protobuf:"zigzag64,4,opt,name=to_ts,json=toTs,proto3" json:"to_ts,omitempty"`       // -1 means Inf
+	OrderAscend bool               `protobuf:"varint,5,opt,name=order_ascend,json=orderAscend,proto3" json:"order_ascend,omitempty"`
+	// pagination params
+	PageSize      int32  `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"` // <= 0 means server will choose
+	PageToken     string `protobuf:"bytes,7,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexJoinReq) Reset() {
+	*x = IndexJoinReq{}
+	mi := &file_remote_kv_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexJoinReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexJoinReq) ProtoMessage() {}
+
+func (x *IndexJoinReq) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexJoinReq.ProtoReflect.Descriptor instead.
+func (*IndexJoinReq) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *IndexJoinReq) GetTxId() uint64 {
+	if x != nil {
+		return x.TxId
+	}
+	return 0
+}
+
+func (x *IndexJoinReq) GetClauses() []*IndexJoinClause {
+	if x != nil {
+		return x.Clauses
+	}
+	return nil
+}
+
+func (x *IndexJoinReq) GetFromTs() int64 {
+	if x != nil {
+		return x.FromTs
+	}
+	return 0
+}
+
+func (x *IndexJoinReq) GetToTs() int64 {
+	if x != nil {
+		return x.ToTs
+	}
+	return 0
+}
+
+func (x *IndexJoinReq) GetOrderAscend() bool {
+	if x != nil {
+		return x.OrderAscend
+	}
+	return false
+}
+
+func (x *IndexJoinReq) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *IndexJoinReq) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
 type HistoryRangeReq struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	TxId  uint64                 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
@@ -1486,7 +1676,7 @@ type HistoryRangeReq struct {
 
 func (x *HistoryRangeReq) Reset() {
 	*x = HistoryRangeReq{}
-	mi := &file_remote_kv_proto_msgTypes[18]
+	mi := &file_remote_kv_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1498,7 +1688,7 @@ func (x *HistoryRangeReq) String() string {
 func (*HistoryRangeReq) ProtoMessage() {}
 
 func (x *HistoryRangeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[18]
+	mi := &file_remote_kv_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1511,7 +1701,7 @@ func (x *HistoryRangeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryRangeReq.ProtoReflect.Descriptor instead.
 func (*HistoryRangeReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{18}
+	return file_remote_kv_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *HistoryRangeReq) GetTxId() uint64 {
@@ -1590,7 +1780,7 @@ type RangeAsOfReq struct {
 
 func (x *RangeAsOfReq) Reset() {
 	*x = RangeAsOfReq{}
-	mi := &file_remote_kv_proto_msgTypes[19]
+	mi := &file_remote_kv_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1602,7 +1792,7 @@ func (x *RangeAsOfReq) String() string {
 func (*RangeAsOfReq) ProtoMessage() {}
 
 func (x *RangeAsOfReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[19]
+	mi := &file_remote_kv_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1615,7 +1805,7 @@ func (x *RangeAsOfReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RangeAsOfReq.ProtoReflect.Descriptor instead.
 func (*RangeAsOfReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{19}
+	return file_remote_kv_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RangeAsOfReq) GetTxId() uint64 {
@@ -1699,7 +1889,7 @@ type Pairs struct {
 
 func (x *Pairs) Reset() {
 	*x = Pairs{}
-	mi := &file_remote_kv_proto_msgTypes[20]
+	mi := &file_remote_kv_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1711,7 +1901,7 @@ func (x *Pairs) String() string {
 func (*Pairs) ProtoMessage() {}
 
 func (x *Pairs) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[20]
+	mi := &file_remote_kv_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1724,7 +1914,7 @@ func (x *Pairs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pairs.ProtoReflect.Descriptor instead.
 func (*Pairs) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{20}
+	return file_remote_kv_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Pairs) GetKeys() [][]byte {
@@ -1758,7 +1948,7 @@ type PairsPagination struct {
 
 func (x *PairsPagination) Reset() {
 	*x = PairsPagination{}
-	mi := &file_remote_kv_proto_msgTypes[21]
+	mi := &file_remote_kv_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1770,7 +1960,7 @@ func (x *PairsPagination) String() string {
 func (*PairsPagination) ProtoMessage() {}
 
 func (x *PairsPagination) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[21]
+	mi := &file_remote_kv_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1783,7 +1973,7 @@ func (x *PairsPagination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PairsPagination.ProtoReflect.Descriptor instead.
 func (*PairsPagination) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{21}
+	return file_remote_kv_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PairsPagination) GetNextKey() []byte {
@@ -1810,7 +2000,7 @@ type IndexPagination struct {
 
 func (x *IndexPagination) Reset() {
 	*x = IndexPagination{}
-	mi := &file_remote_kv_proto_msgTypes[22]
+	mi := &file_remote_kv_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1822,7 +2012,7 @@ func (x *IndexPagination) String() string {
 func (*IndexPagination) ProtoMessage() {}
 
 func (x *IndexPagination) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[22]
+	mi := &file_remote_kv_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1835,7 +2025,7 @@ func (x *IndexPagination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexPagination.ProtoReflect.Descriptor instead.
 func (*IndexPagination) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{22}
+	return file_remote_kv_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *IndexPagination) GetNextTimeStamp() int64 {
@@ -1862,7 +2052,7 @@ type HistoryStartFromReq struct {
 
 func (x *HistoryStartFromReq) Reset() {
 	*x = HistoryStartFromReq{}
-	mi := &file_remote_kv_proto_msgTypes[23]
+	mi := &file_remote_kv_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1874,7 +2064,7 @@ func (x *HistoryStartFromReq) String() string {
 func (*HistoryStartFromReq) ProtoMessage() {}
 
 func (x *HistoryStartFromReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[23]
+	mi := &file_remote_kv_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1887,7 +2077,7 @@ func (x *HistoryStartFromReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryStartFromReq.ProtoReflect.Descriptor instead.
 func (*HistoryStartFromReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{23}
+	return file_remote_kv_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HistoryStartFromReq) GetDomain() uint32 {
@@ -1913,7 +2103,7 @@ type HistoryStartFromReply struct {
 
 func (x *HistoryStartFromReply) Reset() {
 	*x = HistoryStartFromReply{}
-	mi := &file_remote_kv_proto_msgTypes[24]
+	mi := &file_remote_kv_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1925,7 +2115,7 @@ func (x *HistoryStartFromReply) String() string {
 func (*HistoryStartFromReply) ProtoMessage() {}
 
 func (x *HistoryStartFromReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[24]
+	mi := &file_remote_kv_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1938,7 +2128,7 @@ func (x *HistoryStartFromReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryStartFromReply.ProtoReflect.Descriptor instead.
 func (*HistoryStartFromReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{24}
+	return file_remote_kv_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *HistoryStartFromReply) GetStartFrom() uint64 {
@@ -1958,7 +2148,7 @@ type CurrentDomainVersionReq struct {
 
 func (x *CurrentDomainVersionReq) Reset() {
 	*x = CurrentDomainVersionReq{}
-	mi := &file_remote_kv_proto_msgTypes[25]
+	mi := &file_remote_kv_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1970,7 +2160,7 @@ func (x *CurrentDomainVersionReq) String() string {
 func (*CurrentDomainVersionReq) ProtoMessage() {}
 
 func (x *CurrentDomainVersionReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[25]
+	mi := &file_remote_kv_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1983,7 +2173,7 @@ func (x *CurrentDomainVersionReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CurrentDomainVersionReq.ProtoReflect.Descriptor instead.
 func (*CurrentDomainVersionReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{25}
+	return file_remote_kv_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CurrentDomainVersionReq) GetTxId() uint64 {
@@ -2010,7 +2200,7 @@ type CurrentDomainVersionReply struct {
 
 func (x *CurrentDomainVersionReply) Reset() {
 	*x = CurrentDomainVersionReply{}
-	mi := &file_remote_kv_proto_msgTypes[26]
+	mi := &file_remote_kv_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2022,7 +2212,7 @@ func (x *CurrentDomainVersionReply) String() string {
 func (*CurrentDomainVersionReply) ProtoMessage() {}
 
 func (x *CurrentDomainVersionReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[26]
+	mi := &file_remote_kv_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2035,7 +2225,7 @@ func (x *CurrentDomainVersionReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CurrentDomainVersionReply.ProtoReflect.Descriptor instead.
 func (*CurrentDomainVersionReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{26}
+	return file_remote_kv_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CurrentDomainVersionReply) GetMajor() uint64 {
@@ -2061,7 +2251,7 @@ type StepSizeReq struct {
 
 func (x *StepSizeReq) Reset() {
 	*x = StepSizeReq{}
-	mi := &file_remote_kv_proto_msgTypes[27]
+	mi := &file_remote_kv_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2073,7 +2263,7 @@ func (x *StepSizeReq) String() string {
 func (*StepSizeReq) ProtoMessage() {}
 
 func (x *StepSizeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[27]
+	mi := &file_remote_kv_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2086,7 +2276,7 @@ func (x *StepSizeReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepSizeReq.ProtoReflect.Descriptor instead.
 func (*StepSizeReq) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{27}
+	return file_remote_kv_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *StepSizeReq) GetTxId() uint64 {
@@ -2105,7 +2295,7 @@ type StepSizeReply struct {
 
 func (x *StepSizeReply) Reset() {
 	*x = StepSizeReply{}
-	mi := &file_remote_kv_proto_msgTypes[28]
+	mi := &file_remote_kv_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2117,7 +2307,7 @@ func (x *StepSizeReply) String() string {
 func (*StepSizeReply) ProtoMessage() {}
 
 func (x *StepSizeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[28]
+	mi := &file_remote_kv_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2130,7 +2320,7 @@ func (x *StepSizeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepSizeReply.ProtoReflect.Descriptor instead.
 func (*StepSizeReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{28}
+	return file_remote_kv_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *StepSizeReply) GetStep() uint64 {
@@ -2149,7 +2339,7 @@ type MaxPrunableStepsBacklogReply struct {
 
 func (x *MaxPrunableStepsBacklogReply) Reset() {
 	*x = MaxPrunableStepsBacklogReply{}
-	mi := &file_remote_kv_proto_msgTypes[29]
+	mi := &file_remote_kv_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2161,7 +2351,7 @@ func (x *MaxPrunableStepsBacklogReply) String() string {
 func (*MaxPrunableStepsBacklogReply) ProtoMessage() {}
 
 func (x *MaxPrunableStepsBacklogReply) ProtoReflect() protoreflect.Message {
-	mi := &file_remote_kv_proto_msgTypes[29]
+	mi := &file_remote_kv_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2174,7 +2364,7 @@ func (x *MaxPrunableStepsBacklogReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MaxPrunableStepsBacklogReply.ProtoReflect.Descriptor instead.
 func (*MaxPrunableStepsBacklogReply) Descriptor() ([]byte, []int) {
-	return file_remote_kv_proto_rawDescGZIP(), []int{29}
+	return file_remote_kv_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *MaxPrunableStepsBacklogReply) GetSteps() uint64 {
@@ -2293,7 +2483,21 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\n" +
 	"timestamps\x18\x01 \x03(\x04R\n" +
 	"timestamps\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xdf\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"2\n" +
+	"\fIndexJoinKey\x12\x14\n" +
+	"\x05table\x18\x01 \x01(\tR\x05table\x12\f\n" +
+	"\x01k\x18\x02 \x01(\fR\x01k\";\n" +
+	"\x0fIndexJoinClause\x12(\n" +
+	"\x04keys\x18\x01 \x03(\v2\x14.remote.IndexJoinKeyR\x04keys\"\xe3\x01\n" +
+	"\fIndexJoinReq\x12\x13\n" +
+	"\x05tx_id\x18\x01 \x01(\x04R\x04txId\x121\n" +
+	"\aclauses\x18\x02 \x03(\v2\x17.remote.IndexJoinClauseR\aclauses\x12\x17\n" +
+	"\afrom_ts\x18\x03 \x01(\x12R\x06fromTs\x12\x13\n" +
+	"\x05to_ts\x18\x04 \x01(\x12R\x04toTs\x12!\n" +
+	"\forder_ascend\x18\x05 \x01(\bR\vorderAscend\x12\x1b\n" +
+	"\tpage_size\x18\x06 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\a \x01(\tR\tpageToken\"\xdf\x01\n" +
 	"\x0fHistoryRangeReq\x12\x13\n" +
 	"\x05tx_id\x18\x01 \x01(\x04R\x04txId\x12\x14\n" +
 	"\x05table\x18\x02 \x01(\tR\x05table\x12\x17\n" +
@@ -2376,7 +2580,7 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tDirection\x12\v\n" +
 	"\aFORWARD\x10\x00\x12\n" +
 	"\n" +
-	"\x06UNWIND\x10\x012\xae\a\n" +
+	"\x06UNWIND\x10\x012\xea\a\n" +
 	"\x02KV\x126\n" +
 	"\aVersion\x12\x16.google.protobuf.Empty\x1a\x13.types.VersionReply\x12&\n" +
 	"\x02Tx\x12\x0e.remote.Cursor\x1a\f.remote.Pair(\x010\x01\x12F\n" +
@@ -2387,7 +2591,8 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tGetLatest\x12\x14.remote.GetLatestReq\x1a\x16.remote.GetLatestReply\x12?\n" +
 	"\vHistorySeek\x12\x16.remote.HistorySeekReq\x1a\x18.remote.HistorySeekReply\x12<\n" +
 	"\n" +
-	"IndexRange\x12\x15.remote.IndexRangeReq\x1a\x17.remote.IndexRangeReply\x126\n" +
+	"IndexRange\x12\x15.remote.IndexRangeReq\x1a\x17.remote.IndexRangeReply\x12:\n" +
+	"\tIndexJoin\x12\x14.remote.IndexJoinReq\x1a\x17.remote.IndexRangeReply\x126\n" +
 	"\fHistoryRange\x12\x17.remote.HistoryRangeReq\x1a\r.remote.Pairs\x120\n" +
 	"\tRangeAsOf\x12\x14.remote.RangeAsOfReq\x1a\r.remote.Pairs\x12N\n" +
 	"\x10HistoryStartFrom\x12\x1b.remote.HistoryStartFromReq\x1a\x1d.remote.HistoryStartFromReply\x12Z\n" +
@@ -2408,7 +2613,7 @@ func file_remote_kv_proto_rawDescGZIP() []byte {
 }
 
 var file_remote_kv_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_remote_kv_proto_goTypes = []any{
 	(Op)(0),                              // 0: remote.Op
 	(Action)(0),                          // 1: remote.Action
@@ -2431,68 +2636,75 @@ var file_remote_kv_proto_goTypes = []any{
 	(*HistorySeekReply)(nil),             // 18: remote.HistorySeekReply
 	(*IndexRangeReq)(nil),                // 19: remote.IndexRangeReq
 	(*IndexRangeReply)(nil),              // 20: remote.IndexRangeReply
-	(*HistoryRangeReq)(nil),              // 21: remote.HistoryRangeReq
-	(*RangeAsOfReq)(nil),                 // 22: remote.RangeAsOfReq
-	(*Pairs)(nil),                        // 23: remote.Pairs
-	(*PairsPagination)(nil),              // 24: remote.PairsPagination
-	(*IndexPagination)(nil),              // 25: remote.IndexPagination
-	(*HistoryStartFromReq)(nil),          // 26: remote.HistoryStartFromReq
-	(*HistoryStartFromReply)(nil),        // 27: remote.HistoryStartFromReply
-	(*CurrentDomainVersionReq)(nil),      // 28: remote.CurrentDomainVersionReq
-	(*CurrentDomainVersionReply)(nil),    // 29: remote.CurrentDomainVersionReply
-	(*StepSizeReq)(nil),                  // 30: remote.StepSizeReq
-	(*StepSizeReply)(nil),                // 31: remote.StepSizeReply
-	(*MaxPrunableStepsBacklogReply)(nil), // 32: remote.MaxPrunableStepsBacklogReply
-	(*typesproto.H256)(nil),              // 33: types.H256
-	(*typesproto.H160)(nil),              // 34: types.H160
-	(*emptypb.Empty)(nil),                // 35: google.protobuf.Empty
-	(*typesproto.VersionReply)(nil),      // 36: types.VersionReply
+	(*IndexJoinKey)(nil),                 // 21: remote.IndexJoinKey
+	(*IndexJoinClause)(nil),              // 22: remote.IndexJoinClause
+	(*IndexJoinReq)(nil),                 // 23: remote.IndexJoinReq
+	(*HistoryRangeReq)(nil),              // 24: remote.HistoryRangeReq
+	(*RangeAsOfReq)(nil),                 // 25: remote.RangeAsOfReq
+	(*Pairs)(nil),                        // 26: remote.Pairs
+	(*PairsPagination)(nil),              // 27: remote.PairsPagination
+	(*IndexPagination)(nil),              // 28: remote.IndexPagination
+	(*HistoryStartFromReq)(nil),          // 29: remote.HistoryStartFromReq
+	(*HistoryStartFromReply)(nil),        // 30: remote.HistoryStartFromReply
+	(*CurrentDomainVersionReq)(nil),      // 31: remote.CurrentDomainVersionReq
+	(*CurrentDomainVersionReply)(nil),    // 32: remote.CurrentDomainVersionReply
+	(*StepSizeReq)(nil),                  // 33: remote.StepSizeReq
+	(*StepSizeReply)(nil),                // 34: remote.StepSizeReply
+	(*MaxPrunableStepsBacklogReply)(nil), // 35: remote.MaxPrunableStepsBacklogReply
+	(*typesproto.H256)(nil),              // 36: types.H256
+	(*typesproto.H160)(nil),              // 37: types.H160
+	(*emptypb.Empty)(nil),                // 38: google.protobuf.Empty
+	(*typesproto.VersionReply)(nil),      // 39: types.VersionReply
 }
 var file_remote_kv_proto_depIdxs = []int32{
 	0,  // 0: remote.Cursor.op:type_name -> remote.Op
-	33, // 1: remote.StorageChange.location:type_name -> types.H256
-	34, // 2: remote.AccountChange.address:type_name -> types.H160
+	36, // 1: remote.StorageChange.location:type_name -> types.H256
+	37, // 2: remote.AccountChange.address:type_name -> types.H160
 	1,  // 3: remote.AccountChange.action:type_name -> remote.Action
 	5,  // 4: remote.AccountChange.storage_changes:type_name -> remote.StorageChange
 	8,  // 5: remote.StateChangeBatch.change_batch:type_name -> remote.StateChange
 	2,  // 6: remote.StateChange.direction:type_name -> remote.Direction
-	33, // 7: remote.StateChange.block_hash:type_name -> types.H256
+	36, // 7: remote.StateChange.block_hash:type_name -> types.H256
 	6,  // 8: remote.StateChange.changes:type_name -> remote.AccountChange
-	35, // 9: remote.KV.Version:input_type -> google.protobuf.Empty
-	3,  // 10: remote.KV.Tx:input_type -> remote.Cursor
-	9,  // 11: remote.KV.StateChanges:input_type -> remote.StateChangeRequest
-	10, // 12: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
-	12, // 13: remote.KV.Range:input_type -> remote.RangeReq
-	13, // 14: remote.KV.Sequence:input_type -> remote.SequenceReq
-	15, // 15: remote.KV.GetLatest:input_type -> remote.GetLatestReq
-	17, // 16: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
-	19, // 17: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
-	21, // 18: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
-	22, // 19: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
-	26, // 20: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
-	28, // 21: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
-	30, // 22: remote.KV.StepSize:input_type -> remote.StepSizeReq
-	35, // 23: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
-	36, // 24: remote.KV.Version:output_type -> types.VersionReply
-	4,  // 25: remote.KV.Tx:output_type -> remote.Pair
-	7,  // 26: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
-	11, // 27: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
-	23, // 28: remote.KV.Range:output_type -> remote.Pairs
-	14, // 29: remote.KV.Sequence:output_type -> remote.SequenceReply
-	16, // 30: remote.KV.GetLatest:output_type -> remote.GetLatestReply
-	18, // 31: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
-	20, // 32: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
-	23, // 33: remote.KV.HistoryRange:output_type -> remote.Pairs
-	23, // 34: remote.KV.RangeAsOf:output_type -> remote.Pairs
-	27, // 35: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
-	29, // 36: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
-	31, // 37: remote.KV.StepSize:output_type -> remote.StepSizeReply
-	32, // 38: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
-	24, // [24:39] is the sub-list for method output_type
-	9,  // [9:24] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	21, // 9: remote.IndexJoinClause.keys:type_name -> remote.IndexJoinKey
+	22, // 10: remote.IndexJoinReq.clauses:type_name -> remote.IndexJoinClause
+	38, // 11: remote.KV.Version:input_type -> google.protobuf.Empty
+	3,  // 12: remote.KV.Tx:input_type -> remote.Cursor
+	9,  // 13: remote.KV.StateChanges:input_type -> remote.StateChangeRequest
+	10, // 14: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
+	12, // 15: remote.KV.Range:input_type -> remote.RangeReq
+	13, // 16: remote.KV.Sequence:input_type -> remote.SequenceReq
+	15, // 17: remote.KV.GetLatest:input_type -> remote.GetLatestReq
+	17, // 18: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
+	19, // 19: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
+	23, // 20: remote.KV.IndexJoin:input_type -> remote.IndexJoinReq
+	24, // 21: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
+	25, // 22: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
+	29, // 23: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
+	31, // 24: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
+	33, // 25: remote.KV.StepSize:input_type -> remote.StepSizeReq
+	38, // 26: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
+	39, // 27: remote.KV.Version:output_type -> types.VersionReply
+	4,  // 28: remote.KV.Tx:output_type -> remote.Pair
+	7,  // 29: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
+	11, // 30: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
+	26, // 31: remote.KV.Range:output_type -> remote.Pairs
+	14, // 32: remote.KV.Sequence:output_type -> remote.SequenceReply
+	16, // 33: remote.KV.GetLatest:output_type -> remote.GetLatestReply
+	18, // 34: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
+	20, // 35: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
+	20, // 36: remote.KV.IndexJoin:output_type -> remote.IndexRangeReply
+	26, // 37: remote.KV.HistoryRange:output_type -> remote.Pairs
+	26, // 38: remote.KV.RangeAsOf:output_type -> remote.Pairs
+	30, // 39: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
+	32, // 40: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
+	34, // 41: remote.KV.StepSize:output_type -> remote.StepSizeReply
+	35, // 42: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
+	27, // [27:43] is the sub-list for method output_type
+	11, // [11:27] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_remote_kv_proto_init() }
@@ -2509,7 +2721,7 @@ func file_remote_kv_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_remote_kv_proto_rawDesc), len(file_remote_kv_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   30,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

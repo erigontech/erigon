@@ -527,6 +527,13 @@ func UnderlyingTx(tx TemporalTx) TemporalTx {
 	return nil
 }
 
+// UnderlyingTxIsWritable checks the transaction returned by UnderlyingTx, not
+// the wrapper's method set.
+func UnderlyingTxIsWritable(tx TemporalTx) bool {
+	_, writable := UnderlyingTx(tx).(TemporalRwTx)
+	return writable
+}
+
 // AsOfGetter reads state as of a txNum.
 type AsOfGetter interface {
 	// GetAsOf - state as of given `ts`
@@ -553,6 +560,9 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
+
+	// IndexJoin - return iterator over the timestamps that match query `q`, see IndexQuery
+	IndexJoin(q IndexQuery) (timestamps stream.U64, err error)
 
 	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
 	// `ok == true && v != nil && len(v) == 0` means key-creation even
@@ -913,6 +923,9 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
+
+// ErrPrefetchIncomplete reports a batch prefetch that stopped with key lookups still pending.
+var ErrPrefetchIncomplete = errors.New("batch prefetch stopped with lookups pending")
 
 // ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
 // the latest value per key, so no historical answer exists in memory. Overlay read views treat it as

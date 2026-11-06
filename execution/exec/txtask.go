@@ -116,6 +116,10 @@ type TxResult struct {
 	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
 	// means every read was settled.
 	Dep int
+
+	// ValStamp is the versionMap write sequence loaded before the worker's read-set
+	// validation; 0 means not validated.
+	ValStamp uint64
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -300,13 +304,13 @@ func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
 		return false
 	}
 	txn := t.Tx()
-	isPlainCall := txn != nil && txn.GetTo() != nil && txn.GetValue().IsZero() && len(txn.GetAuthorizations()) == 0 &&
+	isPlain := txn != nil && len(txn.GetAuthorizations()) == 0 &&
 		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.FrameTxType
-	if !isPlainCall {
+	if !isPlain {
 		return false
 	}
 	sender, err := t.TxSender()
-	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && sender.Value() != *txn.GetTo()
+	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && (txn.GetTo() == nil || sender.Value() != *txn.GetTo())
 	return senderOnlyPays
 }
 

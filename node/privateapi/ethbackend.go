@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/version"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // EthBackendAPIVersion
@@ -63,7 +65,8 @@ import (
 // 4.0.0 - remove BorTxnLookup and BorEvents
 // 4.1.0 - add FrozenBlocks function
 // 4.2.0 - add BlockBody function
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 2, Patch: 0}
+// 5.0.0 - replace AAValidation with FrameValidation
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 5, Minor: 0, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -541,17 +544,17 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			sd = nil
 		}
 	}
-	block, err := s.blockReader.CurrentBlock(tx)
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	header, err := s.blockReader.HeaderByHash(ctx, tx, headHash)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if header == nil {
 		return nil, errors.New("frame validation: no current block")
 	}
-	if expectedHash != (common.Hash{}) && expectedHash != block.Hash() {
+	if expectedHash != (common.Hash{}) && expectedHash != headHash {
 		return nil, status.Error(codes.Aborted, "frame validation head changed")
 	}
-	header := block.HeaderNoCopy()
 	maxTxNum, err := s.blockReader.TxnumReader().Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
@@ -566,6 +569,7 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	}
 	ibs := state.New(reader)
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
 	// The validation hook forbids BLOCKHASH, but cancellation does not stop
 	// the current opcode from calling GetHash.
 	rejectBlockHash := func(uint64) (common.Hash, error) {
@@ -594,8 +598,8 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 			return nil, err
 		}
 	}
-	// Fee caps determine queue placement. Prefix validation must also accept
-	// transactions waiting for execution or blob fees to fall.
+	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
+	// do not become cached failures of prefix validation.
 	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
 		blockContext.BaseFee.Set(frame.GetFeeCap())
 	}
@@ -614,18 +618,19 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 		}
 		return &remoteproto.FrameValidationReply{}, nil
 	}
-	dependencies := make([][]byte, len(result.Dependencies))
+	dependencies := make([]*typesproto.H160, len(result.Dependencies))
 	for i := range result.Dependencies {
-		dependencies[i] = result.Dependencies[i][:]
+		dependencies[i] = gointerfaces.ConvertAddressToH160(result.Dependencies[i])
 	}
 	creationNonces := make([]*remoteproto.FrameCreationNonce, len(result.CreationNonces))
 	for i, dependency := range result.CreationNonces {
 		creationNonces[i] = &remoteproto.FrameCreationNonce{
-			Address: dependency.Address[:], MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
+			Address: gointerfaces.ConvertAddressToH160(dependency.Address), MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
 		}
 	}
 	return &remoteproto.FrameValidationReply{
-		Valid: true, Payer: result.Payer[:], MaxCost: result.MaxCost.Bytes(), PayerBalance: result.PayerBalance.Bytes(),
+		Valid: true, Payer: gointerfaces.ConvertAddressToH160(result.Payer),
+		MaxCost: gointerfaces.ConvertUint256IntToH256(&result.MaxCost), PayerBalance: gointerfaces.ConvertUint256IntToH256(&result.PayerBalance),
 		Paymaster: result.Paymaster, Deadline: result.Deadline, Dependencies: dependencies, CreationNonces: creationNonces,
 	}, nil
 }

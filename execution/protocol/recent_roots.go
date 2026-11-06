@@ -60,10 +60,10 @@ func FrameTransactionRecentRoots(tx *types.FrameTransaction) ([]RecentRootRefere
 	if err != nil {
 		return nil, err
 	}
-	if prefix.recentRoot < 0 {
+	if prefix.recentRootFrame < 0 {
 		return nil, nil
 	}
-	return ParseRecentRootReferences(tx.Frames[prefix.recentRoot].Data)
+	return ParseRecentRootReferences(tx.Frames[prefix.recentRootFrame].Data)
 }
 
 func validateRecentRootDataLength(size int) error {

@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/spectest/spectest"
-	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
 var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
@@ -41,7 +40,7 @@ var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spe
 	}
 	startSlot := testState.Slot()
 	for _, block := range blocks {
-		if err := machine.TransitionState(c.Machine, testState, block); err != nil {
+		if err := transitionStateWithPrecomputedCheck(t, c.Machine, testState, block); err != nil {
 			require.NoError(t, fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot))
 		}
 	}

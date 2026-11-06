@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -132,8 +134,17 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
+	defer coreConn.Close()
 
 	ethBackendClient := remoteproto.NewETHBACKENDClient(coreConn)
+	backendVersion, err := ethBackendClient.Version(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		return fmt.Errorf("could not get ETHBACKEND version: %w", err)
+	}
+	expectedVersion := gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion)
+	if !gointerfaces.EnsureVersion(expectedVersion, backendVersion) {
+		return fmt.Errorf("incompatible ETHBACKEND versions: client %s, server %s", expectedVersion, gointerfaces.VersionFromProto(backendVersion))
+	}
 	kvClient := remoteproto.NewKVClient(coreConn)
 	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
 	if err != nil {
