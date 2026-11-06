@@ -31,7 +31,7 @@ func TestUncachedWriterWritesEveryByteInOrder(t *testing.T) {
 	require.NoError(t, err)
 	defer f.Close()
 
-	_, err = f.Write([]byte("head"))
+	_, err = f.WriteString("head")
 	require.NoError(t, err)
 
 	data := make([]byte, 3<<20+17)
