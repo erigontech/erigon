@@ -373,12 +373,12 @@ func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Ac
 	lazyMap(&vm.originAccounts).LoadOrStore(addr, acc)
 }
 
-// TxCount is the number of txs InitStamps sized the map for (0 before it).
+// TxCount is the number of txs InitStamps sized the map for, without the block-init and block-end tasks (0 before it).
 func (vm *VersionMap) TxCount() int {
 	if vm.stamps == nil {
 		return 0
 	}
-	return vm.stamps.n - 1
+	return vm.stamps.n - 2
 }
 
 // BALAccounts returns the block access list the map was seeded from (nil without one).

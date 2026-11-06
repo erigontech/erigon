@@ -446,9 +446,9 @@ func TestPrefetchBaseAccounts_SkipsBlocksWithFewTxs(t *testing.T) {
 	for _, tc := range []struct {
 		txs       int
 		wantReads bool
-	}{{txs: 20, wantReads: false}, {txs: 2 * baseAccountPrefetchMinTxs, wantReads: true}} {
+	}{{txs: 20, wantReads: false}, {txs: baseAccountPrefetchMinTxs - 1, wantReads: false}, {txs: baseAccountPrefetchMinTxs, wantReads: true}} {
 		vm := state.NewVersionMap(bal)
-		vm.InitStamps(tc.txs - 1)
+		vm.InitStamps(tc.txs) // as exec does: the index of the block-end task, after the txs
 		db := &countingRoDB{}
 		cc := &commitmentCalculator{db: db, asOfReader: &asOfStateReader{}, baseAccounts: map[accounts.Address]*accounts.Account{}}
 		cc.prefetchBaseAccounts(t.Context(), vm, 0)
