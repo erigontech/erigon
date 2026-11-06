@@ -1269,9 +1269,9 @@ func TestRetryUnverifiedAnchorPayloadDoesNotCacheBlobMismatch(t *testing.T) {
 	require.False(t, graph.IsBlockInvalid(anchorRoot))
 
 	t.Run("late validation", func(t *testing.T) {
-		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, env.Message.Payload.BlockHash, execution_client.PayloadStatusValidated, env.Message.Payload.GasLimit)
+		status, recorded := store.MarkPayloadStatusAndGasLimitIfRetained(anchorRoot, env.Message.Payload.BlockHash, execution_client.PayloadStatusValidated, env.Message.Payload.GasLimit)
 		require.EqualValues(t, execution_client.PayloadStatusNone, status)
-		require.False(t, retained)
+		require.False(t, recorded)
 		require.True(t, graph.IsPayloadUnavailable(anchorRoot))
 	})
 	t.Run("redelivery", func(t *testing.T) {

@@ -628,16 +628,16 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		// Detect blob mismatches locally because remote Engine API responses lose Go error identity.
 		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
-			err := validatePayloadBlobHashes(payload, versionedHashes)
-			if errors.Is(err, misc.ErrMismatchBlobHashes) {
+			blobErr := validatePayloadBlobHashes(payload, versionedHashes)
+			if errors.Is(blobErr, misc.ErrMismatchBlobHashes) {
 				// Callers may reject the beacon root only after the payload matches its claimed block hash.
 				requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
-				if _, err := payload.RlpHeader(parentBlockRoot, requestsHash, nil); err != nil {
-					return execution_client.PayloadStatusInvalidated, err
+				if _, headerErr := payload.RlpHeader(parentBlockRoot, requestsHash, nil); headerErr != nil {
+					return execution_client.PayloadStatusInvalidated, headerErr
 				}
 			}
-			if err != nil {
-				return execution_client.PayloadStatusInvalidated, err
+			if blobErr != nil {
+				return execution_client.PayloadStatusInvalidated, blobErr
 			}
 		}
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)

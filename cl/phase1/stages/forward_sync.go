@@ -510,13 +510,13 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if err != nil {
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
-	status, retained := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+	status, recorded := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
 		anchorRoot,
 		env.Message.Payload.BlockHash,
 		status,
 		env.Message.Payload.GasLimit,
 	)
-	if !retained {
+	if !recorded {
 		return nil
 	}
 	if status == execution_client.PayloadStatusInvalidated {
