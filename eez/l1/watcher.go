@@ -229,37 +229,53 @@ func (w *Watcher) PollFinalized(ctx context.Context) ([]Event, error) {
 	return []Event{Finalized{Head: *f}}, nil
 }
 
+// pollFailure is how long one kind of poll has been failing.
+type pollFailure struct {
+	poll  string
+	since time.Time
+}
+
+// note logs a failed poll, at error level once the same poll has failed
+// for the grace, or the first success after failures.
+func (w *Watcher) note(ctx context.Context, f *pollFailure, err error) {
+	switch {
+	case err != nil && ctx.Err() == nil:
+		if f.since.IsZero() {
+			f.since = time.Now()
+		}
+		logFn := w.logger.Warn
+		if time.Since(f.since) > w.grace {
+			logFn = w.logger.Error
+		}
+		logFn("[eez] L1 poll failed, retrying", "event", "eez.l1_watcher.poll.failed", "poll", f.poll, "err", err)
+	case err == nil && !f.since.IsZero():
+		w.logger.Info("[eez] L1 poll recovered", "poll", f.poll, "failedFor", time.Since(f.since).Round(time.Second))
+		f.since = time.Time{}
+	}
+}
+
 // Run polls every interval, and whenever heads delivers, and sends the
 // events to out, reading finality every finalityEvery polls, until ctx ends
-// or a terminal error occurs. Transient read errors are logged and retried
-// on the next poll, at error level once polls have failed for a minute.
-// heads may be nil.
+// or a terminal error occurs. A transient read error is logged and retried
+// on the next head or finality poll, at error level once that poll has
+// failed for a minute. heads may be nil.
 func (w *Watcher) Run(ctx context.Context, interval time.Duration, finalityEvery int, heads <-chan struct{}, out chan<- Event) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	var failing time.Time
+	head, finality := pollFailure{poll: "head"}, pollFailure{poll: "finalized"}
 	for n := 0; ; n++ {
 		events, err := w.Poll(ctx)
-		if err == nil && finalityEvery > 0 && n%finalityEvery == 0 {
-			var fin []Event
-			fin, err = w.PollFinalized(ctx)
-			events = append(events, fin...)
-		}
-		switch {
-		case errors.Is(err, ErrReorgTooDeep) || errors.Is(err, ErrFinalityViolation):
+		if errors.Is(err, ErrReorgTooDeep) {
 			return err
-		case err != nil && ctx.Err() == nil:
-			if failing.IsZero() {
-				failing = time.Now()
+		}
+		w.note(ctx, &head, err)
+		if err == nil && finalityEvery > 0 && n%finalityEvery == 0 {
+			fin, err := w.PollFinalized(ctx)
+			if errors.Is(err, ErrFinalityViolation) {
+				return err
 			}
-			logFn := w.logger.Warn
-			if time.Since(failing) > w.grace {
-				logFn = w.logger.Error
-			}
-			logFn("[eez] L1 poll failed, retrying", "event", "eez.l1_watcher.poll.failed", "err", err)
-		case err == nil && !failing.IsZero():
-			w.logger.Info("[eez] L1 poll recovered", "failedFor", time.Since(failing).Round(time.Second))
-			failing = time.Time{}
+			w.note(ctx, &finality, err)
+			events = append(events, fin...)
 		}
 		for _, e := range events {
 			select {

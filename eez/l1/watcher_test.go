@@ -265,10 +265,53 @@ func TestWatcherRunLogsFailures(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 
 	logs := buf.String()
-	require.Equal(t, 6, strings.Count(logs, `msg="[eez] L1 poll failed, retrying" event=eez.l1_watcher.poll.failed err="connection refused"`))
+	require.Equal(t, 6, strings.Count(logs, `msg="[eez] L1 poll failed, retrying" event=eez.l1_watcher.poll.failed poll=head err="connection refused"`))
 	require.Contains(t, logs, `lvl=warn msg="[eez] L1 poll failed, retrying"`)
 	require.Contains(t, logs, `lvl=eror msg="[eez] L1 poll failed, retrying"`)
-	require.Contains(t, logs, `lvl=info msg="[eez] L1 poll recovered" failedFor=`)
+	require.Contains(t, logs, `lvl=info msg="[eez] L1 poll recovered" poll=head failedFor=`)
+}
+
+// unfinalized fails finalized reads until fails reads have failed, while
+// head reads succeed.
+type unfinalized struct {
+	*recording.MemoryChain
+	fails, reads atomic.Int32
+}
+
+func (u *unfinalized) Finalized(ctx context.Context) (*l1.Header, error) {
+	u.reads.Add(1)
+	if u.fails.Add(-1) >= 0 {
+		return nil, errors.New("finalized: connection refused")
+	}
+	return u.MemoryChain.Finalized(ctx)
+}
+
+// TestWatcherRunLogsFinalityFailures: the head polls between finality polls
+// neither end nor restart a finality failure, which escalates past the grace
+// and recovers on the first finality read that succeeds.
+func TestWatcherRunLogsFinalityFailures(t *testing.T) {
+	r := &unfinalized{MemoryChain: linear(t, 3)}
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	w := l1.NewWatcher(r, l1.DefaultReorgDepth, logger)
+	require.NoError(t, w.Seed(t.Context(), 3))
+	w.SetGrace(20 * time.Millisecond)
+	r.fails.Store(8)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx, 5*time.Millisecond, 2, nil, make(chan l1.Event)) }()
+	require.Eventually(t, func() bool { return r.reads.Load() >= 10 }, 10*time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	logs := buf.String()
+	require.Contains(t, logs, `lvl=eror msg="[eez] L1 poll failed, retrying"`)
+	require.Equal(t, 1, strings.Count(logs, `msg="[eez] L1 poll recovered"`), logs)
+	require.Less(t, strings.LastIndex(logs, `poll failed`), strings.Index(logs, `poll recovered`))
+	require.Contains(t, logs, `lvl=eror msg="[eez] L1 poll failed, retrying" event=eez.l1_watcher.poll.failed poll=finalized`)
+	require.Contains(t, logs, `lvl=info msg="[eez] L1 poll recovered" poll=finalized`)
 }
 
 // TestSeedAtFirstServedBlock seeds the ring with the ancestors the source
