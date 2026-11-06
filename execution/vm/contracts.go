@@ -656,14 +656,12 @@ func modexpU256(dst, base, exp, mod []byte) {
 	bitAt := func(i int) int { return int(exp[i>>3]>>(7-i&7)) & 1 }
 	w := 1
 	switch n := nbits - bits.LeadingZeros8(exp[0]); {
-	case n > 240:
-		w = 5
 	case n > 80:
 		w = 4
 	case n > 32:
 		w = 3
 	}
-	var odd [16]uint256.Int // odd[k] = b^(2k+1)
+	var odd [8]uint256.Int // odd[k] = b^(2k+1)
 	odd[0] = b
 	if w > 1 {
 		var b2 uint256.Int
