@@ -119,6 +119,16 @@ func (c CaplinConfig) IsDevnet() bool {
 	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
 }
 
+// SnapshotBlobsFromSlot is the cutoff for filtering blob snapshot downloads. The download filter
+// sizes the serving window from the built-in config of the chain, so a custom beacon config,
+// whose window may be longer, downloads every blob segment and leaves the cut to pruning.
+func (c CaplinConfig) SnapshotBlobsFromSlot() uint64 {
+	if c.IsDevnet() {
+		return 0
+	}
+	return c.BlobsArchiveFromSlot
+}
+
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
