@@ -362,7 +362,7 @@ func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
 		require.NoError(t, os.WriteFile(f, nil, 0o644))
 	}
 
-	removeMergedFiles(info)
+	removeMergedFiles(info, nil)
 
 	for _, f := range files {
 		require.NoFileExists(t, f)
@@ -1903,4 +1903,41 @@ func TestMergeRemovesBuiltOutputsWhenALaterTypeFails(t *testing.T) {
 			require.True(exists, "%s: an input must stay on disk", in.FileName())
 		}
 	}
+}
+
+// A sole input of the merged range with an older segment version resolves to the output's index names: a failed
+// merge must not remove the index the input still uses.
+func TestMergeAbortKeepsTheIndexOfASameRangeInput(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	lastType := snaptype2.BlockSnapshotTypes[len(snaptype2.BlockSnapshotTypes)-1]
+	createTestSegmentFile(t, 0, 10_000, lastType.Enum(), dir, version.V1_0, logger)
+	createTestSegmentFile(t, 10_000, 20_000, lastType.Enum(), dir, version.V1_0, logger)
+	for _, snT := range snaptype2.BlockSnapshotTypes[:len(snaptype2.BlockSnapshotTypes)-1] {
+		createTestSegmentOnlyFile(t, 0, 20_000, snT.Enum(), dir, version.V1_0, logger)
+		for _, idxName := range snT.IdxFileNames(0, 20_000) { // the current index names, as a merge output's
+			idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{KeyCount: 1, BucketSize: 10, TmpDir: dir, IndexFile: filepath.Join(dir, idxName), LeafSize: 8}, logger)
+			require.NoError(err)
+			idx.DisableFsync()
+			require.NoError(idx.AddKey([]byte{1}, 0))
+			require.NoError(idx.Build(t.Context()))
+			idx.Close()
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	s.dirty[lastType.Enum()].Scan(func(seg *DirtySegment) bool {
+		seg.closeSeg() // its merge fails after the earlier types are built
+		return false
+	})
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	require.Error(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000)}, s.Dir(), false, nil, nil))
+
+	headersIdx := filepath.Join(dir, snaptype2.Headers.IdxFileNames(0, 20_000)[0])
+	exists, err := dir2.FileExist(headersIdx)
+	require.NoError(err)
+	require.True(exists, "%s: the input's index must stay on disk", filepath.Base(headersIdx))
 }

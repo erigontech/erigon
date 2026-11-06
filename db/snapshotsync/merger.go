@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -89,11 +90,18 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
-func removeMergedFiles(sn snaptype.FileInfo) {
+// removeMergedFiles removes a merge output's files, except an index an input still uses: a same-range input with an
+// older segment version resolves to the output's index names.
+func removeMergedFiles(sn snaptype.FileInfo, inputs []*DirtySegment) {
 	_ = dir.RemoveFile(sn.Path)
 	_ = dir.RemoveFile(sn.Path + ".torrent")
 	for _, idx := range sn.Type.IdxFileNames(sn.From, sn.To) {
 		idxPath := filepath.Join(filepath.Dir(sn.Path), idx)
+		if slices.ContainsFunc(inputs, func(in *DirtySegment) bool {
+			return slices.ContainsFunc(in.indexes, func(x *recsplit.Index) bool { return x != nil && x.FilePath() == idxPath })
+		}) {
+			continue
+		}
 		_ = dir.RemoveFile(idxPath)
 		_ = dir.RemoveFile(idxPath + ".torrent")
 	}
@@ -115,7 +123,7 @@ func (m *Merger) mergeSubSegment(
 		}
 		if err != nil {
 			newDirtySegment.close()
-			removeMergedFiles(sn)
+			removeMergedFiles(sn, toMerge)
 		}
 	}()
 	if len(toMerge) == 0 {
@@ -229,6 +237,7 @@ func (m *Merger) Merge(
 
 		built := make([]*DirtySegment, 0, len(snapTypes))
 		outputs := make([]snaptype.FileInfo, 0, len(snapTypes))
+		var inputs []*DirtySegment
 		builtFileNames := make([]string, 0, len(snapTypes))
 		samePathTypes := make(map[snaptype.Enum]struct{})
 		abort := func() { // a later OpenFolder must not adopt the outputs of an unfinished range
@@ -239,7 +248,7 @@ func (m *Merger) Merge(
 				_ = onDelete(ctx, slices.Clone(builtFileNames))
 			}
 			for i := range outputs {
-				removeMergedFiles(outputs[i])
+				removeMergedFiles(outputs[i], inputs)
 			}
 		}
 		for _, t := range snapTypes {
@@ -268,6 +277,7 @@ func (m *Merger) Merge(
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
 			built = append(built, newDirtySegment)
 			outputs = append(outputs, output)
+			inputs = append(inputs, toMerge[t.Enum()]...)
 			fileName := newDirtySegment.FilePath()
 			mergedFileNames = append(mergedFileNames, fileName)
 			builtFileNames = append(builtFileNames, fileName)
