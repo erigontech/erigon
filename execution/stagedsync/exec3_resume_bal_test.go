@@ -105,8 +105,11 @@ type resumeBALFixture struct {
 	senders  []common.Address
 	// wipeHistory drops the account, storage and code history after seeding.
 	wipeHistory bool
+	// smallSteps runs exec on steps of resumeBALStepSize, whose first edge is tx0.
+	smallSteps bool
 	// fromStateFiles moves the seeded state into the files of the first step and
-	// empties the state tables, as a snapshot sync leaves them.
+	// empties the state tables, as a snapshot sync leaves them. It implies
+	// smallSteps.
 	fromStateFiles bool
 	// noPrefixReceipts leaves the prefix's receipts out of the seed.
 	noPrefixReceipts bool
@@ -477,7 +480,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	var db kv.TemporalRwDB
-	if fx.fromStateFiles {
+	if fx.smallSteps || fx.fromStateFiles {
 		db = temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(resumeBALStepSize))
 	} else {
 		db = newResumeTestDB(t)
@@ -729,6 +732,45 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.NoError(t, err, "resume point %d", point)
 		require.NotNil(t, verdict, "resume point %d", point)
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
+	}
+}
+
+// TestResumedBlockChecksStateRoot pins that a block resumed mid-block has its
+// state root checked against the header, as when executed from its start, also
+// when it resumes at a step edge or crosses one.
+func TestResumedBlockChecksStateRoot(t *testing.T) {
+	base := newResumeBALFixture(t)
+	header := types.CopyHeader(base.block.HeaderNoCopy())
+	header.Root[0] ^= 0xff
+	wrongRoot := base.block.WithSeal(header)
+
+	for _, tc := range []struct {
+		name           string
+		point          resumePoint
+		smallSteps     bool
+		fromStateFiles bool
+	}{
+		{"full", fromBlockStart, false, false},
+		{"after block start", afterBlockInit, false, false},
+		{"after tx0", afterTx0, false, false},
+		{"before block end", beforeBlockEnd, false, false},
+		{"across a step edge", afterBlockInit, true, false},
+		{"at a step edge", afterTx0, true, false},
+		{"at the state files' step edge", afterTx0, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := *base
+			fx.smallSteps, fx.fromStateFiles = tc.smallSteps, tc.fromStateFiles
+			verdict, err := fx.exec(t, fx.block, tc.point)
+			require.NoError(t, err)
+			if verdict != nil {
+				t.Fatal(verdict.err)
+			}
+			verdict, err = fx.exec(t, wrongRoot, tc.point)
+			require.NoError(t, err)
+			require.NotNil(t, verdict, "a block with a wrong state root must be rejected")
+			require.ErrorIs(t, verdict.err, ErrWrongTrieRoot)
+		})
 	}
 }
 

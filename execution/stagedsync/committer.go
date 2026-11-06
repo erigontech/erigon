@@ -414,16 +414,11 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.state.ResetBlockFlags()
 			}
 		case cc.perBlockCompute(r.BlockNum):
-			if cc.lastComputedBlock == 0 && r.isPartial {
-				// First block resumed mid-block: compute (as serial does) to save
-				// trie state without checking the root.
-				cc.compute(ctx, targetOf(r), computeMode{label: "partial-block "})
-			} else {
-				// Per-block compute that validates the root, publishing only on
-				// mismatch (silent success keeps the bounded output channel from
-				// deadlocking).
-				cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
-			}
+			// Per-block compute that validates the root, publishing only on
+			// mismatch (silent success keeps the bounded output channel from
+			// deadlocking). A block resumed mid-block is no exception: the
+			// commitment it resumes from covers its executed prefix.
+			cc.compute(ctx, targetOf(r), computeMode{checkRoot: true})
 			if r.BlockNum+1 == cc.perBlockFrom {
 				// Flush the boundary block's pending update outside any changeset
 				// before the first window block's compute routes into its saved CS.
