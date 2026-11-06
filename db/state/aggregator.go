@@ -424,6 +424,11 @@ func (a *Aggregator) HistoryCompressions(domain kv.Domain) (efComp, vComp seg.Fi
 	return a.d[domain].History.InvertedIndex.Compression, a.d[domain].History.Compression
 }
 
+// ErrStateSaltNotFound reports that the state salt file is absent and this
+// caller may not create one. During bootstrap it arrives as a file of its own,
+// so a caller that races it can retry rather than treat the failure as final.
+var ErrStateSaltNotFound = errors.New("salt not found on ReloadSalt")
+
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {
@@ -431,7 +436,7 @@ func (a *Aggregator) reloadSalt() error {
 	}
 
 	if salt == nil {
-		return errors.New("salt not found on ReloadSalt")
+		return ErrStateSaltNotFound
 	}
 
 	for _, d := range a.d {

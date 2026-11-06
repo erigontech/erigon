@@ -25,7 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
@@ -41,6 +43,16 @@ func (s stubBlockRetire) BuildMissedIndicesIfNeed(_ context.Context, _ string, _
 	return s.err
 }
 
+// failingAggregator is stubAggregator with a BuildMissedAccessors that fails.
+type failingAggregator struct {
+	stubAggregator
+	err error
+}
+
+func (f failingAggregator) BuildMissedAccessors(_ context.Context, _ kv.RoDB, _ int, _ ...kv.BuildAccessorsOption) error {
+	return f.err
+}
+
 // The index salt lands as its own file during bootstrap, so a scan that runs
 // before it arrives fails for a reason that resolves itself. Reported as a
 // plain error it counts against the per-file quarantine, and a quarantined
@@ -54,6 +66,17 @@ func TestProductionIndexBuilder_SaltNotYetPresentPauses(t *testing.T) {
 	err := b.BuildMissedIndices(context.Background(), nil)
 	require.ErrorIs(t, err, validation.ErrPause,
 		"a scan that ran before the salt arrived must not count toward quarantine")
+}
+
+// The state salt is a second file with the same timing, and the E3 scan reaches
+// it through OpenFolder. Same condition, same treatment.
+func TestProductionIndexBuilder_StateSaltNotYetPresentPauses(t *testing.T) {
+	b := &productionIndexBuilder{
+		agg: failingAggregator{err: fmt.Errorf("open folder: %w", state.ErrStateSaltNotFound)},
+	}
+
+	err := b.BuildMissedIndices(context.Background(), nil)
+	require.ErrorIs(t, err, validation.ErrPause)
 }
 
 func TestProductionIndexBuilder_RealFailureIsNotAPause(t *testing.T) {
