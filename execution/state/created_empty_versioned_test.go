@@ -87,7 +87,16 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	require.True(t, hasBalance && bal.Deletes(),
 		"a withheld created-empty account emits the balance-deleted removal verdict, overriding its lingering during-tx cells")
 
+	_, hasSelfDestruct := writes.GetSelfDestruct(addr)
+	require.True(t, hasSelfDestruct, "the removal carries the self-destruct marker")
+
 	vm.FlushVersionedWrites(writes, true)
+	published, err := WithoutVanished(writes, vm, 0, false, &minimalStateReader{})
+	require.NoError(t, err)
+	_, hasSelfDestruct = published.GetSelfDestruct(addr)
+	_, hasBalance = published.GetBalance(addr)
+	require.False(t, hasSelfDestruct || hasBalance, "the removal of an absent account publishes no writes")
+
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
 	next.SetTxContext(1, 1)
