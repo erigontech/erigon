@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -215,7 +216,7 @@ func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *st
 		return
 	}
 	got, err := readBaseAccounts(ctx, bal, baseAccountReaders, func() (state.StateReader, func(), error) {
-		tx, err := cc.db.BeginTemporalRo(ctx) //nolint:gocritic // readBaseAccounts rolls it back through the returned func
+		tx, err := cc.db.BeginTemporalRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic // readBaseAccounts rolls it back through the returned func; no free reader skips the prefetch
 		if err != nil {
 			return nil, nil, err
 		}

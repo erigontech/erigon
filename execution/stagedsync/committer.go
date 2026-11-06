@@ -385,7 +385,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.curVersionMap = r.versionMap
 			if r.versionMap != cc.blockBaseVM {
 				cc.setBlockBase(r.versionMap, cc.asOfReader.dr.StateReaderAt(r.txNum))
-				cc.prefetchBaseAccounts(ctx, r.versionMap, r.txNum)
+				if !cc.computedAhead[r.blockNum] || dbg.BALShadowCompute { // a computed-ahead block touches nothing
+					cc.prefetchBaseAccounts(ctx, r.versionMap, r.txNum)
+				}
 			}
 			if perBlock {
 				base = cc.blockBase
