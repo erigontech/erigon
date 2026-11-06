@@ -19,9 +19,11 @@
 package btindex
 
 import (
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -47,16 +49,34 @@ func BenchmarkBuildBtreeIndex(b *testing.B) {
 	decomp, err := seg.NewDecompressor(generateKV(b, tmp, 32, 64, 4_000_000, logger, seg.CompressNone))
 	require.NoError(b, err)
 	defer decomp.Close()
+	var keys [][]byte
 	for g := decomp.MakeGetter(); g.HasNext(); {
+		k, _ := g.Next(nil)
+		keys = append(keys, k)
 		g.Skip()
 	}
+	rnd := rand.New(rand.NewPCG(1, 2))
 
 	indexPath := filepath.Join(tmp, "bench.bt")
 	var cached float64
+	var lookup time.Duration
 	for b.Loop() {
 		r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
 		require.NoError(b, BuildBtreeIndexWithDecompressor(indexPath, "", r, background.NewProgressSet(), tmp, 1, logger, false, statecfg.AccessorBTree))
 		cached += cachedMiB(b, indexPath)
+
+		start := time.Now()
+		bt, err := OpenBtreeIndexWithDecompressor(indexPath, seg.NewReader(decomp.MakeGetter(), seg.CompressNone))
+		require.NoError(b, err)
+		gr := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+		for range 200_000 {
+			_, _, _, found, err := bt.Get(keys[rnd.IntN(len(keys))], nil, gr)
+			require.NoError(b, err)
+			require.True(b, found)
+		}
+		bt.Close()
+		lookup += time.Since(start)
 	}
 	b.ReportMetric(cached/float64(b.N), "index-cached-MiB/op")
+	b.ReportMetric(float64(lookup.Nanoseconds())/float64(b.N), "lookup-ns/op")
 }
