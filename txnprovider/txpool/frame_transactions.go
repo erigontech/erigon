@@ -62,6 +62,10 @@ func (r frameRejection) applies(p *TxPool, generation uint64) bool {
 	return r.generation == generation
 }
 
+func (r frameRejection) validationResult() frameValidationResult {
+	return frameValidationResult{reason: r.reason, senderConflict: r.blocker != (common.Hash{})}
+}
+
 func (p *TxPool) RejectFramePrefix(hash common.Hash) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -209,7 +213,7 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 			continue
 		}
 		if rejection, ok := p.frameRejections.Get(string(txn.IDHash[:])); ok && rejection.applies(p, batch.generation) {
-			batch.results[txn] = frameValidationResult{reason: rejection.reason, senderConflict: rejection.blocker != (common.Hash{})}
+			batch.results[txn] = rejection.validationResult()
 			continue
 		}
 		result := frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
@@ -331,7 +335,7 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	rejected = rejected && rejection.applies(p, generation)
 	p.lock.Unlock()
 	if rejected {
-		return frameValidationResult{reason: rejection.reason, senderConflict: rejection.blocker != (common.Hash{})}, nil
+		return rejection.validationResult(), nil
 	}
 	var data bytes.Buffer
 	if err := txn.Txn.MarshalBinary(&data); err != nil {

@@ -219,12 +219,16 @@ func (t *testingImpl) CommitBlockV1(
 	return blockHash, nil
 }
 
-// lockedStatusPoll runs call under the engine lock, retrying while the execution
+// lockedPoll runs call under the engine lock, retrying while the execution
 // service reports busy, until the deadline expires.
-func (t *testingImpl) lockedStatusPoll(ctx context.Context, deadline time.Time, call func() (execmodule.ExecutionStatus, *string, error)) (status execmodule.ExecutionStatus, validationErr *string, busy bool, err error) {
+func (t *testingImpl) lockedPoll(ctx context.Context, deadline time.Time, call func() (bool, error)) (bool, error) {
 	t.server.lock.Lock()
 	defer t.server.lock.Unlock()
-	busy, err = waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
+	return waitForResponse(ctx, time.Until(deadline), call)
+}
+
+func (t *testingImpl) lockedStatusPoll(ctx context.Context, deadline time.Time, call func() (execmodule.ExecutionStatus, *string, error)) (status execmodule.ExecutionStatus, validationErr *string, busy bool, err error) {
+	busy, err = t.lockedPoll(ctx, deadline, func() (bool, error) {
 		var callErr error
 		status, validationErr, callErr = call()
 		if callErr != nil {
@@ -358,22 +362,14 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 
 	var payloadID uint64
-	execBusy, err := func() (bool, error) {
-		t.server.lock.Lock()
-		defer t.server.lock.Unlock()
-
-		var assembled execmodule.AssembleBlockResult
-		var err error
-		busy, err := waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
-			assembled, err = t.server.executionService.AssembleBlock(ctx, assembleParams)
-			if err != nil {
-				return false, err
-			}
-			return assembled.Busy, nil
-		})
+	execBusy, err := t.lockedPoll(ctx, deadline, func() (bool, error) {
+		assembled, err := t.server.executionService.AssembleBlock(ctx, assembleParams)
+		if err != nil {
+			return false, err
+		}
 		payloadID = assembled.PayloadID
-		return busy, err
-	}()
+		return assembled.Busy, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -382,20 +378,14 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 
 	var assembled execmodule.AssembledBlockResult
-	execBusy, err = func() (bool, error) {
-		t.server.lock.Lock()
-		defer t.server.lock.Unlock()
-
+	execBusy, err = t.lockedPoll(ctx, deadline, func() (bool, error) {
 		var err error
-		busy, err := waitForResponse(ctx, time.Until(deadline), func() (bool, error) {
-			assembled, err = t.server.executionService.GetAssembledBlock(ctx, payloadID)
-			if err != nil {
-				return false, err
-			}
-			return assembled.Busy, nil
-		})
-		return busy, err
-	}()
+		assembled, err = t.server.executionService.GetAssembledBlock(ctx, payloadID)
+		if err != nil {
+			return false, err
+		}
+		return assembled.Busy, nil
+	})
 	if err != nil {
 		return nil, 0, err
 	}
