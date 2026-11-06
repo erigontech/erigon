@@ -838,6 +838,7 @@ func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 		t.Run(fmt.Sprintf("sequence %d", nonce), func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			backend := pool.ethBackend.(*frameValidationBackend)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 2, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			add := func(key, nonce uint64, want txpoolcfg.DiscardReason) *TxnSlot {
 				t.Helper()
 				frame := framePoolSlotWithNonce(t, sender, nonce, 1, 2, uint256.Int{key})
@@ -871,6 +872,57 @@ func TestFramePoolSenderPolicyRejectionCache(t *testing.T) {
 			}))
 			add(2, nonce, txpoolcfg.Success)
 			require.Len(t, backend.calls, 2, "removing the conflicting frame must allow retry without waiting for a block")
+		})
+	}
+}
+
+func TestFramePoolConsumedNonceBeforeSenderConflict(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%t", cached), func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			blocker := framePoolSlotWithNonce(t, sender, 1, 1, 2)
+			if cached {
+				// A keyed frame can remain pooled while the account nonce advances.
+				blocker = framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			} else {
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			}
+			var txns TxnSlots
+			txns.Append(blocker, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			candidate := framePoolSlot(t, sender, 1, 2)
+			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, *candidate.Txn.GetChainID(), log.New())
+			submit := func(want txpoolproto.ImportResult, reason txpoolcfg.DiscardReason) {
+				t.Helper()
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{candidate.Rlp}})
+				require.NoError(t, err)
+				require.Equal(t, []string{reason.String()}, reply.Errors)
+				require.Equal(t, []txpoolproto.ImportResult{want}, reply.Imported)
+			}
+			if cached {
+				submit(txpoolproto.ImportResult_INVALID, txpoolcfg.InvalidFrame)
+				rejection, ok := pool.frameRejections.Get(string(candidate.IDHash[:]))
+				require.True(t, ok)
+				require.Equal(t, common.Hash(blocker.IDHash), rejection.blocker)
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				require.Contains(t, pool.byHash, string(blocker.IDHash[:]))
+			}
+			calls := len(backend.calls)
+			for range 2 {
+				submit(txpoolproto.ImportResult_STALE, txpoolcfg.NonceTooLow)
+			}
+			require.Len(t, backend.calls, calls, "consumed account nonces do not need simulation")
+			require.NotContains(t, pool.byHash, string(candidate.IDHash[:]))
+			if cached {
+				change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+				change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				submit(txpoolproto.ImportResult_INVALID, txpoolcfg.InvalidFrame)
+			}
 		})
 	}
 }
