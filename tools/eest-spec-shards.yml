@@ -32,6 +32,11 @@
 #                                      the runner's RAM. Opt-in-true on purpose:
 #                                      a false-valued key is invisible to jq's
 #                                      // default and to GitHub's loose ==.
+#   evm-timeout-minutes   (optional) — wall-clock limit of the evm run. On expiry the
+#                                      run gets SIGQUIT (GOTRACEBACK=all), so a hang
+#                                      leaves its goroutine dump in the log, and the
+#                                      shard fails. Set it well above a healthy run:
+#                                      quiet stretches of over 10 min are normal.
 #   run                   (optional) — blocktest --run fork regex for race shards.
 #                                      Read by run-eest-spec-test.sh (to filter the
 #                                      run) and tools/check-eest-shard-coverage.sh
@@ -244,6 +249,7 @@
   max-allowed-failures: 0
   expected-tests: 111893
   commitment-parallel: true
+  evm-timeout-minutes: 25 # a healthy run takes ~12 min
   exclude:
     - *declined_eip7610_files
     - '/\.meta/'
