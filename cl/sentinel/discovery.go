@@ -106,6 +106,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 
 	ctx, cancel := context.WithTimeout(s.ctx, subnetSearchTimeout)
 	defer cancel()
+	// The filter skips non-matching nodes inside Next, so a walk would outlive the timeout unless it is closed.
+	defer context.AfterFunc(ctx, filteredIterator.Close)()
 
 	checked := 0
 	maxChecks := 2000 // Higher limit since we're searching for multiple subnets
@@ -239,7 +241,6 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 
 			// Find peers for all underserved subnets in one pass
 			s.findPeersForSubnets(underserved)
-			backoff.record(underserved, time.Now())
 
 			// Log post-search global coverage
 			postCoverage := s.getSubnetCoverage()
@@ -285,42 +286,39 @@ func coversUnderservedSubnet(peerSubnets bitfield.Bitvector64, coverage *[attest
 	return false
 }
 
-// subnetSearchBackoff spaces out the searches for subnets whose last search found no peer. On a network with few
-// nodes some subnets have fewer subscribers than minimumPeersPerSubnet; without it they would be the emptiest subnets
-// in every cycle and take all of its places, so the subnets that can be filled would never be searched.
+// subnetSearchBackoff spaces out the searches for subnets that a search did not raise. On a network with few nodes
+// some subnets have fewer subscribers than minimumPeersPerSubnet; without it they would be the emptiest subnets in
+// every cycle and take all of its places, so the subnets that can be filled would never be searched. A search is
+// judged by the coverage it leaves, not by the peers it dialled: most dialled peers do not stay, for example nodes of
+// another network that fail the handshake.
 type subnetSearchBackoff struct {
-	delay   [attestationSubnetCount]time.Duration
-	retryAt [attestationSubnetCount]time.Time
+	delay    [attestationSubnetCount]time.Duration
+	retryAt  [attestationSubnetCount]time.Time
+	searched [attestationSubnetCount]bool // searched in the last cycle, judged in this one
+	before   [attestationSubnetCount]int  // its coverage when searched
 }
 
-// next returns the subnets for the next search: the underserved ones that are not backing off, the emptiest first.
+// next judges the last search and returns the subnets for the next one: the underserved ones that are not backing off,
+// the emptiest first.
 func (b *subnetSearchBackoff) next(coverage *[attestationSubnetCount]int, now time.Time) []subnetSearchState {
-	b.clearServed(coverage)
+	for i, count := range coverage {
+		switch {
+		case count >= minimumPeersPerSubnet, b.searched[i] && count > b.before[i]:
+			b.delay[i], b.retryAt[i] = 0, time.Time{}
+		case b.searched[i]:
+			b.delay[i] = min(max(2*b.delay[i], subnetSearchInterval), maxSubnetSearchBackoff)
+			b.retryAt[i] = now.Add(b.delay[i])
+		}
+		b.searched[i] = false
+	}
 	subnets := slices.DeleteFunc(underservedSubnets(coverage), func(s subnetSearchState) bool {
 		return now.Before(b.retryAt[s.idx])
 	})
-	return subnets[:min(len(subnets), maxSubnetsPerCycle)]
-}
-
-// record backs off each searched subnet that got no peer and clears the others.
-func (b *subnetSearchBackoff) record(searched []subnetSearchState, now time.Time) {
-	for _, s := range searched {
-		if s.found > 0 {
-			b.delay[s.idx], b.retryAt[s.idx] = 0, time.Time{}
-			continue
-		}
-		b.delay[s.idx] = min(max(2*b.delay[s.idx], subnetSearchInterval), maxSubnetSearchBackoff)
-		b.retryAt[s.idx] = now.Add(b.delay[s.idx])
+	subnets = subnets[:min(len(subnets), maxSubnetsPerCycle)]
+	for _, s := range subnets {
+		b.searched[s.idx], b.before[s.idx] = true, coverage[s.idx]
 	}
-}
-
-// clearServed forgets the backoff of subnets that reached minimumPeersPerSubnet, so a later shortage starts over.
-func (b *subnetSearchBackoff) clearServed(coverage *[attestationSubnetCount]int) {
-	for i, count := range coverage {
-		if count >= minimumPeersPerSubnet {
-			b.delay[i], b.retryAt[i] = 0, time.Time{}
-		}
-	}
+	return subnets
 }
 
 // peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions

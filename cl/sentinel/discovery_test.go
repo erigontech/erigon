@@ -18,6 +18,7 @@ package sentinel
 
 import (
 	"context"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,10 @@ import (
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover"
+	"github.com/erigontech/erigon/p2p/enode"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -381,10 +386,24 @@ func TestSubnetSearchBackoffLetsFillableSubnetsTakeTheirTurn(t *testing.T) {
 	first := backoff.next(&coverage, now)
 	require.Len(t, first, maxSubnetsPerCycle)
 	require.Equal(t, minimumPeersPerSubnet, first[0].wanted, "the emptiest subnets come first")
-	backoff.record(first, now) // nothing found
 
-	second := backoff.next(&coverage, now.Add(subnetSearchInterval/2))
+	// The search did not raise any of them.
+	second := backoff.next(&coverage, now.Add(subnetSearchInterval))
 	require.Equal(t, []int{maxSubnetsPerCycle, maxSubnetsPerCycle + 1, maxSubnetsPerCycle + 2, maxSubnetsPerCycle + 3}, subnetIdxs(second))
+}
+
+// A search that connects peers which do not stay, such as nodes of another network that fail the handshake, has not
+// helped the subnet.
+func TestSubnetSearchBackoffJudgesASearchByTheCoverageItLeaves(t *testing.T) {
+	coverage := coverageWith(minimumPeersPerSubnet)
+	coverage[5] = 0
+	var backoff subnetSearchBackoff
+	now := time.Now()
+
+	searched := backoff.next(&coverage, now)
+	require.Equal(t, []int{5}, subnetIdxs(searched))
+	searched[0].found = 3 // dialled, then dropped
+	require.Empty(t, backoff.next(&coverage, now.Add(subnetSearchInterval)))
 }
 
 func TestSubnetSearchBackoffDoublesUpToTheCap(t *testing.T) {
@@ -392,33 +411,60 @@ func TestSubnetSearchBackoffDoublesUpToTheCap(t *testing.T) {
 	coverage[5] = 0
 	var backoff subnetSearchBackoff
 	now := time.Now()
+	require.Equal(t, []int{5}, subnetIdxs(backoff.next(&coverage, now)))
 	for _, want := range []time.Duration{subnetSearchInterval, 2 * subnetSearchInterval, 4 * subnetSearchInterval, 8 * subnetSearchInterval, maxSubnetSearchBackoff, maxSubnetSearchBackoff} {
-		searched := backoff.next(&coverage, now)
-		require.Equal(t, []int{5}, subnetIdxs(searched))
-		backoff.record(searched, now)
+		now = now.Add(subnetSearchInterval) // the next cycle sees the search left the subnet empty
+		require.Empty(t, backoff.next(&coverage, now))
 		require.Empty(t, backoff.next(&coverage, now.Add(want-time.Millisecond)), "searched again before %v", want)
 		now = now.Add(want)
+		require.Equal(t, []int{5}, subnetIdxs(backoff.next(&coverage, now)), "not searched again after %v", want)
 	}
 }
 
-func TestSubnetSearchBackoffClearsOnAPeerOrOnceServed(t *testing.T) {
+func TestSubnetSearchBackoffClearsOnAGainOrOnceServed(t *testing.T) {
 	coverage := coverageWith(minimumPeersPerSubnet)
 	coverage[1], coverage[2] = 0, 0
 	var backoff subnetSearchBackoff
 	now := time.Now()
-	for range 3 {
-		searched := backoff.next(&coverage, now)
-		backoff.record(searched, now)
-		now = now.Add(maxSubnetSearchBackoff)
+	require.Equal(t, []int{1, 2}, subnetIdxs(backoff.next(&coverage, now)))
+
+	coverage[1] = 1 // the search raised subnet 1 but not subnet 2
+	now = now.Add(subnetSearchInterval)
+	require.Equal(t, []int{1}, subnetIdxs(backoff.next(&coverage, now)), "a raised subnet is searched again at once")
+
+	coverage[2] = minimumPeersPerSubnet // other connections fill subnet 2 while it backs off
+	now = now.Add(time.Second)
+	require.Empty(t, backoff.next(&coverage, now))
+	coverage[2] = 0 // and it loses them again
+	now = now.Add(time.Second)
+	require.Equal(t, []int{2}, subnetIdxs(backoff.next(&coverage, now)), "a served subnet starts over")
+}
+
+// A discv5 walk that finds no node blocks in Next; the search must still end when its context does.
+func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	db, err := enode.OpenDBEx(t.Context(), "", t.TempDir(), log.Root())
+	require.NoError(t, err)
+	defer db.Close()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	listener, err := discover.ListenV5(t.Context(), conn, enode.NewLocalNode(db, key), discover.Config{PrivateKey: key, Log: log.Root()})
+	require.NoError(t, err)
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	s := &Sentinel{ctx: ctx, listener: listener, cfg: &SentinelConfig{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.findPeersForSubnets([]subnetSearchState{{idx: 0, wanted: 1}})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the search outlived its context")
 	}
-
-	searched := backoff.next(&coverage, now)
-	require.Equal(t, []int{1, 2}, subnetIdxs(searched))
-	searched[0].found = 1 // subnet 1 got a peer
-	backoff.record(searched, now)
-	coverage[2] = minimumPeersPerSubnet // subnet 2 was filled by other connections
-	backoff.next(&coverage, now)
-	coverage[2] = 0 // and lost them again
-
-	require.Equal(t, []int{1, 2}, subnetIdxs(backoff.next(&coverage, now.Add(time.Millisecond))))
 }
