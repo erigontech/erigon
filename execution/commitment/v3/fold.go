@@ -116,7 +116,7 @@ func branchRefs(n *node, refStore *[16][32]byte) (refLens [16]uint8, err error) 
 			continue
 		}
 		if n.leafMask&bit == 0 {
-			if err = foldBranchChild(n, nib, &refStore[nib]); err != nil {
+			if err := foldBranchChild(n, nib, &refStore[nib]); err != nil {
 				return refLens, err
 			}
 			refLens[nib] = 32
