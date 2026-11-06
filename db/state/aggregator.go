@@ -169,7 +169,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 	// them until the runner OOMs. All collector access is nil-safe.
 	if dbg.KVReadLevelledMetrics {
 		a.metricsCollector = kvmetrics.NewCollector()
-		a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
+		a.metricsCollector.Start()
 	}
 	return a, nil
 }
@@ -725,15 +725,15 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	a.WaitForFiles()
-	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
+	// Every caller must wait for maintenance before it can safely close the database.
+	// Keep the aggregator context alive until that work finishes.
+	firstClose := a.background.BeginClose()
+	a.background.Wait()
+	if !firstClose {
 		return
 	}
 	a.ctxCancel()
-	if a.metricsCollector != nil {
-		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
-	}
-	a.background.Wait()
+	a.metricsCollector.Stop()
 
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
