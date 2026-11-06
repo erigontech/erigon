@@ -160,7 +160,8 @@ func (c *ExecChain) Nonce(ctx context.Context, number uint64, addr common.Addres
 		if number > executed {
 			return fmt.Errorf("state after block %d: executed up to %d", number, executed)
 		}
-		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, 0, c.reader.TxnumReader())
+		// -1: before the next block's opening system calls.
+		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, -1, c.reader.TxnumReader())
 		if err != nil {
 			return err
 		}
@@ -183,7 +184,8 @@ func (c *ExecChain) Storage(ctx context.Context, number uint64, addr common.Addr
 		if number > executed {
 			return fmt.Errorf("state after block %d: executed up to %d", number, executed)
 		}
-		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, 0, c.reader.TxnumReader())
+		// -1: before the next block's opening system calls.
+		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, -1, c.reader.TxnumReader())
 		if err != nil {
 			return err
 		}
