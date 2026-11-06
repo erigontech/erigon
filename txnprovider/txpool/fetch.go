@@ -405,6 +405,28 @@ func (f *Fetch) keepAlternate(peer fetchPeer, hashes Hashes, sent time.Time) {
 // errPeerGone: sentry no longer knows the peer, so a request to it reaches no one.
 var errPeerGone = errors.New("peer gone")
 
+// keepAnnouncersOfTracked keeps the announcer of a hash the pool already knows but a request still tracks (its body
+// may yet fail validation) as an alternate, without a request. It returns the hashes a reply can still come back
+// for, in announcement order: the unknown ones and those tracked ones.
+func (f *Fetch) keepAnnouncersOfTracked(hashes, unknown Hashes, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) Hashes {
+	peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(peerID)}
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	var keep Hashes
+	for i, j := 0, 0; i < len(hashes); i += 32 {
+		h := hashes[i : i+32]
+		if j < len(unknown) && bytes.Equal(unknown[j:j+32], h) {
+			keep, j = append(keep, h...), j+32
+			continue
+		}
+		if r, ok := f.requested.Get(h); ok {
+			f.addAlternate(r, peer)
+			keep = append(keep, h...)
+		}
+	}
+	return keep
+}
+
 // addAlternate keeps an announcer to ask after the requested peer.
 func (f *Fetch) addAlternate(r *fetchRequest, peer fetchPeer) {
 	if peer != r.peer {
@@ -832,6 +854,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
+		f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId)
 		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 		if len(unknownHashes) > 0 {
 			if unsent, err := f.requestPooledTxns(sentryClient, req.PeerId, unknownHashes); err != nil {
@@ -857,10 +880,9 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
-		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
-		// won't come back for already-known txs, so entries for them would
-		// just sit unused in the LRU until evicted.
-		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, unknownHashes)
+		// Record only for hashes a reply can still come back for: unknown ones and tracked ones whose body
+		// is still queued for validation.
+		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId))
 		unknownHashes = f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 
 		if len(unknownHashes) > 0 {

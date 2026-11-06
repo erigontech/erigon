@@ -693,7 +693,9 @@ func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Has
 	defer p.lock.Unlock()
 	for i := 0; i < len(hashes); i += 32 {
 		hash, hashS := hashes[i:i+32], string(hashes[i:i+32])
-		if _, ok := p.unprocessedRemoteByHash[hashS]; ok {
+		_, inQueue := p.unprocessedRemoteByHash[hashS]
+		_, simulating := p.remoteFrames.pending[hashS] // a frame leaves the queue before its simulation ends
+		if inQueue || simulating {
 			queued = append(queued, hash...)
 			continue
 		}

@@ -936,7 +936,7 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 			}
 			var unknown Hashes
 			for i := 0; i < len(hashes); i += 32 {
-				if h := [32]byte(hashes[i : i+32]); !a.known[h] && !a.discarded[h] {
+				if h := [32]byte(hashes[i : i+32]); !a.known[h] && !a.discarded[h] && !a.queued[h] {
 					unknown = append(unknown, hashes[i:i+32]...)
 				}
 			}
@@ -1623,4 +1623,17 @@ func TestDisconnectedPeerIsNotKeptByALateAnnouncementOrFailedSend(t *testing.T) 
 	require.NoError(t, a.fetch.handleNewPeer(a.sentryClient, &sentryproto.PeerEvent{PeerId: gointerfaces.ConvertHashToH512(gone), EventId: sentryproto.PeerEvent_Connect}))
 	a.announce(t, gone, hashLate)
 	require.Contains(t, a.fetch.alternatesOf, fetchPeer{a.sentryClient, gone}, "a reconnected peer is an alternate again")
+}
+
+func TestAnnouncerOfAQueuedBodyIsKeptAsAlternate(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.queued = map[[32]byte]bool{hash: true} // A's body waits for validation, so the pool knows the hash
+	a.announce(t, peerB, hash)
+	require.Equal(t, [][64]byte{peerA}, a.requestedFrom, "a known hash is not requested again")
+	a.queued = nil // A's sidecar failed validation
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "the peer that announced while the body was queued is asked")
 }

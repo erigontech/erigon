@@ -205,16 +205,18 @@ func TestHeldOrQueuedIdHashesSeparatesHeldQueuedAndRejected(t *testing.T) {
 	held, queued, rejected, unknown, replaced := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}, common.Hash{5}
 	pool.byHash[string(held[:])] = &metaTxn{TxnSlot: &TxnSlot{IDHash: held}}
 	pool.unprocessedRemoteByHash[string(queued[:])] = &TxnSlot{IDHash: queued}
+	frame := common.Hash{6}
+	pool.remoteFrames.pending[string(frame[:])] = struct{}{} // left the remote queue, simulation still running
 	pool.discardReasonsLRU.Add(string(rejected[:]), txpoolcfg.UnmatchedBlobTxExt)
 	pool.discardReasonsLRU.Add(string(replaced[:]), txpoolcfg.ReplacedByHigherTip) // a refetched body would be dropped as known
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {                 // its pool row is not removed yet
 		return tx.Put(kv.PoolTransaction, rejected[:], []byte{1})
 	}))
 	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
-		gotHeld, gotQueued, err := pool.HeldOrQueuedIdHashes(tx, slices.Concat(held[:], queued[:], rejected[:], unknown[:], replaced[:]))
+		gotHeld, gotQueued, err := pool.HeldOrQueuedIdHashes(tx, slices.Concat(held[:], queued[:], rejected[:], unknown[:], replaced[:], frame[:]))
 		require.NoError(t, err)
 		require.Equal(t, Hashes(slices.Concat(held[:], replaced[:])), gotHeld, "a discard that a refetch cannot change ends the retries")
-		require.Equal(t, Hashes(queued[:]), gotQueued, "a rejected or unknown txn is neither held nor queued")
+		require.Equal(t, Hashes(slices.Concat(queued[:], frame[:])), gotQueued, "a rejected or unknown txn is neither held nor queued")
 		return nil
 	}))
 }
