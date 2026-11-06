@@ -1279,8 +1279,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			log.Warn("[blobsRecover] failed to remove column sidecars", "err", err, "slot", slot, "blockRoot", blockRoot, "columns", toRemove)
 		}
 		timeRemoveColumns := time.Since(beginRemoveColumns)
-		// Reconstructed columns are published on the subnets this node subscribes to, and stored if in custody.
-		subscribedToAll := d.publishColumns != nil && (d.IsArchivedMode() || d.caplinConfig.SubscribeAllTopics)
+		// Reconstructed columns are published on the subnets this node subscribes to, and stored if in custody. Recovery
+		// runs only on an archive node or a supernode, and a supernode has every column in custody.
+		subscribedToAll := d.publishColumns != nil && d.IsArchivedMode()
 		var toPublish []*cltypes.DataColumnSidecar
 		beginAddColumns := time.Now()
 		for columnIndex := range d.beaconConfig.NumberOfColumns {
@@ -1332,14 +1333,16 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 					continue
 				}
 			}
-			toPublish = append(toPublish, sidecar)
 			if !inCustody {
+				toPublish = append(toPublish, sidecar)
 				continue
 			}
+			// A published column is marked seen, so a column that failed to write is left for a gossip copy to store.
 			if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar); err != nil {
 				log.Warn("[blobsRecover] failed to write column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 				continue
 			}
+			toPublish = append(toPublish, sidecar)
 			log.Trace("[blobsRecover] added a custody data column", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 		}
 		if d.publishColumns != nil && len(toPublish) > 0 {

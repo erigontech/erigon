@@ -188,18 +188,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("failed to get block root: %w", err)
 	}
 
-	// A column this node does not store is still validated and relayed on a subscribed subnet. An archive node
-	// stores columns only until it can recover, or has recovered, the blobs.
-	var store bool
-	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		store = !s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) &&
-			!s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot)
-	} else {
-		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
-		if err != nil {
-			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
-		}
-		_, store = myCustodyColumns[msg.Index]
+	store, err := s.shouldStore(blockHeader.Slot, blockRoot, msg.Index)
+	if err != nil {
+		return err
 	}
 
 	blobParameters := s.cfg.GetBlobParameters(blockHeader.Slot / s.cfg.SlotsPerEpoch)
@@ -306,6 +297,21 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	return nil
 }
 
+// shouldStore reports whether the node stores a column it has validated. A column it does not store is still relayed
+// on a subscribed subnet. An archive node also stores columns outside custody until it can recover, or has recovered,
+// the blobs.
+func (s *dataColumnSidecarService) shouldStore(slot uint64, blockRoot common.Hash, index uint64) (bool, error) {
+	peerDas := s.forkChoice.GetPeerDas()
+	myCustodyColumns, err := peerDas.StateReader().GetMyCustodyColumns()
+	if err != nil {
+		return false, fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
+	}
+	if _, inCustody := myCustodyColumns[index]; inCustody {
+		return true, nil
+	}
+	return peerDas.IsArchivedMode() && !peerDas.IsColumnOverHalf(slot, blockRoot) && !peerDas.IsBlobAlreadyRecovered(blockRoot), nil
+}
+
 // PublishColumns marks each sidecar of one block as seen and publishes it on its subnet, unless the sidecar was seen
 // already. The sidecars must be on subnets this node subscribes to.
 func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
@@ -405,16 +411,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	var store bool
-	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		store = !s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) &&
-			!s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot)
-	} else {
-		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
-		if err != nil {
-			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
-		}
-		_, store = myCustodyColumns[msg.Index]
+	store, err := s.shouldStore(slot, blockRoot, msg.Index)
+	if err != nil {
+		return err
 	}
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
