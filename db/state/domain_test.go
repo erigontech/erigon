@@ -4352,6 +4352,16 @@ func TestDomainFileCacheDistinctKeysWithEqualHashDoNotAlias(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, found)
 	})
+	t.Run("history seek, miss first", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, _, err := dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found, "a cached miss of an equal-hash key must not hide a present key")
+		require.Equal(t, uint64(1), res.txNum)
+	})
 }
 
 func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
