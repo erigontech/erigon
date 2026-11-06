@@ -149,17 +149,17 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 		state:      evm.IntraBlockState(),
 		mintsValue: mintsValue(msg),
 		nonceless:  nonceless(msg),
-		gas:        executionGas(msg, gp),
+		gas:        executionGas(msg, gp, evm.ChainRules().IsAmsterdam),
 	}
 }
 
 // executionGas returns the gas msg executes with: its gas limit or, when it
-// takes its gas from the block, what the block has left up to that limit.
-func executionGas(msg Message, gp *GasPool) uint64 {
+// takes its gas from the block, at most the largest limit the block admits.
+func executionGas(msg Message, gp *GasPool, isAmsterdam bool) uint64 {
 	if !TakesGasFromBlock(msg) || gp == nil {
 		return msg.Gas()
 	}
-	return min(msg.Gas(), gp.ExecutionGasAvailable())
+	return min(msg.Gas(), MaxInclusionGas(gp, isAmsterdam, msg.SkipExecutionGasCap()))
 }
 
 // TakesGasFromBlock reports whether msg executes with the gas its block has

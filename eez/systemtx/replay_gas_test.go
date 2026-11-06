@@ -50,18 +50,19 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// amsterdamReplay holds a block whose native transaction, at index 1, encodes a
-// limit above what the Amsterdam receipts before it leave of the block limit.
+// amsterdamReplay holds a block of a transaction storing new slots and, at
+// index 1, a native transaction encoding the cap, with the cumulative gas of
+// the receipts the custom trace stage rewrote under Amsterdam.
 type amsterdamReplay struct {
-	m      *execmoduletester.ExecModuleTester
-	config *chain.Config
-	built  *types.BlockWithReceipts
+	m          *execmoduletester.ExecModuleTester
+	config     *chain.Config
+	built      *types.BlockWithReceipts
+	cumulative []uint64
 }
 
 // newAmsterdamReplay builds the block under Osaka, then rewrites the receipt
-// domain under Amsterdam, where the new storage slots of the transaction before
-// the native one cost several times their Osaka gas.
-func newAmsterdamReplay(t *testing.T) *amsterdamReplay {
+// domain under Amsterdam, where each new slot costs state gas.
+func newAmsterdamReplay(t *testing.T, slots byte) *amsterdamReplay {
 	t.Helper()
 	eezl2 := protocol.RollupXEEZL2Address
 	filler := common.HexToAddress("0x00000000000000000000000000000000000f111e")
@@ -71,9 +72,9 @@ func newAmsterdamReplay(t *testing.T) *amsterdamReplay {
 	genesis.Alloc[derivertest.UserAddress()] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)}
 	// JUMPDEST PUSH1 0 JUMP: EEZL2 burns all the gas it gets.
 	genesis.Alloc[eezl2] = types.GenesisAccount{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}}
-	// Stores i in slot i, for i from 150 down to 1.
+	// Stores i in slot i, for i from slots down to 1.
 	genesis.Alloc[filler] = types.GenesisAccount{Code: []byte{
-		byte(vm.PUSH2), 0, 150,
+		byte(vm.PUSH2), 0, slots,
 		byte(vm.JUMPDEST), byte(vm.DUP1), byte(vm.DUP1), byte(vm.SSTORE),
 		byte(vm.PUSH1), 1, byte(vm.SWAP1), byte(vm.SUB),
 		byte(vm.DUP1), byte(vm.PUSH1), 3, byte(vm.JUMPI),
@@ -108,6 +109,7 @@ func newAmsterdamReplay(t *testing.T) *amsterdamReplay {
 	}, []types.Transaction{user, native}, common.Hash{}, common.Hash{})
 	require.NoError(t, err)
 	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[0].Status)
+	require.Equal(t, protocol.NativeTxGasCap, built.Block.Transactions()[1].GetGasLimit())
 
 	amsterdam := *m.ChainConfig
 	amsterdam.AmsterdamTime = common.NewUint64(0)
@@ -117,13 +119,7 @@ func newAmsterdamReplay(t *testing.T) *amsterdamReplay {
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 		return rawdb.WriteChainConfig(tx, parent.Hash(), &amsterdam)
 	}))
-
-	limit := built.Block.Transactions()[1].GetGasLimit()
-	cumulative := domainCumulative(t, m, 1, len(built.Receipts))
-	require.Less(t, l2.BlockGasLimit-cumulative[0], limit)
-	// Execution gas alone counts against the transaction, as in block execution.
-	require.Equal(t, limit, cumulative[1]-cumulative[0])
-	return &amsterdamReplay{m: m, config: &amsterdam, built: built}
+	return &amsterdamReplay{m: m, config: &amsterdam, built: built, cumulative: domainCumulative(t, m, 1, len(built.Receipts))}
 }
 
 // traceGasUsed returns the gas debug_traceTransaction reports for txn.
@@ -169,10 +165,14 @@ func generatedGasUsed(t *testing.T, m *execmoduletester.ExecModuleTester, cc *ch
 // TestReplayEncodedGasAmsterdam checks that a replay runs a native transaction
 // with the limit it encodes, not with what the receipts before it leave.
 func TestReplayEncodedGasAmsterdam(t *testing.T) {
-	r := newAmsterdamReplay(t)
+	r := newAmsterdamReplay(t, 128)
 	native := r.built.Block.Transactions()[1]
-	require.Equal(t, native.GetGasLimit(), traceGasUsed(t, r.m, native), "debug_traceTransaction")
-	require.Equal(t, native.GetGasLimit(), generatedGasUsed(t, r.m, r.config, r.built.Block, 1), "GetReceipt")
+	limit := native.GetGasLimit()
+	require.Less(t, r.built.Block.GasLimit()-r.cumulative[0], limit)
+	// The block's gas before it, the larger of its regular and state gas, leaves it its limit.
+	require.Equal(t, limit, r.cumulative[1]-r.cumulative[0])
+	require.Equal(t, limit, traceGasUsed(t, r.m, native), "debug_traceTransaction")
+	require.Equal(t, limit, generatedGasUsed(t, r.m, r.config, r.built.Block, 1), "GetReceipt")
 }
 
 // TestReplayGasFromBlock checks that up to Osaka a replay runs a type-0x76

@@ -17,11 +17,13 @@
 package protocol
 
 import (
+	"cmp"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -29,10 +31,14 @@ import (
 
 func TestGasFromBlock(t *testing.T) {
 	const msgGas = 100_000
+	amsterdam := chain.TestChainOsakaConfig.Copy()
+	amsterdam.AmsterdamTime = common.NewUint64(0)
 	for _, tc := range []struct {
 		name      string
+		cfg       *chain.Config
 		fromBlock bool
 		blockLeft uint64
+		stateLeft uint64 // blockLeft when 0
 		used      uint64
 		err       error
 	}{
@@ -40,6 +46,8 @@ func TestGasFromBlock(t *testing.T) {
 		{name: "block has less", fromBlock: true, blockLeft: 50_000, used: 50_000},
 		{name: "block below intrinsic gas", fromBlock: true, blockLeft: 20_000, err: ErrIntrinsicGas},
 		{name: "reserved limit", blockLeft: 50_000, err: ErrGasLimitReached},
+		{name: "block has less state gas", cfg: amsterdam, fromBlock: true, blockLeft: 200_000, stateLeft: 50_000, used: 50_000},
+		{name: "block has less regular gas", cfg: amsterdam, fromBlock: true, blockLeft: 50_000, stateLeft: 200_000, used: 50_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
@@ -49,9 +57,9 @@ func TestGasFromBlock(t *testing.T) {
 			msg := mintingMsg(new(uint256.Int), 0)
 			msg.ChangeGas(0, msgGas)
 			msg.SetGasFromBlock(tc.fromBlock)
-			gp := NewGasPool(tc.blockLeft, 0)
+			gp := NewBlockGasPool(tc.blockLeft, cmp.Or(tc.stateLeft, tc.blockLeft), 0)
 
-			res, err := ApplyMessage(newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000), msg, gp, true, false, nil)
+			res, err := ApplyMessage(newTestEVM(ibs, cmp.Or(tc.cfg, chain.TestChainOsakaConfig), 30_000_000), msg, gp, true, false, nil)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 				require.Equal(t, tc.blockLeft, gp.Gas())

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -128,6 +129,23 @@ func TestCustomTraceGasFromBlockAmsterdam(t *testing.T) {
 	require.Equal(t, l2.BlockGasLimit-blockGas, got[1]-got[0])
 }
 
+// TestCustomTraceStateGasAmsterdam checks that the custom trace stage and
+// debug_traceBlock count a block's gas from Amsterdam as the larger of its
+// regular and state gas: the state gas of new slots leaves a later native
+// transaction less than it encodes. That limit is above what the block admits;
+// here it only exposes the count.
+func TestCustomTraceStateGasAmsterdam(t *testing.T) {
+	const slots = 150
+	r := newAmsterdamReplay(t, slots)
+	left := r.built.Block.GasLimit() - slots*params.StateGasPerStorageSet
+	require.Less(t, left, r.built.Block.Transactions()[1].GetGasLimit())
+	require.Equal(t, left, r.cumulative[1]-r.cumulative[0], "custom trace stage")
+	// The header holds the block's Osaka gas, which the trace's assert-mode check compares.
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+	require.Equal(t, left, traceBlockGasUsed(t, r.m, false)[1], "debug_traceBlock")
+}
+
 // refunder clears a slot for the refund and burns gas down to 100000.
 var refunder = common.HexToAddress("0x00000000000000000000000000000000000fe1d0")
 
@@ -193,35 +211,46 @@ func TestTraceBlockGasFromBlock(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m, _, built := systemTxAfter(t, user.to, user.data)
 			receipts := built.Receipts
-			api := jsonrpc.NewPrivateDebugAPI(
-				jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
-				m.DB, nil, &rpccfg.DebugApiConfig{})
-			tracer := "callTracer"
 			for _, noRefunds := range []bool{false, true} {
-				var buf bytes.Buffer
-				stream := jsonstream.New(&buf)
-				require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &tracer, NoRefunds: &noRefunds}, stream))
-				require.NoError(t, stream.Flush())
-				var traces []struct {
-					Error  json.RawMessage `json:"error"`
-					Result struct {
-						GasUsed hexutil.Uint64 `json:"gasUsed"`
-					} `json:"result"`
-				}
-				require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
-				require.Len(t, traces, len(receipts))
-				require.Empty(t, traces[0].Error)
-				require.Empty(t, traces[1].Error)
+				gas := traceBlockGasUsed(t, m, noRefunds)
+				require.Len(t, gas, len(receipts))
 				// The option shows: the transaction before reports other gas than its receipt.
 				if noRefunds {
-					require.NotEqual(t, receipts[0].GasUsed, uint64(traces[0].Result.GasUsed))
+					require.NotEqual(t, receipts[0].GasUsed, gas[0])
 				} else {
-					require.Equal(t, receipts[0].GasUsed, uint64(traces[0].Result.GasUsed))
+					require.Equal(t, receipts[0].GasUsed, gas[0])
 				}
-				require.Equal(t, receipts[1].GasUsed, uint64(traces[1].Result.GasUsed), "noRefunds %v", noRefunds)
+				require.Equal(t, receipts[1].GasUsed, gas[1], "noRefunds %v", noRefunds)
 			}
 		})
 	}
+}
+
+// traceBlockGasUsed returns the gas debug_traceBlockByNumber reports for each
+// transaction of block 1.
+func traceBlockGasUsed(t *testing.T, m *execmoduletester.ExecModuleTester, noRefunds bool) []uint64 {
+	t.Helper()
+	api := jsonrpc.NewPrivateDebugAPI(
+		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+		m.DB, nil, &rpccfg.DebugApiConfig{})
+	tracer := "callTracer"
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), &tracersConfig.TraceConfig{Tracer: &tracer, NoRefunds: &noRefunds}, stream))
+	require.NoError(t, stream.Flush())
+	var traces []struct {
+		Error  json.RawMessage `json:"error"`
+		Result struct {
+			GasUsed hexutil.Uint64 `json:"gasUsed"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
+	gas := make([]uint64, len(traces))
+	for i, trace := range traces {
+		require.Empty(t, trace.Error, "transaction %d", i)
+		gas[i] = uint64(trace.Result.GasUsed)
+	}
+	return gas
 }
 
 // domainCumulative returns the cumulative gas the receipt domain holds for the n

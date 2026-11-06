@@ -3258,7 +3258,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			if chainTx, ok := txTask.(*exec.TxTask); ok && be.gasPool != nil {
 				// A message that takes its gas from the block ran with the
 				// block limit; it re-runs with what the block has left.
-				stale, err := chainTx.BindBlockGas(be.gasPool.ExecutionGasAvailable())
+				stale, err := chainTx.BindBlockGas(be.gasPool)
 				if err != nil {
 					return nil, err
 				}

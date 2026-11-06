@@ -443,7 +443,7 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 
 type historicalResultProcessor struct {
 	blockResult BlockResult
-	blockGas    uint64 // gas the block counts so far, which from Amsterdam is not its receipts'
+	blockGas    protocol.GasUsed // gas the block counts so far, which from Amsterdam is not its receipts'
 	replay      *HistoricalTraceWorker
 }
 
@@ -470,8 +470,8 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		}
 
 		if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
-			left := txTask.BlockGasLimit()
-			left -= min(left, p.blockGas)
+			limit := txTask.BlockGasLimit()
+			left := protocol.NewBlockGasPool(limit-min(limit, p.blockGas.BlockExecution), limit-min(limit, p.blockGas.BlockState), 0)
 			stale, err := txTask.BindBlockGas(left)
 			if err != nil {
 				return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, err)
@@ -482,7 +482,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
 				}
 			}
-			p.blockGas += result.ExecutionResult.BlockExecutionGasUsed
+			p.blockGas.AddResult(&result.ExecutionResult)
 		}
 
 		receipt, err := result.CreateNextReceipt(prev)
@@ -528,7 +528,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			p.blockResult = BlockResult{}
-			p.blockGas = 0
+			p.blockGas = protocol.GasUsed{}
 			stopedAtBlockEnd = true
 			if forceStopAtBlockEnd {
 				break

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -323,43 +324,59 @@ func TestChargesSenderAtValidation(t *testing.T) {
 func TestBindBlockGas(t *testing.T) {
 	const capped = 16_777_216
 	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	newTask := func(fromBlock bool) *TxTask {
+	amsterdam := chain.TestChainOsakaConfig.Copy()
+	amsterdam.AmsterdamTime = common.NewUint64(0)
+	newTask := func(fromBlock bool, cfg *chain.Config) *TxTask {
 		msg := types.NewMessage(accounts.InternAddress(common.Address{1}), accounts.InternAddress(to), 0, new(uint256.Int), capped,
 			new(uint256.Int), new(uint256.Int), new(uint256.Int), nil, nil, false, false, false, true, nil)
 		msg.SetGasFromBlock(fromBlock)
 		return &TxTask{
 			Header:  &types.Header{GasLimit: 30_000_000},
 			Txs:     types.Transactions{&types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to, GasLimit: capped}}},
-			Config:  chain.TestChainOsakaConfig,
+			Config:  cfg,
 			message: msg,
 		}
 	}
 
-	task := newTask(false)
-	stale, err := task.BindBlockGas(1_000_000)
+	task := newTask(false, chain.TestChainOsakaConfig)
+	stale, err := task.BindBlockGas(protocol.NewGasPool(1_000_000, 0))
 	require.NoError(t, err)
 	require.False(t, stale)
 	require.Equal(t, uint64(capped), task.InclusionGas())
 	require.Equal(t, uint64(30_000_000), task.GasPool().ExecutionGasAvailable())
 
 	// The block has more than the cap left: the block-limit run stands.
-	task = newTask(true)
-	stale, err = task.BindBlockGas(20_000_000)
+	task = newTask(true, chain.TestChainOsakaConfig)
+	stale, err = task.BindBlockGas(protocol.NewGasPool(20_000_000, 0))
 	require.NoError(t, err)
 	require.False(t, stale)
 	require.Equal(t, uint64(capped), task.InclusionGas())
 
 	// Less: the run is stale until it re-runs with what is left.
-	task = newTask(true)
-	stale, err = task.BindBlockGas(10_000_000)
+	task = newTask(true, chain.TestChainOsakaConfig)
+	stale, err = task.BindBlockGas(protocol.NewGasPool(10_000_000, 0))
 	require.NoError(t, err)
 	require.True(t, stale)
 	require.Equal(t, uint64(10_000_000), task.InclusionGas())
 	require.Equal(t, uint64(10_000_000), task.GasPool().ExecutionGasAvailable())
-	stale, err = task.BindBlockGas(10_000_000)
+	stale, err = task.BindBlockGas(protocol.NewGasPool(10_000_000, 0))
 	require.NoError(t, err)
 	require.False(t, stale)
 
 	task.ResetTx(1, 0)
 	require.Equal(t, uint64(30_000_000), task.GasPool().ExecutionGasAvailable())
+
+	// From Amsterdam the block's state gas also bounds what it leaves.
+	task = newTask(true, amsterdam)
+	stale, err = task.BindBlockGas(protocol.NewBlockGasPool(20_000_000, 10_000_000, 0))
+	require.NoError(t, err)
+	require.True(t, stale)
+	require.Equal(t, uint64(10_000_000), task.InclusionGas())
+	require.Equal(t, uint64(10_000_000), task.GasPool().ExecutionGasAvailable())
+	task = newTask(true, amsterdam)
+	stale, err = task.BindBlockGas(protocol.NewBlockGasPool(10_000_000, 20_000_000, 0))
+	require.NoError(t, err)
+	require.True(t, stale)
+	require.Equal(t, uint64(10_000_000), task.InclusionGas())
+	require.Equal(t, uint64(10_000_000), task.GasPool().ExecutionGasAvailable())
 }

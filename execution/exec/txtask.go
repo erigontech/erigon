@@ -426,15 +426,17 @@ func (t *TxTask) GasPool() *protocol.GasPool {
 	return protocol.NewGasPool(gasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
 }
 
-// BindBlockGas records left, the gas the block has left before the task,
-// when the task's message takes its gas from the block; later executions get
-// a pool of left. It reports whether the last execution ran with other gas,
-// which the per-invocation pool of the block limit gives before binding.
-func (t *TxTask) BindBlockGas(left uint64) (stale bool, err error) {
+// BindBlockGas records the gas the block's pool gp leaves before the task, the
+// largest limit gp admits, when the task's message takes its gas from the
+// block; later executions get a pool of that gas. It reports whether the last
+// execution ran with other gas, which the per-invocation pool of the block
+// limit gives before binding.
+func (t *TxTask) BindBlockGas(gp *protocol.GasPool) (stale bool, err error) {
 	msg, err := t.TxMessage()
 	if err != nil || msg == nil || !msg.GasFromBlock() {
 		return false, err
 	}
+	left := protocol.MaxInclusionGas(gp, t.Rules().IsAmsterdam, false)
 	executed := t.BlockGasLimit()
 	if prev := t.blockGas.Swap(&left); prev != nil {
 		executed = *prev

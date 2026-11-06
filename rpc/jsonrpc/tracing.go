@@ -174,7 +174,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				GasPrice:   *msg.GasPrice(),
 				BlobHashes: msg.BlobHashes(),
 			}
-			gasLeft := block.GasLimit() - min(block.GasLimit(), gasUsed.BlockExecution)
+			gasLeft := block.GasLimit() - min(block.GasLimit(), gasUsed.BlockGasUsed())
 			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, gasLeft, config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
