@@ -163,7 +163,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 	return cache.GetWithTxNum(key)
 }
 
-// getCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
 // when the code domain cache is not a CodeCache (defensive fallback).
 //
@@ -171,7 +171,7 @@ func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64,
 // for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
 // patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
 // entry.
-func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
+func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return nil, false
