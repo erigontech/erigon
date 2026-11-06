@@ -18,13 +18,17 @@ package storage
 
 import (
 	"context"
-	"github.com/erigontech/erigon/db/kv"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // productionIndexBuilder satisfies lifecycle.IndexBuilder by triggering
@@ -101,18 +105,29 @@ func (b *productionIndexBuilder) BuildMissedIndices(ctx context.Context, primary
 		if err := b.blockRetire.BuildMissedIndicesIfNeed(ctx, "storage-lifecycle", b.notifier); err != nil {
 			logger.Warn("[storage-lifecycle] E2 BuildMissedIndicesIfNeed failed",
 				"trigger", primaryName, "elapsed", time.Since(start), "err", err)
-			return err
+			return asPause(err)
 		}
 	}
 	if b.agg != nil {
 		if err := b.agg.BuildMissedAccessors(ctx, b.chainDB, b.indexWorkers); err != nil {
 			logger.Warn("[storage-lifecycle] E3 BuildMissedAccessors failed",
 				"trigger", primaryName, "elapsed", time.Since(start), "err", err)
-			return err
+			return asPause(err)
 		}
 	}
 
 	logger.Info("[storage-lifecycle] BuildMissedIndices done",
 		"trigger", primaryName, "elapsed", time.Since(start))
 	return nil
+}
+
+// asPause marks the build failures that resolve themselves, so the driver
+// retries the file instead of counting it toward quarantine. The salt arrives
+// as a file of its own during bootstrap, and a scan that runs before it does
+// fails for every file at once.
+func asPause(err error) error {
+	if errors.Is(err, snaptype.ErrSaltNotFound) {
+		return fmt.Errorf("%w: %w", validation.ErrPause, err)
+	}
+	return err
 }

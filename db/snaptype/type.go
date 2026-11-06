@@ -113,6 +113,11 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 	return &salt, nil
 }
 
+// ErrSaltNotFound reports that the salt file is absent and this caller may not
+// create one. During bootstrap it arrives as a file of its own, so a caller
+// that races it can retry rather than treat the failure as final.
+var ErrSaltNotFound = errors.New("salt not found in GetIndexSalt")
+
 // GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
 // and existing indices have salt in metadata.
@@ -130,7 +135,7 @@ func GetIndexSalt(baseDir string, logger log.Logger) (uint32, error) {
 	}
 	if saltp == nil {
 		logger.Error("salt not found", "stack", dbg.Stack())
-		return 0, errors.New("salt not found in GetIndexSalt")
+		return 0, ErrSaltNotFound
 	}
 	salt = *saltp
 
