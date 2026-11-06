@@ -158,7 +158,7 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 	if b.FromSlot < frozenBlobs {
 		return fmt.Errorf("slots below %d are served from blob segments, which this command does not repair; use --from-slot=%d or later", frozenBlobs, frozenBlobs)
 	}
-	if err := db.View(ctx, func(tx kv.Tx) error { return checkRangeIndexed(tx, b.FromSlot, b.ToSlot) }); err != nil {
+	if err := db.View(ctx, func(tx kv.Tx) error { return checkRangeIndexed(ctx, tx, b.FromSlot, b.ToSlot) }); err != nil {
 		return err
 	}
 	recorder := &writeErrRecorder{BlobStorage: store}
@@ -194,7 +194,7 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 // past the local head, or in a stretch the backfill never wrote. Blocks are linked by their parent
 // roots, from the first block of the range back below it and from the last one to the next block
 // after the range, so an empty slot is one the chain itself skipped.
-func checkRangeIndexed(tx kv.Tx, from, to uint64) error {
+func checkRangeIndexed(ctx context.Context, tx kv.Tx, from, to uint64) error {
 	head, _, err := beacon_indicies.ReadCanonicalHead(tx)
 	if err != nil {
 		return err
@@ -225,6 +225,9 @@ func checkRangeIndexed(tx kv.Tx, from, to uint64) error {
 		return nil
 	}
 	for slot := from; ; slot++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return err
@@ -239,8 +242,15 @@ func checkRangeIndexed(tx kv.Tx, from, to uint64) error {
 			break
 		}
 	}
-	// Empty slots at the end of the range are empty only if the next block follows the last one.
+	// Empty slots at the end of the range are empty only if the next block follows the last one. A
+	// range that ends on a block has none, and a gap after it is not this range's to prove.
+	if prevRoot != (common.Hash{}) && prevSlot == to {
+		return nil
+	}
 	for slot := to + 1; slot <= head; slot++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return err

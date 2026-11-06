@@ -403,11 +403,16 @@ func TestBlobArchiveStoreFillRefusesSlotsBelowTheFrozenFrontier(t *testing.T) {
 
 // A stretch the index does not cover reads as empty slots; the run must refuse it rather than
 // report it as checked. The gap is inside the range, before its first block, or after its last.
+// A range that ends on a block has no trailing empty slots, so a gap after it does not matter.
 func TestBlobArchiveStoreFillRefusesAnUnindexedStretch(t *testing.T) {
-	for name, tc := range map[string]struct{ from, to uint64 }{
-		"inside":   {fillTestSlot, fillTestSlot + 3},
-		"leading":  {fillTestSlot + 1, fillTestSlot + 3},
-		"trailing": {fillTestSlot, fillTestSlot + 2},
+	for name, tc := range map[string]struct {
+		from, to uint64
+		refused  bool
+	}{
+		"inside":              {fillTestSlot, fillTestSlot + 3, true},
+		"leading":             {fillTestSlot + 1, fillTestSlot + 3, true},
+		"trailing":            {fillTestSlot, fillTestSlot + 2, true},
+		"ends before the gap": {fillTestSlot, fillTestSlot, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFillFixture(t)
@@ -417,9 +422,25 @@ func TestBlobArchiveStoreFillRefusesAnUnindexedStretch(t *testing.T) {
 			url, _ := f.endpoint(false)
 
 			err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: tc.from, ToSlot: tc.to}, nil)
-			require.ErrorContains(t, err, "not in the local index")
+			if tc.refused {
+				require.ErrorContains(t, err, "not in the local index")
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
+}
+
+// The index check reads every slot of the range, so it has to stop when the run is cancelled.
+func TestCheckRangeIndexedStopsWhenCancelled(t *testing.T) {
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot, 0)
+	ctx, cancel := context.WithCancel(t.Context())
+	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
+		cancel()
+		require.ErrorIs(t, checkRangeIndexed(ctx, tx, fillTestSlot, fillTestSlot), context.Canceled)
+		return nil
+	}))
 }
 
 func cloneSidecar(t *testing.T, sidecar *cltypes.BlobSidecar) *cltypes.BlobSidecar {
