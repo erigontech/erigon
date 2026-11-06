@@ -2889,9 +2889,10 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 		graph                dataAvailabilityForkGraph
 		wantError            string
 		wantStateUnavailable bool
+		wantReplayFailed     bool
 	}{
 		{name: "state", graph: dataAvailabilityForkGraph{block: block}, wantError: "state", wantStateUnavailable: true},
-		{name: "state error", graph: dataAvailabilityForkGraph{block: block, stateErr: &stateErr}, wantError: "state"},
+		{name: "state error", graph: dataAvailabilityForkGraph{block: block, stateErr: &stateErr}, wantError: "state", wantReplayFailed: true},
 		{name: "block", graph: dataAvailabilityForkGraph{state: blockState}, wantError: "block"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2906,6 +2907,7 @@ func TestValidateExecutionPayloadEnvelopeForGossipIgnoresUnavailableBlockData(t 
 			} else {
 				require.NotErrorIs(t, err, ErrExecutionPayloadEnvelopeStateUnavailable)
 			}
+			require.Equal(t, tc.wantReplayFailed, errors.Is(err, ErrExecutionPayloadEnvelopeStateReplayFailed))
 			require.ErrorContains(t, err, tc.wantError)
 			require.True(t, store.mu.TryLock())
 			store.mu.Unlock()
@@ -3921,6 +3923,17 @@ func TestExecutionPayloadApplyInFlightEndsWithARejectedEnvelope(t *testing.T) {
 
 	require.False(t, f.ExecutionPayloadApplyInFlight(root))
 	require.True(t, f.ExecutionPayloadReceivedBefore(root, time.Now().Add(time.Second)), "the arrival stays recorded")
+}
+
+func TestExecutionPayloadApplyInFlightCoversAcceptedImportBeforeApply(t *testing.T) {
+	root := common.Hash{1}
+	f := &ForkChoiceStore{}
+
+	finish := f.BeginPendingPayloadEnvelope(root)
+	require.True(t, f.ExecutionPayloadApplyInFlight(root))
+	require.False(t, f.ExecutionPayloadApplyInFlight(common.Hash{2}))
+	finish()
+	require.False(t, f.ExecutionPayloadApplyInFlight(root))
 }
 
 // availabilityRecordingForkGraph keeps the payload availability fork choice marks.
