@@ -49,7 +49,7 @@ func NewDataColumnStore(fs afero.Fs, beaconChainConfig *clparams.BeaconChainConf
 	impl := &dataColumnStorageImpl{
 		beaconChainConfig: beaconChainConfig,
 		emitters:          emitters,
-		bitmaps:           newColumnBitmaps(),
+		bitmaps:           newColumnBitmaps(maxColumnBitmaps),
 	}
 	impl.bucketStore.init(fs)
 	impl.slotLocks.initLocks()
@@ -129,10 +129,10 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 
 func (s *dataColumnStorageImpl) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
 	column := uint64(columnIndex)
-	// The gossip and peer-DAS paths call this per column, so it reads the floor without
-	// queueing behind a prune waiting on pruneMutex. A prune that raises the floor after this
-	// check removes the bucket after the answer, as it would after a stat.
-	if slot >= s.floor.Load() {
+	// Called per column from gossip and peer-DAS, so it must not queue behind a prune waiting
+	// on pruneMutex. A prune that raises the floor after this load removes the bucket after
+	// the answer, as it would after a stat.
+	if slot >= s.pruneFloor.Load() {
 		if stored, known := s.bitmaps.has(s.columnKey(slot, blockRoot), column); known {
 			return stored, nil
 		}
@@ -242,9 +242,6 @@ func (s *dataColumnStorageImpl) scanSavedColumns(slot uint64, key columnKey) ([]
 func (s *dataColumnStorageImpl) PruneBelow(slot uint64) error {
 	log.Debug("pruning data column sidecars", "cutoff_slot", slot)
 	err := s.pruneBelow(slot)
-	s.pruneMutex.RLock()
-	floor := s.pruneFloor
-	s.pruneMutex.RUnlock()
-	s.bitmaps.dropBelow(floor / subdivisionSlot)
+	s.bitmaps.dropBelow(s.pruneFloor.Load() / subdivisionSlot)
 	return err
 }

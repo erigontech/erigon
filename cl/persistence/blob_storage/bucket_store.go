@@ -52,13 +52,13 @@ var ErrPruneNotStarted = errors.New("prune did not start")
 // bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>.
 //
 // The caller picks the slot granularity. Reads need none: a write lands by rename, so a
-// reader sees the old file or the new one and never a partial. Writes do — see write.
+// reader sees the old file or the new one and never a partial. Writes do — see writeAdmitted.
 type bucketStore struct {
 	fs         afero.Fs
 	pruneMutex sync.RWMutex
-	pruneFloor uint64
-	// floor mirrors pruneFloor for readers that must not queue behind pruneMutex.
-	floor atomic.Uint64
+	// pruneFloor changes only under pruneMutex; it is atomic so readers that must not queue
+	// behind a pending prune can still load it.
+	pruneFloor atomic.Uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
 	bucketLocks []sync.RWMutex
@@ -83,7 +83,7 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 
 func (b *bucketStore) startWrite(slot uint64) bool {
 	b.pruneMutex.RLock()
-	if slot < b.pruneFloor {
+	if slot < b.pruneFloor.Load() {
 		b.pruneMutex.RUnlock()
 		return false
 	}
@@ -94,21 +94,13 @@ func (b *bucketStore) finishWrite() {
 	b.pruneMutex.RUnlock()
 }
 
-// write encodes v onto a temp file and renames it onto the target, so a failure
+// writeAdmitted encodes v onto a temp file and renames it onto the target, so a failure
 // never leaves a partial file where a reader would take it for a complete one.
-// created reports whether the target was absent beforehand.
+// created reports whether the target was absent beforehand. The caller holds startWrite.
 //
 // The temp name is derived from the target alone, so two writes of the same
 // (slot, root, idx) would share it and interleave into one file. Callers must
 // hold the stripe lock that serializes writes of that file.
-func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
-	if !b.startWrite(slot) {
-		return false, nil
-	}
-	defer b.finishWrite()
-	return b.writeAdmitted(slot, root, idx, v)
-}
-
 func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
 	l := b.forBucket(slot / subdivisionSlot)
 	l.RLock()
@@ -299,11 +291,10 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 		b.pruneMutex.Unlock()
 		return fmt.Errorf("%w: %w", ErrPruneNotStarted, err)
 	}
-	if slot > b.pruneFloor {
-		b.pruneFloor = slot
-		b.floor.Store(slot)
+	if slot > b.pruneFloor.Load() {
+		b.pruneFloor.Store(slot)
 	}
-	effectiveFloor := b.pruneFloor
+	effectiveFloor := b.pruneFloor.Load()
 	b.pruneMutex.Unlock()
 
 	cutoff := effectiveFloor / subdivisionSlot

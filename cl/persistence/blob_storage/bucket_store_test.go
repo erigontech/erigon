@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type removeAllFailingFs struct {
@@ -52,6 +54,14 @@ func (r *removeAllFailingFs) RemoveAll(path string) error {
 		return err
 	}
 	return r.Fs.RemoveAll(path)
+}
+
+func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
+	if !b.startWrite(slot) {
+		return false, nil
+	}
+	defer b.finishWrite()
+	return b.writeAdmitted(slot, root, idx, v)
 }
 
 func newBucketStore(t *testing.T, fs afero.Fs) *bucketStore {
@@ -183,7 +193,7 @@ func TestBucketStorePruneBelowPropagatesReaddirError(t *testing.T) {
 	b := newBucketStore(t, fs)
 
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), ErrPruneNotStarted)
-	require.Zero(t, b.pruneFloor)
+	require.Zero(t, b.pruneFloor.Load())
 }
 
 func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
@@ -219,30 +229,37 @@ func TestBucketStorePruneBelowKeepsABucketItCannotList(t *testing.T) {
 	require.Equal(t, []string{"0"}, rootEntryNames(t, mem), "an unlisted bucket's roots would leak with it")
 }
 
-// goneBucketFs reports a bucket as removed after pruneBelow listed it, as an overlapping
-// pruneBelow does.
-type goneBucketFs struct {
+// interleavingOpenFs runs during before the first Open of name returns, so a test can slip a
+// second pruneBelow between the first one's listing and its open of the bucket.
+type interleavingOpenFs struct {
 	afero.Fs
-	name string
+	name   string
+	during func()
+	ran    atomic.Bool
 }
 
-func (f goneBucketFs) Open(name string) (afero.File, error) {
-	if name == f.name {
-		return nil, os.ErrNotExist
+func (f *interleavingOpenFs) Open(name string) (afero.File, error) {
+	if name == f.name && f.ran.CompareAndSwap(false, true) {
+		f.during()
 	}
 	return f.Fs.Open(name)
 }
 
-func TestBucketStorePruneBelowTreatsABucketRemovedConcurrentlyAsPruned(t *testing.T) {
+func TestBucketStoreOverlappingPrunesBothSucceed(t *testing.T) {
 	mem := afero.NewMemMapFs()
 	makeBuckets(t, mem, "0", "1")
-	b := newBucketStore(t, goneBucketFs{Fs: mem, name: "0"})
-	var dropped int
-	b.dropRows = func(roots []common.Hash) error { dropped++; return nil }
+	require.NoError(t, afero.WriteFile(mem, "0/"+common.Hash{7}.String()+"_0", []byte{1}, 0o644))
+	fs := &interleavingOpenFs{Fs: mem, name: "0"}
+	b := newBucketStore(t, fs)
+	var dropped [][]common.Hash
+	b.dropRows = func(roots []common.Hash) error { dropped = append(dropped, roots); return nil }
+	var inner error
+	fs.during = func() { inner = b.pruneBelow(subdivisionSlot) }
 
-	require.NoError(t, b.pruneBelow(2*subdivisionSlot), "the other prune already removed the bucket and its rows")
-	require.Equal(t, 1, dropped)
-	require.Equal(t, []string{"0"}, rootEntryNames(t, mem))
+	require.NoError(t, b.pruneBelow(subdivisionSlot), "the bucket the other prune removed counts as pruned")
+	require.NoError(t, inner)
+	require.Equal(t, [][]common.Hash{{{7}}}, dropped, "the inner prune drops the rows once")
+	require.Equal(t, []string{"1"}, rootEntryNames(t, mem))
 }
 
 func TestBucketStoreLowerPruneRetriesTheEstablishedFloor(t *testing.T) {

@@ -93,6 +93,46 @@ func TestColumnWriteAfterSeedingUpdatesTheBitmap(t *testing.T) {
 	require.Zero(t, fs.stats.Load())
 }
 
+func TestFailedColumnWriteOfASeededRootLeavesItsBitClear(t *testing.T) {
+	fs := newFailingFs(afero.NewMemMapFs())
+	s := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter()).(*dataColumnStorageImpl)
+	root := common.Hash{1}
+	require.NoError(t, s.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1000, 0)))
+	require.Equal(t, []uint64{0}, savedColumns(t, s, 1000, root))
+	_, file := s.path(1000, root, 1)
+	fs.failWritesAfter(file+tmpSuffix, 1, errInducedFailure)
+
+	require.ErrorIs(t, s.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(1000, 1)), errInducedFailure)
+
+	require.Equal(t, []uint64{0}, savedColumns(t, s, 1000, root), "a column whose write failed has no file")
+	require.False(t, columnExists(t, s, 1000, root, 1))
+}
+
+// A full cache gives up its oldest bucket for a newer one, and does not cache a root older
+// than everything it holds: lookups of old slots are rare and the files still answer them.
+func TestColumnBitmapsEvictTheOldestBucketWhenFull(t *testing.T) {
+	s, _ := newStatCountingColumnStore(t)
+	s.bitmaps = newColumnBitmaps(2)
+	oldest, middle, newest, older := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	seed := func(root common.Hash, slot uint64) {
+		require.NoError(t, s.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0)))
+		require.Equal(t, []uint64{0}, savedColumns(t, s, slot, root))
+	}
+	seed(oldest, subdivisionSlot)
+	seed(middle, 2*subdivisionSlot)
+	seed(newest, 3*subdivisionSlot)
+	require.NotContains(t, s.bitmaps.entries, oldest)
+	require.Contains(t, s.bitmaps.entries, middle)
+	require.Contains(t, s.bitmaps.entries, newest)
+
+	seed(older, 100)
+	require.NotContains(t, s.bitmaps.entries, older)
+	require.Len(t, s.bitmaps.entries, 2)
+	require.True(t, columnExists(t, s, 100, older, 0))
+	require.True(t, columnExists(t, s, subdivisionSlot, oldest, 0))
+	require.Equal(t, map[uint64]int{2: 1, 3: 1}, s.bitmaps.perBucket)
+}
+
 func TestColumnLookupsOfAnUnstoredRootKeepNoEntry(t *testing.T) {
 	s, _ := newStatCountingColumnStore(t)
 	for i := range byte(16) {
@@ -347,4 +387,9 @@ func TestColumnBitmapsStayInStepWithTheFilesUnderConcurrency(t *testing.T) {
 	require.Equal(t, scanned, cached, "every set bit must have its file and every file its bit")
 	require.NotContains(t, s.bitmaps.entries, pruned)
 	require.False(t, columnExists(t, s, 100, pruned, 0))
+	counted := 0
+	for _, n := range s.bitmaps.perBucket {
+		counted += n
+	}
+	require.Len(t, s.bitmaps.entries, counted, "per-bucket counts must track the entries")
 }

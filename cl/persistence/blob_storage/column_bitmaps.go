@@ -24,28 +24,20 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// columnBitmaps remembers, per block root, which columns have a file on disk, so
-// GetSavedColumnIndex and ColumnSidecarExists answer without a stat per column. It lives in
-// memory only: after a restart the files decide again.
-//
-// An entry describes the files of one root in one bucket, at one column count. A caller
-// asking about another bucket or count gets no answer and goes to the files; a write or
-// remove for another bucket or count drops the entry.
-//
-// The caller keeps the bits in step with the files:
-//   - a bit is set after its file is in place and cleared after its file is removed, both
-//     under the root's lock. A lock-free reader is then at most as stale as a stat taken
-//     just before the unlink, and a remove that fails, which drops the entry, never hides
-//     a file still on disk;
-//   - an entry is seeded only from a full scan of the root's files under the root's lock, so
-//     no write or remove of that root, at any slot, interleaves with the scan;
-//   - entries are used and seeded only for slots at or above the prune floor, read under
-//     pruneMutex. pruneBelow removes only buckets under the floor's, so it never removes a
-//     file a used entry claims.
+// maxColumnBitmaps bounds the cache at about the default retention window, one root per slot.
+const maxColumnBitmaps = 1 << 17
+
+// columnBitmaps caches which columns of a root have a file, so lookups need no stat. An
+// entry is built from a scan of the root's files and answers only for that bucket and column
+// count. Callers set a bit after its file is written and clear it after its file is removed,
+// both under the root's lock, and use entries only at or above the prune floor.
 type columnBitmaps struct {
 	mu      sync.Mutex
 	entries map[common.Hash]*columnBitmap
-	dropped uint64
+	// perBucket counts entries per bucket, so a full cache can evict its oldest bucket.
+	perBucket map[uint64]int
+	limit     int
+	dropped   uint64
 }
 
 type columnBitmap struct {
@@ -60,8 +52,41 @@ type columnKey struct {
 	bucket, width uint64
 }
 
-func newColumnBitmaps() *columnBitmaps {
-	return &columnBitmaps{entries: map[common.Hash]*columnBitmap{}}
+func newColumnBitmaps(limit int) *columnBitmaps {
+	return &columnBitmaps{entries: map[common.Hash]*columnBitmap{}, perBucket: map[uint64]int{}, limit: limit}
+}
+
+// remove drops the root's entry. Callers hold c.mu.
+func (c *columnBitmaps) remove(root common.Hash) {
+	e, ok := c.entries[root]
+	if !ok {
+		return
+	}
+	delete(c.entries, root)
+	if c.perBucket[e.bucket]--; c.perBucket[e.bucket] == 0 {
+		delete(c.perBucket, e.bucket)
+	}
+}
+
+// makeRoom evicts the oldest bucket when the cache is full and reports whether an entry in
+// bucket may be added. Callers hold c.mu.
+func (c *columnBitmaps) makeRoom(bucket uint64) bool {
+	if len(c.entries) < c.limit {
+		return true
+	}
+	oldest := bucket
+	for b := range c.perBucket {
+		oldest = min(oldest, b)
+	}
+	if oldest == bucket {
+		return false
+	}
+	for root, e := range c.entries {
+		if e.bucket == oldest {
+			c.remove(root)
+		}
+	}
+	return true
 }
 
 // entry returns the root's entry when it describes k. Callers hold c.mu.
@@ -119,7 +144,12 @@ func (c *columnBitmaps) seed(k columnKey, columns []uint64) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.remove(k.root)
+	if !c.makeRoom(k.bucket) {
+		return
+	}
 	c.entries[k.root] = e
+	c.perBucket[k.bucket]++
 }
 
 // set marks a column whose file was just written. A root without an entry stays without
@@ -132,7 +162,7 @@ func (c *columnBitmaps) set(k columnKey, column uint64) {
 	}
 	e, ok := c.entry(k)
 	if !ok || column >= k.width {
-		delete(c.entries, k.root)
+		c.remove(k.root)
 		return
 	}
 	e.bits[column/8] |= 1 << (column % 8)
@@ -147,14 +177,14 @@ func (c *columnBitmaps) clear(k columnKey, column uint64) {
 	}
 	e, ok := c.entry(k)
 	if !ok {
-		delete(c.entries, k.root)
+		c.remove(k.root)
 		return
 	}
 	if column < k.width {
 		e.bits[column/8] &^= 1 << (column % 8)
 	}
 	if !slices.ContainsFunc(e.bits, func(b byte) bool { return b != 0 }) {
-		delete(c.entries, k.root)
+		c.remove(k.root)
 	}
 }
 
@@ -162,7 +192,7 @@ func (c *columnBitmaps) clear(k columnKey, column uint64) {
 func (c *columnBitmaps) forget(root common.Hash) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.entries, root)
+	c.remove(root)
 }
 
 // dropBelow frees the entries of buckets under bucket. They are never consulted once the
@@ -176,7 +206,7 @@ func (c *columnBitmaps) dropBelow(bucket uint64) {
 	c.dropped = bucket
 	for root, e := range c.entries {
 		if e.bucket < bucket {
-			delete(c.entries, root)
+			c.remove(root)
 		}
 	}
 }
