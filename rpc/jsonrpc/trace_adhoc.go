@@ -1603,6 +1603,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
+	var gasUsed protocol.GasUsed
 
 	for txIndex, msg := range msgs {
 		if isHistoricalStateReader && blockReplay {
@@ -1666,7 +1667,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if precompiles != nil {
 			evm.SetPrecompiles(precompiles)
 		}
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gas := msg.Gas()
+		if blockReplay && protocol.TakesGasFromBlock(msg) {
+			gas = header.GasLimit - min(header.GasLimit, gasUsed.BlockGasUsed())
+		}
+		gp := new(protocol.GasPool).AddGas(gas).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
 			tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
@@ -1678,6 +1683,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
+		gasUsed.AddResult(execResult)
 
 		if tracer != nil && tracer.Hooks.HasTxEndHook() {
 			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
@@ -1730,7 +1736,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 // doCall traces txn, transaction txIndex of its block; blockTxs, the block's
 // transactions, is set when the engine post-processes each transaction.
-func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
+func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.TemporalTx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txn types.Transaction, blockTxs types.Transactions, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
@@ -1827,7 +1833,10 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	gp, err := replayGasPool(dbtx, header, chainRules, msg, txIndex, baseTxNum+uint64(txIndex))
+	if err != nil {
+		return nil, err
+	}
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())

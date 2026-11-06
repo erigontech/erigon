@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -531,7 +532,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gp, err := replayGasPool(dbtx, lastHeader, lastRules, msg, txIndex, txNum)
+		if err != nil {
+			return nil, err
+		}
 		ibs.SetTxContext(blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
@@ -996,7 +1000,10 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				txCtx := protocol.NewEVMTxContext(job.msg)
 				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
-				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
+				gp, err := replayGasPool(workerTx, header, chainRules, job.msg, job.txIndex, baseTxNum+uint64(job.txIndex))
+				if err != nil {
+					return err
+				}
 
 				if tracer.Hooks.OnTxStart != nil {
 					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
@@ -1117,6 +1124,27 @@ func (api *TraceAPIImpl) callTransaction(
 
 	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, blockTxs, callParam,
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
+}
+
+// replayGasPool returns the gas pool of msg, the transaction at txIndex and txNum
+// of header's block, replayed without the transactions before it: a message
+// taking its gas from the block gets what the receipt domain says they left.
+// From Amsterdam it does not hold what a block counts, and the messages taking
+// gas from the block there encode all they get.
+func replayGasPool(tx kv.TemporalTx, header *types.Header, rules *chain.Rules, msg *types.Message, txIndex int, txNum uint64) (*protocol.GasPool, error) {
+	gas := msg.Gas()
+	if protocol.TakesGasFromBlock(msg) && !rules.IsAmsterdam {
+		var gasBefore uint64
+		// Before the first transaction the receipt domain still holds the previous block's gas.
+		if txIndex > 0 {
+			var err error
+			if gasBefore, _, _, err = rawtemporaldb.ReceiptAsOf(tx, txNum); err != nil {
+				return nil, err
+			}
+		}
+		gas = header.GasLimit - min(header.GasLimit, gasBefore)
+	}
+	return new(protocol.GasPool).AddGas(gas).AddBlobGas(msg.BlobGas()), nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter. As in
