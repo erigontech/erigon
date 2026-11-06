@@ -20,6 +20,8 @@
 package protocol
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -41,6 +43,29 @@ func PostProcessTx(engine rules.EngineReader, config *chain.Config, ibs *state.I
 		return nil
 	}
 	return p.PostProcessTx(config, ibs, txs, i)
+}
+
+// BindTxGas returns txn with the gas limit engine binds it to when gp is its
+// block's pool before it.
+func BindTxGas(engine rules.EngineReader, isAmsterdam bool, txn types.Transaction, gp *GasPool) (types.Transaction, error) {
+	b, ok := engine.(rules.TxGasBinder)
+	if !ok {
+		return txn, nil
+	}
+	return b.BindTxGas(txn, MaxInclusionGas(gp, isAmsterdam, false))
+}
+
+// CheckTxGas checks that txn has the gas limit engine binds it to when gp is
+// its block's pool before it.
+func CheckTxGas(engine rules.EngineReader, isAmsterdam bool, txn types.Transaction, gp *GasPool) error {
+	bound, err := BindTxGas(engine, isAmsterdam, txn, gp)
+	if err != nil {
+		return err
+	}
+	if have, want := txn.GetGasLimit(), bound.GetGasLimit(); have != want {
+		return fmt.Errorf("%w: %d, want %d", ErrGasLimitPosition, have, want)
+	}
+	return nil
 }
 
 type GasUsed struct {

@@ -20,15 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eez/protocol"
-	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -238,17 +235,10 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	if c.config.IsCancun(in.Time) {
 		params.ParentBeaconBlockRoot = &common.Hash{}
 	}
-	// A native transaction's gas limit is the gas its block leaves it: the
-	// block is rebuilt with the limits its receipts give until they agree.
-	var built *types.BlockWithReceipts
-	for bound := false; !bound; {
-		if built, err = c.assemble(ctx, in.Number, params); err != nil {
-			return nil, err
-		}
-		if txs, bound, err = bindNativeGas(txs, built.Receipts, gasLimit); err != nil {
-			return nil, fmt.Errorf("%w: block %d: %w", ErrRejected, in.Number, err)
-		}
-		params.CustomTxnProvider = staticTxns(txs)
+	// Assembly binds a native transaction's gas limit to its position.
+	built, err := c.assemble(ctx, in.Number, params)
+	if err != nil {
+		return nil, err
 	}
 	block := built.Block
 	if !in.Matches(block.Header()) {
@@ -306,40 +296,6 @@ func (c *ExecChain) assemble(ctx context.Context, number uint64, params *builder
 		return nil, fmt.Errorf("assemble block %d: no block", number)
 	}
 	return built, nil
-}
-
-// bindNativeGas sets the gas limit of every native transaction of txs to
-// what the block of receipts left it, and reports whether every limit
-// already was.
-func bindNativeGas(txs []types.Transaction, receipts types.Receipts, gasLimit uint64) ([]types.Transaction, bool, error) {
-	if len(receipts) != len(txs) {
-		return nil, false, fmt.Errorf("%d receipts for %d transactions", len(receipts), len(txs))
-	}
-	bound := true
-	out := txs
-	for i, tx := range txs {
-		native, ok := tx.(*systemtx.NativeTransaction)
-		if !ok {
-			continue
-		}
-		var cumulative uint64
-		if i > 0 {
-			cumulative = receipts[i-1].CumulativeGasUsed
-		}
-		body := native.Body()
-		if body.GasLimit = protocol.NativeTxGasLimit(gasLimit, cumulative); body.GasLimit == native.GetGasLimit() {
-			continue
-		}
-		rebound, err := systemtx.NewNative(body)
-		if err != nil {
-			return nil, false, err
-		}
-		if bound {
-			out, bound = slices.Clone(txs), false
-		}
-		out[i] = rebound
-	}
-	return out, bound, nil
 }
 
 func (c *ExecChain) Insert(ctx context.Context, blocks []*types.Block) error {

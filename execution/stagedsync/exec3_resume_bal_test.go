@@ -615,3 +615,98 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
 	}
 }
+
+// gasLeftAt records the gas its block admits at the transaction mark.
+type gasLeftAt struct {
+	rules.Engine
+	mark common.Hash
+	seen *uint64
+}
+
+func (b gasLeftAt) BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transaction, error) {
+	if txn.Hash() == b.mark {
+		*b.seen = gasLeft
+	}
+	return txn, nil
+}
+
+// boundAt binds the transaction mark to the gas its block admits less offset.
+type boundAt struct {
+	rules.Engine
+	mark   common.Hash
+	offset uint64
+}
+
+func (b boundAt) BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transaction, error) {
+	if txn.Hash() != b.mark || gasLeft-b.offset == txn.GetGasLimit() {
+		return txn, nil
+	}
+	return &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: gasLeft - b.offset}}, nil
+}
+
+// TestResumedBlockTxGas checks that a gas limit bound to its position is
+// checked in a block executed from its start, and left alone in a block
+// resumed after a transaction its gas pool then misses.
+func TestResumedBlockTxGas(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	base := fx.engine
+	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
+	observer := common.HexToAddress("0x0000000000000000000000000000000000000b22")
+	coinbase := common.HexToAddress("0x000000000000000000000000000000000000c01b")
+	signer := types.LatestSignerForChainID(fx.config.ChainID)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	txsWith := func(gas uint64) types.Transactions {
+		var txs types.Transactions
+		for _, txn := range []*types.LegacyTx{
+			{CommonTx: types.CommonTx{Nonce: 0, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
+			{CommonTx: types.CommonTx{Nonce: 1, To: &target, Value: *uint256.NewInt(1), GasLimit: 21_000}, GasPrice: *gasPrice},
+			{CommonTx: types.CommonTx{Nonce: 2, To: &observer, GasLimit: gas}, GasPrice: *gasPrice},
+		} {
+			signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
+			require.NoError(t, err)
+			txs = append(txs, signed)
+		}
+		return txs
+	}
+
+	// tx2's limit has to be what tx0 and tx1 leave of the block, less offset.
+	const offset = 29_000_000
+	var left uint64
+	txs := txsWith(1_000_000)
+	fx.engine = gasLeftAt{base, txs[2].Hash(), &left}
+	fx.assembleBlock(t, txs, coinbase)
+	require.Greater(t, left, uint64(offset+100_000))
+	bound, unbound := txsWith(left-offset), txsWith(left-offset-1)
+	fx.engine = boundAt{base, bound[2].Hash(), offset}
+	valid := fx.assembleBlock(t, bound, coinbase)
+	fx.engine = base
+	invalid := fx.assembleBlock(t, unbound, coinbase)
+
+	for _, tc := range []struct {
+		name   string
+		block  *types.Block
+		mark   common.Hash
+		offset uint64
+		point  resumePoint
+		err    error
+	}{
+		{"full/bound", valid, bound[2].Hash(), offset, fromBlockStart, nil},
+		{"full/unbound", invalid, unbound[2].Hash(), offset, fromBlockStart, protocol.ErrGasLimitPosition},
+		{"full/first unbound", valid, bound[0].Hash(), 0, fromBlockStart, protocol.ErrGasLimitPosition},
+		{"after block start/unbound", invalid, unbound[2].Hash(), offset, afterBlockInit, protocol.ErrGasLimitPosition},
+		{"after tx0/bound", valid, bound[2].Hash(), offset, afterTx0, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx.engine = boundAt{base, tc.mark, tc.offset}
+			verdict, err := fx.exec(t, tc.block, tc.point)
+			if verdict != nil {
+				err = verdict.err
+			}
+			if tc.err == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tc.err)
+		})
+	}
+}

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -109,5 +110,32 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		})
+	}
+}
+
+// offByOne binds every transaction to one more gas than it has.
+type offByOne struct{ rules.Engine }
+
+func (offByOne) BindTxGas(txn types.Transaction, _ uint64) (types.Transaction, error) {
+	return &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: txn.GetGasLimit() + 1}}, nil
+}
+
+// TestSerialResumedBlockTxGas checks that the serial executor checks a bound
+// gas limit in a block executed from its start and not in one resumed after a
+// transaction its gas pool then misses.
+func TestSerialResumedBlockTxGas(t *testing.T) {
+	for _, start := range []int{0, 1} {
+		se, task := newSerialFinalizeTestExec(t, offByOne{ethash.NewFaker()})
+		task.Txs = types.Transactions{
+			&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}},
+			&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}},
+		}
+		task.TxIndex = start
+		_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
+		if start == 0 {
+			require.ErrorIs(t, err, protocol.ErrGasLimitPosition)
+		} else {
+			require.NotErrorIs(t, err, protocol.ErrGasLimitPosition)
+		}
 	}
 }

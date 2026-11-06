@@ -133,14 +133,10 @@ func DecodeNativeTxBody(body []byte) (*NativeTx, error) {
 	return &tx, nil
 }
 
-// NativeTxGasLimit is the gas limit of a native transaction after
-// transactions that used cumulativeGasUsed of a block's gasLimit: what the
-// block has left, at most NativeTxGasCap.
-func NativeTxGasLimit(gasLimit, cumulativeGasUsed uint64) uint64 {
-	if cumulativeGasUsed >= gasLimit {
-		return 0
-	}
-	return min(gasLimit-cumulativeGasUsed, NativeTxGasCap)
+// NativeTxGasLimit is the gas limit of a native transaction where its block
+// admits gasLeft more gas: gasLeft, at most NativeTxGasCap.
+func NativeTxGasLimit(gasLeft uint64) uint64 {
+	return min(gasLeft, NativeTxGasCap)
 }
 
 // SourceHash identifies the complete cross-chain group at index of a Sync

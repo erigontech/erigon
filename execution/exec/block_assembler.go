@@ -374,6 +374,16 @@ LOOP:
 			break
 		}
 
+		bound, err := protocol.BindTxGas(ba.cfg.Engine, ba.cfg.ChainConfig.IsAmsterdam(header.Time), txn, gasPool)
+		if err != nil {
+			if ba.cfg.Strict {
+				return nil, true, notIncluded(txn, err)
+			}
+			logger.Debug(fmt.Sprintf("[%s] Could not bind transaction gas", logPrefix), "hash", txn.Hash(), "err", err)
+			continue
+		}
+		txn = bound
+
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
 		if rlpSpacePostTxn < 0 && ba.cfg.Strict {
 			return nil, true, notIncluded(txn, errors.New("block size limit"))

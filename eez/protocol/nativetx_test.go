@@ -157,10 +157,10 @@ func TestLiveHistoryTx(t *testing.T) {
 }
 
 func TestNativeTxGasLimit(t *testing.T) {
-	require.Equal(t, NativeTxGasCap, NativeTxGasLimit(30_000_000, 0))
-	require.Equal(t, NativeTxGasCap, NativeTxGasLimit(30_000_000, 30_000_000-NativeTxGasCap))
-	require.Equal(t, uint64(1_000), NativeTxGasLimit(30_000_000, 29_999_000))
-	require.Zero(t, NativeTxGasLimit(30_000_000, 30_000_000))
+	require.Equal(t, NativeTxGasCap, NativeTxGasLimit(30_000_000))
+	require.Equal(t, NativeTxGasCap, NativeTxGasLimit(NativeTxGasCap))
+	require.Equal(t, uint64(1_000), NativeTxGasLimit(1_000))
+	require.Zero(t, NativeTxGasLimit(0))
 }
 
 func TestNativeTxRejects(t *testing.T) {

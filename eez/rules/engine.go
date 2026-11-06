@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -73,6 +74,7 @@ type Engine struct {
 var (
 	_ rules.Engine          = (*Engine)(nil)
 	_ rules.TxPostProcessor = (*Engine)(nil)
+	_ rules.TxGasBinder     = (*Engine)(nil)
 
 	systemAddress       = accounts.InternAddress(protocol.SystemAddress)
 	nativeSystemAddress = accounts.InternAddress(protocol.NativeSystemAddress)
@@ -211,6 +213,22 @@ func (e *Engine) PostProcessTx(_ *chain.Config, ibs *state.IntraBlockState, txs 
 	return e.burnProtocolBalances(ibs)
 }
 
+// BindTxGas gives a rollupX v0.1 native transaction the gas its block admits,
+// at most protocol.NativeTxGasCap.
+func (e *Engine) BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transaction, error) {
+	native, ok := txn.(*systemtx.NativeTransaction)
+	if !ok || e.l2.RuleSet() != config.RollupXV01 {
+		return txn, nil
+	}
+	gas := protocol.NativeTxGasLimit(gasLeft)
+	if gas == native.GetGasLimit() {
+		return txn, nil
+	}
+	body := native.Body()
+	body.GasLimit = gas
+	return systemtx.NewNative(body)
+}
+
 func completesGroup(txs types.Transactions, i int) bool {
 	switch txs[i].Type() {
 	case protocol.NativeTxType:
@@ -289,16 +307,12 @@ func (e *Engine) ValidateBlockPostExecution(chainConfig *chain.Config, header *t
 
 // validateV01 checks the positions of the rollupX v0.1 system transactions:
 // a history update only first and in an update block, succeeding without
-// logs; a native transaction with the gas its block has left, calling
-// loadExecutionTable or executeIncomingCrossChainCall; and every load
-// followed by an ordinary transaction.
+// logs; a native transaction calling loadExecutionTable or
+// executeIncomingCrossChainCall; and every load followed by an ordinary
+// transaction. Execution checks a native transaction's gas (BindTxGas).
 func (e *Engine) validateV01(header *types.Header, receipts types.Receipts, txns types.Transactions) error {
 	withReceipts := len(receipts) == len(txns)
 	for i, txn := range txns {
-		var cumulative uint64
-		if withReceipts && i > 0 {
-			cumulative = receipts[i-1].CumulativeGasUsed
-		}
 		switch txn.Type() {
 		case protocol.HistoryTxType:
 			switch {
@@ -313,8 +327,6 @@ func (e *Engine) validateV01(header *types.Header, receipts types.Receipts, txns
 			switch call := nativeCall(txn); {
 			case call != protocol.LoadExecutionTableSelector && call != protocol.ExecuteIncomingCrossChainCallSelector:
 				return fmt.Errorf("native transaction %d calls %x", i, call)
-			case withReceipts && txn.GetGasLimit() != protocol.NativeTxGasLimit(header.GasLimit, cumulative):
-				return fmt.Errorf("native transaction %d has gas limit %d, its position %d", i, txn.GetGasLimit(), protocol.NativeTxGasLimit(header.GasLimit, cumulative))
 			case call == protocol.LoadExecutionTableSelector && (i+1 == len(txns) || systemType(txns[i+1].Type())):
 				return fmt.Errorf("load %d without its user transaction", i)
 			}

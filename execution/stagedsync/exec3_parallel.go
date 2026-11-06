@@ -2105,6 +2105,12 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 	return versionTxIndex - be.tasks[0].Version().TxIndex
 }
 
+// resumedAfterExecutedTxs reports whether some of the block's transactions
+// ran before this executor started it, so its gas pool lacks their gas.
+func (be *blockExecutor) resumedAfterExecutedTxs() bool {
+	return be.tasks[0].Version().TxIndex > 0
+}
+
 // selfLoopEvaluate validates tv's read-set against the versionMap and, when valid,
 // returns the commit target (task-index space) the tx must reach to be stable — the
 // highest task it actually read from, so it can commit as soon as those deps commit,
@@ -3256,6 +3262,11 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 			}
 			if chainTx, ok := txTask.(*exec.TxTask); ok && be.gasPool != nil {
+				if !be.resumedAfterExecutedTxs() {
+					if err := protocol.CheckTxGas(pe.cfg.engine, chainTx.Rules().IsAmsterdam, chainTx.Tx(), be.gasPool); err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w: block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+					}
+				}
 				// A message that takes its gas from the block ran with the
 				// block limit; it re-runs with what the block has left.
 				stale, err := chainTx.BindBlockGas(be.gasPool)

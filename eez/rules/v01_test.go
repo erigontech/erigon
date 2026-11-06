@@ -111,6 +111,52 @@ func TestV01PostProcessTx(t *testing.T) {
 	requireBalance(t, ibs, 5, v01EEZL2, nativeSystemAddress)
 }
 
+// TestV01BindTxGas checks that a native transaction is bound to the gas its
+// block admits, at most the cap, and that other transactions keep theirs.
+func TestV01BindTxGas(t *testing.T) {
+	cfg, _, _ := block1(t, networks.Chiado699169)
+	e, err := New(cfg)
+	require.NoError(t, err)
+	gas := protocol.NativeTxGasCap
+	for _, tc := range []struct {
+		name string
+		gas  uint64
+		left uint64
+		want uint64
+	}{
+		{"block above the cap", gas, 30_000_000, gas},
+		{"block below the cap", gas, 1_000_000, 1_000_000},
+		{"limit below the block", 1_000_000, 30_000_000, gas},
+		{"block spent", gas, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := native(t, delivery, tc.gas)
+			bound, err := e.BindTxGas(tx, tc.left)
+			require.NoError(t, err)
+			body := tx.(*systemtx.NativeTransaction).Body()
+			body.GasLimit = tc.want
+			require.Equal(t, body, bound.(*systemtx.NativeTransaction).Body())
+		})
+	}
+	tx := native(t, delivery, 1_000_000)
+	bound, err := e.BindTxGas(tx, 1_000_000)
+	require.NoError(t, err)
+	require.Same(t, tx, bound)
+	user := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 21_000}}
+	bound, err = e.BindTxGas(user, 0)
+	require.NoError(t, err)
+	require.Same(t, types.Transaction(user), bound)
+
+	// rollupX v0.0.1 has no native transactions.
+	cfg, _, _ = block1(t, networks.Chiado699069)
+	e, err = New(cfg)
+	require.NoError(t, err)
+	tx = native(t, delivery, gas)
+	bound, err = e.BindTxGas(tx, 0)
+	require.NoError(t, err)
+	require.Same(t, tx, bound)
+}
+
 // TestV01Validate checks the positions of system transactions in a v0.1
 // block.
 func TestV01Validate(t *testing.T) {
@@ -143,9 +189,6 @@ func TestV01Validate(t *testing.T) {
 		{"history failed", 3, types.Transactions{historyUpdate(t)}, types.Receipts{{Status: types.ReceiptStatusFailed}}, false},
 		{"history logged", 3, types.Transactions{historyUpdate(t)}, types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{}}}}, false},
 		{"outbound pair and delivery", 5, types.Transactions{native(t, load, gas), user, native(t, delivery, gas)}, ok(100_000, 200_000, 300_000), true},
-		{"delivery in a full block", 5, types.Transactions{user, native(t, delivery, 1_000_000)}, ok(29_000_000, 29_500_000), true},
-		{"native gas below its position", 5, types.Transactions{native(t, delivery, gas-1)}, ok(1), false},
-		{"native gas above its position", 5, types.Transactions{user, native(t, delivery, 1_000_001)}, ok(29_000_000, 29_500_000), false},
 		{"load last", 5, types.Transactions{native(t, load, gas)}, ok(1), false},
 		{"load then delivery", 5, types.Transactions{native(t, load, gas), native(t, delivery, gas)}, ok(1, 2), false},
 		{"other selector", 5, types.Transactions{native(t, [4]byte{1, 2, 3, 4}, gas)}, ok(1), false},

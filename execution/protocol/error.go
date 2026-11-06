@@ -81,6 +81,10 @@ var (
 	// by a transaction is higher than what's left in the block.
 	ErrGasLimitReached = errors.New("gas limit reached")
 
+	// ErrGasLimitPosition is returned for a transaction whose gas limit is not
+	// the one its engine binds it to at its position in the block.
+	ErrGasLimitPosition = errors.New("gas limit differs from its position")
+
 	// ErrBlobGasLimitReached is returned by the gas pool if the amount of blob gas required
 	// by a transaction is higher than what's left in the block.
 	ErrBlobGasLimitReached = errors.New("blob gas limit reached")

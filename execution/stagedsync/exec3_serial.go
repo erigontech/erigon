@@ -370,6 +370,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask.Config = se.cfg.chainConfig
 		txTask.Engine = se.cfg.engine
 
+		// A partly executed block's pool misses its earlier transactions.
+		if startTxIndex == 0 && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			if err := protocol.CheckTxGas(se.cfg.engine, txTask.Rules().IsAmsterdam, txTask.Tx(), gasPool); err != nil {
+				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+			}
+		}
+
 		result := se.worker.RunTxTask(txTask)
 		se.worker.PublishReadMetrics()
 
