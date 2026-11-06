@@ -203,6 +203,14 @@ func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64
 	return nil, nil
 }
 
+func (s *stubExecutionModule) GetHeaderIfIdle(ctx context.Context, hash *common.Hash, number *uint64) (*types.Header, bool, error) {
+	if ready, err := s.Ready(ctx); err != nil || !ready {
+		return nil, false, err
+	}
+	header, err := s.GetHeader(ctx, hash, number)
+	return header, true, err
+}
+
 func (s *stubExecutionModule) Ready(ctx context.Context) (bool, error) {
 	if s.readyFunc != nil {
 		return s.readyFunc(ctx)
