@@ -220,8 +220,8 @@ type downloadChainFetcher struct {
 }
 
 func (f downloadChainFetcher) FetchHeadersBackwards(_ context.Context, hash common.Hash, amount uint64, _ *p2p.PeerId, _ ...p2p.FetcherOption) (p2p.FetcherResponse[[]*types.Header], error) {
-	for i, block := range f.blocks {
-		if block.Hash() == hash {
+	for i, candidate := range f.blocks {
+		if candidate.Hash() == hash {
 			headers := make([]*types.Header, 0, amount)
 			for _, block := range f.blocks[max(0, i-int(amount)+1) : i+1] {
 				headers = append(headers, block.HeaderNoCopy())
@@ -254,19 +254,25 @@ func newSizeCheckingDownloader(t *testing.T, config *chain.Config, blocks []*typ
 	)
 }
 
-func TestDownloadOversizedBlockMarksBadChain(t *testing.T) {
-	config := &chain.Config{OsakaTime: common.NewUint64(2)}
-	largeTxn := types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), make([]byte, params.MaxRlpBlockSize))
+func oversizedTransactions() []types.Transaction {
+	return []types.Transaction{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), make([]byte, params.MaxRlpBlockSize))}
+}
+
+func downloadTestChain(blockTxns ...[]types.Transaction) []*types.Block {
 	blocks := []*types.Block{types.NewBlockWithHeader(&types.Header{}, nil)}
-	for i := uint64(1); i <= 4; i++ {
-		var txns []types.Transaction
-		if i <= 2 {
-			txns = []types.Transaction{largeTxn}
-		}
+	for i, txns := range blockTxns {
+		number := uint64(i + 1)
 		blocks = append(blocks, types.NewBlock(&types.Header{
-			Number: *uint256.NewInt(i), ParentHash: blocks[i-1].Hash(), Time: i,
+			Number: *uint256.NewInt(number), ParentHash: blocks[i].Hash(), Time: number,
 		}, txns, nil, nil, nil, nil))
 	}
+	return blocks
+}
+
+func TestDownloadOversizedBlockMarksBadChain(t *testing.T) {
+	config := &chain.Config{OsakaTime: common.NewUint64(2)}
+	largeTxns := oversizedTransactions()
+	blocks := downloadTestChain(largeTxns, largeTxns, nil, nil)
 	for _, trigger := range []Trigger{NewPayloadTrigger, FcuTrigger, SegmentRecoveryTrigger} {
 		t.Run(trigger.String(), func(t *testing.T) {
 			e := newSizeCheckingDownloader(t, config, blocks, nil)
@@ -294,11 +300,9 @@ func TestDownloadOversizedBlockMarksBadChain(t *testing.T) {
 
 func TestDownloadOversizedChainTipMarksOnlyTipBad(t *testing.T) {
 	config := &chain.Config{OsakaTime: common.NewUint64(0)}
-	genesis := types.NewBlockWithHeader(&types.Header{}, nil)
-	parent := types.NewBlock(&types.Header{Number: *uint256.NewInt(1), ParentHash: genesis.Hash()}, nil, nil, nil, nil, nil)
-	largeTxn := types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), make([]byte, params.MaxRlpBlockSize))
-	tip := types.NewBlock(&types.Header{Number: *uint256.NewInt(2), ParentHash: parent.Hash()}, []types.Transaction{largeTxn}, nil, nil, nil, nil)
-	e := newSizeCheckingDownloader(t, config, []*types.Block{genesis, parent, tip}, nil)
+	blocks := downloadTestChain(nil, oversizedTransactions())
+	parent, tip := blocks[1], blocks[2]
+	e := newSizeCheckingDownloader(t, config, blocks, nil)
 	err := e.processReq(t.Context(), BackwardDownloadRequest{
 		MissingHash: parent.Hash(), Trigger: NewPayloadTrigger, ValidateChainTip: tip,
 	})
@@ -313,10 +317,9 @@ func TestDownloadOversizedChainTipMarksOnlyTipBad(t *testing.T) {
 
 func TestDownloadInsertErrorDoesNotMarkChainBad(t *testing.T) {
 	config := &chain.Config{OsakaTime: common.NewUint64(0)}
-	genesis := types.NewBlockWithHeader(&types.Header{}, nil)
-	parent := types.NewBlock(&types.Header{Number: *uint256.NewInt(1), ParentHash: genesis.Hash()}, nil, nil, nil, nil, nil)
-	tip := types.NewBlock(&types.Header{Number: *uint256.NewInt(2), ParentHash: parent.Hash()}, nil, nil, nil, nil, nil)
-	e := newSizeCheckingDownloader(t, config, []*types.Block{genesis, parent, tip}, context.DeadlineExceeded)
+	blocks := downloadTestChain(nil, nil)
+	parent, tip := blocks[1], blocks[2]
+	e := newSizeCheckingDownloader(t, config, blocks, context.DeadlineExceeded)
 	err := e.processReq(t.Context(), BackwardDownloadRequest{
 		MissingHash: parent.Hash(), Trigger: NewPayloadTrigger, ValidateChainTip: tip,
 	})
