@@ -659,7 +659,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := bufiopool.Writer(cf)
+	cw := bufiopool.Writer(dir.UncachedWriter(cf))
 	defer bufiopool.PutWriter(cw)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
@@ -833,7 +833,7 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 		return err
 	}
 
-	cw := bufiopool.Writer(cf)
+	cw := bufiopool.Writer(dir.UncachedWriter(cf))
 	defer bufiopool.PutWriter(cw)
 
 	// Write data header: word count, empty word count, patternsSize=0, then position dict.
