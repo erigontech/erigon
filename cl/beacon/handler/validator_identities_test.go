@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,4 +75,48 @@ func TestValidatorIdentitiesAtHeadAreReadInsideTheView(t *testing.T) {
 	require.Len(t, body.Data, postState.ValidatorLength())
 	want := postState.ValidatorSet().Get(0).PublicKey()
 	require.Equal(t, want[:], []byte(body.Data[0].Pubkey))
+}
+
+func TestPostStateValidatorIdentities(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+
+	server := httptest.NewServer(h.mux)
+	defer server.Close()
+
+	pk, err := postState.ValidatorPublicKey(3)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		body    string
+		indices []string
+	}{
+		{`["1","` + pk.Hex() + `","99999999"]`, []string{"1", "3"}},
+		{``, nil},
+		{`[]`, nil},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/states/head/validator_identities", "application/json", strings.NewReader(tc.body))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			var out struct {
+				Data []struct {
+					Index string `json:"index"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+			if tc.indices == nil {
+				require.Len(t, out.Data, postState.ValidatorLength())
+				return
+			}
+			got := make([]string, 0, len(out.Data))
+			for _, d := range out.Data {
+				got = append(got, d.Index)
+			}
+			require.Equal(t, tc.indices, got)
+		})
+	}
 }

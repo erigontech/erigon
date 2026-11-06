@@ -17,11 +17,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"math"
 	"net/http"
@@ -888,6 +890,32 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 }
 
 func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return a.validatorIdentities(r, nil)
+}
+
+func (a *ApiHandler) PostEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	var ids []string
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &ids); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
+	}
+	return a.validatorIdentities(r, ids)
+}
+
+func (a *ApiHandler) validatorIdentities(r *http.Request, ids []string) (*beaconhttp.BeaconResponse, error) {
+	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, ids)
+	if err != nil {
+		return nil, err
+	}
+	filter := make(map[uint64]struct{}, len(filterIndicies))
+	for _, idx := range filterIndicies {
+		filter[idx] = struct{}{}
+	}
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -910,7 +938,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 	if blockId.Head() {
 		// If we are looking at the head, we can just read the validators from the head state
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			validatorIdentities = newValidatorIdentities(s.Validators())
+			validatorIdentities = newValidatorIdentities(s.Validators(), filter)
 			isOptimistic = a.forkchoiceStore.IsRootOptimistic(root)
 			return nil
 		}); err != nil {
@@ -942,7 +970,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		}
 		isFinalized = *slot <= a.forkchoiceStore.FinalizedSlot()
 		isOptimistic = a.forkchoiceStore.IsRootOptimistic(blockRoot)
-		validatorIdentities = newValidatorIdentities(validators)
+		validatorIdentities = newValidatorIdentities(validators, filter)
 	}
 	if validatorIdentities == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
@@ -953,12 +981,17 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		WithFinalized(isFinalized), nil
 }
 
-func newValidatorIdentities(validators *solid.ValidatorSet) *solid.ListSSZ[*validatorIdentityResponse] {
+func newValidatorIdentities(validators *solid.ValidatorSet, filter map[uint64]struct{}) *solid.ListSSZ[*validatorIdentityResponse] {
 	if validators == nil {
 		return nil
 	}
 	validatorIdentities := solid.NewStaticListSSZ[*validatorIdentityResponse](validators.Length(), (&validatorIdentityResponse{}).EncodingSizeSSZ())
 	validators.Range(func(i int, v solid.Validator, l int) bool {
+		if len(filter) > 0 {
+			if _, ok := filter[uint64(i)]; !ok {
+				return true
+			}
+		}
 		validatorIdentities.Append(&validatorIdentityResponse{
 			Index:           uint64(i),
 			Pubkey:          v.PublicKey(),
