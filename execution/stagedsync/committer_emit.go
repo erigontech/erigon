@@ -229,7 +229,7 @@ func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *st
 
 // readBaseAccounts reads every BAL account through workers readers, each from newReader; an absent account maps to nil.
 func readBaseAccounts(ctx context.Context, bal types.BlockAccessList, workers int, newReader func() (state.StateReader, func(), error)) (map[accounts.Address]*accounts.Account, error) {
-	parts := make([]map[accounts.Address]*accounts.Account, workers)
+	accs := make([]*accounts.Account, len(bal))
 	g, ctx := errgroup.WithContext(ctx)
 	for w := range workers {
 		g.Go(func() error {
@@ -238,19 +238,14 @@ func readBaseAccounts(ctx context.Context, bal types.BlockAccessList, workers in
 				return err
 			}
 			defer done()
-			m := make(map[accounts.Address]*accounts.Account, len(bal)/workers+1)
 			for i := w; i < len(bal); i += workers {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				a := accounts.InternAddress(bal[i].Address)
-				acc, err := r.ReadAccountData(a)
-				if err != nil {
+				if accs[i], err = r.ReadAccountData(accounts.InternAddress(bal[i].Address)); err != nil {
 					return err
 				}
-				m[a] = acc
 			}
-			parts[w] = m
 			return nil
 		})
 	}
@@ -258,8 +253,8 @@ func readBaseAccounts(ctx context.Context, bal types.BlockAccessList, workers in
 		return nil, err
 	}
 	all := make(map[accounts.Address]*accounts.Account, len(bal))
-	for _, m := range parts {
-		maps.Copy(all, m)
+	for i, acc := range accs {
+		all[accounts.InternAddress(bal[i].Address)] = acc
 	}
 	return all, nil
 }
