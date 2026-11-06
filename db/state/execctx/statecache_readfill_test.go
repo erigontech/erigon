@@ -1172,8 +1172,10 @@ func TestLocalCacheUnwindDoesNotFillSharedStateCache(t *testing.T) {
 	defer candidate.Close()
 	candidate.BindStateCache(sc)
 	candidate.Unwind(16, nil)
-	_, _, err = candidate.GetLatest(kv.AccountsDomain, tx, key)
-	require.NoError(t, err)
+	for range 2 { // two misses, so the doorkeeper alone would admit the fill
+		_, _, err = candidate.GetLatest(kv.AccountsDomain, tx, key)
+		require.NoError(t, err)
+	}
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a speculative session must not seed the shared state cache from a database read")
 }
