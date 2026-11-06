@@ -718,9 +718,11 @@ func (c *AuRa) applyRewards(config *chain.Config, header *types.Header, state *s
 	}
 	for _, r := range rewards {
 		if config.IsEIPEnabled(7928, header.Time) && r.Amount.IsZero() {
-			continue
+			err = state.AddZeroReward(r.Beneficiary, tracing.BalanceIncreaseRewardMineBlock)
+		} else {
+			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
 		}
-		if err := state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock); err != nil {
+		if err != nil {
 			return err
 		}
 	}

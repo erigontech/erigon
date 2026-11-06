@@ -284,6 +284,7 @@ func (ibs *IntraBlockState) wroteAccountLifecycle(addr accounts.Address) bool {
 }
 
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
+	s.versionedReads.recordBALRead(addr)
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
 		if err != nil {
@@ -986,6 +987,7 @@ func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRe
 // of it is a stable snapshot the read-once fast path can serve (own writes take
 // precedence and must go through the full path). Same gate as versionedWriteHit.
 func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
+	ibs.versionedReads.recordBALRead(addr)
 	_, dirty := ibs.journal.dirties[addr]
 	return !dirty
 }

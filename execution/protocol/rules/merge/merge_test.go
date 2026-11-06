@@ -345,7 +345,11 @@ func TestFinalizeZeroRewardOmittedFromBlockAccessList(t *testing.T) {
 		Difficulty: *ProofOfStakeDifficulty,
 		Number:     *uint256.NewInt(1),
 	}
-	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	addr := accounts.InternAddress(beneficiary)
+	empty := accounts.NewAccount()
+	vm := state.NewVersionMap(nil)
+	vm.WriteAddress(addr, state.Version{TxIndex: -1}, &empty, true)
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
 	ibs.SetTxContext(1, 0)
 	ibs.StartAccessRecording()
 	t.Cleanup(ibs.Close)
@@ -354,8 +358,11 @@ func TestFinalizeZeroRewardOmittedFromBlockAccessList(t *testing.T) {
 	_, err = New(auraEngine).Finalize(&chain.Config{AmsterdamTime: &amsterdam}, header, ibs, nil, nil, nil, nil, nil, false, log.New())
 	require.NoError(t, err)
 
-	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsAmsterdam: true})
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsAura: true, IsAmsterdam: true})
 	require.NoError(t, err)
+	ibs.FlushWritesToVersionMap(writes)
+	_, exists := vm.View(1, state.NewNoopReader()).GetAccount(addr)
+	require.False(t, exists, "a zero reward must still clear an existing empty beneficiary")
 	io := state.NewVersionedIO(1)
 	ibs.MergeTxIOInto(io, writes)
 	require.Empty(t, io.AsBlockAccessList())

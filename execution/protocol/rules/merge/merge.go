@@ -167,17 +167,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		return nil, err
 	}
 	for _, r := range rewards {
-		if config.IsEIPEnabled(7928, header.Time) && r.Amount.IsZero() {
-			continue
-		}
-		var err error
+		reason := tracing.BalanceChangeUnspecified
 		switch r.Kind {
 		case rules.RewardAuthor:
-			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineBlock)
+			reason = tracing.BalanceIncreaseRewardMineBlock
 		case rules.RewardUncle:
-			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceIncreaseRewardMineUncle)
-		default:
-			err = state.AddBalance(r.Beneficiary, r.Amount, tracing.BalanceChangeUnspecified)
+			reason = tracing.BalanceIncreaseRewardMineUncle
+		}
+		if config.IsEIPEnabled(7928, header.Time) && r.Amount.IsZero() {
+			err = state.AddZeroReward(r.Beneficiary, reason)
+		} else {
+			err = state.AddBalance(r.Beneficiary, r.Amount, reason)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("applying reward kind %d to %x: %w", r.Kind, r.Beneficiary, err)

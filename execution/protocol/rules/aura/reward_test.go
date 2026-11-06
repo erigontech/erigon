@@ -31,29 +31,43 @@ import (
 
 func TestApplyRewardsBlockAccessList(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		timestamp   uint64
-		reward      uint64
-		readBalance bool
-		wantAccess  bool
+		name           string
+		timestamp      uint64
+		reward         uint64
+		readBalance    bool
+		readAfter      bool
+		emptyExists    bool
+		initialBalance uint64
+		wantAccess     bool
 	}{
 		{name: "zero_reward", timestamp: 10},
+		{name: "existing_empty_beneficiary", timestamp: 10, emptyExists: true},
 		{name: "before_amsterdam", timestamp: 9, wantAccess: true},
 		{name: "nonzero_reward", timestamp: 10, reward: 1, wantAccess: true},
 		{name: "separate_balance_read", timestamp: 10, readBalance: true, wantAccess: true},
+		{name: "later_balance_read", timestamp: 10, readAfter: true, wantAccess: true},
+		{name: "later_balance_read_empty_account", timestamp: 10, emptyExists: true, readAfter: true, wantAccess: true},
+		{name: "later_balance_read_funded_account", timestamp: 10, initialBalance: 7, readAfter: true, wantAccess: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &AuRa{cfg: AuthorityRoundParams{
 				BlockReward: BlockRewardList{{amount: uint256.NewInt(tc.reward)}},
 			}}
-			ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+			beneficiary := common.HexToAddress("0x1111111111111111111111111111111111111111")
+			addr := accounts.InternAddress(beneficiary)
+			vm := state.NewVersionMap(nil)
+			if tc.emptyExists || tc.initialBalance != 0 {
+				account := accounts.NewAccount()
+				account.Balance.SetUint64(tc.initialBalance)
+				vm.WriteAddress(addr, state.Version{TxIndex: -1}, &account, true)
+			}
+			ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
 			ibs.SetTxContext(1, 0)
 			ibs.StartAccessRecording()
 			t.Cleanup(ibs.Close)
 
-			beneficiary := common.HexToAddress("0x1111111111111111111111111111111111111111")
 			if tc.readBalance {
-				_, err := ibs.GetBalance(accounts.InternAddress(beneficiary))
+				_, err := ibs.GetBalance(addr)
 				require.NoError(t, err)
 			}
 			amsterdam := uint64(10)
@@ -65,8 +79,16 @@ func TestApplyRewardsBlockAccessList(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsAmsterdam: tc.timestamp >= amsterdam})
+			if tc.readAfter {
+				_, err := ibs.GetBalance(addr)
+				require.NoError(t, err)
+			}
+
+			writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsAura: true, IsAmsterdam: tc.timestamp >= amsterdam})
 			require.NoError(t, err)
+			ibs.FlushWritesToVersionMap(writes)
+			_, exists := vm.View(1, state.NewNoopReader()).GetAccount(addr)
+			require.Equal(t, tc.reward+tc.initialBalance != 0, exists)
 			io := state.NewVersionedIO(1)
 			ibs.MergeTxIOInto(io, writes)
 			bal := io.AsBlockAccessList()
