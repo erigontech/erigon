@@ -115,8 +115,9 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 
 	// Consume additional rate-limit tokens proportional to the number of roots,
-	// capped so that a full pre-Deneb request still fits in the bucket.
-	if cost := min(req.Length(), blockRateBurst) - 1; !c.consumeRateLimit(s, cost) {
+	// capped at the number of blocks one response can carry so that the roots
+	// beyond the cap can be requested again without a punishment.
+	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

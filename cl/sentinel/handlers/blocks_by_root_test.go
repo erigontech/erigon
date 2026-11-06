@@ -169,11 +169,20 @@ func TestBlocksByRangeHandler(t *testing.T) {
 
 type blocksByRootTester struct {
 	requestRaw func(payload []byte) []byte
-	root       common.Hash
-	chunkSize  int
+	// clearBuckets empties the rate limiter; requestRaw does not, so requests share a peer bucket.
+	clearBuckets func()
+	root         common.Hash
+	chunkSize    int
 }
 
+// request sends roots from a fresh rate-limit bucket.
 func (b *blocksByRootTester) request(t *testing.T, roots []common.Hash) []byte {
+	b.clearBuckets()
+	return b.requestSharedBucket(t, roots)
+}
+
+// requestSharedBucket sends roots without refilling the peer's rate-limit bucket.
+func (b *blocksByRootTester) requestSharedBucket(t *testing.T, roots []common.Hash) []byte {
 	req := solid.NewHashList(len(roots))
 	for _, r := range roots {
 		req.Append(r)
@@ -216,7 +225,6 @@ func setupBlocksByRootHandler(t *testing.T, denebForkEpoch uint64) *blocksByRoot
 	c.Start()
 
 	requestRaw := func(payload []byte) []byte {
-		c.rateLimiter.buckets.Clear()
 		stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 		require.NoError(t, err)
 		_, err = stream.Write(payload)
@@ -226,7 +234,7 @@ func setupBlocksByRootHandler(t *testing.T, denebForkEpoch uint64) *blocksByRoot
 		require.NoError(t, err)
 		return resp
 	}
-	b := &blocksByRootTester{requestRaw: requestRaw, root: root}
+	b := &blocksByRootTester{requestRaw: requestRaw, clearBuckets: c.rateLimiter.buckets.Clear, root: root}
 	single := b.request(t, []common.Hash{root})
 	require.NotEmpty(t, single)
 	require.Equal(t, byte(SuccessfulResponsePrefix), single[0])
@@ -297,4 +305,15 @@ func TestBlocksByRootHandlerRejectsLengthPrefixAboveMaxPayloadSize(t *testing.T)
 
 	prefix := binary.AppendUvarint(nil, clparams.MaxPayloadSize+1)
 	requireInvalidRequest(t, b.requestRaw(prefix))
+}
+
+func TestBlocksByRootHandlerRetryAfterResponseCap(t *testing.T) {
+	b := setupBlocksByRootHandler(t, 0)
+	limit := int(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb)
+
+	// The first response is capped at MaxRequestsBlocks, so the remaining roots
+	// must still fit in the bucket when the peer asks for them straight away.
+	b.clearBuckets()
+	b.requireBlocks(t, b.requestSharedBucket(t, b.repeatRoot(limit)), MaxRequestsBlocks)
+	b.requireBlocks(t, b.requestSharedBucket(t, b.repeatRoot(limit-MaxRequestsBlocks)), limit-MaxRequestsBlocks)
 }
