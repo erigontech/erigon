@@ -47,7 +47,8 @@ type frameReservation struct {
 }
 
 // State-dependent rejections expire with state; sender-policy rejections expire when
-// the conflicting transaction leaves the pool. Access requires p.lock.
+// the conflicting transaction leaves the pool. Cache access and blocker membership
+// checks require p.lock; copied rejection values can be used after unlocking.
 type frameRejection struct {
 	generation uint64
 	blocker    common.Hash
@@ -66,6 +67,8 @@ func (r frameRejection) validationResult() frameValidationResult {
 	return frameValidationResult{reason: r.reason, senderConflict: r.blocker != (common.Hash{})}
 }
 
+// RejectFramePrefix caches a prefix policy rejection for gossip deduplication.
+// The rejection depends only on the transaction, so it remains valid across state changes.
 func (p *TxPool) RejectFramePrefix(hash common.Hash) {
 	p.lock.Lock()
 	defer p.lock.Unlock()

@@ -273,7 +273,8 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
 		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
 		txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
-		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
+		// INVALID includes rejections under current fork rules or pool policy;
+		// it does not imply that the transaction can never be accepted.
 		return txpoolproto.ImportResult_INVALID
 	default:
 		return txpoolproto.ImportResult_INTERNAL_ERROR
