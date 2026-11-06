@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,5 +159,48 @@ func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
 	case <-handlerDone:
 		t.Fatal("event stream closed")
 	default:
+	}
+}
+
+// floodUntilDropped sends head events from several goroutines until one is dropped for every subscriber, so the only
+// subscriber has lagged.
+func floodUntilDropped(t *testing.T, emitters *beaconevents.EventEmitter) {
+	t.Helper()
+	var dropped atomic.Bool
+	var senders sync.WaitGroup
+	deadline := time.Now().Add(5 * time.Second)
+	for range 4 {
+		senders.Go(func() {
+			for !dropped.Load() && time.Now().Before(deadline) {
+				if emitters.State().TrySendHead(&beaconevents.HeadData{}) == 0 {
+					dropped.Store(true)
+				}
+			}
+		})
+	}
+	senders.Wait()
+	require.True(t, dropped.Load(), "the subscriber never lagged")
+}
+
+// A stream that cannot take a head event is closed, so the client reconnects instead of missing the head silently.
+func TestEventStreamClosesWhenItMissesAHeadEvent(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
+	w := &collectingStreamWriter{header: http.Header{}}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/events?topics=head", nil)
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		a.EventSourceGetV1Events(w, req)
+	}()
+	require.Eventually(t, func() bool {
+		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
+	}, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
+
+	floodUntilDropped(t, a.emitters)
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream kept running after it missed a head event")
 	}
 }

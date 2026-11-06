@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/transition"
+	ethevent "github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -54,8 +55,12 @@ func (a *ApiHandler) StartPayloadAttributes(ctx context.Context) <-chan struct{}
 			select {
 			case <-ctx.Done():
 				return
-			case <-subscription.Err():
-				return
+			case err := <-subscription.Err():
+				if !errors.Is(err, ethevent.ErrSubscriberLagged) {
+					return
+				}
+				// The dropped event may have been a head change.
+				notify()
 			case event := <-events:
 				if event.Event == beaconevents.StateHeadV2 {
 					notify()

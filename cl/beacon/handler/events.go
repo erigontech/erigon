@@ -252,8 +252,8 @@ const eventStreamFeedBuffer = 128
 
 // eventStreamSubscription subscribes a stream only to the feeds that carry its topics, each into its own buffer. State
 // events must never share a buffer with operation events: the operation feed carries thousands of gossip events per
-// slot, and head is sent without waiting for subscribers, so it is dropped when its buffer is full. A channel and
-// subscription of a feed the stream does not need stay nil, and a nil channel is never ready in a select.
+// slot, and head is sent without waiting for subscribers, so a stream whose buffer is full misses it and is closed.
+// A channel and subscription of a feed the stream does not need stay nil, and a nil channel is never ready in a select.
 type eventStreamSubscription struct {
 	state, op       chan *event.EventStream
 	stateSub, opSub ethevent.Subscription

@@ -25,15 +25,17 @@ func (f *stateFeed) SendHead(value *HeadData) int {
 	})
 }
 
+// TrySendHead and SendHeadV2 do not wait for subscribers. A subscriber that cannot take the event gets
+// ethevent.ErrSubscriberLagged on its Err channel instead of missing it silently.
 func (f *stateFeed) TrySendHead(value *HeadData) int {
-	return f.feed.TrySend(&EventStream{
+	return f.feed.TrySendOrFail(&EventStream{
 		Event: StateHead,
 		Data:  value,
 	})
 }
 
 func (f *stateFeed) SendHeadV2(value *HeadV2Data) int {
-	return f.feed.TrySend(&EventStream{Event: StateHeadV2, Data: value})
+	return f.feed.TrySendOrFail(&EventStream{Event: StateHeadV2, Data: value})
 }
 
 // The node has received a block (from P2P or API) that is successfully imported on the fork-choice on_block handler

@@ -464,3 +464,27 @@ func TestPayloadAttributesEventDropsHeadChangedBeforePublication(t *testing.T) {
 
 	require.Empty(t, events)
 }
+
+// A missed head event must not stop the loop: it still emits payload attributes for later head changes.
+func TestPayloadAttributesLoopSurvivesAMissedHeadEvent(t *testing.T) {
+	headState, handler, _, parentRoot := setupEmptyGloasHead(t)
+	mockSlotClock(t, handler, headState.Slot()+1)
+	emitter := beaconevents.NewEventEmitter()
+	handler.emitters = emitter
+	defer emitter.TrackPayloadAttributesSubscriber()()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := handler.StartPayloadAttributes(ctx)
+	defer func() {
+		cancel()
+		<-done
+	}()
+	floodUntilDropped(t, emitter)
+
+	events := make(chan *beaconevents.EventStream, 8)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	awaitPayloadAttributesEvent(t, handler, events, &beaconevents.HeadV2Data{
+		Version: "gloas",
+		Data:    beaconevents.HeadV2Content{Slot: headState.Slot(), Block: parentRoot, PayloadStatus: "empty"},
+	})
+}

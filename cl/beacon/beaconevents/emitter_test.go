@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	ethevent "github.com/erigontech/erigon/common/event"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,4 +81,27 @@ func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
 	var emitter *EventEmitter
 	require.Nil(t, emitter.DataColumnStored())
 	emitter.NotifyDataColumnStored(common.Hash{1})
+}
+
+func TestHeadEventsReportAFullSubscriber(t *testing.T) {
+	for name, send := range map[string]func(*stateFeed) int{
+		"head":    func(f *stateFeed) int { return f.TrySendHead(&HeadData{}) },
+		"head_v2": func(f *stateFeed) int { return f.SendHeadV2(&HeadV2Data{}) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newStateFeed()
+			ch := make(chan *EventStream, 1)
+			sub := f.Subscribe(ch)
+			defer sub.Unsubscribe()
+			require.Equal(t, 1, f.SendBlock(&BlockData{}))
+
+			require.Zero(t, send(f))
+			select {
+			case err := <-sub.Err():
+				require.ErrorIs(t, err, ethevent.ErrSubscriberLagged)
+			default:
+				t.Fatal("head event dropped without telling the subscriber")
+			}
+		})
+	}
 }
