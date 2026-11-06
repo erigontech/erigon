@@ -228,6 +228,40 @@ func TestGetExecutionPayloadEnvelopeRechecksRejectionAfterLookup(t *testing.T) {
 	}
 }
 
+func TestGetExecutionPayloadEnvelopeReadError(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		rejected bool
+		wantCode int
+	}{
+		{name: "rejected during read", rejected: true, wantCode: http.StatusNotFound},
+		{name: "unrelated read error", wantCode: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler, root, envelope, fc := newHistoricalEnvelopeHandlerAtSlot(t, 64)
+			rebuilder := &apiEnvelopeRebuilder{envelope: envelope}
+			handler.envelopeRebuilder = rebuilder
+			fc.SetEnvelope(root, envelope)
+			rejected := false
+			fc.IsEnvelopeRejectedFunc = func(blockRoot common.Hash) bool { return blockRoot == root && rejected }
+			readErr := errors.New("injected envelope read error")
+			fc.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+				rejected = test.rejected
+				return nil, readErr
+			}
+
+			response, err := handler.GetEthV1BeaconExecutionPayloadEnvelope(httptest.NewRecorder(), envelopeRequest(t, root))
+			require.Nil(t, response)
+			require.Error(t, err)
+			require.Equal(t, test.wantCode, beaconhttp.WrapEndpointError(err).Code)
+			require.Zero(t, rebuilder.prepareCalls)
+			if !test.rejected {
+				require.ErrorIs(t, err, readErr)
+			}
+		})
+	}
+}
+
 func TestGetExecutionPayloadEnvelopeChecksGloasForkBeforeReadingBlock(t *testing.T) {
 	t.Run("pre-Gloas block with pruned execution body", func(t *testing.T) {
 		handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)

@@ -937,6 +937,9 @@ func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockR
 	if a.forkchoiceStore.HasEnvelope(blockRoot) {
 		envelope, err = a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
+			if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+				return nil, 0, false, nil
+			}
 			return nil, 0, false, err
 		}
 	}
