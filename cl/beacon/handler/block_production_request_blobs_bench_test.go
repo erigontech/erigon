@@ -21,68 +21,31 @@ import (
 	"slices"
 	"testing"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"golang.org/x/sync/errgroup"
-
-	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
-	"github.com/erigontech/erigon/common/crypto/kzg"
 )
-
-// verifyBlobBundlesSerial verifies the cells of all blobs in a single batch, one blob after the other.
-func verifyBlobBundlesSerial(bundles []BlobBundle) error {
-	var (
-		commitments []goethkzg.KZGCommitment
-		cellIndices []uint64
-		cells       []*goethkzg.Cell
-		proofs      []goethkzg.KZGProof
-	)
-	for i := range bundles {
-		blobCells, err := peerdasutils.ComputeCells(bundles[i].Blob)
-		if err != nil {
-			return err
-		}
-		bundles[i].Cells = blobCells
-		for j := range blobCells {
-			commitments = append(commitments, goethkzg.KZGCommitment(bundles[i].Commitment))
-			cellIndices = append(cellIndices, uint64(j))
-			cells = append(cells, (*goethkzg.Cell)(&blobCells[j]))
-			proofs = append(proofs, goethkzg.KZGProof(bundles[i].KzgProofs[j]))
-		}
-	}
-	return kzg.Ctx().VerifyCellKZGProofBatch(commitments, cellIndices, cells, proofs)
-}
 
 // BenchmarkVerifyBlobBundles times concurrent verifications of the same blob count; ns/op is the
 // time until the slowest caller is done.
 func BenchmarkVerifyBlobBundles(b *testing.B) {
 	const maxBlobs = 21
 	all := newCellProofBundles(b, maxBlobs)
-	verifiers := []struct {
-		name   string
-		verify func([]BlobBundle) error
-	}{
-		{"serial", verifyBlobBundlesSerial},
-		{"parallel", func(bundles []BlobBundle) error { return verifyBlobBundles(bundles, true) }},
-	}
 	for _, blobs := range []int{6, maxBlobs} {
 		for _, callers := range []int{1, 2} {
-			for _, verifier := range verifiers {
-				b.Run(fmt.Sprintf("blobs=%d/callers=%d/%s", blobs, callers, verifier.name), func(b *testing.B) {
-					sets := make([][]BlobBundle, callers)
-					for i := range sets {
-						sets[i] = slices.Clone(all[:blobs])
+			b.Run(fmt.Sprintf("blobs=%d/callers=%d", blobs, callers), func(b *testing.B) {
+				sets := make([][]BlobBundle, callers)
+				for i := range sets {
+					sets[i] = slices.Clone(all[:blobs])
+				}
+				for b.Loop() {
+					var g errgroup.Group
+					for _, set := range sets {
+						g.Go(func() error { return verifyBlobBundles(set, true) })
 					}
-					for b.Loop() {
-						var g errgroup.Group
-						for _, set := range sets {
-							g.Go(func() error { return verifier.verify(set) })
-						}
-						if err := g.Wait(); err != nil {
-							b.Fatal(err)
-						}
+					if err := g.Wait(); err != nil {
+						b.Fatal(err)
 					}
-				})
-			}
+				}
+			})
 		}
 	}
 }
