@@ -271,6 +271,18 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			removal(true)(vm)
 			vm.WriteBalance(addr, v(1), *uint256.NewInt(5), true)
 		}, base: &committed, acc: with(committed, bal(5)), ok: true, wasDeleted: true, baseReads: 1},
+		{name: "recreated above an EIP-161 removal", setup: func(vm *VersionMap) {
+			removal(true)(vm)
+			vm.WriteSelfDestruct(addr, v(1), false, true)
+			vm.WriteAddress(addr, v(1), &fresh, true)
+			vm.WriteBalance(addr, v(1), *uint256.NewInt(5), true)
+			vm.WriteNonce(addr, v(1), 1, true)
+		}, base: &committed, acc: with(fresh, func(a *accounts.Account) { a.Balance, a.Nonce = *uint256.NewInt(5), 1 }), ok: true, wasDeleted: true},
+		{name: "EIP-161 removal at the view's txIdx is not visible", setup: func(vm *VersionMap) {
+			ws := &WriteSet{}
+			ws.SetEmptyRemoval(addr, v(2))
+			vm.FlushVersionedWrites(ws, true)
+		}, base: &committed, acc: committed, ok: true, baseReads: 1},
 		{
 			name: "self-destruct cell only", setup: func(vm *VersionMap) { vm.WriteSelfDestruct(addr, v(0), true, true) },
 			base: &committed, acc: committed, ok: true, wasDeleted: true, baseReads: 1,
