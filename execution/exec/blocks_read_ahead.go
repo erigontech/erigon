@@ -485,7 +485,13 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	group.Go(func() error {
 		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
-		if cold.any() {
+		if cold.any() && warmOverlap {
+			if cold.storage {
+				warm = balAccounts(bal)
+				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
+			}
+			group.Go(func() error { prefetchBALState(ctx, db, bal, cold); return nil })
+		} else if cold.any() {
 			var stripped bool
 			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
@@ -793,3 +799,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 
 	return nil
 }
+
+// warmOverlap is a probe: BAL_WARM_OVERLAP starts the per-key warmup together with the batch prefetch, not after it.
+var warmOverlap = dbg.EnvBool("BAL_WARM_OVERLAP", false)
