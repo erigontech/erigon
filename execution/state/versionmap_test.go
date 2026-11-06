@@ -2330,3 +2330,29 @@ func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
 	})
 	require.NotPanics(t, func() { vm.MarkWritesComplete(zeroRoot) })
 }
+
+// A panic inside a flush (here the Done->Estimate assert) must not leave the account's lock held:
+// the self-loop worker recovers it, and every later reader of the account would block forever.
+func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.Address{0xab})
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
+	vm.FlushVersionedWrites(ws, true)
+	require.Panics(t, func() { vm.FlushVersionedWrites(ws, false) }, "a Done cell downgraded to Estimate trips the assert")
+
+	read := make(chan struct{})
+	go func() {
+		vm.ReadSelfDestruct(addr, 1)
+		close(read)
+	}()
+	select {
+	case <-read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read after the recovered panic blocks on the account lock")
+	}
+}
