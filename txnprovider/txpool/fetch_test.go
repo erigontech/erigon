@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -292,7 +293,8 @@ func TestOnNewBlock(t *testing.T) {
 	stateChanges.
 		EXPECT().
 		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+		DoAndReturn(func(_ context.Context, request *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+			assert.True(t, request.WithStorage, "frame nonce revalidation needs changed storage slots")
 			return stream, nil
 		})
 
@@ -381,6 +383,48 @@ func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentry
 	}
 }
 
+func TestFramePolicyRejectionKeepsOrdinaryTransactions(t *testing.T) {
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	require.NoError(t, frame.Validate())
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	ordinary := tpEncodeTests[1].txns
+	txns := [][]byte{ordinary[0], encoded.Bytes(), ordinary[1]}
+
+	for _, id := range []sentryproto.MessageId{sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66} {
+		t.Run(id.String(), func(t *testing.T) {
+			ctx := t.Context()
+			ctrl := gomock.NewController(t)
+			sentryServer := sentryproto.NewMockSentryServer(ctrl)
+			sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
+			pool := NewMockPool(ctrl)
+			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+			pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Do(func(_ context.Context, slots TxnSlots, _ PeerID, _ sentryproto.SentryClient) {
+					require.Len(t, slots.Txns, len(ordinary))
+					for i, txn := range slots.Txns {
+						require.Equal(t, ordinary[i], txn.Rlp)
+					}
+				})
+
+			m := NewMockSentry(ctx, sentryServer)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
+			require.NoError(t, err)
+			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+			payload := EncodeTransactions(txns, nil)
+			if id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
+				payload = EncodePooledTransactions66(txns, 1, nil)
+			}
+			err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+				Id: id, Data: payload, PeerId: peerID,
+			}, sentryClient)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -389,6 +433,10 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 	for i := range oversizedTxns {
 		oversizedTxns[i] = txn
 	}
+	frame := framePoolSlot(t, [20]byte{1}, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signature: make([]byte, 65)}}
+	var invalidFrame bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&invalidFrame))
 
 	// Each sub-test sends a malformed message of a given type and asserts that PenalizePeer is called.
 	tests := []struct {
@@ -405,6 +453,16 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			name: "malformed PooledTransactions66",
 			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 			data: []byte{0xff, 0xfe},
+		},
+		{
+			name: "invalid frame signature Transactions66",
+			id:   sentryproto.MessageId_TRANSACTIONS_66,
+			data: EncodeTransactions([][]byte{invalidFrame.Bytes()}, nil),
+		},
+		{
+			name: "invalid frame signature PooledTransactions66",
+			id:   sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+			data: EncodePooledTransactions66([][]byte{invalidFrame.Bytes()}, 1, nil),
 		},
 		{
 			name: "oversized Transactions66",
@@ -441,6 +499,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 			sentryServer := sentryproto.NewMockSentryServer(ctrl)
 			pool := NewMockPool(ctrl)
 			pool.EXPECT().Started().Return(true)
+			pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 
 			// Expect PenalizePeer to be called exactly once with a Kick penalty.
 			sentryServer.EXPECT().

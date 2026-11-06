@@ -152,7 +152,7 @@ func NewFetch(
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
-		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
 		requested:            requested,
 		retryBudgets:         map[fetchPeer]*retryBudget{},
@@ -548,7 +548,7 @@ func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.Sentr
 // protocol violation via the blob_versioned_hashes / BlobBundles count
 // mismatch below (blob txs must declare >=1 blob per EIP-4844).
 func (f *Fetch) checkBlobSidecar(slot *TxnSlot) error {
-	if slot == nil || slot.Txn == nil || slot.Txn.Type() != types.BlobTxType {
+	if slot == nil || slot.Txn == nil || (slot.Txn.Type() != types.BlobTxType && slot.Txn.GetBlobGas() == 0) {
 		return nil
 	}
 	blobHashes := slot.Txn.GetBlobHashes()
@@ -1116,7 +1116,7 @@ func (f *Fetch) dropAlternate(peer fetchPeer) {
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -1166,7 +1166,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.TxType() == BlobTxnType {
+					if utx.Txn.GetBlobGas() != 0 {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)

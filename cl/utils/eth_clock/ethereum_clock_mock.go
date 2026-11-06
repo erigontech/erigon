@@ -350,17 +350,17 @@ func (c *MockEthereumClockGetEpochAtSlotCall) DoAndReturn(f func(uint64) uint64)
 }
 
 // GetSlotByTime mocks base method.
-func (m *MockEthereumClock) GetSlotByTime(arg0 time.Time) uint64 {
+func (m *MockEthereumClock) GetSlotByTime(time time.Time) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSlotByTime", arg0)
+	ret := m.ctrl.Call(m, "GetSlotByTime", time)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // GetSlotByTime indicates an expected call of GetSlotByTime.
-func (mr *MockEthereumClockMockRecorder) GetSlotByTime(arg0 any) *MockEthereumClockGetSlotByTimeCall {
+func (mr *MockEthereumClockMockRecorder) GetSlotByTime(time any) *MockEthereumClockGetSlotByTimeCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSlotByTime", reflect.TypeOf((*MockEthereumClock)(nil).GetSlotByTime), time)
 	return &MockEthereumClockGetSlotByTimeCall{Call: call}
 }
 
@@ -575,6 +575,44 @@ func (c *MockEthereumClockNextForkEpochIncludeBPOCall) Do(f func() uint64) *Mock
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockEthereumClockNextForkEpochIncludeBPOCall) DoAndReturn(f func() uint64) *MockEthereumClockNextForkEpochIncludeBPOCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Now mocks base method.
+func (m *MockEthereumClock) Now() time.Time {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Now")
+	ret0, _ := ret[0].(time.Time)
+	return ret0
+}
+
+// Now indicates an expected call of Now.
+func (mr *MockEthereumClockMockRecorder) Now() *MockEthereumClockNowCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Now", reflect.TypeOf((*MockEthereumClock)(nil).Now))
+	return &MockEthereumClockNowCall{Call: call}
+}
+
+// MockEthereumClockNowCall wrap *gomock.Call
+type MockEthereumClockNowCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEthereumClockNowCall) Return(arg0 time.Time) *MockEthereumClockNowCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEthereumClockNowCall) Do(f func() time.Time) *MockEthereumClockNowCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEthereumClockNowCall) DoAndReturn(f func() time.Time) *MockEthereumClockNowCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

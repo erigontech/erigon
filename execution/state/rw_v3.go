@@ -133,22 +133,23 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, vw := range writes.CreateContracts() {
 			ensure(a).createContract = vw.Val
 		}
-		for a, byKey := range writes.StoragesChanged() {
+		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
 				d.storage = append(d.storage, storageItem{k, vw.Val})
 			}
 		}
 
-		// Drop a self-destructed address's own field/storage writes so it reaches
-		// the pure-delete branch below (a raw versionMap view still carries them).
-		// Balance is kept unless the destruct burned it (a later same-tx credit keeps
-		// the burn stamp): a kept non-zero balance is the EIP-8246 preserved account.
+		// A balance write stamped ValueDeleted is the removal verdict (a burning
+		// self-destruct or an EIP-161 empty): drop the address's other field/storage
+		// writes so it reaches the pure-delete branch below (a raw versionMap view
+		// still carries them). A self-destruct that preserves a non-zero balance
+		// (EIP-8246) is not balance-deleted and survives as an EOA.
 		for _, d := range perAddr {
-			if d.selfDestruct {
-				if d.balanceDeleted {
-					d.balance.SetNone()
-				}
+			if d.balanceDeleted {
+				d.balance.SetNone()
+			}
+			if d.selfDestruct || d.balanceDeleted {
 				d.nonce.SetNone()
 				d.incarnation.SetNone()
 				d.codeHash.SetNone()
@@ -173,7 +174,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			d := perAddr[addr]
 			address := addr.Value()
 
-			if d.selfDestruct {
+			if d.selfDestruct || d.balanceDeleted {
 				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, addr)
 				}
@@ -358,10 +359,9 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	return nil
 }
 
-// ApplyTxIndexes writes trace indices, log indices, and receipts. skipReceiptCache
-// skips the receipt-cache domain write for the parallel executor's block-finalize
-// txResult, which shares the system-tx-end txNum: a second DomainPut there would
-// overwrite the last regular tx's receipt history entry.
+// ApplyTxIndexes writes trace indices, log indices, and receipts.
+// A nil receipt clears the cached value when receipt caching is enabled.
+// skipReceiptCache leaves the receipt cache and its history unchanged.
 func (rs *StateV3) ApplyTxIndexes(
 	roTx kv.TemporalTx,
 	txNum uint64,
@@ -771,7 +771,8 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		}
 	}
 	value := accounts.SerialiseV3(account)
-	if w.accumulator != nil {
+	// Refresh an earlier notification even when the account returns to its original value.
+	if w.accumulator != nil && (!original.Equals(account) || w.accumulator.HasAccountChange(addressValue)) {
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 
@@ -829,11 +830,11 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
-	if len(v) == 0 {
-		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
-	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
+	}
+	if len(v) == 0 {
+		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
@@ -927,8 +928,12 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	return r.ReadAccountStorageByPlainKey(address, key.Value())
+}
+
+// ReadAccountStorageByPlainKey is ReadAccountStorage for a slot that is not interned.
+func (r *ReaderV3) ReadAccountStorageByPlainKey(address accounts.Address, keyValue common.Hash) (uint256.Int, bool, error) {
 	addressValue := address.Value()
-	keyValue := key.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
@@ -943,7 +948,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	}
 
 	if r.trace {
-		r.traceReadAccountStorage(address, key, enc, res)
+		r.traceReadAccountStorage(address, keyValue, enc, res)
 	}
 
 	return res, ok, err
@@ -953,7 +958,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 // needs for %x formatting does not force res to the heap on every read.
 //
 //go:noinline
-func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key accounts.StorageKey, enc []byte, res uint256.Int) {
+func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.Hash, enc []byte, res uint256.Int) {
 	if enc == nil {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 	} else {

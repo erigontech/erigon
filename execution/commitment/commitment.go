@@ -1537,7 +1537,20 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+func (t *Updates) HashKey(key []byte) []byte { return t.hashKey(key) }
+
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	t.TouchPlainKeyDirectHashed(key, nil, update)
+}
+
+func (t *Updates) hashedOr(key string, hashed []byte) []byte {
+	if hashed != nil {
+		return hashed
+	}
+	return t.hashKey(common.ToBytesZeroCopy(key))
+}
+
+func (t *Updates) TouchPlainKeyDirectHashed(key string, hashed []byte, update *Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
 			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
@@ -1575,7 +1588,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashedOr(key, hashed),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1584,12 +1597,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
+			t.collectDirect(t.hashedOr(key, hashed), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashedOr(key, hashed)
 		u := new(Update)
 		*u = *update
 		ik := keyBytes

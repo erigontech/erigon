@@ -883,3 +883,60 @@ func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
 		beaconCfg: s.beaconCfg,
 	}
 }
+
+func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, blockRoot common.Hash, bid *ExecutionPayloadBid, env *SignedExecutionPayloadEnvelope) error {
+	if beaconCfg == nil {
+		return errors.New("nil beacon chain config")
+	}
+	if bid == nil {
+		return errors.New("nil execution payload bid")
+	}
+	if env == nil || env.Message == nil || env.Message.Payload == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	envelope := env.Message
+	payload := envelope.Payload
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("beacon block root mismatch: envelope=%v block=%v", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
+		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
+	}
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
+	}
+	if payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
+	}
+	if payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
+	}
+	if payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
+	}
+	if payload.SlotNumber != bid.Slot {
+		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("nil execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("execution requests root: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
+	if err != nil {
+		return fmt.Errorf("payload header: %w", err)
+	}
+	if header.Hash() != payload.BlockHash {
+		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
+	}
+	return nil
+}
