@@ -57,17 +57,22 @@ type FrameCreationNonce struct {
 	MaxNonce uint64
 }
 
+type framePrefix struct {
+	paymentFrame    int
+	deploymentFrame int // -1 when the prefix has no deployment frame
+	recentRootFrame int // -1 when the prefix has no recent-root frame
+	deadline        uint64
+}
+
 // frameValidationTracer enforces pool-only restrictions through EVM hooks, so
 // simulation shares the consensus executor without restricting mined transactions.
 type frameValidationTracer struct {
 	FrameValidation
-	evm             *vm.EVM
-	paymentFrame    int
-	deploymentFrame int // -1 when the prefix has no deployment frame
-	recentRootFrame int // -1 when the prefix has no recent-root frame
-	err             error
-	dependencies    map[common.Address]struct{}
-	creations       map[common.Address]frameCreationTrace
+	framePrefix
+	evm          *vm.EVM
+	err          error
+	dependencies map[common.Address]struct{}
+	creations    map[common.Address]frameCreationTrace
 }
 
 type frameCreationTrace struct {
@@ -93,7 +98,7 @@ func ValidateFrameTransactionPrefix(tx *types.FrameTransaction) error {
 // ValidateFrameTransaction applies public-mempool policy to the validation prefix,
 // stopping after payment approval and reverting all simulated state changes.
 func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameValidation, error) {
-	validation, err := frameValidationPrefix(tx)
+	prefix, err := frameValidationPrefix(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +106,13 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	if err != nil {
 		return nil, err
 	}
-	if tx.Frames[0].IsExpiryVerifier() && validation.Deadline < evm.Context.Time {
+	if tx.Frames[0].IsExpiryVerifier() && prefix.deadline < evm.Context.Time {
 		return nil, errors.New("expired frame transaction")
+	}
+	validation := &frameValidationTracer{
+		FrameValidation: FrameValidation{Deadline: prefix.deadline},
+		framePrefix:     prefix,
+		evm:             evm,
 	}
 	if validation.recentRootFrame >= 0 {
 		validation.RecentRoots, err = ParseRecentRootReferences(tx.Frames[validation.recentRootFrame].Data)
@@ -112,7 +122,6 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	}
 	config, txContext := evm.Config(), evm.TxContext
 	defer evm.ResetBetweenBlocks(evm.Context, txContext, evm.IntraBlockState(), config, evm.ChainRules())
-	validation.evm = evm
 	validation.dependencies = map[common.Address]struct{}{tx.SenderAddress: {}}
 	if !tx.UsesLegacyNonce() {
 		// Keyed nonces depend on the manager account as well as their selected storage slots.
@@ -146,77 +155,77 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 // frameValidationPrefix recognizes optional expiry, recent-root and deployment frames followed by
 // sender approval and, if separate, payer approval. Restricting this prefix
 // bounds unpaid validation work; execution frames after it are not simulated.
-func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, error) {
+func frameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error) {
 	invalid := errors.New("unrecognized frame validation prefix")
 	if len(tx.Frames) == 0 {
-		return nil, invalid
+		return framePrefix{}, invalid
 	}
-	v := &frameValidationTracer{deploymentFrame: -1, recentRootFrame: -1}
+	prefix := framePrefix{deploymentFrame: -1, recentRootFrame: -1}
 	i := 0
 	if f := &tx.Frames[0]; f.IsExpiryVerifier() {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
-			return nil, invalid
+			return framePrefix{}, invalid
 		}
-		v.Deadline = binary.BigEndian.Uint64(f.Data)
+		prefix.deadline = binary.BigEndian.Uint64(f.Data)
 		i++
 	}
 	if i < len(tx.Frames) {
 		f := &tx.Frames[i]
 		if f.IsRecentRootVerifier() {
 			if !f.Value.IsZero() || f.Limits.State != 0 {
-				return nil, invalid
+				return framePrefix{}, invalid
 			}
 			if err := validateRecentRootDataLength(len(f.Data)); err != nil {
-				return nil, err
+				return framePrefix{}, err
 			}
-			v.recentRootFrame = i
+			prefix.recentRootFrame = i
 			i++
 		}
 	}
 	if i < len(tx.Frames) && tx.Frames[i].Mode == types.FrameDefault && tx.Frames[i].Flags == 0 {
-		v.deploymentFrame = i
+		prefix.deploymentFrame = i
 		i++
 	}
 	if i >= len(tx.Frames) {
-		return nil, invalid
+		return framePrefix{}, invalid
 	}
 	verify := &tx.Frames[i]
 	if verify.Mode != types.FrameVerify || verify.ResolvedTarget(tx.SenderAddress) != tx.SenderAddress {
-		return nil, invalid
+		return framePrefix{}, invalid
 	}
 	switch verify.Flags {
 	case types.FrameApproveBoth:
 	case types.FrameApproveExecution:
 		i++
 		if i >= len(tx.Frames) || tx.Frames[i].Mode != types.FrameVerify || tx.Frames[i].Flags != types.FrameApprovePayment {
-			return nil, invalid
+			return framePrefix{}, invalid
 		}
 	default:
-		return nil, invalid
+		return framePrefix{}, invalid
 	}
-	v.paymentFrame = i
+	prefix.paymentFrame = i
 	var execution, state uint64
 	for _, sig := range tx.Signatures {
 		execution += sig.VerificationGas()
 		if execution > maxFrameValidationExecutionGas {
-			return nil, errors.New("frame signature validation exceeds gas limit")
+			return framePrefix{}, errors.New("frame signature validation exceeds gas limit")
 		}
 	}
 	for j, frame := range tx.Frames {
-		if j > v.paymentFrame {
+		if j > prefix.paymentFrame {
 			if frame.Mode == types.FrameVerify {
-				return nil, invalid
+				return framePrefix{}, invalid
 			}
 			continue
 		}
 		if frame.Limits.Execution > maxFrameValidationExecutionGas-execution ||
 			frame.Limits.State > maxFrameValidationStateGas-state {
-			return nil, errors.New("frame validation exceeds gas limit")
+			return framePrefix{}, errors.New("frame validation exceeds gas limit")
 		}
 		execution += frame.Limits.Execution
 		state += frame.Limits.State
 	}
-	return v, nil
+	return prefix, nil
 }
 
 func (v *frameValidationTracer) fail(err error) {
