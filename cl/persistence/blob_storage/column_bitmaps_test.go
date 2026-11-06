@@ -138,6 +138,49 @@ func TestFailedColumnRemoveLetsTheFilesAnswerAgain(t *testing.T) {
 	require.True(t, columnExists(t, s, 1000, root, 0))
 }
 
+// stallingFailingRemoveFs holds a Remove of path until released, then fails it, leaving the
+// file in place.
+type stallingFailingRemoveFs struct {
+	afero.Fs
+	path    string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *stallingFailingRemoveFs) Remove(name string) error {
+	if name == f.path {
+		close(f.entered)
+		<-f.release
+		return errInducedFailure
+	}
+	return f.Fs.Remove(name)
+}
+
+// ColumnSidecarExists takes no root lock, so it runs while a remove is in flight. A file that
+// the remove then fails to delete must not read as missing in the meantime: peers asking for
+// it would be refused and the downloader would fetch it again.
+func TestColumnSidecarExistsDuringAFailingRemoveSeesTheFile(t *testing.T) {
+	fs := &stallingFailingRemoveFs{Fs: afero.NewMemMapFs(), entered: make(chan struct{}), release: make(chan struct{})}
+	s := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter()).(*dataColumnStorageImpl)
+	root := common.Hash{1}
+	for _, column := range []int64{0, 1} {
+		require.NoError(t, s.WriteColumnSidecars(t.Context(), root, column, createTestDataColumnSidecar(1000, column)))
+	}
+	require.Equal(t, []uint64{0, 1}, savedColumns(t, s, 1000, root))
+	_, fs.path = s.path(1000, root, 0)
+
+	removeDone := make(chan error, 1)
+	go func() { removeDone <- s.RemoveColumnSidecars(t.Context(), 1000, root, 0) }()
+	<-fs.entered
+
+	require.True(t, columnExists(t, s, 1000, root, 0), "the file is still on disk while its remove is in flight")
+
+	close(fs.release)
+	require.ErrorIs(t, <-removeDone, errInducedFailure)
+	require.True(t, columnExists(t, s, 1000, root, 0))
+	require.Equal(t, []uint64{0, 1}, savedColumns(t, s, 1000, root))
+}
+
 func TestColumnBitmapsAreNotUsedBelowThePruneFloor(t *testing.T) {
 	s, _ := newStatCountingColumnStore(t)
 	pruned, kept := common.Hash{1}, common.Hash{2}

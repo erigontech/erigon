@@ -147,26 +147,26 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	lock := s.forRoot(blockRoot)
 	lock.Lock()
 	defer lock.Unlock()
-	columns := make([]uint64, len(columnIndices))
-	for i, index := range columnIndices {
-		columns[i] = uint64(index)
-	}
-	s.bitmaps.clear(s.columnKey(slot, blockRoot), columns)
+	key := s.columnKey(slot, blockRoot)
 	var firstErr error
 	defer func() {
 		if firstErr != nil {
-			// A file that failed to go may still be there, so its cleared bit no longer
-			// matches the disk; let the files answer for this root again.
+			// A file that failed to go may still be there; let the files answer for this
+			// root again.
 			s.bitmaps.forget(blockRoot)
 		}
 	}()
 	for _, index := range columnIndices {
+		// The bit goes after the file, so ColumnSidecarExists, which takes no root lock,
+		// never reports missing a file that a failed remove leaves in place. Until then it
+		// answers as a stat taken just before the unlink would.
 		if err := s.remove(slot, blockRoot, uint64(index)); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("failed to remove column sidecar: %w", err)
 			}
 			continue
 		}
+		s.bitmaps.clear(key, uint64(index))
 		log.Trace("removed data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", index)
 	}
 	return firstErr

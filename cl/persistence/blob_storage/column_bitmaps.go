@@ -32,9 +32,11 @@ import (
 // asking about another bucket or count gets no answer and goes to the files; a write or
 // remove for another bucket or count drops the entry.
 //
-// The caller keeps every set bit backed by a file:
-//   - a bit is set after its file is in place and cleared before its file is removed, both
-//     under the root's lock;
+// The caller keeps the bits in step with the files:
+//   - a bit is set after its file is in place and cleared after its file is removed, both
+//     under the root's lock. A lock-free reader is then at most as stale as a stat taken
+//     just before the unlink, and a remove that fails, which drops the entry, never hides
+//     a file still on disk;
 //   - an entry is seeded only from a full scan of the root's files under the root's lock, so
 //     no write or remove of that root, at any slot, interleaves with the scan;
 //   - entries are used and seeded only for slots at or above the prune floor, read under
@@ -136,8 +138,8 @@ func (c *columnBitmaps) set(k columnKey, column uint64) {
 	e.bits[column/8] |= 1 << (column % 8)
 }
 
-// clear unmarks columns about to be removed and drops an entry left with none.
-func (c *columnBitmaps) clear(k columnKey, columns []uint64) {
+// clear unmarks a column whose file was just removed and drops an entry left with none.
+func (c *columnBitmaps) clear(k columnKey, column uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.entries[k.root]; !ok {
@@ -148,10 +150,8 @@ func (c *columnBitmaps) clear(k columnKey, columns []uint64) {
 		delete(c.entries, k.root)
 		return
 	}
-	for _, column := range columns {
-		if column < k.width {
-			e.bits[column/8] &^= 1 << (column % 8)
-		}
+	if column < k.width {
+		e.bits[column/8] &^= 1 << (column % 8)
 	}
 	if !slices.ContainsFunc(e.bits, func(b byte) bool { return b != 0 }) {
 		delete(c.entries, k.root)
