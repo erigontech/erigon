@@ -1317,7 +1317,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, applyTx kv.Tempo
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
 				// The view finalizeValidatedTx reads the first receipt's offsets from.
-				if executor.lacksPriorGas, err = restorePriorGas(applyTx, pe.cfg.chainConfig, executor.gasPool, txTask); err != nil {
+				if executor.lacksPriorGas, err = pe.restorePriorGas(ctx, applyTx, executor.gasPool, txTask); err != nil {
 					return err
 				}
 				// Set the coinbase once, before any worker runs, so self-loop workers

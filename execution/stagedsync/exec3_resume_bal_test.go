@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math/big"
@@ -472,6 +473,23 @@ func (fx *resumeBALFixture) moveToStateFiles(t *testing.T, db kv.TemporalRwDB, d
 	require.Equal(t, resumeBALStepSize, tx.Debug().TxNumsInFiles(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
 }
 
+// wipeHistoryTables empties the account, storage and code history tables.
+func wipeHistoryTables(t *testing.T, db kv.TemporalRwDB) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, table := range []string{
+			kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
+			kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+			kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
+		} {
+			if err := tx.ClearTable(table); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+
 // exec runs block through the parallel executor from point and returns the
 // invalid-block verdict and the operational error, at most one of them set.
 func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumePoint) (*blockVerdict, error) {
@@ -489,18 +507,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	if fx.fromStateFiles {
 		fx.moveToStateFiles(t, db, dirs)
 	} else if fx.wipeHistory {
-		require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-			for _, table := range []string{
-				kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
-				kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
-				kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
-			} {
-				if err := tx.ClearTable(table); err != nil {
-					return err
-				}
-			}
-			return nil
-		}))
+		wipeHistoryTables(t, db)
 	}
 
 	cfg := fx.execCfg(t, db, dirs, block)
@@ -582,6 +589,9 @@ func (fx *resumeBALFixture) execSerial(t *testing.T, block *types.Block, point r
 	dirs := datadir.New(t.TempDir())
 	db := newResumeTestDB(t)
 	fx.seed(t, db, point)
+	if fx.wipeHistory {
+		wipeHistoryTables(t, db)
+	}
 	cfg := fx.execCfg(t, db, dirs, block)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -805,7 +815,8 @@ func (b boundAt) BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transac
 // TestResumedBlockTxGas checks that a gas limit bound to its position is
 // checked in a block executed from its start or resumed before Amsterdam, and
 // left alone in a block resumed from Amsterdam or after transactions without
-// receipts, whose gas its pool then lacks.
+// receipts, whose gas its pool then lacks: no message takes its gas from the
+// block, so the transactions are not executed again.
 func TestResumedBlockTxGas(t *testing.T) {
 	amsterdam := chain.TestChainOsakaConfig.Copy()
 	amsterdam.AmsterdamTime = common.NewUint64(resumeBlockTime)
@@ -874,6 +885,7 @@ func testResumedBlockTxGas(t *testing.T, config *chain.Config) {
 		{"after block start/unbound", invalid, unbound[2].Hash(), offset, afterBlockInit, false, protocol.ErrGasLimitPosition},
 		{"after tx0/bound", valid, bound[2].Hash(), offset, afterTx0, false, nil},
 		{"after tx0 without receipts/bound", valid, bound[2].Hash(), offset, afterTx0, true, nil},
+		{"after tx0 without receipts/unbound", invalid, unbound[2].Hash(), offset, afterTx0, true, nil},
 	}
 	if !isAmsterdam {
 		cases = append(cases, testCase{"after tx0/unbound", invalid, unbound[2].Hash(), offset, afterTx0, false, protocol.ErrGasLimitPosition})
@@ -915,81 +927,237 @@ func (txn fromBlockTxn) AsMessage(s types.Signer, baseFee *uint256.Int, rules *c
 	return msg, nil
 }
 
-// TestResumedBlockGasFromBlock checks that both executors, resuming a block
-// after a transaction that left less gas than a later message's limit, give
-// that message, which takes its gas from the block, what the transaction
-// left, and check the message's bound gas limit against it.
-func TestResumedBlockGasFromBlock(t *testing.T) {
-	burner := common.HexToAddress("0x000000000000000000000000000000000000b0e4")
-	recorder := common.HexToAddress("0x000000000000000000000000000000000000ea51")
+var (
+	// resumeBurner burns all the gas it gets: JUMPDEST PUSH1 0 JUMP.
+	resumeBurner = common.HexToAddress("0x000000000000000000000000000000000000b0e4")
+	// resumeRecorder stores the gas it has left: GAS PUSH1 0 SSTORE.
+	resumeRecorder = common.HexToAddress("0x000000000000000000000000000000000000ea51")
+)
+
+// newRecorderFixture returns an Osaka fixture without a block, whose genesis
+// adds resumeBurner and resumeRecorder, and the transactions of a block where
+// a transaction per burns entry burns that gas and the last one calls
+// resumeRecorder with gasLimit, its message taking its gas from the block if
+// fromBlock.
+func newRecorderFixture(t *testing.T, burns []uint64, gasLimit uint64, fromBlock bool) (*resumeBALFixture, types.Transactions) {
+	t.Helper()
 	fx := newResumeFixture(t, chain.TestChainOsakaConfig, types.GenesisAlloc{
-		// JUMPDEST PUSH1 0 JUMP: burns all the gas it gets.
-		burner: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
-		// GAS PUSH1 0 SSTORE: stores the gas it has left.
-		recorder: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.GAS), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}},
+		resumeBurner:   {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
+		resumeRecorder: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.GAS), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}},
 	})
 	signer := types.LatestSignerForChainID(fx.config.ChainID)
 	gasPrice := uint256.NewInt(1_000_000_000)
+	var legacy []*types.LegacyTx
+	for i, burn := range burns {
+		legacy = append(legacy, &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &resumeBurner, GasLimit: burn}, GasPrice: *gasPrice})
+	}
+	legacy = append(legacy, &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(len(burns)), To: &resumeRecorder, GasLimit: gasLimit}, GasPrice: *gasPrice})
 	var txs types.Transactions
-	for _, txn := range []*types.LegacyTx{
-		{CommonTx: types.CommonTx{Nonce: 0, To: &burner, GasLimit: 16_000_000}, GasPrice: *gasPrice},
-		{CommonTx: types.CommonTx{Nonce: 1, To: &recorder, GasLimit: params.MaxTxnGasLimit}, GasPrice: *gasPrice},
-	} {
+	for _, txn := range legacy {
 		signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
 		require.NoError(t, err)
 		txs = append(txs, signed)
 	}
-	txs[1] = fromBlockTxn{txs[1]}
-	var left uint64
-	fx.engine = gasLeftAt{fx.engine, txs[1].Hash(), &left}
-	fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
-	wantLeft := fx.block.GasLimit() - fx.receipts[0].GasUsed
-	require.Less(t, wantLeft, params.MaxTxnGasLimit)
-	require.Equal(t, wantLeft, left)
+	if fromBlock {
+		txs[len(burns)] = fromBlockTxn{txs[len(burns)]}
+	}
+	fx.senders = slices.Repeat([]common.Address{senderIsCoinbaseKey.rawAddress}, len(txs))
+	return fx, txs
+}
+
+// recordGas returns the gas resumeRecorder stores in fx.block and points
+// fx.inspect at have, which then receives what a run stores.
+func (fx *resumeBALFixture) recordGas(t *testing.T, have *uint256.Int) uint256.Int {
+	t.Helper()
 	var want uint256.Int
-	for _, account := range fx.block.BlockAccessList() {
-		if account.Address == recorder {
-			want = account.StorageChanges[0].Changes[0].Value
+	bal := fx.block.BlockAccessList()
+	for i := range bal {
+		if bal[i].Address == resumeRecorder {
+			want = bal[i].StorageChanges[0].Changes[0].Value
 		}
 	}
 	require.False(t, want.IsZero())
-
-	var recorded uint256.Int
 	fx.inspect = func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx) {
-		v, _, err := sd.GetLatest(kv.StorageDomain, tx, dbutils.GenerateStoragePlainKey(recorder, common.Hash{}))
+		v, _, err := sd.GetLatest(kv.StorageDomain, tx, dbutils.GenerateStoragePlainKey(resumeRecorder, common.Hash{}))
 		require.NoError(t, err)
-		recorded.SetBytes(v)
+		have.SetBytes(v)
 	}
-	for _, tc := range []struct {
+	return want
+}
+
+// TestResumedBlockGasFromBlock checks that both executors, resuming a block
+// after transactions that left less gas than a later message's limit, give
+// that message, which takes its gas from the block, what the transactions
+// left, also when their receipts are missing, and check the message's bound
+// gas limit against it.
+func TestResumedBlockGasFromBlock(t *testing.T) {
+	for _, prefix := range []struct {
 		name  string
-		point resumePoint
+		burns []uint64
 	}{
-		{"full", fromBlockStart},
-		{"after tx0", afterTx0},
+		{"one prefix tx", []uint64{16_000_000}},
+		{"two prefix txs", []uint64{8_000_000, 8_000_000}},
 	} {
-		t.Run("parallel/"+tc.name, func(t *testing.T) {
-			left, recorded = 0, uint256.Int{}
-			verdict, err := fx.exec(t, fx.block, tc.point)
-			require.NoError(t, err)
-			if verdict != nil {
-				t.Fatal(verdict.err)
+		fx, txs := newRecorderFixture(t, prefix.burns, params.MaxTxnGasLimit, true)
+		last := len(prefix.burns)
+		var left uint64
+		fx.engine = gasLeftAt{fx.engine, txs[last].Hash(), &left}
+		fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+		wantLeft := fx.block.GasLimit() - fx.receipts[last-1].CumulativeGasUsed
+		require.Less(t, wantLeft, params.MaxTxnGasLimit)
+		require.Equal(t, wantLeft, left)
+		var recorded uint256.Int
+		want := fx.recordGas(t, &recorded)
+
+		for _, tc := range []struct {
+			name             string
+			point            resumePoint
+			noPrefixReceipts bool
+		}{
+			{"full", fromBlockStart, false},
+			{"after prefix", resumePoint(last), false},
+			{"after prefix without receipts", resumePoint(last), true},
+		} {
+			for _, serial := range []bool{false, true} {
+				name := prefix.name + "/parallel/" + tc.name
+				if serial {
+					name = prefix.name + "/serial/" + tc.name
+				}
+				t.Run(name, func(t *testing.T) {
+					left, recorded = 0, uint256.Int{}
+					fx.noPrefixReceipts = tc.noPrefixReceipts
+					err := fx.run(t, fx.block, tc.point, serial)
+					require.Equal(t, want, recorded, "gas recorded by the message")
+					require.NoError(t, err)
+					require.Equal(t, wantLeft, left, "gas left checked at the message")
+				})
 			}
+		}
+	}
+}
+
+const noWritesTxType = 0x7d
+
+func init() {
+	types.RegisterTxType(noWritesTxType, types.TxTypeSpec{New: func() types.Transaction { return nil }, Nonceless: true})
+}
+
+// noWritesTxn is a transaction whose message, free, nonceless and to an
+// account that does not exist, writes no state.
+type noWritesTxn struct{ types.Transaction }
+
+func (txn noWritesTxn) AsMessage(s types.Signer, baseFee *uint256.Int, rules *chain.Rules) (*types.Message, error) {
+	msg, err := txn.Transaction.AsMessage(s, baseFee, rules)
+	if err != nil {
+		return nil, err
+	}
+	var zero uint256.Int
+	free := types.NewMessage(msg.From(), accounts.InternAddress(common.HexToAddress("0x000000000000000000000000000000000000dead")), msg.Nonce(), &zero,
+		msg.Gas(), &zero, &zero, &zero, nil, nil, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, true /* isFree */, nil)
+	free.SetTxType(noWritesTxType)
+	return free, nil
+}
+
+// TestResumedBlockGasFromBlockAfterNoWrites checks that both executors resume a
+// block after a transaction that wrote no state and left no receipt before a
+// message taking its gas from the block: the block start's writes show the
+// state history holds the block.
+func TestResumedBlockGasFromBlockAfterNoWrites(t *testing.T) {
+	fx, txs := newRecorderFixture(t, []uint64{21_000}, params.MaxTxnGasLimit, true)
+	// tx0 leaves its sender's nonce to tx1.
+	recorder, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 0, To: &resumeRecorder, GasLimit: params.MaxTxnGasLimit}, GasPrice: *uint256.NewInt(1_000_000_000),
+	}, *types.LatestSignerForChainID(fx.config.ChainID), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+	txs[0], txs[1] = noWritesTxn{txs[0]}, fromBlockTxn{recorder}
+	fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+	bal := fx.block.BlockAccessList()
+	require.True(t, hasStorageChangeAt(bal, 0), "the block start must write storage")
+	require.False(t, hasStorageChangeAt(bal, 1), "tx0 must write nothing")
+	for i := range bal {
+		for _, bc := range bal[i].BalanceChanges {
+			require.NotEqual(t, uint32(1), bc.Index, "tx0 must write nothing")
+		}
+		for _, nc := range bal[i].NonceChanges {
+			require.NotEqual(t, uint32(1), nc.Index, "tx0 must write nothing")
+		}
+	}
+	var recorded uint256.Int
+	want := fx.recordGas(t, &recorded)
+	fx.noPrefixReceipts = true
+	for _, serial := range []bool{false, true} {
+		name := "parallel"
+		if serial {
+			name = "serial"
+		}
+		t.Run(name, func(t *testing.T) {
+			recorded = uint256.Int{}
+			require.NoError(t, fx.run(t, fx.block, afterTx0, serial))
 			require.Equal(t, want, recorded, "gas recorded by tx1")
-			require.Equal(t, wantLeft, left, "gas left checked at tx1")
-		})
-		t.Run("serial/"+tc.name, func(t *testing.T) {
-			left, recorded = 0, uint256.Int{}
-			err := fx.execSerial(t, fx.block, tc.point)
-			require.Equal(t, want, recorded, "gas recorded by tx1")
-			require.NoError(t, err)
-			require.Equal(t, wantLeft, left, "gas left checked at tx1")
 		})
 	}
 }
 
+// TestResumedBlockWithoutPrefixGas checks that both executors, resuming a
+// block after a transaction whose gas neither its receipt nor the state
+// history tells, fail the run without judging the block when a later message
+// takes its gas from the block, and execute the block otherwise.
+func TestResumedBlockWithoutPrefixGas(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		gasLimit  uint64
+		fromBlock bool
+	}{
+		{"gas from block", params.MaxTxnGasLimit, true},
+		{"gas limit", 100_000, false},
+	} {
+		fx, txs := newRecorderFixture(t, []uint64{16_000_000}, tc.gasLimit, tc.fromBlock)
+		fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+		var recorded uint256.Int
+		want := fx.recordGas(t, &recorded)
+		fx.noPrefixReceipts, fx.wipeHistory = true, true
+		for _, serial := range []bool{false, true} {
+			name := "parallel/" + tc.name
+			if serial {
+				name = "serial/" + tc.name
+			}
+			t.Run(name, func(t *testing.T) {
+				recorded = uint256.Int{}
+				var err error
+				if serial {
+					err = fx.execSerial(t, fx.block, afterTx0)
+				} else {
+					var verdict *blockVerdict
+					verdict, err = fx.exec(t, fx.block, afterTx0)
+					if verdict != nil {
+						t.Fatalf("block judged: %v", verdict.err)
+					}
+				}
+				if !tc.fromBlock {
+					require.NoError(t, err)
+					require.Equal(t, want, recorded, "gas recorded by tx1")
+					return
+				}
+				require.ErrorIs(t, err, state.ErrPruned)
+				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+				require.NotErrorIs(t, err, ErrWrongTrieRoot)
+			})
+		}
+	}
+}
+
+// badMessageTxn is a transaction without a message.
+type badMessageTxn struct{ types.Transaction }
+
+func (badMessageTxn) AsMessage(types.Signer, *uint256.Int, *chain.Rules) (*types.Message, error) {
+	return nil, errors.New("no message")
+}
+
 // TestRestorePriorGas checks that a resumed block's gas pool loses the gas and
 // blob gas its earlier transactions' receipts tell, and is left as it is, and
-// reported to lack them, where they do not tell it.
+// reported to lack them, where they do not tell it and no later message takes
+// its gas from the block, which otherwise fails the run without the state
+// history.
 func TestRestorePriorGas(t *testing.T) {
 	const gasLimit = 30_000_000
 	db := newResumeTestDB(t)
@@ -1012,26 +1180,42 @@ func TestRestorePriorGas(t *testing.T) {
 	amsterdam := chain.TestChainOsakaConfig.Copy()
 	amsterdam.AmsterdamTime = common.NewUint64(0)
 	maxBlobGas := chain.TestChainOsakaConfig.GetMaxBlobGasPerBlock(0)
+	tx0 := signSelfSendTx(t, 0, 0, 1, 21_000, chain.TestChainOsakaConfig, 0)
+	tx1 := signSelfSendTx(t, 1, 0, 1, 21_000, chain.TestChainOsakaConfig, 0)
+	tx2 := signSelfSendTx(t, 2, 0, 1, 21_000, chain.TestChainOsakaConfig, 0)
 	for _, tc := range []struct {
 		name        string
 		config      *chain.Config
 		txNum       uint64
 		txIndex     int
+		txs         types.Transactions
+		err         error
 		lacking     bool
 		gasUsed     uint64
 		blobGasUsed uint64
 	}{
-		{"resumed", chain.TestChainOsakaConfig, 5, 1, false, 1_000_000, params.GasPerBlob},
-		{"resumed without receipts", chain.TestChainOsakaConfig, 4, 1, true, 0, 0},
-		{"resumed from amsterdam", amsterdam, 5, 1, true, 0, 0},
+		{"resumed", chain.TestChainOsakaConfig, 5, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, nil, false, 1_000_000, params.GasPerBlob},
+		{"resumed without receipts", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, tx1, tx2}, nil, true, 0, 0},
+		{"resumed without receipts or history before gas from the block", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, state.ErrPruned, false, 0, 0},
+		{"resumed without receipts or history before later gas from the block", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, tx1, fromBlockTxn{tx2}}, state.ErrPruned, false, 0, 0},
+		// Executing the transaction without a message rejects the block first.
+		{"resumed without receipts before a transaction without a message", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, badMessageTxn{tx1}, fromBlockTxn{tx2}}, nil, true, 0, 0},
+		{"resumed from amsterdam", amsterdam, 5, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, nil, true, 0, 0},
 		// The receipt before the first transaction is the parent block's last.
-		{"first transaction", chain.TestChainOsakaConfig, 5, 0, false, 0, 0},
-		{"block start", chain.TestChainOsakaConfig, 5, -1, false, 0, 0},
+		{"first transaction", chain.TestChainOsakaConfig, 5, 0, types.Transactions{fromBlockTxn{tx0}}, nil, false, 0, 0},
+		{"block start", chain.TestChainOsakaConfig, 5, -1, types.Transactions{fromBlockTxn{tx0}}, nil, false, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gp := protocol.NewGasPool(gasLimit, maxBlobGas)
-			task := &exec.TxTask{TxNum: tc.txNum, TxIndex: tc.txIndex, Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit}}
-			lacking, err := restorePriorGas(tx, tc.config, gp, task)
+			te := &txExecutor{cfg: ExecuteBlockCfg{chainConfig: tc.config}}
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit}
+			task := &exec.TxTask{TxNum: tc.txNum, TxIndex: tc.txIndex, Txs: tc.txs, Config: tc.config, Header: header}
+			lacking, err := te.restorePriorGas(t.Context(), tx, gp, task)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tc.lacking, lacking)
 			require.Equal(t, gasLimit-tc.gasUsed, gp.ExecutionGasAvailable())
@@ -1040,9 +1224,28 @@ func TestRestorePriorGas(t *testing.T) {
 	}
 }
 
+// otherTask is a task of another kind than *exec.TxTask.
+type otherTask struct{ *exec.TxTask }
+
+// TestParallelResumedAtOtherTask checks that the parallel executor fails a
+// block resumed at a task whose prior gas it cannot restore instead of running
+// the block with a full gas pool.
+func TestParallelResumedAtOtherTask(t *testing.T) {
+	config := chain.TestChainOsakaConfig
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	txs := types.Transactions{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0), signSelfSendTx(t, 1, 0, 1, 21_000, config, 0)}
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000}
+	task := otherTask{&exec.TxTask{TxNum: 4, TxIndex: 1, Txs: txs, Header: header, Config: config}}
+	err := pe.processRequest(t.Context(), roTx, &execRequest{blockNum: 1, tasks: []exec.Task{task}})
+	require.ErrorContains(t, err, "otherTask")
+}
+
 // TestResumedBlockBlobGas checks that both executors, resuming a block after a
 // transaction that used blob gas, reject a later one whose blobs the rest of
-// the block's blob gas does not fit.
+// the block's blob gas does not fit, also without the first one's receipt when
+// the later one takes its gas from the block.
 func TestResumedBlockBlobGas(t *testing.T) {
 	fx := newResumeFixture(t, chain.TestChainOsakaConfig, nil)
 	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
@@ -1070,22 +1273,33 @@ func TestResumedBlockBlobGas(t *testing.T) {
 	require.Less(t, fx.config.GetMaxBlobsPerBlock(resumeBlockTime), uint64(2*params.MaxBlobsPerTxn))
 	txs := types.Transactions{blobTx(0), blobTx(1)}
 	prefix, receipts := fx.assembleBlock(t, txs[:1], coinbase)
-	fx.block = types.NewBlockForAsembling(prefix.Header(), txs, nil, receipts, prefix.Withdrawals(), prefix.BlockAccessListSidecar())
-	fx.block.SendersToTxs(fx.senders)
 	fx.receipts = receipts
+	blockOf := func(txs types.Transactions) *types.Block {
+		block := types.NewBlockForAsembling(prefix.Header(), txs, nil, receipts, prefix.Withdrawals(), prefix.BlockAccessListSidecar())
+		block.SendersToTxs(fx.senders)
+		return block
+	}
+	block, fromBlock := blockOf(txs), blockOf(types.Transactions{txs[0], fromBlockTxn{txs[1]}})
 
 	for _, tc := range []struct {
-		name  string
-		point resumePoint
+		name             string
+		block            *types.Block
+		point            resumePoint
+		noPrefixReceipts bool
 	}{
-		{"full", fromBlockStart},
-		{"after tx0", afterTx0},
+		{"full", block, fromBlockStart, false},
+		{"after tx0", block, afterTx0, false},
+		{"after tx0 without receipts/gas from block", fromBlock, afterTx0, true},
 	} {
-		t.Run("parallel/"+tc.name, func(t *testing.T) {
-			require.ErrorIs(t, fx.run(t, fx.block, tc.point, false), protocol.ErrBlobGasLimitReached)
-		})
-		t.Run("serial/"+tc.name, func(t *testing.T) {
-			require.ErrorIs(t, fx.run(t, fx.block, tc.point, true), protocol.ErrBlobGasLimitReached)
-		})
+		for _, serial := range []bool{false, true} {
+			name := "parallel/" + tc.name
+			if serial {
+				name = "serial/" + tc.name
+			}
+			t.Run(name, func(t *testing.T) {
+				fx.block, fx.noPrefixReceipts = tc.block, tc.noPrefixReceipts
+				require.ErrorIs(t, fx.run(t, tc.block, tc.point, serial), protocol.ErrBlobGasLimitReached)
+			})
+		}
 	}
 }

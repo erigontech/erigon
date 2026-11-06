@@ -362,17 +362,17 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	var lacksPriorGas bool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
+		txTask.Config = se.cfg.chainConfig
+		txTask.Engine = se.cfg.engine
 
 		if gasPool == nil {
 			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
-			if lacksPriorGas, err = restorePriorGas(se.applyTx, se.cfg.chainConfig, gasPool, task); err != nil {
+			if lacksPriorGas, err = se.restorePriorGas(ctx, se.applyTx, gasPool, txTask); err != nil {
 				return false, err
 			}
 		}
 
 		txTask.ResetGasPool(gasPool)
-		txTask.Config = se.cfg.chainConfig
-		txTask.Engine = se.cfg.engine
 
 		if !lacksPriorGas && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
 			if err := protocol.CheckTxGas(se.cfg.engine, txTask.Rules().IsAmsterdam, txTask.Tx(), gasPool); err != nil {
