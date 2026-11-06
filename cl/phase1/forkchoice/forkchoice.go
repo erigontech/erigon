@@ -1087,6 +1087,8 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
+// RejectEnvelope rejects this beacon root's envelope without invalidating its execution hash.
+// Sibling roots can reference the same execution block with different blob commitments.
 func (f *ForkChoiceStore) RejectEnvelope(blockRoot common.Hash) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

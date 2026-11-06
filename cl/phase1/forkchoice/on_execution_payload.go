@@ -47,10 +47,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// errELBehind is returned by validatePayloadWithEL when the EL cannot process
-// the payload because it hasn't caught up yet (e.g. parent block not available).
-// applyEnvelope treats this as non-fatal: it proceeds with persisting the envelope
-// and queues the execution block for later EL insertion.
+// errELBehind signals that the EL has not provided a payload verdict yet.
+// The envelope can still be persisted and queued for a later NewPayload attempt.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
 // ErrPayloadValidationInterrupted marks a NewPayload that ended with its context, waiting for
@@ -379,8 +377,7 @@ func (f *ForkChoiceStore) checkDataAvailability(
 	return nil
 }
 
-// validatePayloadWithEL validates the execution payload with the execution layer engine.
-// Called before ProcessExecutionPayloadEnvelope verification.
+// validatePayloadWithEL checks the payload with the EL after consensus envelope processing.
 func (f *ForkChoiceStore) validatePayloadWithEL(
 	ctx context.Context,
 	envelope *cltypes.ExecutionPayloadEnvelope,
@@ -629,9 +626,11 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 		defer finishImport()
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		// Detect blob mismatches locally because remote Engine API responses lose Go error identity.
 		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
 			err := validatePayloadBlobHashes(payload, versionedHashes)
 			if errors.Is(err, misc.ErrMismatchBlobHashes) {
+				// Callers may reject the beacon root only after the payload matches its claimed block hash.
 				requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
 				if _, err := payload.RlpHeader(parentBlockRoot, requestsHash, nil); err != nil {
 					return execution_client.PayloadStatusInvalidated, err
@@ -1359,9 +1358,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		}
 		if err != nil {
 			if errors.Is(err, errELBehind) {
-				// EL is behind (e.g. parent block not yet available after forward sync).
-				// Proceed with persisting the envelope so HasEnvelope() returns true.
-				// The execution block will be fed to EL via blockCollector on the next Flush().
+				// Persist the envelope and queue it for a later NewPayload attempt.
 				elBehind = true
 			} else {
 				return false, err

@@ -152,7 +152,8 @@ type forkGraphDisk struct {
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
-	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
+	// Envelope state is tracked in memory by beacon block root.
+	// Corrupt files in invalidEnvelopes can be replaced; rejectedEnvelopes blocks redelivery until pruning.
 	envelopeExists    sync.Map // common.Hash -> struct{}
 	envelopeMissing   sync.Map // common.Hash -> struct{}
 	invalidEnvelopes  sync.Map // common.Hash -> struct{}

@@ -1199,8 +1199,8 @@ func acceptedParentPayloadStatus(status execution_client.PayloadStatus, retained
 	}
 }
 
-// recordGloasPayloadRetryResult records the EL's answer and requeues a payload without a final
-// status.
+// recordGloasPayloadRetryResult records EL verdicts for retained roots and requeues retryable payloads.
+// A blob mismatch rejects only the beacon root, preserving verdicts cached by execution hash.
 func recordGloasPayloadRetryResult(
 	store gloasPayloadRetryResultStore,
 	payload forkchoice.PendingELPayload,

@@ -303,6 +303,8 @@ type ExecutionPayloadBid struct {
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
 }
 
+// VersionedHashes returns blob versioned hashes in commitment order.
+// The result is non-nil even without commitments because the EL treats nil as missing input.
 func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
 	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
 	for i := range hashes {
