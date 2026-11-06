@@ -1191,12 +1191,8 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
 		if len(key) != 0 {
-			if sd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
-				if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
-					return nil, err
-				}
-			} else {
-				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
+				return nil, err
 			}
 			processed++
 		}
