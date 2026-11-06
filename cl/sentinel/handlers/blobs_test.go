@@ -133,6 +133,7 @@ func TestBlobsByIdentifiersSkipsDuplicatesAndUnavailable(t *testing.T) {
 			storage := blob_storage.NewBlobStore(blobDB, afero.NewMemMapFs())
 			sidecars := getTestBlobSidecars(block.SignedBeaconBlockHeader())
 			require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, sidecars))
+			require.NoError(t, storage.WriteBlobSidecars(t.Context(), fuluRoot, getTestBlobSidecars(fuluBlock.SignedBeaconBlockHeader())))
 			c := &ConsensusHandlers{
 				ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg,
 				blobsStorage: storage, ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),

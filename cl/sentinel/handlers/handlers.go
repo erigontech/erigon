@@ -181,8 +181,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 		defer c.rateLimiter.releaseConcurrency(peerID)
 
-		// Enforce per-peer, per-protocol rate limit (1 token for admission;
-		// batch handlers consume additional tokens after decoding the request).
+		// Charge admission before decoding the request; see consumeRateLimit for batch charges.
 		if !c.rateLimiter.allowRequest(peerID, name, 1) {
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
 			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)

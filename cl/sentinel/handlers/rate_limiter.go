@@ -127,10 +127,6 @@ const bucketIdleExpiry = 10 * time.Minute
 
 // peerRateLimiter enforces per-peer, per-protocol rate limits and per-peer
 // concurrent stream caps on incoming ReqResp handlers.
-//
-// Rate limits use a capped estimate of response items from each request.
-// The stream wrapper consumes one token for admission; batch handlers charge
-// the remaining estimate after decoding, before reading or building responses.
 type peerRateLimiter struct {
 	// protocolLimits maps protocol name -> rate config
 	protocolLimits map[string]protocolRateConfig

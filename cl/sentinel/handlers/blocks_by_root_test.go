@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
@@ -123,6 +124,58 @@ func TestBeaconBlocksByRootLeavesCreditForRemainingRoots(t *testing.T) {
 		require.Equal(t, tc.tokensLeft, bucket.tokens)
 	}
 	require.Equal(t, 128, store.readBlockByRootCalls)
+}
+
+func TestBeaconBlocksByRootMissingRootsDoNotCountTowardResponseLimit(t *testing.T) {
+	_, db := setupStore(t)
+	store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, 96)
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	req := solid.NewHashList(98)
+	req.Append(common.Hash{0xff})
+	for _, block := range blocks {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		req.Append(root)
+	}
+	stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+	require.NoError(t, c.beaconBlocksByRootHandler(stream))
+	stream.request = bytes.NewReader(stream.response.Bytes())
+	slots := readBlocksByRangeSlots(t, stream, c.ethClock)
+	require.Len(t, slots, 96)
+	require.Equal(t, uint64(100), slots[0])
+	require.Equal(t, uint64(195), slots[95])
+	require.Equal(t, 97, store.readBlockByRootCalls)
+}
+
+func TestBeaconBlocksByRootReturnsWriteError(t *testing.T) {
+	_, db := setupStore(t)
+	store := tests.NewMockBlockReader()
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block := populateDatabaseWithBlocks(t, store, tx, 100, 0)[0]
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	req := solid.NewHashList(1)
+	req.Append(root)
+	stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+	stream.expired = true
+	require.ErrorIs(t, c.beaconBlocksByRootHandler(stream), os.ErrDeadlineExceeded)
 }
 
 func TestBeaconBlocksByRootRejectsOversizedPrefix(t *testing.T) {

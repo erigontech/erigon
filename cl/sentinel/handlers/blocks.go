@@ -45,8 +45,6 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the blocks we may serve.
-	// The wrapper already consumed 1 token for admission.
 	estimatedResponses := min(req.Count, MaxRequestsBlocks)
 	if cost := max(int(estimatedResponses)-1, 0); !c.consumeRateLimit(s, cost) {
 		return nil
@@ -115,7 +113,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	// Charge for at most MaxRequestsBlocks responses; the wrapper already consumed one token.
+	// Cap the charge at the response limit so peers retain credit for the remaining roots.
 	if cost := min(req.Length(), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
@@ -126,25 +124,22 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	var block *cltypes.SignedBeaconBlock
 	seen := make(map[common.Hash]struct{}, req.Length())
 	// Only successfully written blocks count toward the response limit; missing or
 	// duplicate roots must not prevent later known blocks from being served.
 	written := 0
-	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
-		if written >= MaxRequestsBlocks {
-			return false
-		}
+	for i := 0; i < req.Length() && written < MaxRequestsBlocks; i++ {
+		blockRoot := req.Get(i)
 		if _, ok := seen[blockRoot]; ok {
-			return true
+			continue
 		}
 		seen[blockRoot] = struct{}{}
-		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+		block, err := c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
 		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
 			block, err = nil, nil
 		}
 		if err != nil {
-			return false
+			return err
 		}
 		// If the block is not in the database, check the fork choice store.
 		// Recently received blocks (e.g. via gossip) may not have been persisted yet.
@@ -153,31 +148,28 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 		if block == nil {
 			log.Debug("[Sentinel] beaconBlocksByRoot: block not found", "root", blockRoot)
-			return true
+			continue
 		}
 
-		// Read the fork digest
 		forkDigest, err := c.ethClock.ComputeForkDigest(block.Block.Slot / c.beaconConfig.SlotsPerEpoch)
 		if err != nil {
-			return false
+			return err
 		}
 
-		if _, err = s.Write([]byte{0}); err != nil {
-			return false
+		if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
+			return err
 		}
 
-		if _, err = s.Write(forkDigest[:]); err != nil {
-			return false
+		if _, err := s.Write(forkDigest[:]); err != nil {
+			return err
 		}
-		// obtain block and write
-		if err = ssz_snappy.EncodeAndWrite(s, block); err != nil {
-			return false
+		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {
+			return err
 		}
 		written++
-		return true
-	})
+	}
 
-	return err
+	return nil
 }
 
 type emptyString struct{}
