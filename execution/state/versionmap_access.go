@@ -131,12 +131,12 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 	return uint256.Int{}, false
 }
 
-// WasDestroyed reports whether addr was destroyed or removed (self-destruct or EIP-161
-// touched-empty removal) at or below the view's txNum — the lifecycle verdict the
-// commitment uses to delete the account's whole storage subtree.
-func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
-	state, _, _, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
-	return state != LifecycleLive
+// DestroyedAt reports whether addr was destroyed or removed (self-destruct or EIP-161
+// touched-empty removal) at or below the view's txNum, and the tx index of that destruct —
+// the lifecycle verdict the commitment uses to delete the account's whole storage subtree.
+func (view *VersionMapView) DestroyedAt(addr accounts.Address) (txIdx int, destroyed bool) {
+	state, _, destroyedAt, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
+	return destroyedAt, state != LifecycleLive
 }
 
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
