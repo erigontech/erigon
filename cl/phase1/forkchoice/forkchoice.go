@@ -1100,6 +1100,9 @@ func (f *ForkChoiceStore) rejectEnvelopeLocked(blockRoot common.Hash) {
 	if !f.forkGraph.RejectEnvelope(blockRoot) {
 		return
 	}
+	if bid := f.anchorExecutionPayloadBid; bid != nil && blockRoot == f.forkGraph.AnchorRoot() {
+		f.eth2Roots.Add(blockRoot, bid.ParentBlockHash)
+	}
 	if f.verifiedExecutionPayload != nil {
 		f.verifiedExecutionPayload.Remove(blockRoot)
 	}

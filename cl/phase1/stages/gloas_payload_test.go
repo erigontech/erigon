@@ -1296,6 +1296,7 @@ func TestRetryUnverifiedAnchorPayloadRejectsStoredBlobMismatch(t *testing.T) {
 	cfg.InitializeForkSchedule()
 	bid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
 	anchor.SetLatestExecutionPayloadBid(bid)
+	anchor.SetLatestBlockHash(bid.ParentBlockHash)
 	root, err := anchor.BlockRoot()
 	require.NoError(t, err)
 	envelope.Message.BeaconBlockRoot = root
@@ -1305,6 +1306,7 @@ func TestRetryUnverifiedAnchorPayloadRejectsStoredBlobMismatch(t *testing.T) {
 	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
 	store := newAnchorForkChoiceStore(t, cfg, anchor, engine)
 	require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
+	require.Equal(t, bid.BlockHash, store.GetEth1Hash(root))
 	stageCfg := &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: engine, gloasPayloadValidator: store}
 
 	retryUnverifiedAnchorPayload(t.Context(), stageCfg)
@@ -1312,6 +1314,22 @@ func TestRetryUnverifiedAnchorPayloadRejectsStoredBlobMismatch(t *testing.T) {
 	require.True(t, store.IsEnvelopeRejected(root))
 	require.False(t, store.HasEnvelope(root))
 	require.Zero(t, engine.newPayloadCalls)
+
+	t.Run("execution head on EMPTY branch", func(t *testing.T) {
+		hash, ready := store.GetExecutionHead(forkchoice.ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty})
+		if !ready {
+			hash = store.GetEth1Hash(root)
+		}
+		require.Equal(t, bid.ParentBlockHash, hash)
+	})
+	t.Run("safe checkpoint", func(t *testing.T) {
+		require.Equal(t, common.Hash(root), store.JustifiedCheckpoint().Root)
+		require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.JustifiedCheckpoint().Root))
+	})
+	t.Run("finalized checkpoint", func(t *testing.T) {
+		require.Equal(t, common.Hash(root), store.FinalizedCheckpoint().Root)
+		require.Equal(t, bid.ParentBlockHash, store.GetFinalizedExecutionHash(store.FinalizedCheckpoint().Root))
+	})
 }
 
 func TestRetryUnverifiedAnchorPayloadDoesNotCacheBlobMismatch(t *testing.T) {
