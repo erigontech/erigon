@@ -234,6 +234,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if err != nil {
 			return nil, err
 		}
+		if err := protocol.PostProcessTx(api.engine(), chainConfig, st, block.Transactions(), idx); err != nil {
+			return nil, err
+		}
 
 		if err := ethapi.FinalizeCallTx(st, rules); err != nil {
 			return nil, err

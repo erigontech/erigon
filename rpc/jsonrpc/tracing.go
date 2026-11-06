@@ -181,6 +181,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			if traceErr != nil {
 				return traceErr
 			}
+			if err := protocol.PostProcessTx(engine, chainConfig, ibs, txns, txnIndex); err != nil {
+				return err
+			}
 			return ethapi.FinalizeCallTx(ibs, rules)
 		})
 

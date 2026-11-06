@@ -202,6 +202,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
+		if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, block.Transactions(), idx); err != nil {
+			return nil, err
+		}
 		_ = statedb.FinalizeTx(rules, state.NewNoopWriter())
 
 	}
@@ -510,6 +513,11 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 					log.Error(err.Error())
 					return nil, err
 				}
+				// Block execution post-processed the failed transaction too.
+				if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, replayTransactions, idx); err != nil {
+					log.Error(err.Error())
+					return nil, err
+				}
 				continue
 			}
 		}
@@ -521,6 +529,10 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		// Execute the transaction message
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 		if err != nil {
+			log.Error(err.Error())
+			return nil, err
+		}
+		if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, replayTransactions, idx); err != nil {
 			log.Error(err.Error())
 			return nil, err
 		}

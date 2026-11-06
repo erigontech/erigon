@@ -1541,20 +1541,21 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* blockReplay */, true /* noBaseFee */, traceConfig, overrides)
 	if err != nil {
 		return nil, callError(err)
 	}
 	return trace, nil
 }
 
-// advanceTxNum moves the history reader with the transaction index. Block
-// replay needs it; an ad-hoc bundle must not, or a call reads state left by a
-// real transaction it never executed.
+// blockReplay says txns are the transactions of header's block: the history
+// reader moves with the transaction index and the engine post-processes each
+// transaction. An ad-hoc bundle must not move the reader, or a call reads
+// state left by a real transaction it never executed.
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
+	header *types.Header, requireCanonical, gasBailout, blockReplay, noBaseFee bool,
 	traceConfig *config.TraceConfig, overrides *ethapi.StateOverrides,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1604,7 +1605,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	var tracingHooks *tracing.Hooks
 
 	for txIndex, msg := range msgs {
-		if isHistoricalStateReader && advanceTxNum {
+		if isHistoricalStateReader && blockReplay {
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
 		if err := common.Stopped(ctx.Done()); err != nil {
@@ -1684,6 +1685,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
+		if blockReplay {
+			if err := protocol.PostProcessTx(engine, chainConfig, ibs, txns, txIndex); err != nil {
+				return nil, nil, err
+			}
+		}
 		if traceTypeStateDiff {
 			// Closure so the per-tx state is closed on every exit path.
 			if err := func() error {
