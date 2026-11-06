@@ -18,6 +18,7 @@ package cache
 
 import (
 	"math"
+	"os"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -169,8 +170,14 @@ func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
 // PutIfAbsent implements Cache.PutIfAbsent (live entry kept, stale one
 // replaced).
 func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
+	if skipFills {
+		return
+	}
 	c.put(key, value, txNum, false)
 }
+
+// skipFills is a probe bound: GC_SKIP_FILL=1 drops every read-miss fill.
+var skipFills = os.Getenv("GC_SKIP_FILL") == "1"
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
