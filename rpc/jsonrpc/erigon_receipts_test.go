@@ -1053,3 +1053,22 @@ func TestGetReceiptChecksCanonicalInReadViewNotLiveBackend(t *testing.T) {
 	_, cached := gen.TryGetCachedReceipt(block.Hash(), txNum, 0)
 	require.False(t, cached)
 }
+
+// TestGetLogsServesCachedLogsWithoutCopy pins that receipts enter the cache with their logs
+// stamped, so a repeated eth_getLogs returns the cached logs themselves.
+func TestGetLogsServesCachedLogsWithoutCopy(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}
+
+	first, err := api.GetLogs(m.Ctx, crit)
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+	second, err := api.GetLogs(m.Ctx, crit)
+	require.NoError(t, err)
+	require.Len(t, second, len(first))
+	for i := range first {
+		require.Same(t, first[i], second[i])
+		require.NotNil(t, second[i].BlockTimestamp)
+	}
+}

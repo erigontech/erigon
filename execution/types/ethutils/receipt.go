@@ -60,6 +60,43 @@ type RPCReceipt struct {
 	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
 }
 
+// logsWithTimestamp returns the receipt's logs, and its frame receipts that share them, as the RPC
+// renders them: each log carrying timestamp, or none when timestamp is nil. Logs already in that
+// state are returned as they are; otherwise all are copied, so the cached receipt is never changed.
+func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types.Logs, []types.FrameReceipt) {
+	if receipt.Logs == nil {
+		return types.Logs{}, receipt.FrameReceipts
+	}
+	if !slices.ContainsFunc(receipt.Logs, func(l *types.Log) bool { return !sameTimestamp(l.BlockTimestamp, timestamp) }) {
+		return receipt.Logs, receipt.FrameReceipts
+	}
+	copies := make([]struct {
+		log       types.Log
+		timestamp hexutil.Uint64
+	}, len(receipt.Logs))
+	logs := make(types.Logs, len(receipt.Logs))
+	for i, log := range receipt.Logs {
+		copies[i].log = *log
+		copies[i].log.BlockTimestamp = nil
+		if timestamp != nil {
+			copies[i].timestamp = *timestamp
+			copies[i].log.BlockTimestamp = &copies[i].timestamp
+		}
+		logs[i] = &copies[i].log
+	}
+	frames := receipt.FrameReceipts
+	if len(frames) > 0 {
+		rendered := types.Receipt{FrameReceipts: slices.Clone(frames)}
+		rendered.SetLogs(logs)
+		frames = rendered.FrameReceipts
+	}
+	return logs, frames
+}
+
+func sameTimestamp(a, b *hexutil.Uint64) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
 func MarshalReceipt(
 	receipt *types.Receipt,
 	txn types.Transaction,
@@ -87,32 +124,12 @@ func MarshalReceipt(
 		from = &address
 	}
 
-	var logsToMarshal types.Logs
-	frameReceiptsToMarshal := receipt.FrameReceipts
-
-	switch {
-	case withBlockTimestamp:
-		stamped := make([]struct {
-			log       types.Log
-			timestamp hexutil.Uint64
-		}, len(receipt.Logs))
-		logsToMarshal = make(types.Logs, len(receipt.Logs))
-		for i, log := range receipt.Logs {
-			stamped[i].log = *log
-			stamped[i].timestamp = hexutil.Uint64(header.Time)
-			stamped[i].log.BlockTimestamp = &stamped[i].timestamp
-			logsToMarshal[i] = &stamped[i].log
-		}
-		if len(receipt.FrameReceipts) > 0 {
-			stampedReceipt := types.Receipt{FrameReceipts: slices.Clone(receipt.FrameReceipts)}
-			stampedReceipt.SetLogs(logsToMarshal)
-			frameReceiptsToMarshal = stampedReceipt.FrameReceipts
-		}
-	case receipt.Logs == nil:
-		logsToMarshal = types.Logs{}
-	default:
-		logsToMarshal = receipt.Logs
+	var timestamp *hexutil.Uint64
+	if withBlockTimestamp {
+		at := hexutil.Uint64(header.Time)
+		timestamp = &at
 	}
+	logsToMarshal, frameReceiptsToMarshal := logsWithTimestamp(receipt, timestamp)
 
 	result := &RPCReceipt{
 		Payer:             receipt.Payer,
