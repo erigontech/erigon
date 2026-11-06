@@ -55,11 +55,15 @@ func (l *LayeredDomainReader) ReadDomain(name kv.Domain, k []byte, ts uint64) ([
 	return l.baseGetAsOf(name, k, ts)
 }
 
+func (l *LayeredDomainReader) StateReaderAt(ts uint64) StateReader {
+	return PrevBlockBaseTxNum(&domainDecodedBase{l: l, ts: ts}, l.prevBlocks, ts)
+}
+
 // readLayered composes the versionMap window over the base and re-encodes the
 // result. A zero/absent layered result is authoritative (a prior block's delete
 // must shadow a stale committed value), so it does not fall through to the base.
 func (l *LayeredDomainReader) readLayered(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	layered := PrevBlockBaseTxNum(&domainDecodedBase{l: l, ts: ts}, l.prevBlocks, ts)
+	layered := l.StateReaderAt(ts)
 	switch name {
 	case kv.AccountsDomain:
 		acc, err := layered.ReadAccountData(accounts.InternAddress(common.BytesToAddress(k)))
