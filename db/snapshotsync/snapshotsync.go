@@ -221,6 +221,7 @@ func getMinimumBlocksToDownload(
 	minHistoryStep = kv.Step(math.MaxUint32)
 	minCommitmentHistoryStep = kv.Step(math.MaxUint32)
 	minReceiptsStep = kv.Step(math.MaxUint32)
+	resumedBlockStep := kv.Step(math.MaxUint32)
 	stateTxNum := maxStateStep * stepSize
 	if err := blockReader.IterateFrozenBodies(tx, func(blockNum, baseTxNum, txAmount uint64) error {
 		if iterations%1e6 == 0 {
@@ -237,6 +238,9 @@ func getMinimumBlocksToDownload(
 		}
 		if blockNum == receiptsHistoryPruneTo {
 			minReceiptsStep = stepAtTxNum(baseTxNum, stepSize)
+		}
+		if baseTxNum < stateTxNum && stateTxNum < baseTxNum+txAmount {
+			resumedBlockStep = kv.Step(baseTxNum / stepSize)
 		}
 		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
@@ -259,6 +263,9 @@ func getMinimumBlocksToDownload(
 	minHistoryStep = clearUnsetStep(minHistoryStep)
 	minCommitmentHistoryStep = clearUnsetStep(minCommitmentHistoryStep)
 	minReceiptsStep = clearUnsetStep(minReceiptsStep)
+	// Execution resumes inside the block that the state files end in and replays the block's
+	// first transactions from history.
+	minHistoryStep = min(minHistoryStep, resumedBlockStep)
 
 	return frozenBlocks - minToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, nil
 }
