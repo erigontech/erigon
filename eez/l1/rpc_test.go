@@ -17,6 +17,7 @@ package l1_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http/httptest"
@@ -126,4 +127,48 @@ func TestRPCTransportError(t *testing.T) {
 	var op *net.OpError
 	require.ErrorAs(t, err, &op)
 	require.Equal(t, "dial", op.Op)
+}
+
+// TestRPCURLError checks that a failure with no connection error, as an
+// untrusted certificate, prints the endpoint without its path and query,
+// where providers put API keys, and keeps the cause.
+func TestRPCURLError(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	defer srv.Close()
+	r, err := l1.DialRPC(t.Context(), srv.URL+"/v2/secret-key?apikey=secret-query", log.New())
+	require.NoError(t, err)
+	defer r.Close()
+	_, err = r.ChainID(t.Context())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+	require.Contains(t, err.Error(), srv.URL)
+	require.ErrorContains(t, err, "x509")
+	var cert *tls.CertificateVerificationError
+	require.ErrorAs(t, err, &cert)
+	var ue *url.Error
+	require.ErrorAs(t, err, &ue)
+
+	err = l1.MapRPCError(&url.Error{Op: "Post", URL: "https://user:secret@host/v2/secret?apikey=secret", Err: errors.New("cause")}, "call")
+	require.EqualError(t, err, "call: Post https://host: cause")
+
+	host := strings.TrimPrefix(srv.URL, "https://")
+	for name, endpoint := range map[string]string{
+		"user info":       "https://user:secret@" + host + "/v2/secret-key",
+		"unparsable":      srv.URL + "/v2/secret-key\n",
+		"websocket dial":  "wss://" + host + "/v2/secret-key",
+		"websocket query": "wss://" + host + "/v2?apikey=secret",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, err := l1.DialRPC(t.Context(), endpoint, log.New())
+			if err == nil {
+				defer r.Close()
+				_, err = r.ChainID(t.Context())
+			}
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "secret")
+			if strings.HasPrefix(endpoint, "wss://") {
+				require.ErrorContains(t, err, "WebSocket dial")
+			}
+		})
+	}
 }

@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon/common"
@@ -42,7 +44,7 @@ var _ ChainReader = (*RPC)(nil)
 func DialRPC(ctx context.Context, url string, logger log.Logger) (*RPC, error) {
 	client, err := rpc.DialContext(ctx, url, logger)
 	if err != nil {
-		return nil, err
+		return nil, shortTransport(err)
 	}
 	return &RPC{client: client}, nil
 }
@@ -203,12 +205,31 @@ func (e *transportError) Error() string { return e.op.Error() }
 
 func (e *transportError) Unwrap() error { return e.err }
 
+// urlError prints a failed request with the URL's scheme and host only: its
+// path, query and user info may carry the endpoint's API key.
+type urlError struct {
+	text string
+	err  error
+}
+
+func (e *urlError) Error() string { return e.text }
+
+func (e *urlError) Unwrap() error { return e.err }
+
 func shortTransport(err error) error {
-	var op *net.OpError
-	if !errors.As(err, &op) {
-		return err
+	if op, ok := errors.AsType[*net.OpError](err); ok {
+		short := *op
+		short.Source = nil
+		return &transportError{op: short, err: err}
 	}
-	short := *op
-	short.Source = nil
-	return &transportError{op: short, err: err}
+	if ue, ok := errors.AsType[*url.Error](err); ok {
+		host := "endpoint"
+		if u, perr := url.Parse(ue.URL); perr == nil && u.Host != "" {
+			host = u.Scheme + "://" + u.Host
+		}
+		// url.Error prints its URL quoted.
+		text := strings.ReplaceAll(err.Error(), strconv.Quote(ue.URL), host)
+		return &urlError{text: strings.ReplaceAll(text, ue.URL, host), err: err}
+	}
+	return err
 }
