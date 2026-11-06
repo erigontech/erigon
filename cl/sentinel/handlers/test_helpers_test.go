@@ -3,7 +3,9 @@ package handlers
 import (
 	"bytes"
 	"testing"
+	"time"
 
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
@@ -24,6 +26,18 @@ func newHandlerTestStream(t *testing.T, proto string, request ssz.EncodableSSZ) 
 		conn:     &remotePeerConn{peerID: peer.ID("request-peer")},
 		protocol: protocol.ID(proto),
 	}
+}
+
+func admitHandlerTestRequest(t *testing.T, c *ConsensusHandlers, stream network.Stream) *tokenBucket {
+	t.Helper()
+	key := peerProtocolKey{peerID: stream.Conn().RemotePeer().String(), protocol: string(stream.Protocol())}
+	require.True(t, c.rateLimiter.allowRequest(key.peerID, key.protocol, 1))
+	value, ok := c.rateLimiter.buckets.Load(key)
+	require.True(t, ok)
+	bucket := value.(*tokenBucket)
+	// Keep refill outside the test interval so exact charges do not depend on timing.
+	bucket.lastRefill = time.Now().Add(time.Hour)
+	return bucket
 }
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {

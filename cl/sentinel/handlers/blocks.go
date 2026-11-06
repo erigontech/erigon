@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -97,14 +98,17 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	var req solid.HashListSSZ = solid.NewHashList(int(c.beaconConfig.MaxRequestBlocksDeneb))
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
-		return err
+	// BeaconBlocksByRoot v2 keeps the original request limit until Deneb activates.
+	maxRoots := c.beaconConfig.MaxRequestBlocks
+	if c.ethClock.GetCurrentEpoch() >= c.beaconConfig.DenebForkEpoch {
+		maxRoots = c.beaconConfig.MaxRequestBlocksDeneb
 	}
-
-	// HashListSSZ decoding does not enforce its configured limit.
-	if uint64(req.Length()) > c.beaconConfig.MaxRequestBlocksDeneb {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	var req solid.HashListSSZ = solid.NewHashList(int(maxRoots))
+	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, clparams.Phase0Version, maxRoots*length.Hash); err != nil {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		}
+		return err
 	}
 
 	if req.Length() == 0 {

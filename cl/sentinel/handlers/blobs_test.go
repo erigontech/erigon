@@ -49,21 +49,54 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-func TestBlobsByRangeChargesLargeCounts(t *testing.T) {
-	for _, count := range []uint64{math.MaxUint64 - 100, 1 << 60, 1 << 63} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
+func TestBlobsByRangeRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		count uint64
+		cost  int
+	}{
+		{0, 0},
+		{1, 8},
+		{2, 17},
+		{8, 71},
+		{9, 71},
+		{math.MaxUint64 - 100, 71},
+		{1 << 60, 71},
+		{1 << 63, 71},
+	} {
+		t.Run(fmt.Sprint(tc.count), func(t *testing.T) {
 			_, db := setupStore(t)
 			cfg := clparams.MainnetBeaconConfig
+			cfg.BlobSchedule = []clparams.BlobParameters{{Epoch: 0, MaxBlobsPerBlock: 9}}
 			c := &ConsensusHandlers{ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg, rateLimiter: newPeerRateLimiter()}
 			proto := communication.BlobSidecarByRangeProtocolV1
-			c.rateLimiter.protocolLimits[proto] = protocolRateConfig{maxTokens: maxBlobsThroughputPerRequest}
-			stream := newHandlerTestStream(t, proto, &cltypes.BlobsByRangeRequest{StartSlot: 100, Count: count})
-			peerID := stream.Conn().RemotePeer().String()
-			require.True(t, c.rateLimiter.allowRequest(peerID, proto, 1))
+			stream := newHandlerTestStream(t, proto, &cltypes.BlobsByRangeRequest{StartSlot: 100, Count: tc.count})
+			bucket := admitHandlerTestRequest(t, c, stream)
 
 			require.NoError(t, c.blobsSidecarsByRangeHandlerDeneb(stream))
 			require.Empty(t, stream.response.Bytes())
-			require.False(t, c.rateLimiter.consumeTokens(peerID, proto, 1))
+			require.Equal(t, bucket.maxTokens-1-float64(tc.cost), bucket.tokens)
+		})
+	}
+}
+
+func TestBlobsByIdentifiersRequestCost(t *testing.T) {
+	for _, tc := range []struct{ count, cost int }{{0, 0}, {1, 0}, {3, 2}, {72, 71}, {73, 71}} {
+		t.Run(fmt.Sprint(tc.count), func(t *testing.T) {
+			_, db := setupStore(t)
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{
+				ctx: t.Context(), indiciesDB: db, beaconConfig: &cfg,
+				ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+			}
+			req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](tc.count, 40)
+			for i := range tc.count {
+				req.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{0xff}, Index: uint64(i)})
+			}
+			stream := newHandlerTestStream(t, communication.BlobSidecarByRootProtocolV1, req)
+			bucket := admitHandlerTestRequest(t, c, stream)
+			require.NoError(t, c.blobsSidecarsByIdsHandlerDeneb(stream))
+			require.Empty(t, stream.response.Bytes())
+			require.Equal(t, bucket.maxTokens-1-float64(tc.cost), bucket.tokens)
 		})
 	}
 }

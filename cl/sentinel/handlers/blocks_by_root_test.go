@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
@@ -38,25 +39,38 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
-	for _, count := range []int{128, 129} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		count          int
+		denebForkEpoch uint64
+		limit          int
+	}{
+		{"Deneb at limit", 128, 0, 128},
+		{"Deneb above limit", 129, 0, 128},
+		{"before Deneb above 128", 129, math.MaxUint64, 1024},
+		{"before Deneb at limit", 1024, math.MaxUint64, 1024},
+		{"before Deneb above limit", 1025, math.MaxUint64, 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			_, db := setupStore(t)
 			store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
 			tx, err := db.BeginRw(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, uint64(count-1))
+			blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, uint64(tc.count-1))
 			require.NoError(t, tx.Commit())
 			cfg := clparams.MainnetBeaconConfig
+			cfg.DenebForkEpoch = tc.denebForkEpoch
 			c := &ConsensusHandlers{
 				ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
 				ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
 			}
-			req := solid.NewHashList(count)
+			req := solid.NewHashList(tc.count)
 			for _, block := range blocks {
 				root, err := block.Block.HashSSZ()
 				require.NoError(t, err)
@@ -64,7 +78,7 @@ func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
 			}
 			stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
 			require.NoError(t, c.beaconBlocksByRootHandler(stream))
-			if uint64(count) > cfg.MaxRequestBlocksDeneb {
+			if tc.count > tc.limit {
 				code, err := stream.response.ReadByte()
 				require.NoError(t, err)
 				require.Equal(t, byte(InvalidRequestPrefix), code)
@@ -74,6 +88,54 @@ func TestBeaconBlocksByRootRequestLimit(t *testing.T) {
 			require.Equal(t, MaxRequestsBlocks, store.readBlockByRootCalls)
 			stream.request = bytes.NewReader(stream.response.Bytes())
 			require.Len(t, readBlocksByRangeSlots(t, stream, c.ethClock), MaxRequestsBlocks)
+		})
+	}
+}
+
+func TestBeaconBlocksByRootLeavesCreditForRemainingRoots(t *testing.T) {
+	_, db := setupStore(t)
+	store := &countingBlockReader{MockBlockReader: tests.NewMockBlockReader()}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blocks := populateDatabaseWithBlocks(t, store.MockBlockReader, tx, 100, 127)
+	require.NoError(t, tx.Commit())
+	cfg := clparams.MainnetBeaconConfig
+	c := &ConsensusHandlers{
+		ctx: t.Context(), beaconDB: store, indiciesDB: db, beaconConfig: &cfg,
+		ethClock: getEthClock(t), rateLimiter: newPeerRateLimiter(),
+	}
+	for _, tc := range []struct {
+		start, responses int
+		tokensLeft       float64
+	}{{0, 96, 32}, {96, 32, 0}} {
+		req := solid.NewHashList(len(blocks) - tc.start)
+		for _, block := range blocks[tc.start:] {
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			req.Append(root)
+		}
+		stream := newHandlerTestStream(t, communication.BeaconBlocksByRootProtocolV2, req)
+		bucket := admitHandlerTestRequest(t, c, stream)
+		require.NoError(t, c.beaconBlocksByRootHandler(stream))
+		stream.request = bytes.NewReader(stream.response.Bytes())
+		require.Len(t, readBlocksByRangeSlots(t, stream, c.ethClock), tc.responses)
+		require.Equal(t, tc.tokensLeft, bucket.tokens)
+	}
+	require.Equal(t, 128, store.readBlockByRootCalls)
+}
+
+func TestBeaconBlocksByRootRejectsOversizedPrefix(t *testing.T) {
+	for _, size := range []uint64{(clparams.MainnetBeaconConfig.MaxRequestBlocksDeneb + 1) * length.Hash, clparams.MaxPayloadSize + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.DenebForkEpoch = 0
+			c := &ConsensusHandlers{beaconConfig: &cfg, ethClock: getEthClock(t)}
+			stream := &envelopeHandlerStream{request: bytes.NewReader(binary.AppendUvarint(nil, size))}
+			require.NoError(t, c.beaconBlocksByRootHandler(stream))
+			code, err := stream.response.ReadByte()
+			require.NoError(t, err)
+			require.Equal(t, byte(InvalidRequestPrefix), code)
 		})
 	}
 }

@@ -45,21 +45,25 @@ import (
 
 var altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
 
-func TestLightClientUpdatesChargesLargeCount(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	c := &ConsensusHandlers{
-		beaconConfig: &cfg, ethClock: getEthClock(t),
-		forkChoiceReader: mock_services.NewForkChoiceStorageMock(t), rateLimiter: newPeerRateLimiter(),
+func TestLightClientUpdatesRequestCost(t *testing.T) {
+	for _, tc := range []struct {
+		count uint64
+		cost  int
+	}{{0, 0}, {1, 0}, {3, 2}, {100, 99}, {101, 99}, {math.MaxUint64 - 1, 99}} {
+		t.Run(fmt.Sprint(tc.count), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			c := &ConsensusHandlers{
+				beaconConfig: &cfg, ethClock: getEthClock(t),
+				forkChoiceReader: mock_services.NewForkChoiceStorageMock(t), rateLimiter: newPeerRateLimiter(),
+			}
+			stream := newHandlerTestStream(t, communication.LightClientUpdatesByRangeProtocolV1,
+				&cltypes.LightClientUpdatesByRangeRequest{StartPeriod: 1, Count: tc.count})
+			bucket := admitHandlerTestRequest(t, c, stream)
+			require.NoError(t, c.lightClientUpdatesByRangeHandler(stream))
+			require.Empty(t, stream.response.Bytes())
+			require.Equal(t, bucket.maxTokens-1-float64(tc.cost), bucket.tokens)
+		})
 	}
-	proto := communication.LightClientUpdatesByRangeProtocolV1
-	c.rateLimiter.protocolLimits[proto] = protocolRateConfig{maxTokens: maxLightClientsPerRequest}
-	stream := newHandlerTestStream(t, proto, &cltypes.LightClientUpdatesByRangeRequest{StartPeriod: 1, Count: math.MaxUint64 - 1})
-	peerID := stream.Conn().RemotePeer().String()
-	require.True(t, c.rateLimiter.allowRequest(peerID, proto, 1))
-
-	require.NoError(t, c.lightClientUpdatesByRangeHandler(stream))
-	require.Empty(t, stream.response.Bytes())
-	require.False(t, c.rateLimiter.consumeTokens(peerID, proto, 1))
 }
 
 func TestLightClientUpdatesRejectsOverflow(t *testing.T) {
