@@ -106,7 +106,7 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufiopool.Writer(bufferFile)
+	w := bufiopool.Writer(dir.UncachedWriter(bufferFile))
 	defer bufiopool.PutWriter(w)
 
 	if err = b.Write(w); err != nil {
