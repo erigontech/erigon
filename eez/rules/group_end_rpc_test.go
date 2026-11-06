@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 
@@ -64,17 +65,19 @@ func groupEndBalances() []byte {
 // TestGroupEndBurnRPCReplay checks that the RPC methods replaying several
 // transactions of a block on one state burn the protocol balances at a group
 // end as block execution does, also when the transaction ending the group
-// reverts. With EEZL2 as coinbase, a user transaction after a load tips EEZL2
-// and ends the group; the contract created next logs and deploys the balances
-// of EEZL2 and the funded native system address, which block execution burnt.
+// reverts. With EEZL2 as coinbase, a user transaction after a load calls a
+// contract reading the native system address's balance, tips EEZL2 and ends
+// the group; the contract created next logs and deploys the balances of EEZL2
+// and the funded native system address, which block execution burnt.
 func TestGroupEndBurnRPCReplay(t *testing.T) {
-	reverter := common.HexToAddress("0x8e7e")
+	readNative := append(append([]byte{byte(vm.PUSH20)}, protocol.NativeSystemAddress[:]...), byte(vm.BALANCE), byte(vm.POP))
+	ender, reverter := common.HexToAddress("0x7ec1"), common.HexToAddress("0x8e7e")
 	for _, tc := range []struct {
 		name   string
 		to     common.Address
 		status uint64
 	}{
-		{"group end", common.HexToAddress("0x7ec1"), types.ReceiptStatusSuccessful},
+		{"group end", ender, types.ReceiptStatusSuccessful},
 		{"reverted group end", reverter, types.ReceiptStatusFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,7 +85,8 @@ func TestGroupEndBurnRPCReplay(t *testing.T) {
 			c := newGroupEndChain(t, types.GenesisAlloc{
 				derivertest.UserAddress():    groupEndRich,
 				protocol.NativeSystemAddress: {Balance: big.NewInt(common.GWei)},
-				reverter:                     {Code: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.REVERT)}},
+				ender:                        {Code: readNative},
+				reverter:                     {Code: append(slices.Clone(readNative), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.REVERT))},
 			})
 			creation, err := types.SignTx(&types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, Data: initCode},
@@ -152,6 +156,44 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
 			require.Len(t, traces, 3)
 			require.Equal(t, want, traces[2].Result.Output)
+		})
+	})
+
+	t.Run("prestateTracer diffMode", func(t *testing.T) {
+		forEachCallState(t, func(t *testing.T) {
+			api := jsonrpc.NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+			tracer, tracerCfg := "prestateTracer", json.RawMessage(`{"diffMode":true}`)
+			cfg := &tracersConfig.TraceConfig{Tracer: &tracer, TracerConfig: &tracerCfg}
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(1), cfg, stream))
+			require.NoError(t, stream.Flush())
+			var traces []struct {
+				Result json.RawMessage `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
+			require.Len(t, traces, 3)
+			// The burn belongs to the transaction ending the group: it empties the
+			// native system address and leaves EEZL2 as it found it.
+			var diff struct {
+				Pre  map[common.Address]struct{} `json:"pre"`
+				Post map[common.Address]struct {
+					Balance *hexutil.U256 `json:"balance"`
+				} `json:"post"`
+			}
+			require.NoError(t, json.Unmarshal(traces[1].Result, &diff))
+			require.NotContains(t, diff.Post, protocol.RollupXEEZL2Address, "%s", traces[1].Result)
+			require.Contains(t, diff.Pre, protocol.NativeSystemAddress, "%s", traces[1].Result)
+			native, ok := diff.Post[protocol.NativeSystemAddress]
+			require.True(t, ok, "%s", traces[1].Result)
+			require.Equal(t, &hexutil.U256{}, native.Balance, "%s", traces[1].Result)
+			for i, txn := range block.Transactions() {
+				var buf bytes.Buffer
+				stream := jsonstream.New(&buf)
+				require.NoError(t, api.TraceTransaction(t.Context(), txn.Hash(), cfg, stream))
+				require.NoError(t, stream.Flush())
+				require.JSONEq(t, string(traces[i].Result), buf.String(), "transaction %d", i)
+			}
 		})
 	})
 

@@ -183,7 +183,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 1_000_000}
 			txnGasUsage, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
-				uint256.NewInt(0), common.Hash{}, 0, ibs, 0, &tracersConfig.TraceConfig{Tracer: &name},
+				uint256.NewInt(0), common.Hash{}, 0, ibs, 0, nil, &tracersConfig.TraceConfig{Tracer: &name},
 				chain.AllProtocolChanges, jsonstream.New(io.Discard), time.Second, nil)
 			require.Equal(t, 1, calls)
 			require.Equal(t, received, txnGasUsage)
@@ -230,7 +230,7 @@ func TestTraceTxGasFromBlock(t *testing.T) {
 			msg.SetGasFromBlock(tc.fromBlock)
 			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 1_000_000}
 			usage, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
-				uint256.NewInt(0), common.Hash{}, 0, ibs, tc.blockGasLeft, nil,
+				uint256.NewInt(0), common.Hash{}, 0, ibs, tc.blockGasLeft, nil, nil,
 				chain.TestChainOsakaConfig, jsonstream.New(io.Discard), time.Second, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.used, usage.BlockExecutionGasUsed)
@@ -393,7 +393,7 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 					b.Fatal(err)
 				}
 				_, err := TraceTx(b.Context(), nil, txn, msg, blockCtx, protocol.NewEVMTxContext(msg),
-					uint256.NewInt(0), common.Hash{}, 0, ibs, 0, config, chain.TestChainOsakaConfig,
+					uint256.NewInt(0), common.Hash{}, 0, ibs, 0, nil, config, chain.TestChainOsakaConfig,
 					jsonstream.New(io.Discard), time.Minute, nil)
 				if err != nil {
 					b.Fatal(err)
