@@ -648,7 +648,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
 		// Retryable failures may clear before the discarded pool row is removed.
 		switch reason {
-		case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
+		case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged, txpoolcfg.RlpNotFound:
 			return false, nil
 		default:
 			return true, nil
@@ -809,8 +809,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	minTxGas := mdgas.MinTxGas(isAmsterdam)
 
 	txns.Resize(uint(min(n, len(best.ms))))
-	var toRemove []*metaTxn
-	var toDiscard []*metaTxn
+	var toDiscard, toDemote, missingRlp []*metaTxn
+	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
 	count := 0
 	i := 0
 
@@ -830,6 +830,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		mt := best.ms[i]
 
 		if yielded != nil && yielded.Contains(mt.TxnSlot.IDHash) {
+			continue
+		}
+		// Pending is ordered without the blob fee, so promotion only demotes a blob txn the blob fee has risen
+		// past once it is the worst one.
+		if !coversPendingFees(mt, pendingBaseFee, pendingBlobFee) {
+			toDemote = append(toDemote, mt)
 			continue
 		}
 
@@ -867,7 +873,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			return false, count, err
 		}
 		if len(rlpTxn) == 0 {
-			toRemove = append(toRemove, mt)
+			missingRlp = append(missingRlp, mt)
 			continue
 		}
 
@@ -937,16 +943,17 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	}
 
 	txns.Resize(uint(count))
-	if len(toRemove) > 0 {
-		for _, mt := range toRemove {
-			p.pending.Remove(mt, "best", p.logger)
-		}
+	for _, mt := range toDemote {
+		p.pending.Remove(mt, "best", p.logger)
+		p.baseFee.Add(mt, "demote-best", p.logger)
 	}
-	if len(toDiscard) > 0 {
-		for _, mt := range toDiscard {
-			p.pending.Remove(mt, "best", p.logger)
-			p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
-		}
+	for _, mt := range missingRlp {
+		p.pending.Remove(mt, "best", p.logger)
+		p.discardLocked(mt, txpoolcfg.RlpNotFound)
+	}
+	for _, mt := range toDiscard {
+		p.pending.Remove(mt, "best", p.logger)
+		p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
 	}
 
 	return true, count, nil
@@ -2473,9 +2480,15 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 	}
 }
 
+// coversPendingFees reports whether a txn pays the pending block's base fee and, if it carries blobs, its blob fee.
+func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool {
+	return mt.minFeeCap.CmpUint64(pendingBaseFee) >= 0 &&
+		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
+}
+
 func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
-	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.HasBlobs() && worst.TxnSlot.GetBlobFeeCap().LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
+	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || !coversPendingFees(worst, pendingBaseFee, pendingBlobFee)); worst = p.pending.Worst() {
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
 			p.baseFee.Add(tx, "demote-pending", logger)
@@ -2485,7 +2498,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	}
 
 	// Promote best transactions from base fee pool to pending pool while they qualify
-	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (!best.TxnSlot.HasBlobs() || best.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
+	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && coversPendingFees(best, pendingBaseFee, pendingBlobFee); best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
 		announceFirstPending(announcements, tx)
 		p.pending.Add(tx, logger)
@@ -2500,7 +2513,7 @@ func (p *TxPool) promoteSubPools(pendingBaseFee uint64, pendingBlobFee uint64, a
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
-		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
+		if coversPendingFees(best, pendingBaseFee, pendingBlobFee) {
 			announceFirstPending(announcements, tx)
 			p.pending.Add(tx, logger)
 		} else {

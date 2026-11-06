@@ -132,6 +132,7 @@ const (
 	DelegatedNonceGap          // Delegated account transaction nonce is not currently executable
 	DelegatedTxnLimit          // Delegated account already has an executable transaction
 	BlobSlotsOverflow
+	RlpNotFound // The pooled txn's RLP is neither in memory nor in the pool DB; peers may still serve it
 )
 
 func (r DiscardReason) String() string {
@@ -192,6 +193,8 @@ func (r DiscardReason) String() string {
 		return "blobs limit in txpool is full"
 	case BlobSlotsOverflow:
 		return "sender blob limit exceeded"
+	case RlpNotFound:
+		return "rlp not found"
 	case NoAuthorizations:
 		return "EIP-7702 transactions with an empty authorization list are invalid"
 	case GasLimitTooHigh:
