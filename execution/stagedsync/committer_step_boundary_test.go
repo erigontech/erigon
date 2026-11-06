@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -42,9 +43,12 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -153,16 +157,20 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// Batch mode computes commitment only on an explicit request, which this
 	// stream never sends; the sole writer of a checkpoint is the step-boundary
 	// hook at txNum 15, so the latest checkpoint must decode to that edge.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.StateKey())
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"no commitment checkpoint was saved at the mid-block step edge — the step-boundary hook in handleMessage's txResult case never ran")
-	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, gotBlockNum := stateTxBlockNums(t, stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum,
 		"step-boundary checkpoint must reflect the straddling step's last txNum (stepEnd-1), not the last complete block before the edge")
 	require.Equal(t, uint64(2), gotBlockNum,
 		"the checkpoint sits inside block 2 (the straddling block)")
 
+	if statecfg.ExperimentalCommitmentV3 {
+		requireV3RecordsMatchAccounts(t, doms, tx, stepEdgeTxNum+1, accountValues)
+		return
+	}
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
@@ -207,7 +215,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	const stepEdgeTxNum = uint64(16) - 1
 	stateBlob := runPerBlockMidBlockStepEdge(t, false)
 	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
-	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, gotBlockNum := stateTxBlockNums(t, stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum,
 		"per-block mode must still checkpoint at the mid-block step edge (snapshot producer needs step-aligned commitment)")
 	require.Equal(t, uint64(2), gotBlockNum,
@@ -218,7 +226,7 @@ func TestHandleMessage_BlockEndStateFollowsMidBlockStepCheckpoint(t *testing.T) 
 	const block2End = uint64(16) - 1 + 2
 	stateBlob := runPerBlockMidBlockStepEdge(t, true)
 	require.GreaterOrEqual(t, len(stateBlob), 16)
-	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, gotBlockNum := stateTxBlockNums(t, stateBlob)
 	require.Equal(t, block2End, gotTxNum,
 		"a block whose writes end at a mid-block step edge must still save commitment state at its last txNum; a state left at the edge makes the next cycle re-execute the block")
 	require.Equal(t, uint64(2), gotBlockNum)
@@ -275,7 +283,7 @@ func runPerBlockMidBlockStepEdge(t *testing.T, finishBlock bool) []byte {
 
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.StateKey())
 	require.NoError(t, err)
 	return stateBlob
 }
@@ -285,6 +293,7 @@ func runPerBlockMidBlockStepEdge(t *testing.T, finishBlock bool) []byte {
 // mark the block computed. A swallowed compute error there would let exec
 // proceed past a block whose commitment never landed.
 func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	ctx := context.Background()
 	logger := log.New()
 
@@ -337,7 +346,7 @@ func TestHandleMessage_BaseReadErrorFailsTheBlock(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xe1})
 	av := addr.Value()
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], []byte{0, 0, 0}, 0, nil))
+	putCorruptAccount(t, doms, tx, av[:])
 	ws := &state.WriteSet{}
 	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
 	cc.handleMessage(ctx, recordTx(newRawViewVM(2), 1, common.Hash{0x01}, 2, &chain.Rules{}, ws))
@@ -365,7 +374,7 @@ func TestComputeAhead_BaseReadErrorFailsTheBlock(t *testing.T) {
 	cc.firstBlockNum = 2
 
 	addr := [20]byte{0xe2}
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], []byte{0, 0, 0}, 0, nil))
+	putCorruptAccount(t, doms, tx, addr[:])
 	cc.handleBlockRequest(ctx, &blockRequest{
 		blockNum:   2,
 		firstTxNum: 11,
@@ -393,7 +402,7 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 	for it.HasNext() {
 		k, v, err := it.Next()
 		require.NoError(t, err)
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(k) {
 			continue
 		}
 		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
@@ -401,6 +410,60 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 		checked++
 	}
 	require.Positive(t, checked, "expected at least one commitment branch to verify at the step edge")
+}
+
+func putCorruptAccount(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, addr []byte) {
+	t.Helper()
+	defer doms.SetDisableInlineTouchKey(doms.InlineTouchKeyDisabled())
+	doms.SetDisableInlineTouchKey(true)
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr, []byte{0, 0, 0}, 0, nil))
+}
+
+func stateTxBlockNums(t *testing.T, blob []byte) (txNum, blockNum uint64) {
+	t.Helper()
+	txNum, blockNum, _, err := commitmentdb.DecodeState(blob)
+	require.NoError(t, err)
+	return txNum, blockNum
+}
+
+func requireV3RecordsMatchAccounts(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, asOf uint64, accountValues map[string][]byte) {
+	t.Helper()
+	require.NoError(t, doms.Flush(t.Context(), tx))
+	it, err := tx.RangeAsOf(kv.CommitmentDomain, nil, nil, 1000, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+	hasher, matcher := v3.NewRecordHasher(), v3.NewRecordMatcher()
+	var stateRoot []byte
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		v, ok, err := doms.GetAsOf(kv.CommitmentDomain, k, asOf)
+		require.NoError(t, err)
+		if !ok || len(v) == 0 {
+			continue
+		}
+		if commitment.IsCommitmentStateKey(k) {
+			_, _, stateRoot, err = commitmentdb.DecodeState(v)
+			require.NoError(t, err)
+			continue
+		}
+		hash, err := hasher.Hash(k, v, matcher.Expect)
+		require.NoError(t, err)
+		require.NoError(t, matcher.Record(k, hash))
+	}
+	recordsRoot, records, _, err := matcher.Finish()
+	require.NoError(t, err)
+	require.Positive(t, records)
+	require.Equal(t, stateRoot, recordsRoot[:], "commitment records do not fold to the checkpoint root")
+
+	accountsTrie := trie.New(common.Hash{})
+	for addr, v := range accountValues {
+		var acc accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&acc, v))
+		accountsTrie.UpdateAccount(crypto.Keccak256([]byte(addr)), &acc)
+	}
+	accountsRoot := accountsTrie.Hash()
+	require.Equal(t, accountsRoot[:], stateRoot, "the checkpoint root disagrees with the account domain written through the step edge")
 }
 
 type stepEdgeOutcome struct {
@@ -458,7 +521,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: edgeTxNum})
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.StateKey())
 	require.NoError(t, err)
 
 	require.NoError(t, doms.Flush(ctx, tx))
@@ -487,7 +550,7 @@ func TestHandleMessage_StepEdgeAtBlockEnd(t *testing.T) {
 		res := runBlockEndingOnStepEdge(t, true)
 		require.GreaterOrEqual(t, len(res.commitmentState), 16,
 			"block-end txResult at the step edge → step-boundary checkpoint written")
-		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(res.commitmentState)
+		gotTxNum, gotBlockNum := stateTxBlockNums(t, res.commitmentState)
 		require.Equal(t, uint64(15), gotTxNum)
 		require.Equal(t, uint64(1), gotBlockNum)
 	})
@@ -500,7 +563,7 @@ func TestHandleMessage_StepEdgeAtBlockEnd(t *testing.T) {
 			"a block-end task with empty finalize writes must still leave a step-aligned "+
 				"checkpoint — the hook ignores len(writes); otherwise step-0 commitment .kv "+
 				"lags its account .kv")
-		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(res.commitmentState)
+		gotTxNum, gotBlockNum := stateTxBlockNums(t, res.commitmentState)
 		require.Equal(t, uint64(15), gotTxNum)
 		require.Equal(t, uint64(1), gotBlockNum)
 	})
@@ -549,11 +612,11 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	// The checkpoint must still advance to the step edge: the fix isolates the
 	// changeset, it does not suppress the checkpoint.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.StateKey())
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"step-boundary checkpoint must still be written to sd, only kept out of the changeset")
-	gotTxNum, _ := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, _ := stateTxBlockNums(t, stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum)
 }
 
@@ -759,14 +822,18 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// compute-ahead wrote at the step edge — not the pre-block-2 checkpoint.
 	// Without checkpointStepsFromBAL, compute-ahead would write only the
 	// block-end (txNum 20) checkpoint and this as-of read would miss the edge.
-	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, edgeTxNum+1)
+	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.StateKey(), edgeTxNum+1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.GreaterOrEqual(t, len(blob), 16)
-	gotTx, gotBlock := commitmentdb.DecodeTxBlockNums(blob)
+	gotTx, gotBlock := stateTxBlockNums(t, blob)
 	require.Equal(t, edgeTxNum, gotTx, "compute-ahead must checkpoint commitment at the mid-block step edge (txNum 15)")
 	require.Equal(t, uint64(2), gotBlock, "the checkpoint sits inside the straddling block 2")
 
+	if statecfg.ExperimentalCommitmentV3 {
+		requireV3RecordsMatchAccounts(t, doms, tx, edgeTxNum+1, accountValues)
+		return
+	}
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
@@ -952,7 +1019,7 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 	// Branch writes alone would satisfy a bare Len() check. KeyCommitmentState is the
 	// marker an unwind needs, so assert that exact key (diff keys carry an 8-byte step
 	// suffix) rather than "something was recorded".
-	stateKey := string(commitmentdb.KeyCommitmentState)
+	stateKey := string(commitmentdb.StateKey())
 	sawStateKey := false
 	for _, d := range ownCS.Diffs[kv.CommitmentDomain].GetDiffSet() {
 		if len(d.Key) == len(stateKey)+8 && strings.HasPrefix(d.Key, stateKey) {
@@ -1031,7 +1098,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 	var branches int
 	require.NoError(t, doms.Flush(ctx, tx))
 	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
-		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+		if len(v) > 0 && !commitment.IsCommitmentStateKey(k) {
 			branches++
 		}
 		return true, nil
@@ -1083,6 +1150,7 @@ func TestHandleMessage_ComputedAheadBlockSkipsTouchedUnion(t *testing.T) {
 // its block's version map has left the first-touch cache, so its base read and
 // key hash wait for the fold. Per-block mode does both at first touch.
 func TestHandleMessage_FirstTouchWorkOnlyInPerBlockMode(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
 	dbg.BatchCommitments = true
 	for _, perBlock := range []bool{false, true} {
@@ -1191,6 +1259,10 @@ func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
 	}
 	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, firstTxNum: firstTxNum, lastTxNum: lastTxNum, stateRoot: common.Hash{0xde, 0xad}, bal: bList})
 	require.NoError(t, doms.Flush(ctx, tx))
+	if statecfg.ExperimentalCommitmentV3 {
+		requireV3RecordsMatchAccounts(t, doms, tx, edgeTxNum+1, accountValues)
+		return
+	}
 
 	it, err := tx.RangeAsOf(kv.CommitmentDomain, nil, nil, 1000, order.Asc, -1)
 	require.NoError(t, err)
@@ -1200,7 +1272,7 @@ func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
 	for it.HasNext() {
 		k, _, err := it.Next()
 		require.NoError(t, err)
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(k) {
 			continue
 		}
 		v, ok, err := doms.GetAsOf(kv.CommitmentDomain, k, edgeTxNum+1)

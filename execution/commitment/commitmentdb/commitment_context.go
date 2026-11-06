@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -1018,6 +1019,22 @@ var ErrBehindCommitment = errors.New("behind commitment")
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+}
+
+func StateKey() []byte {
+	if statecfg.ExperimentalCommitmentV3 {
+		return commitment.KeyCommitmentV3State
+	}
+	return KeyCommitmentState
+}
+
+func DecodeState(v []byte) (txNum, blockNum uint64, root []byte, err error) {
+	if statecfg.ExperimentalCommitmentV3 {
+		blockNum, txNum, root, err = commitment.DecodeCommitmentV3State(v)
+		return txNum, blockNum, root, err
+	}
+	root, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(v)
+	return txNum, blockNum, root, err
 }
 
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
