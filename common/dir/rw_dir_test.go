@@ -78,7 +78,7 @@ func TestDeletedOpenFilesListsADeletedFileUntilClose(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, paths, "an open file that still exists is not listed")
 
-	require.NoError(t, os.Remove(p))
+	require.NoError(t, RemoveFile(p))
 	paths, err = DeletedOpenFiles(d)
 	require.NoError(t, err)
 	require.Equal(t, []string{p}, paths)

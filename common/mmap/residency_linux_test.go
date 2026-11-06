@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	dir2 "github.com/erigontech/erigon/common/dir"
 )
 
 // residencySink defeats dead-code elimination of the page-touching loop.
@@ -102,7 +104,7 @@ func TestDeletedMappingsCountsAMappedFileUntilUnmap(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, paths, "a mapped file that still exists is not counted")
 
-	require.NoError(t, os.Remove(p))
+	require.NoError(t, dir2.RemoveFile(p))
 	paths, size, err := DeletedMappings(dir)
 	require.NoError(t, err)
 	require.Equal(t, []string{p}, paths)
