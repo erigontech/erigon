@@ -274,9 +274,6 @@ LOOP:
 		if stopped != nil {
 			select {
 			case <-stopped.C:
-				if ba.cfg.RequireAllTransactions {
-					return coalescedLogs, true, fmt.Errorf("transaction %d (%s): block building interrupted", txnIdx, txn.Hash())
-				}
 				done = true
 				break LOOP
 			default:
@@ -287,7 +284,9 @@ LOOP:
 			return nil, true, err
 		}
 
-		if interrupt != nil && interrupt.Load() && stopped == nil {
+		// Explicit lists must finish before a result can be returned. Their build
+		// context still handles cancellation and the build timeout.
+		if !ba.cfg.RequireAllTransactions && interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
