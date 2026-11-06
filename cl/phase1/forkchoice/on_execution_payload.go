@@ -392,27 +392,9 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		return execution_client.PayloadStatusNone, nil
 	}
 
-	// Get committed bid from the block (not from state, since state transition hasn't happened yet)
-	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
-	if committedBid == nil || committedBid.Message == nil {
-		return execution_client.PayloadStatusNone, errors.New("validatePayloadWithEL: block missing execution payload bid")
-	}
-
-	// Calculate versioned hashes from committed bid's blob_kzg_commitments
-	versionedHashes := make([]common.Hash, 0)
-	blobCommitments := &committedBid.Message.BlobKzgCommitments
-	if blobCommitments.Len() > 0 {
-		versionedHashes = make([]common.Hash, 0, blobCommitments.Len())
-		if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-			if err != nil {
-				return err
-			}
-			versionedHashes = append(versionedHashes, versionedHash)
-			return nil
-		}); err != nil {
-			return execution_client.PayloadStatusNone, fmt.Errorf("validatePayloadWithEL: failed to compute versioned hashes: %w", err)
-		}
+	versionedHashes, err := executionPayloadVersionedHashes(block)
+	if err != nil {
+		return execution_client.PayloadStatusNone, err
 	}
 
 	// Get execution requests list
@@ -432,6 +414,26 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	}
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 	return payloadStatus, err
+}
+
+func executionPayloadVersionedHashes(block *cltypes.SignedBeaconBlock) ([]common.Hash, error) {
+	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if committedBid == nil || committedBid.Message == nil {
+		return nil, errors.New("block missing execution payload bid")
+	}
+	blobCommitments := &committedBid.Message.BlobKzgCommitments
+	versionedHashes := make([]common.Hash, 0, blobCommitments.Len())
+	if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
+		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
+		if err != nil {
+			return err
+		}
+		versionedHashes = append(versionedHashes, versionedHash)
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
+	}
+	return versionedHashes, nil
 }
 
 func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
@@ -641,24 +643,34 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
-			transactions, err := types.DecodeTransactions(payload.Transactions.UnderlyngReference())
-			if err != nil {
-				return execution_client.PayloadStatusInvalidated, err
-			}
-			actualHashes := make([]common.Hash, 0, len(versionedHashes))
-			for _, transaction := range transactions {
-				actualHashes = append(actualHashes, transaction.GetBlobHashes()...)
-			}
-			if !slices.Equal(actualHashes, versionedHashes) {
+			err := validatePayloadBlobHashes(payload, versionedHashes)
+			if errors.Is(err, misc.ErrMismatchBlobHashes) {
 				requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
 				if _, err := payload.RlpHeader(parentBlockRoot, requestsHash, nil); err != nil {
 					return execution_client.PayloadStatusInvalidated, err
 				}
-				return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+			}
+			if err != nil {
+				return execution_client.PayloadStatusInvalidated, err
 			}
 		}
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 	})
+}
+
+func validatePayloadBlobHashes(payload *cltypes.Eth1Block, versionedHashes []common.Hash) error {
+	transactions, err := types.DecodeTransactions(payload.Transactions.UnderlyngReference())
+	if err != nil {
+		return err
+	}
+	actualHashes := make([]common.Hash, 0, len(versionedHashes))
+	for _, transaction := range transactions {
+		actualHashes = append(actualHashes, transaction.GetBlobHashes()...)
+	}
+	if !slices.Equal(actualHashes, versionedHashes) {
+		return misc.ErrMismatchBlobHashes
+	}
+	return nil
 }
 
 func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
@@ -1142,7 +1154,18 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	if validatePayload && f.engine != nil {
 		return cltypes.ValidateExecutionPayloadEnvelopeBidCommitments(f.beaconCfg, block, signedEnvelope)
 	}
-	return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
+	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope); err != nil {
+		return err
+	}
+	versionedHashes, err := executionPayloadVersionedHashes(block)
+	if err != nil {
+		return err
+	}
+	err = validatePayloadBlobHashes(signedEnvelope.Message.Payload, versionedHashes)
+	if errors.Is(err, misc.ErrMismatchBlobHashes) {
+		f.RejectEnvelope(signedEnvelope.Message.BeaconBlockRoot)
+	}
+	return err
 }
 
 func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
