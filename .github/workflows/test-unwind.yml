@@ -1,0 +1,34 @@
+name: Unwind modes
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unwind:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        execution: [serial, parallel]
+        commitment: [serial, parallel]
+        batch: [false, true]
+    env:
+      ERIGON_EXEC3_PARALLEL: ${{ matrix.execution == 'parallel' && 'true' || 'false' }}
+      ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment == 'parallel' && 'true' || 'false' }}
+      ERIGON_BATCH_COMMITMENTS: ${{ matrix.batch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-erigon
+        with:
+          cache-namespace: test-unwind
+      # These switches are read at package init; test-unwind disables result caching.
+      - run: make test-unwind
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()

@@ -214,6 +214,15 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 		assertChurnState(ctx, t, eat, churn, payloads[target-2], sums[target-2])
 
 		// Keep churning: every poke re-reads its ring slots from MDBX+files.
-		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
+		continued, continuedSums := churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
+		head := continued[len(continued)-1]
+		headSum := continuedSums[len(continuedSums)-1]
+
+		// Retained changesets cannot make immutable snapshot state unwindable.
+		// Rejection must leave both reads and subsequent payload building usable.
+		require.Error(t, eat.MockCl.UpdateForkChoice(ctx, payloads[18])) // block 20
+		assertChurnState(ctx, t, eat, churn, head, headSum)
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, head))
+		churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(6_000 + k) })
 	})
 }

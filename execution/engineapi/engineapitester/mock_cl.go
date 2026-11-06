@@ -28,6 +28,7 @@ import (
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -469,6 +470,10 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 	if elPayload.Withdrawals != nil {
 		wh := types.DeriveSha(types.Withdrawals(elPayload.Withdrawals))
 		header.WithdrawalsHash = &wh
+	}
+	if elPayload.BlockAccessList != nil {
+		hash := crypto.Keccak256Hash(*elPayload.BlockAccessList)
+		header.BlockAccessListHash = &hash
 	}
 	requests := make(types.FlatRequests, 0, len(p.ExecutionRequests))
 	for _, r := range p.ExecutionRequests {

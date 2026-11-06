@@ -1568,67 +1568,50 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return err
 	}
 	defer valsCursor.Close()
-	// Revert keys using diff entries.
-	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	//
-	// DomainEntryDiff.Value semantics:
-	//   - nil            → "different step" — prev value lives at another step, skip the restore
-	//                       (only produced by legacy V0 changesets where valueLen==0 deserializes as nil)
-	//   - []byte{}       → "no previous value" — key was absent before this step, so write an
-	//                       empty tombstone to prevent getLatestFromDb falling through to files
-	//                       (which have no concept of deletions) and returning stale data
-	//   - non-empty      → restore the actual previous value
+	// Fully discarded steps need only deletion: their preceding versions remain
+	// in MDBX or files. Restoring at a different step would create a version that
+	// surviving changesets cannot remove during a later unwind.
+	// Only the partially retained step needs its overwritten value restored.
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
-	for i := range domainDiffs {
-		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
-		key := common.ToBytesZeroCopy(keyStr)
-		if dt.d.LargeValues {
-			// Delete the entry at the write step
+	for _, diff := range domainDiffs {
+		key := common.ToBytesZeroCopy(diff.Key)
+		stepBytes, fullKey := key[len(key)-8:], key[:len(key)-8]
+		if d.LargeValues {
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-			if value != nil {
-				// key aliases the diff's immutable string, and dropping its trailing
-				// step leaves exactly the 8 bytes of spare capacity the append needs,
-				// so appending in place would rewrite that string. Build a new key.
-				unwindKey := make([]byte, 0, len(key))
-				unwindKey = append(unwindKey, key[:len(key)-8]...)
-				unwindKey = append(unwindKey, unwindStepBytes...)
-				if err := rwTx.Put(d.ValuesTable, unwindKey, value); err != nil {
-					return err
-				}
+		} else {
+			valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
+			if err != nil {
+				return err
 			}
-			continue
-		}
-		stepBytes := key[len(key)-8:]
-		fullKey := key[:len(key)-8]
-		// Delete the current entry at the write step
-		valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
-		if err != nil {
-			return err
-		}
-		if len(valInDB) > 0 {
-			stepInDB := valInDB[:8]
-			if bytes.Equal(stepInDB, stepBytes) {
+			if len(valInDB) >= 8 && bytes.Equal(valInDB[:8], stepBytes) {
 				if err := valsCursor.DeleteCurrent(); err != nil {
 					return err
 				}
 			}
 		}
-
-		// A key changed at several steps in the range has one diff per step, sorted
-		// by key then descending step; only the lowest step's value is the value at
-		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
-		// DupSort table keeps several dups at the unwind step and getLatestFromDb
-		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
-		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
-		if value != nil && lastForKey {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil { //nolint:makezero
-				return err
-			}
+		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(stepBytes, unwindStepBytes) {
+			continue
+		}
+		// A value already supplied by an older version needs no new entry.
+		// Otherwise that entry could outlive the changesets of this step.
+		previous, _, _, err := dt.GetLatest(fullKey, rwTx)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(previous, diff.Value) {
+			continue
+		}
+		if d.LargeValues {
+			err = rwTx.Put(d.ValuesTable, key, diff.Value)
+		} else {
+			err = valsCursor.Put(fullKey, append(unwindStepBytes, diff.Value...)) //nolint:makezero
+		}
+		if err != nil {
+			return err
 		}
 	}
 	// Compare valsKV with prevSeenKeys

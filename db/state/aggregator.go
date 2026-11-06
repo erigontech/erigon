@@ -2205,6 +2205,25 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 	return finished
 }
 
+func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
+	step := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
+	// An interrupted build can leave a domain without files while the state
+	// domains advance. Resume at its pending DB data, not at the state frontier.
+	for _, d := range at.d {
+		if !d.d.Enabled || d.FirstStepNotInFiles() >= step {
+			continue
+		}
+		first, err := kv.FirstKey(tx, d.ht.h.KeysTable)
+		if err != nil {
+			return 0, err
+		}
+		if len(first) > 0 {
+			step = min(step, max(d.FirstStepNotInFiles(), kv.Step(binary.BigEndian.Uint64(first)/at.StepSize())))
+		}
+	}
+	return step, nil
+}
+
 // Returns a channel which is closed when aggregation is done and whether it started.
 func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, doMerge bool, finalityCtx kv.FinalityContext) (chan struct{}, bool) {
 	fin := make(chan struct{})
@@ -2233,8 +2252,6 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		return fin, false
 	}
 
-	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 
@@ -2248,6 +2265,18 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 				return //nolint
 			}
 			defer a.snapshotBuildSema.Release(1)
+		}
+
+		var step kv.Step
+		if err := db.View(a.ctx, func(tx kv.Tx) (err error) {
+			at := a.BeginFilesRo()
+			defer at.Close()
+			step, err = at.firstStepToBuild(tx)
+			return err
+		}); err != nil {
+			a.logger.Warn("[snapshots] first step to build", "err", err)
+			close(fin)
+			return
 		}
 
 		lastInDB := max(

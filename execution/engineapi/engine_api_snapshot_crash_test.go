@@ -63,6 +63,7 @@ type snapshotCrashRequest struct {
 func configureSnapshotCrashRecovery(config *ethconfig.Config) {
 	configureCrashRecovery(config)
 	config.MaxReorgDepth = snapshotCrashReorgDepth
+	config.Sync.MaxReorgDepth = snapshotCrashReorgDepth
 	config.Snapshot.ProduceE3 = true
 }
 

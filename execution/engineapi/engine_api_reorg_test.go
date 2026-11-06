@@ -389,6 +389,8 @@ func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 2
+			config.Sync.MaxReorgDepth = 2
+			config.Sync.AlwaysGenerateChangesets = false
 		},
 	})
 	require.NoError(t, err)
