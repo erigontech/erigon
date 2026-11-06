@@ -213,6 +213,25 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 		})
 	})
 
+	// After the block, the block-end burn has cleared what the creation tipped.
+	t.Run("eth_callMany after the block", func(t *testing.T) {
+		forEachCallState(t, func(t *testing.T) {
+			api := jsonrpc.NewEthAPI(base, m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5_000_000, ReturnDataLimit: 100_000}, log.New())
+			from, data := derivertest.UserAddress(), hexutil.Bytes(initCode)
+			feeCap, tipCap := hexutil.U256(*uint256.NewInt(groupEndFeeCap)), hexutil.U256{}
+			call := ethapi.CallArgs{From: &from, Data: &data, MaxFeePerGas: &feeCap, MaxPriorityFeePerGas: &tipCap}
+			after := -1
+			for _, index := range []*int{nil, &after} {
+				res, err := api.CallMany(t.Context(), []jsonrpc.Bundle{{Transactions: []ethapi.CallArgs{call}}},
+					jsonrpc.StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: index}, nil, nil)
+				require.NoError(t, err)
+				require.Len(t, res, 1)
+				require.Len(t, res[0], 1)
+				require.Equal(t, hex.EncodeToString(make([]byte, 64)), res[0][0]["value"], "%v", res[0][0])
+			}
+		})
+	})
+
 	overlay := func() *jsonrpc.OverlayAPIImpl {
 		return jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
 	}
