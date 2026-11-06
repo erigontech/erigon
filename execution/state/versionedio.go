@@ -1797,6 +1797,20 @@ func (ws *WriteSet) ReleaseAndReset() {
 	ws.ReleaseMaps()
 }
 
+// ReleaseOrDropLarge is ReleaseAndReset for a small set; a set with many storage entries is dropped to the GC,
+// since returning each entry and clearing big maps costs more than allocating them again (probe).
+func (ws *WriteSet) ReleaseOrDropLarge() {
+	n := 0
+	for _, inner := range ws.storage {
+		n += len(inner)
+	}
+	if n > 1024 && ws.cells == nil {
+		*ws = WriteSet{}
+		return
+	}
+	ws.ReleaseAndReset()
+}
+
 // ReleaseMaps returns the map containers to their pools without releasing the
 // VersionedWrite values. Use ReleaseAndReset only for sets whose VWs came from
 // the vwPools and are exclusively owned.

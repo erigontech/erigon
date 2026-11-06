@@ -372,7 +372,7 @@ func (ibs *IntraBlockState) Reset() {
 	// originals in ibs.versionedWrites are no longer referenced after the
 	// boundary call, so recycle can take every VW back.
 	ibs.versionedWrites.recycle()
-	ibs.versionedOrigins.ReleaseAndReset()
+	ibs.versionedOrigins.ReleaseOrDropLarge()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
 	ibs.accountReadCount = 0
