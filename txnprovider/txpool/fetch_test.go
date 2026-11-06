@@ -812,6 +812,7 @@ func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
 	pool.EXPECT().Started().Return(true).AnyTimes()
 	pool.EXPECT().FilterKnownIdHashes(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, error) { return hashes, nil }).AnyTimes()
+	pool.EXPECT().HeldOrQueuedIdHashes(gomock.Any(), gomock.Any()).Return(nil, nil, nil).AnyTimes()
 	var requestedFrom [][64]byte
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
@@ -840,6 +841,8 @@ func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
 
 	now = now.Add(txFetchTimeout)
 	announce(peerB)
+	require.Equal(t, [][64]byte{peerA}, requestedFrom, "the waiting alternate is asked by the sweep, in order")
+	fetch.requestFromAlternates(ctx, nil)
 	require.Equal(t, [][64]byte{peerA, peerB}, requestedFrom)
 }
 
@@ -851,6 +854,8 @@ type announceFetchTest struct {
 	requestedFrom [][64]byte
 	filterErr     error
 	known         map[[32]byte]bool // hashes the pool holds
+	discarded     map[[32]byte]bool // hashes whose body the pool rejected
+	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
 	sendErr       error
 	failSendAt    int // when > 0, only that send (1-based) fails with sendErr
@@ -871,11 +876,27 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 			}
 			var unknown Hashes
 			for i := 0; i < len(hashes); i += 32 {
-				if !a.known[[32]byte(hashes[i:i+32])] {
+				if h := [32]byte(hashes[i : i+32]); !a.known[h] && !a.discarded[h] {
 					unknown = append(unknown, hashes[i:i+32]...)
 				}
 			}
 			return unknown, a.filterErr
+		}).AnyTimes()
+	pool.EXPECT().HeldOrQueuedIdHashes(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, Hashes, error) {
+			if a.onFilter != nil {
+				a.onFilter()
+			}
+			var held, queued Hashes
+			for i := 0; i < len(hashes); i += 32 {
+				switch h := [32]byte(hashes[i : i+32]); {
+				case a.known[h]:
+					held = append(held, h[:]...)
+				case a.queued[h]:
+					queued = append(queued, h[:]...)
+				}
+			}
+			return held, queued, a.filterErr
 		}).AnyTimes()
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
@@ -938,7 +959,7 @@ func TestRepeatedAnnouncementsDoNotCrowdOutAlternates(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
 	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
-	for range maxFetchAlternates + 1 {
+	for range 5 {
 		a.announce(t, peerA, hash)
 	}
 	a.announce(t, peerB, hash)
@@ -954,8 +975,11 @@ func TestLateAnnouncementKeepsAlternates(t *testing.T) {
 	a.announce(t, peerB, hash)
 	*a.now = a.now.Add(txFetchTimeout)
 	a.announce(t, peerC, hash)
+	require.Equal(t, [][64]byte{peerA}, a.requestedFrom, "a late announcer waits behind the saved alternate")
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
 	a.timeoutSweep()
-	require.Equal(t, [][64]byte{peerA, peerC, peerB}, a.requestedFrom)
+	require.Equal(t, [][64]byte{peerA, peerB, peerC}, a.requestedFrom)
 }
 
 func TestAlternateAnnouncementIsRecorded(t *testing.T) {
@@ -1275,10 +1299,10 @@ func TestQueuedBodyKeepsAlternatesUntilValidated(t *testing.T) {
 	hash, peerA, peerB := [32]byte{0xe1}, [64]byte{0xa}, [64]byte{0xb}
 	a.announce(t, peerA, hash)
 	a.announce(t, peerB, hash)
-	a.known = map[[32]byte]bool{hash: true} // A's body is queued, not yet validated
+	a.queued = map[[32]byte]bool{hash: true} // A's body is queued, not yet validated
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA}, a.requestedFrom)
-	delete(a.known, hash) // the body failed validation
+	delete(a.queued, hash) // the body failed validation
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "the alternate is still there")
 }
@@ -1392,4 +1416,78 @@ func TestFailedChunkReleasesOnlyUnsentHashes(t *testing.T) {
 	_, unsentKept := a.fetch.requested.Get(hashes[299][:])
 	require.True(t, sentKept, "the sent chunk stays reserved")
 	require.False(t, unsentKept, "the failed chunk is released")
+}
+
+func TestSilentAnnouncersDoNotCrowdOutALaterAnnouncer(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, honest := [32]byte{0xaa}, [64]byte{0xee}
+	for i := range 5 {
+		a.announce(t, [64]byte{byte(i + 1)}, hash)
+	}
+	a.announce(t, honest, hash)
+	for range 5 {
+		a.timeoutSweep()
+	}
+	require.Contains(t, a.requestedFrom, honest, "the later announcer must be asked after the silent ones")
+}
+
+func TestReannouncementsAfterTheTimeoutDoNotPostponeAlternates(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, silentX, silentY, honest := [32]byte{0xaa}, [64]byte{0x1}, [64]byte{0x2}, [64]byte{0xee}
+	a.announce(t, silentX, hash)
+	a.announce(t, honest, hash)
+	for i := range 3 {
+		*a.now = a.now.Add(txFetchTimeout)
+		a.announce(t, [][64]byte{silentY, silentX}[i%2], hash)
+		a.fetch.requestFromAlternates(a.ctx, nil)
+	}
+	require.Contains(t, a.requestedFrom, honest, "a saved alternate must be asked before re-announcers")
+}
+
+func TestRejectedBodyKeepsAlternates(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.discarded = map[[32]byte]bool{hash: true} // peerA's body failed validation
+	a.timeoutSweep()
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "a rejected body is no reason to drop the other announcers")
+}
+
+func TestDeferredHashUsesAnotherAlternate(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, busy, idle := [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	var hashes [][32]byte
+	for i := range maxRetryRequestsPerPeer + 1 {
+		hashes = append(hashes, [32]byte{byte(i), 0xcc})
+	}
+	a.announceSized(t, peerA, p2pTxPacketLimit, hashes...)
+	a.announceSized(t, busy, p2pTxPacketLimit, hashes...) // one full-size hash per request: the last one does not fit
+	a.announceSized(t, idle, p2pTxPacketLimit, hashes[len(hashes)-1])
+	a.requestedFrom = nil
+	a.timeoutSweep()
+	require.Contains(t, a.requestedFrom, idle, "the hash beyond busy's budget goes to its other alternate")
+}
+
+func TestAlternateQuotaBoundsAPeerAndIsReleased(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB, full := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xf}
+	fullPeer := fetchPeer{a.sentryClient, full}
+	a.fetch.alternatesOf[fullPeer] = maxAlternatesPerPeer
+	a.announce(t, peerA, hash)
+	a.announce(t, full, hash)
+	a.announce(t, peerB, hash)
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "a peer at its quota is not kept as an alternate")
+
+	delete(a.fetch.alternatesOf, fullPeer)
+	a.known = map[[32]byte]bool{hash: true}
+	a.timeoutSweep()
+	require.Empty(t, a.fetch.alternatesOf, "resolved requests release their alternates")
 }

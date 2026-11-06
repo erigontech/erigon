@@ -84,6 +84,7 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
+	HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	GetBlobs(blobhashes []common.Hash) []PoolBlobBundle
@@ -645,6 +646,37 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 		}
 	}
 	return unknownHashes, err
+}
+
+// HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation;
+// a discarded txn is neither.
+func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		hash, hashS := hashes[i:i+32], string(hashes[i:i+32])
+		if _, ok := p.unprocessedRemoteByHash[hashS]; ok {
+			queued = append(queued, hash...)
+			continue
+		}
+		_, inPool := p.byHash[hashS]
+		_, mined := p.minedBlobTxnsByHash[hashS]
+		if inPool || mined {
+			held = append(held, hash...)
+			continue
+		}
+		if _, discarded := p.discardReasonsLRU.Get(hashS); discarded {
+			continue
+		}
+		has, err := tx.Has(kv.PoolTransaction, hash)
+		if err != nil {
+			return held, queued, err
+		}
+		if has {
+			held = append(held, hash...)
+		}
+	}
+	return held, queued, nil
 }
 
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {

@@ -50,7 +50,9 @@ var errInternalDB = errors.New("internal db error")
 // txFetchTimeout is how long an announced hash waits for the requested peer before another announcer is asked.
 const txFetchTimeout = 5 * time.Second
 
-const maxFetchAlternates = 4
+// maxAlternatesPerPeer bounds the hashes a peer waits on as an alternate, as geth's maxTxAnnounces does: a hash
+// keeps every announcer, so silent peers that announce first cannot crowd out a later one.
+const maxAlternatesPerPeer = 4096
 
 const maxFetchRequests = 64 * 1024
 
@@ -66,7 +68,6 @@ type fetchRequest struct {
 	at         time.Time
 	peer       fetchPeer
 	alternates []fetchPeer
-	seenKnown  bool // the pool held it at the last sweep, maybe only queued for validation
 }
 
 // retryBudget counts a peer's retry requests in the current txFetchTimeout window.
@@ -111,6 +112,7 @@ type Fetch struct {
 	requested                *maphash.LRU[*fetchRequest]
 	pending                  []pendingFetch // in request order, so the oldest expires first
 	retryBudgets             map[fetchPeer]*retryBudget
+	alternatesOf             map[fetchPeer]int // hashes each peer waits on as an alternate
 	now                      func() time.Time
 	logger                   log.Logger
 }
@@ -150,6 +152,7 @@ func NewFetch(
 		announcements:        announcements,
 		requested:            requested,
 		retryBudgets:         map[fetchPeer]*retryBudget{},
+		alternatesOf:         map[fetchPeer]int{},
 		now:                  time.Now,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
@@ -193,20 +196,17 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 	for i := 0; i < len(hashes); i += 32 {
 		h := hashes[i : i+32]
 		r, ok := f.requested.Get(h)
-		if ok && now.Sub(r.at) < txFetchTimeout {
-			if peer != r.peer && !slices.Contains(r.alternates, peer) && len(r.alternates) < maxFetchAlternates {
-				r.alternates = append(r.alternates, peer)
+		if ok && (now.Sub(r.at) < txFetchTimeout || len(r.alternates) > 0) {
+			if peer != r.peer {
+				f.addAlternate(r, peer) // a timed-out request asks its waiting alternates first
 			}
-			continue
-		}
-		if ok && peer == r.peer && len(r.alternates) > 0 {
 			continue
 		}
 		// An announcement flood: forget the oldest request before the insert, so a full LRU evicts no other
 		// pending request, and the forgotten hash is asked again on its next announcement.
 		if len(f.pending) >= maxFetchRequests {
 			if old, found := f.requested.Get(f.pending[0].hash[:]); found && old.at.Equal(f.pending[0].at) {
-				f.requested.Delete(f.pending[0].hash[:])
+				f.forget(f.pending[0].hash[:], old)
 			}
 			f.pending = f.pending[1:]
 			if ok {
@@ -214,7 +214,6 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 			}
 		}
 		if ok {
-			r.alternates = slices.DeleteFunc(r.alternates, func(a fetchPeer) bool { return a == peer })
 			r.at, r.peer = now, peer
 		} else {
 			f.requested.Set(h, &fetchRequest{at: now, peer: peer})
@@ -271,8 +270,8 @@ func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
 	return int(info.size) + announcedSizeSlack // a delivered body may be that much larger
 }
 
-// requestFromAlternates asks the next announcer for each hash whose request timed out. Hashes the
-// pool already holds leave the retry state; a delivered but rejected txn keeps its alternates.
+// requestFromAlternates asks the next announcer for each hash whose request timed out. Hashes the pool holds
+// leave the retry state, queued ones wait for their validation, and a rejected body keeps its alternates.
 func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	f.requestedLock.Lock()
 	now := f.now()
@@ -287,13 +286,16 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	if len(expired) == 0 {
 		return
 	}
-	unknown := map[[32]byte]struct{}{}
-	unknownHashes, err := f.pool.FilterKnownIdHashes(tx, expired)
+	state := map[[32]byte]bool{} // true: held, false: queued for validation
+	held, queued, err := f.pool.HeldOrQueuedIdHashes(tx, expired)
 	if err != nil {
-		unknownHashes = expired // ask anyway: a known txn costs only a duplicate reply
+		held, queued = nil, nil // ask anyway: a held txn costs only a duplicate reply
 	}
-	for i := 0; i < len(unknownHashes); i += 32 {
-		unknown[[32]byte(unknownHashes[i:i+32])] = struct{}{}
+	for i := 0; i < len(held); i += 32 {
+		state[[32]byte(held[i:i+32])] = true
+	}
+	for i := 0; i < len(queued); i += 32 {
+		state[[32]byte(queued[i:i+32])] = false
 	}
 
 	f.requestedLock.Lock()
@@ -307,37 +309,37 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		if !ok || !r.at.Equal(p.at) {
 			continue
 		}
-		if _, missing := unknown[p.hash]; !missing {
-			if r.seenKnown { // held for a whole timeout: validated, not just queued
-				f.requested.Delete(p.hash[:])
+		if isHeld, found := state[p.hash]; found {
+			if isHeld {
+				f.forget(p.hash[:], r)
 				continue
 			}
-			r.seenKnown, r.at = true, sent // a queued body may still fail validation; keep the alternates
+			r.at = sent // a queued body may still fail validation; keep the alternates
 			f.pending = append(f.pending, pendingFetch{p.hash, sent})
 			continue
 		}
-		r.seenKnown = false
 		if len(r.alternates) == 0 {
 			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
 			continue
 		}
-		next := r.alternates[0]
-		plan := plans[next]
-		if plan == nil {
-			b := f.retryBudgets[next]
-			if b == nil || sent.Sub(b.since) >= txFetchTimeout {
-				b = &retryBudget{since: sent}
-				f.retryBudgets[next] = b
+		picked := slices.IndexFunc(r.alternates, func(alt fetchPeer) bool {
+			plan := plans[alt]
+			if plan == nil {
+				b := f.retryBudgets[alt]
+				if b == nil || sent.Sub(b.since) >= txFetchTimeout {
+					b = &retryBudget{since: sent}
+					f.retryBudgets[alt] = b
+				}
+				plan = &retryPlan{limit: maxRetryRequestsPerPeer - b.used}
+				plans[alt] = plan
 			}
-			plan = &retryPlan{limit: maxRetryRequestsPerPeer - b.used}
-			plans[next] = plan
-		}
-		if !plan.add(p.hash[:], f.announcedSize(p.hash[:], next)) {
-			deferred = append(deferred, p) // keeps its alternate for the next sweep
+			return plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
+		})
+		if picked < 0 {
+			deferred = append(deferred, p) // every alternate's budget is spent: keep them for the next sweep
 			continue
 		}
-		r.alternates = r.alternates[1:]
-		r.at, r.peer = sent, next
+		r.at, r.peer = sent, f.removeAlternate(r, picked)
 		f.pending = append(f.pending, pendingFetch{p.hash, sent})
 	}
 	if len(deferred) > 0 {
@@ -380,10 +382,42 @@ func (f *Fetch) keepAlternate(peer fetchPeer, hashes Hashes, sent time.Time) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
 	for i := 0; i < len(hashes); i += 32 {
-		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && r.at.Equal(sent) && !slices.Contains(r.alternates, peer) {
-			r.alternates = append(r.alternates, peer)
+		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && r.at.Equal(sent) {
+			f.appendAlternate(r, peer)
 		}
 	}
+}
+
+// addAlternate keeps an announcer to ask after the requested peer.
+func (f *Fetch) addAlternate(r *fetchRequest, peer fetchPeer) {
+	if peer != r.peer {
+		f.appendAlternate(r, peer)
+	}
+}
+
+func (f *Fetch) appendAlternate(r *fetchRequest, peer fetchPeer) {
+	if slices.Contains(r.alternates, peer) || f.alternatesOf[peer] >= maxAlternatesPerPeer {
+		return
+	}
+	r.alternates = append(r.alternates, peer)
+	f.alternatesOf[peer]++
+}
+
+func (f *Fetch) removeAlternate(r *fetchRequest, i int) fetchPeer {
+	peer := r.alternates[i]
+	r.alternates = slices.Delete(r.alternates, i, i+1)
+	if f.alternatesOf[peer]--; f.alternatesOf[peer] <= 0 {
+		delete(f.alternatesOf, peer)
+	}
+	return peer
+}
+
+// forget drops a request and its alternates.
+func (f *Fetch) forget(hash []byte, r *fetchRequest) {
+	for len(r.alternates) > 0 {
+		f.removeAlternate(r, len(r.alternates)-1)
+	}
+	f.requested.Delete(hash)
 }
 
 // requestPooledTxns splits hashes into requests of 256, because a responder answers only the first 256.
