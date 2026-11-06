@@ -75,9 +75,11 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 		Nonce:      txn.GetNonce(),
 		Value:      txn.GetValue(),
 		Data:       txn.GetData(),
-		Logs:       receipt.Logs,
 		Gas:        txn.GetGasLimit(),
 		AccessList: txn.GetAccessList(),
+	}
+	if receipt.Logs != nil {
+		transaction.Logs = transaction.RPCReceipt.Logs
 	}
 	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
 	// package is fee-capped too.
