@@ -123,8 +123,6 @@ func TestCheckCompatible(t *testing.T) {
 	}
 }
 
-// Post-merge forks are scheduled by timestamp, so they compare against the head's
-// time rather than its number.
 // TestCheckCompatibleBaseFeeDenominator: the EIP-1559 denominator, 8 when
 // unset, cannot change once London is active.
 func TestCheckCompatibleBaseFeeDenominator(t *testing.T) {
@@ -153,6 +151,8 @@ func TestCheckConfigZeroBaseFeeDenominator(t *testing.T) {
 	require.ErrorContains(t, withDenominator(common.NewUint64(0)).CheckConfigForkOrder(), "baseFeeChangeDenominator")
 }
 
+// Post-merge forks are scheduled by timestamp, so they compare against the head's
+// time rather than its number.
 func TestCheckCompatibleTimestampForks(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
