@@ -230,7 +230,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (_ *BtIndexWrit
 	if btw.indexF, err = dir.CreateTemp(args.IndexFile); err != nil {
 		return nil, fmt.Errorf("create temp index file for %s: %w", args.IndexFile, err)
 	}
-	btw.writer = &countingWriter{w: bufiopool.Writer(btw.indexF)}
+	btw.writer = &countingWriter{w: bufiopool.Writer(dir.UncachedWriter(btw.indexF))}
 
 	if args.KeyCount > 0 {
 		if args.M == 0 {
