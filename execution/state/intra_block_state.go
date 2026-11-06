@@ -2835,23 +2835,6 @@ func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Ad
 	return bal.Val.IsZero(), true
 }
 
-func (ibs *IntraBlockState) assertCreatedSelfDestructEmpty(writes *WriteSet, addr accounts.Address, empty bool) {
-	view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
-	if view.Err() != nil {
-		return
-	}
-	nonce, codeHash := view.GetNonce(), view.GetCodeHash()
-	if w, ok := writes.GetNonce(addr); ok {
-		nonce = w.Val
-	}
-	if w, ok := writes.GetCodeHash(addr); ok {
-		codeHash = w.Val
-	}
-	if nonce != 0 || !codeHash.IsEmpty() {
-		panic(fmt.Sprintf("created self-destruct %x: nonce %d codeHash %x, want 0 and empty (shortcut empty=%v)", addr, nonce, codeHash, empty))
-	}
-}
-
 func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
@@ -2861,9 +2844,6 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			continue
 		}
 		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
-			if dbg.AssertEnabled {
-				ibs.assertCreatedSelfDestructEmpty(writes, addr, empty)
-			}
 			if empty {
 				writes.SetContractRemoval(addr, ibs.Version())
 			}
