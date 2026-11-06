@@ -1912,7 +1912,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 		if decision.reason != txpoolcfg.NotSet {
 			if mt.TxnSlot.TxType() == FrameTxnType && decision.reason == txpoolcfg.InvalidFrame {
-				p.frameRejections.Add(string(mt.TxnSlot.IDHash[:]), frameRejection{blocker: found.TxnSlot.IDHash})
+				p.frameRejections.Add(string(mt.TxnSlot.IDHash[:]), frameRejection{blocker: found.TxnSlot.IDHash, reason: decision.reason})
 			}
 			return decision.reason
 		}

@@ -1077,7 +1077,7 @@ func TestFramePoolStaleBatchPreservesPrecheckRejection(t *testing.T) {
 	pending := framePoolSlot(t, common.Address{3}, 1, 2, uint256.Int{1})
 	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
 	ordinary.IDHash[0] = 4
-	pool.frameRejections.Add(string(rejected.IDHash[:]), frameRejection{generation: pool.stateGeneration})
+	pool.frameRejections.Add(string(rejected.IDHash[:]), frameRejection{generation: pool.stateGeneration, reason: txpoolcfg.InvalidFrame})
 	var txns TxnSlots
 	for _, frame := range []*TxnSlot{invalid, rejected, pending} {
 		address := frame.Txn.(*types.FrameTransaction).SenderAddress
