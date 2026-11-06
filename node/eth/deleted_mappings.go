@@ -22,6 +22,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -33,6 +34,8 @@ const deletedMappingsWarnAfter = 10 * time.Minute
 var (
 	mxDeletedMappedFiles = metrics.GetOrCreateGauge("mmap_deleted_files")
 	mxDeletedMappedBytes = metrics.GetOrCreateGauge("mmap_deleted_bytes")
+	mxOpenFds            = metrics.GetOrCreateGauge("fd_open")
+	mxDeletedOpenFds     = metrics.GetOrCreateGauge("fd_deleted")
 )
 
 type deletedMappingsWatch struct{ since, lastWarn time.Time }
@@ -52,8 +55,9 @@ func (w *deletedMappingsWatch) warn(now time.Time, count int) bool {
 	return true
 }
 
-// watchDeletedMappings exports how many files under dir stay mapped after deletion, and warns when they do not go away.
-func watchDeletedMappings(ctx context.Context, dir string, logger log.Logger) {
+// watchDeletedMappings exports open fds and how many files under datadir stay open or mapped after deletion,
+// and warns when those do not go away.
+func watchDeletedMappings(ctx context.Context, datadir string, logger log.Logger) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	var w deletedMappingsWatch
@@ -62,14 +66,21 @@ func watchDeletedMappings(ctx context.Context, dir string, logger log.Logger) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			n, size, err := mmap.DeletedMappings(dir)
+			mapped, size, err := mmap.DeletedMappings(datadir)
 			if err != nil {
 				return
 			}
-			mxDeletedMappedFiles.SetUint64(uint64(n))
+			open, deleted, err := dir.OpenFiles(datadir)
+			if err != nil {
+				return
+			}
+			mxDeletedMappedFiles.SetUint64(uint64(mapped))
 			mxDeletedMappedBytes.SetUint64(size)
-			if w.warn(now, n) {
-				logger.Warn("[mmap] deleted files are still mapped; their disk space is freed only after unmap", "files", n, "size", datasize.ByteSize(size).HR(), "since", w.since.Format(time.DateTime))
+			mxOpenFds.SetUint64(uint64(open))
+			mxDeletedOpenFds.SetUint64(uint64(deleted))
+			if w.warn(now, mapped+deleted) {
+				logger.Warn("[files] deleted files are still open or mapped; their disk space is freed only after close and unmap",
+					"mapped", mapped, "mappedSize", datasize.ByteSize(size).HR(), "openFds", deleted, "since", w.since.Format(time.DateTime))
 			}
 		}
 	}

@@ -17,6 +17,8 @@
 package dir
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,4 +62,36 @@ func Test_CreateTempWithExt(t *testing.T) {
 	base1 := filepath.Base(tmpfile.Name())
 	base2 := filepath.Base(ogfile)
 	require.True(t, strings.HasPrefix(base1, base2))
+}
+
+func TestOpenFilesCountsADeletedFileUntilClose(t *testing.T) {
+	d := t.TempDir()
+	p := filepath.Join(d, "f.seg")
+	require.NoError(t, os.WriteFile(p, []byte{1}, 0o600))
+	open0, _, err := OpenFiles(d)
+	if errors.Is(err, errors.ErrUnsupported) {
+		return // no /proc/self/fd on this platform
+	}
+	require.NoError(t, err)
+
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	open1, deleted, err := OpenFiles(d)
+	require.NoError(t, err)
+	require.Equal(t, open0+1, open1)
+	require.Zero(t, deleted)
+
+	require.NoError(t, os.Remove(p))
+	_, deleted, err = OpenFiles(d)
+	require.NoError(t, err)
+	require.Equal(t, 1, deleted)
+	_, deleted, err = OpenFiles(filepath.Join(d, "other"))
+	require.NoError(t, err)
+	require.Zero(t, deleted, "files outside dir are not counted")
+
+	require.NoError(t, f.Close())
+	open2, deleted, err := OpenFiles(d)
+	require.NoError(t, err)
+	require.Equal(t, open0, open2)
+	require.Zero(t, deleted)
 }
