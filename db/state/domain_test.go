@@ -2441,7 +2441,7 @@ func countDupSortKeys(t testing.TB, tx kv.Tx, tbl string) int {
 //  3. Cursor preservation: InProgress cursor survives a txTo advance — the
 //     subsequent call continues from LastPrunedValue, not from First.
 func TestDomain_PruneRollingCursorProgress(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
+	t.Parallel()
 
 	const (
 		stepSize = uint64(16)

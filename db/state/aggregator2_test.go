@@ -110,7 +110,6 @@ func TestWorkersCfgKeepsOnlyTheNewestRequest(t *testing.T) {
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	prev := statecfg.Schema.CommitmentDomain.CommitmentV3Records
 	statecfg.Schema.CommitmentDomain.CommitmentV3Records = true
 	t.Cleanup(func() { statecfg.Schema.CommitmentDomain.CommitmentV3Records = prev })
@@ -122,7 +121,6 @@ func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	prev, previousV3 := statecfg.Schema.CommitmentDomain.CommitmentV3Records, statecfg.ExperimentalCommitmentV3
 	statecfg.Schema.CommitmentDomain.CommitmentV3Records = true
 	statecfg.ExperimentalCommitmentV3 = true

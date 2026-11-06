@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -32,6 +33,7 @@ import (
 // before the next starts, with commitment merges running between them. The root
 // must come out where the forward run left it regardless of that reshuffling.
 func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("long-running test")
 	}

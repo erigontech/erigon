@@ -213,6 +213,7 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 }
 
 func TestAggregator_SqueezeCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -281,6 +282,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 // and validates. This exercises ExpandShortenedKeysInBranch via the public read-path API
 // (DebugGetLatestFromFiles → replaceShortenedKeysInBranch → ExpandShortenedKeysInBranch).
 func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -352,6 +354,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}

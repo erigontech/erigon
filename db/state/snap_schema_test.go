@@ -166,7 +166,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 }
 
 func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
+	t.Parallel()
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
 	ver := version.V1_0_standart

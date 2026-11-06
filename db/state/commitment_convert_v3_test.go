@@ -342,7 +342,6 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 }
 
 func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize, steps = 1, 4
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
 	put, del, putAccount := domainWriter(t, domains, rwTx)
@@ -442,7 +441,6 @@ func buildRandomWriteFiles(t *testing.T, mode string) (kv.TemporalRwDB, *state.A
 }
 
 func TestConvertCommitmentFiles_V3PrefixFoldMatchesStateRecord(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -587,7 +585,6 @@ func buildWipedStorageFiles(t *testing.T, mode string, c wipeCase) (kv.TemporalR
 }
 
 func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize, steps = 4, 2
 	useCommitmentSchema(t, false)
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
@@ -620,7 +617,6 @@ func TestConvertCommitmentFiles_V3ExtensionRoot(t *testing.T) {
 }
 
 func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize, steps = 4, 2
 	useCommitmentSchema(t, false)
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
@@ -651,7 +647,6 @@ func TestConvertCommitmentFiles_V3LeafRootFailsBeforeSwap(t *testing.T) {
 }
 
 func TestConvertCommitmentFiles_V3ExtensionRootReplacedLater(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, name := range []string{"branch", "empty"} {
 		t.Run(name, func(t *testing.T) {
 			const stepSize, steps = 1, 4

@@ -62,8 +62,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		t.Skip()
 	}
 
-	t.Parallel()
-
 	logger := log.New()
 	stepSize := uint64(100)
 	ctx := t.Context()

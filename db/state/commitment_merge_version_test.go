@@ -134,6 +134,7 @@ func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
 // the write flag off (rebuild loop, writing plain v2.2) then on (squeeze, re-referencing). The squeezed
 // files must be stamped v2.1 so they read back correctly after a disk reload.
 func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: stepSize, disableCommitmentBranchTransform: false})
 	dirs := agg.Dirs()
@@ -160,6 +161,7 @@ func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
 // its write version in memory (matching the on-disk name) without waiting for a folder reopen. A zero
 // in-memory version makes the merge-scheduling predicates treat a plain v2.2 file as referenced.
 func TestMergedCommitmentFileVersionStampedInMemory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	keys := mkAddrs(0x20, 16)
 
@@ -191,6 +193,7 @@ func TestMergedCommitmentFileVersionStampedInMemory(t *testing.T) {
 // v2.2-plain commitment files and pins the branch's central safety claim: reads are driven by each
 // file's own version, not the live write flag.
 func TestMixedVersionDatadirReadsVersionDriven(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	const frozenSteps = uint64(4) // freeze below the referencing threshold so v2.1 and v2.2 files coexist
 	db, agg, dirs, _, _ := buildMixedRegimeDatadir(t, stepSize, frozenSteps)
