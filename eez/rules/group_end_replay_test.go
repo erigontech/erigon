@@ -34,6 +34,25 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
+// TestGroupEndBurnReceipts checks that receipts regenerated for a v0.1 block
+// carry the gas its later transactions used on the burnt state.
+func TestGroupEndBurnReceipts(t *testing.T) {
+	for _, tc := range afterFeesCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newGroupEndChain(t, tc.alloc)
+			chain, built := c.serial(tc.coinbase, tc.txs(c))
+			got, err := chain.Receipts(t.Context(), built.Block)
+			require.NoError(t, err)
+			require.Len(t, got, len(built.Receipts))
+			for i, want := range built.Receipts {
+				require.Equal(t, want.Status, got[i].Status, "transaction %d", i)
+				require.Equal(t, want.GasUsed, got[i].GasUsed, "transaction %d", i)
+				require.Equal(t, want.CumulativeGasUsed, got[i].CumulativeGasUsed, "transaction %d", i)
+			}
+		})
+	}
+}
+
 // balanceWrites records the balances a state writer receives for addr.
 type balanceWrites struct {
 	*state.NoopWriter

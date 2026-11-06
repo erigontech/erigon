@@ -210,7 +210,17 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
 	cfg vm.Config, vmenv *vm.EVM,
 ) (*types.Receipt, error) {
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, nil)
+	return ApplyTransactionWithEVMPostProcessed(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, cfg, vmenv, nil)
+}
+
+// ApplyTransactionWithEVMPostProcessed is ApplyTransactionWithEVM with
+// postProcess run on the state txn left, before its finalization.
+func ApplyTransactionWithEVMPostProcessed(config *chain.Config, engine rules.EngineReader, gp *GasPool,
+	ibs *state.IntraBlockState,
+	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
+	cfg vm.Config, vmenv *vm.EVM, postProcess func() error,
+) (*types.Receipt, error) {
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, postProcess)
 }
 
 func MakeReceipt(

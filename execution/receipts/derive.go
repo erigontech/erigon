@@ -85,10 +85,8 @@ func DeriveForRange(
 		}
 		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
-		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
-		if err == nil {
-			err = protocol.PostProcessTx(engine, cfg, ibs, txns, i)
-		}
+		_, err := protocol.ApplyTransactionWithEVMPostProcessed(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm,
+			protocol.TxPostProcess(engine, cfg, ibs, txns, i))
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d (warmup): %w", i, err)
 		}
@@ -106,11 +104,9 @@ func DeriveForRange(
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
 		receipt, err := applyCancellable(ctx, evm, func() (*types.Receipt, error) {
-			return protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
+			return protocol.ApplyTransactionWithEVMPostProcessed(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm,
+				protocol.TxPostProcess(engine, cfg, ibs, txns, i))
 		})
-		if err == nil {
-			err = protocol.PostProcessTx(engine, cfg, ibs, txns, i)
-		}
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
 		}
