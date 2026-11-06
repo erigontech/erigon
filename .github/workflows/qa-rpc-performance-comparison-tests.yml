@@ -27,6 +27,8 @@ on:
           - eth_getLogs_latest
           - eth_getBlockReceipts_latest
           - eth_getBlockByNumber_latest
+          - eth_getBlockReceipts_gen
+          - eth_getBlockByNumber_gen
   schedule:
     - cron: '0 2 * * *'   # Run daily at 02:00 UTC
 
@@ -364,6 +366,19 @@ jobs:
               --option full=true --counts 1000 --block-tag latest --verify --keep ok \
               --out "perf/pattern/$CHAIN/stress_test_eth_getBlockByNumber_latest_gen_latest.jsonl"
           fi
+          # Without --block-tag each block lookup carries the number of one of the last 8000 blocks (about 27 hours,
+          # within the history that full nodes keep). Above Erigon's block receipts LRU (R_LRU, 1024 blocks), so the
+          # receipts are read from the DB on every request instead of the cache.
+          if selected eth_getBlockReceipts_gen; then
+            ./build/bin/rpc_pattern_gen eth_getBlockReceipts --url http://localhost:8545 \
+              --counts 8000 --verify --keep ok \
+              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockReceipts_gen_latest.jsonl"
+          fi
+          if selected eth_getBlockByNumber_gen; then
+            ./build/bin/rpc_pattern_gen eth_getBlockByNumber --url http://localhost:8545 \
+              --option full=true --counts 8000 --verify --keep ok \
+              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockByNumber_gen_latest.jsonl"
+          fi
           # The patterns that trace recent blocks are generated last, in the reverse order of their run.
           # --max-blocks 32 keeps the traced blocks inside the recent state that full nodes keep (e.g. 128 blocks for Geth).
           if selected trace_block_struct_log; then
@@ -397,6 +412,8 @@ jobs:
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_latest_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockReceipts_latest_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockByNumber_latest_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockReceipts_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockByNumber_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl
@@ -610,6 +627,28 @@ jobs:
         continue-on-error: true
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_latest_gen_latest 1000:20,3000:20,5000:20 eth_getBlockByNumber_latest
 
+      - name: Sync clients before eth_getBlockReceipts_gen
+        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK"
+
+      - name: Run eth_getBlockReceipts_gen
+        id: perf_eth_getBlockReceipts_gen
+        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen'
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_gen_latest 100:20,1000:20,3000:20 eth_getBlockReceipts_gen
+
+      - name: Sync clients before eth_getBlockByNumber_gen
+        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK"
+
+      - name: Run eth_getBlockByNumber_gen
+        id: perf_eth_getBlockByNumber_gen
+        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen'
+        continue-on-error: true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20,5000:20 eth_getBlockByNumber_gen
+
       - name: Collect the benchmark results
         id: collect_results
         if: always() && steps.prepare_perf.outcome == 'success'
@@ -627,6 +666,8 @@ jobs:
             eth_getLogs_latest=${{ steps.perf_eth_getLogs_latest.outcome }}
             eth_getBlockReceipts_latest=${{ steps.perf_eth_getBlockReceipts_latest.outcome }}
             eth_getBlockByNumber_latest=${{ steps.perf_eth_getBlockByNumber_latest.outcome }}
+            eth_getBlockReceipts_gen=${{ steps.perf_eth_getBlockReceipts_gen.outcome }}
+            eth_getBlockByNumber_gen=${{ steps.perf_eth_getBlockByNumber_gen.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"
@@ -732,7 +773,7 @@ jobs:
           for run_id in "$RUN_ID" "$RUN_ID-trace_block_call_tracer" "$RUN_ID-trace_block_struct_log" "$RUN_ID-eth_call_gen" \
             "$RUN_ID-eth_createAccessList_gen" "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" \
             "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_latest" "$RUN_ID-eth_getBlockReceipts_latest" \
-            "$RUN_ID-eth_getBlockByNumber_latest"; do
+            "$RUN_ID-eth_getBlockByNumber_latest" "$RUN_ID-eth_getBlockReceipts_gen" "$RUN_ID-eth_getBlockByNumber_gen"; do
             python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
