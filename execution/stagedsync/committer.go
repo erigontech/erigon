@@ -109,10 +109,13 @@ type commitmentCalculator struct {
 	touchedAccounts map[accounts.Address][]byte
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 	destructed      map[accounts.Address]struct{}
-	blockBase       state.StateReader
-	blockBaseVM     *state.VersionMap
-	baseAccounts    map[accounts.Address]*accounts.Account
-	baseErr         error
+	// wipedAt holds, per account, the tx index of the destruct whose subtree reset an
+	// earlier fold of this block emitted; a later fold must not wipe the slots written since.
+	wipedAt      map[accounts.Address]int
+	blockBase    state.StateReader
+	blockBaseVM  *state.VersionMap
+	baseAccounts map[accounts.Address]*accounts.Account
+	baseErr      error
 	// curVersionMap is the block currently being folded; compute reads it.
 	curVersionMap *state.VersionMap
 
@@ -811,7 +814,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.asOfReader.cur, cc.asOfReader.curTxNum = cc.curVersionMap, t.lastTxNum
 	defer func() { cc.asOfReader.cur = nil }()
 	emitErr := cc.emitTouched(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
-	cc.clearTouched()
+	if m.midBlock {
+		cc.clearFoldedKeys()
+	} else {
+		cc.clearTouched()
+	}
 	if emitErr != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: t.blockNum, txNum: t.lastTxNum,
