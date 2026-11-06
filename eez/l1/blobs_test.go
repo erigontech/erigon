@@ -18,6 +18,7 @@ package l1_test
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -109,6 +110,27 @@ func TestBeaconBlobs(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestBeaconURLError checks that a failed beacon request prints the node
+// without the path of its URL, where providers put API keys, and keeps the
+// cause.
+func TestBeaconURLError(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	defer srv.Close()
+	beacon := l1.NewBeacon(srv.URL + "/v2/secret-key")
+	_, err := beacon.Blobs(t.Context(), &l1.Header{Number: 1, Time: 1}, []common.Hash{{1}})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+	require.Contains(t, err.Error(), srv.URL)
+	require.ErrorContains(t, err, "x509")
+	var cert *tls.CertificateVerificationError
+	require.ErrorAs(t, err, &cert)
+
+	unparsable := l1.NewBeacon(srv.URL + "/v2/secret-key\n")
+	_, err = unparsable.Blobs(t.Context(), &l1.Header{Number: 1, Time: 1}, []common.Hash{{1}})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
 }
 
 func TestBeaconBlobsRejects(t *testing.T) {
