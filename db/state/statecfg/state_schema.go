@@ -83,9 +83,23 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+	legacyCommitmentDomain = Schema.CommitmentDomain
 	if ExperimentalCommitmentV3 {
 		EnableCommitmentV3Records(&Schema.CommitmentDomain)
 	}
+}
+
+var legacyCommitmentDomain DomainCfg
+
+func SetCommitmentV3(on bool) (restore func()) {
+	schema, v3 := Schema, ExperimentalCommitmentV3
+	ExperimentalCommitmentV3 = on
+	if on {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	} else {
+		Schema.CommitmentDomain = legacyCommitmentDomain
+	}
+	return func() { Schema, ExperimentalCommitmentV3 = schema, v3 }
 }
 
 type SchemaGen struct {
