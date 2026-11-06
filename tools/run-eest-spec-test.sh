@@ -287,7 +287,8 @@ for path in "${paths[@]}"; do
 		raw_files+=("$timed_out")
 		GOTRACEBACK=all "$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" &
 		evm_pid=$!
-		( sleep $((evm_timeout_minutes * 60)); echo yes > "$timed_out"; kill -QUIT "$evm_pid" 2>/dev/null; sleep 60; kill -KILL "$evm_pid" 2>/dev/null ) &
+		# Its own stdio goes to /dev/null: after a kill, its sleep must not keep the step's output pipes open.
+		( sleep $((evm_timeout_minutes * 60)); echo yes > "$timed_out"; kill -QUIT "$evm_pid"; sleep 60; kill -KILL "$evm_pid" ) </dev/null >/dev/null 2>&1 &
 		watchdog_pid=$!
 		wait "$evm_pid" || rc=$?
 		kill "$watchdog_pid" 2>/dev/null || true
