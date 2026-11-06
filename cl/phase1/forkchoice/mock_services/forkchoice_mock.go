@@ -98,6 +98,7 @@ type ForkChoiceStorageMock struct {
 	envelopesMu                                        sync.RWMutex
 	executionPayloadMu                                 sync.RWMutex
 	HasEnvelopeFunc                                    func(common.Hash) bool
+	IsEnvelopeRejectedFunc                             func(common.Hash) bool
 	InvalidBlocks                                      map[common.Hash]struct{}
 	ExecutionPayloadReceivedAt                         map[common.Hash]time.Time
 	VerifiedPayloads                                   map[common.Hash]bool
@@ -800,6 +801,10 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 	defer f.envelopesMu.RUnlock()
 	_, ok := f.Envelopes[blockRoot]
 	return ok
+}
+
+func (f *ForkChoiceStorageMock) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	return f.IsEnvelopeRejectedFunc != nil && f.IsEnvelopeRejectedFunc(blockRoot)
 }
 
 func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
