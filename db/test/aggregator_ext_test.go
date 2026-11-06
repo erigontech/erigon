@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
@@ -56,6 +57,7 @@ import (
 var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false, rawdbv3.TxNums)
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -864,6 +866,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 		key, existed := getKey()
 
 		r := rnd.IntN(101)
+		if (r <= 33 || r > 80) && len(key) > length.Addr {
+			key = key[:length.Addr]
+		}
 		switch {
 		case r <= 33:
 			acc := accounts.Account{
