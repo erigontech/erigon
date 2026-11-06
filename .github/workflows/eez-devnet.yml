@@ -35,8 +35,41 @@ concurrency:
 permissions: {}
 
 jobs:
+  # The push that changes ROLLUP0_REF also starts eez-devnet-images.yml,
+  # which takes up to its 180-minute timeout to publish the images; waiting
+  # here keeps that out of the devnet job's timeout.
+  images:
+    name: reference images
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    permissions:
+      packages: read
+    steps:
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for the images of ROLLUP0_REF
+        run: |
+          deadline=$((SECONDS + 190 * 60))
+          for image in eez-node eez-proof-signer eez-deploy; do
+            ref="ghcr.io/erigontech/$image:$ROLLUP0_REF"
+            until err=$(docker manifest inspect "$ref" 2>&1 > /dev/null); do
+              case $err in
+                *unauthorized* | *denied*) echo "::error::$ref: $err"; exit 1 ;;
+              esac
+              (( SECONDS < deadline )) || { echo "::error::$ref not published: $err"; exit 1; }
+              echo "waiting for $ref: $err"
+              sleep 60
+            done
+          done
+
   devnet:
     name: devnet (${{ matrix.reference }})
+    needs: images
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.reference == 'pinned' && 90 || 180 }}
     continue-on-error: ${{ matrix.reference == 'main' }}
