@@ -17,12 +17,9 @@
 package txpool
 
 import (
-	"slices"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -81,19 +78,9 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	return replacementDecision{}
 }
 
-// Frame replacements must keep the same nonce keys and strictly increase fees,
-// even when the configured percentage would round down to no increase.
+// Frame replacements must strictly increase fees, even when the configured
+// percentage would round down to no increase.
 func validateFrameReplacement(previous, replacement *TxnSlot, priceBump, blobPriceBump uint64) txpoolcfg.DiscardReason {
-	previousKeys, replacementKeys := []uint256.Int{{}}, []uint256.Int{{}}
-	if frame, ok := previous.Txn.(*types.FrameTransaction); ok {
-		previousKeys = frame.NonceKeys
-	}
-	if frame, ok := replacement.Txn.(*types.FrameTransaction); ok {
-		replacementKeys = frame.NonceKeys
-	}
-	if !slices.Equal(previousKeys, replacementKeys) {
-		return txpoolcfg.InvalidFrame
-	}
 	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(previous.GetFeeCap(), replacement.GetFeeCap(), priceBump) {
 		return txpoolcfg.NotReplaced
 	}

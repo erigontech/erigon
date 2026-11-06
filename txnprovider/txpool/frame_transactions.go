@@ -219,16 +219,20 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 			batch.results[txn] = rejection.validationResult()
 			continue
 		}
-		result := frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
-		if result.reason == txpoolcfg.Success {
-			if senderID, ok := p.senders.getID(txns.Senders.AddressAt(i)); ok {
-				result.reason = p.checkFrameSender(txn, senderID)
-				result.senderConflict = result.reason != txpoolcfg.Success
-			}
-		}
-		batch.results[txn] = result
+		senderID, _ := p.senders.getID(txns.Senders.AddressAt(i))
+		batch.results[txn] = p.precheckFrame(txn, txns.IsLocal[i], senderID)
 	}
 	return batch, p.stateBlockHash
+}
+
+// precheckFrame requires the pool lock.
+func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, senderID uint64) frameValidationResult {
+	result := frameValidationResult{reason: p.validateFrame(txn, isLocal)}
+	if result.reason == txpoolcfg.Success && senderID != 0 {
+		result.reason = p.checkFrameSender(txn, senderID)
+		result.senderConflict = result.reason != txpoolcfg.Success
+	}
+	return result
 }
 
 // Execution can publish a head before the pool receives its notification. Wait
@@ -250,8 +254,8 @@ func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64)
 }
 
 // applyFrameValidation requires the pool lock. Stale batches are retried while time
-// remains. After the deadline, stale results are discarded and stateless checks are
-// rerun: failures keep their reason, while frames needing simulation receive a retryable
+// remains. After the deadline, transaction checks and current sender policy are
+// rerun to preserve specific rejections. Frames needing simulation receive a retryable
 // rejection. Results for the current state generation remain usable after the deadline.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason, stateCache kvcache.CacheView) ([]txpoolcfg.DiscardReason, error) {
 	if len(batch.results) == 0 {
@@ -271,12 +275,12 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 			continue
 		}
 		if stale {
-			reason := p.validateFrame(txn, txns.IsLocal[i])
-			if reason == txpoolcfg.Success {
-				reason = txpoolcfg.FrameValidationUnavailable
+			result = p.precheckFrame(txn, txns.IsLocal[i], txn.SenderID)
+			if result.reason == txpoolcfg.Success {
+				result.reason = txpoolcfg.FrameValidationUnavailable
 			}
-			result = frameValidationResult{reason: reason}
-		} else if result.senderConflict && !txn.hasKeyedNonce() {
+		}
+		if result.senderConflict && !txn.hasKeyedNonce() {
 			// A consumed account nonce takes precedence over sender policy, including
 			// cached conflicts. Use the same state view as the rest of admission.
 			senderNonce, _, _, err := p.senders.info(stateCache, txn.SenderID)
@@ -285,7 +289,7 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 			}
 			if txn.Nonce < senderNonce {
 				result.reason = txpoolcfg.NonceTooLow
-				p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: batch.generation, reason: result.reason})
+				p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{generation: p.stateGeneration, reason: result.reason})
 			}
 		}
 		if result.reason == txpoolcfg.Success {

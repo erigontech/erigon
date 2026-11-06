@@ -432,5 +432,5 @@ func (s *staticTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.P
 	}
 	start := s.next
 	s.next += min(o.Amount, len(s.txns)-s.next)
-	return s.txns[start:s.next], nil
+	return s.txns[start:s.next:s.next], nil
 }

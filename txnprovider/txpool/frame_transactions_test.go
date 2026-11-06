@@ -1156,6 +1156,56 @@ func TestFramePoolStaleBatchPreservesPrecheckRejection(t *testing.T) {
 	})
 }
 
+func TestFramePoolStaleBatchPreservesSenderConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		key         uint64
+		senderNonce uint64
+		want        txpoolcfg.DiscardReason
+	}{
+		{name: "keyed", key: 2, want: txpoolcfg.InvalidFrame},
+		{name: "legacy", want: txpoolcfg.InvalidFrame},
+		{name: "consumed legacy nonce", senderNonce: 1, want: txpoolcfg.NonceTooLow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, tc.senderNonce, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			blocker := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(blocker, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			candidate := framePoolSlot(t, sender, 1, 2, uint256.Int{tc.key})
+			otherSender := common.Address{2}
+			pending := framePoolSlot(t, otherSender, 1, 2, uint256.Int{1})
+			txns.Txns[0] = candidate
+			txns.Append(pending, otherSender[:], true)
+			calls := 0
+			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+				calls++
+				require.Equal(t, pending.Rlp, req.Transaction)
+				require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{2}, 0, otherSender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}}
+			synctest.Test(t, func(t *testing.T) {
+				reasons, err := pool.AddLocalTxns(t.Context(), txns)
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{tc.want, txpoolcfg.FrameValidationUnavailable}, reasons)
+				require.Equal(t, 1, calls, "sender conflicts must not reach simulation")
+				require.Contains(t, pool.byHash, string(blocker.IDHash[:]))
+				require.NotContains(t, pool.byHash, string(candidate.IDHash[:]))
+				rejection, ok := pool.frameRejections.Get(string(candidate.IDHash[:]))
+				require.True(t, ok)
+				require.Equal(t, tc.want, rejection.reason)
+				require.True(t, rejection.applies(pool, pool.stateGeneration))
+			})
+		})
+	}
+}
+
 func TestFramePoolHeadNotificationTimeout(t *testing.T) {
 	_, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)

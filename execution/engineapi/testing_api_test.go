@@ -955,6 +955,17 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.Nil(t, txns)
 	})
 
+	t.Run("appending does not overwrite unserved transactions", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx, stubTx}}
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(1))
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{stubTx, nil}, append(txns, nil))
+		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithAmount(1))
+		require.NoError(t, err)
+		require.Equal(t, []types.Transaction{stubTx}, txns)
+	})
+
 	t.Run("concurrent callers yield each list entry once", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx, stubTx}}

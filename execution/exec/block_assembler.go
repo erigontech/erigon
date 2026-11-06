@@ -188,6 +188,9 @@ func (ba *BlockAssembler) AddTransactions(
 	// matches the validator's parallel executor (which assigns txIndex
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
+	inclusionError := func(txn types.Transaction, err error) error {
+		return fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+	}
 	header := ba.AssembledBlock.Header
 	// EIP-8037: execution and state gas pools deplete independently. The
 	// builder calls AddTransactions repeatedly with batches from the txpool,
@@ -295,7 +298,7 @@ LOOP:
 		// pool bounds this early exit.
 		if gasPool.Gas() < minTxGas {
 			if ba.cfg.RequireAllTransactions {
-				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), protocol.ErrGasLimitReached)
+				return coalescedLogs, true, inclusionError(txn, protocol.ErrGasLimitReached)
 			}
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
@@ -305,7 +308,7 @@ LOOP:
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
 		if rlpSpacePostTxn < 0 {
 			if ba.cfg.RequireAllTransactions {
-				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): exceeds block RLP size limit", txnIdx, txn.Hash())
+				return coalescedLogs, true, inclusionError(txn, errors.New("exceeds block RLP size limit"))
 			}
 			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
 			logger.Debug(
@@ -321,7 +324,7 @@ LOOP:
 		from, err := txn.Sender(*signer)
 		if err != nil {
 			if ba.cfg.RequireAllTransactions {
-				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+				return coalescedLogs, true, inclusionError(txn, err)
 			}
 			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
 			continue
@@ -331,7 +334,7 @@ LOOP:
 		// phase, start ignoring the sender until we do.
 		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
 			if ba.cfg.RequireAllTransactions {
-				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): replay protection is not active", txnIdx, txn.Hash())
+				return coalescedLogs, true, inclusionError(txn, errors.New("replay protection is not active"))
 			}
 			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", ba.cfg.ChainConfig.SpuriousDragonBlock)
 			continue
@@ -346,7 +349,7 @@ LOOP:
 		} else {
 			clearTxIO()
 			if ba.cfg.RequireAllTransactions {
-				return coalescedLogs, true, fmt.Errorf("transaction %d (%s): %w", txnIdx, txn.Hash(), err)
+				return coalescedLogs, true, inclusionError(txn, err)
 			}
 		}
 		switch {
