@@ -797,7 +797,7 @@ func TestOpenFolder_CorruptedDataFile(t *testing.T) {
 // selects the highest-version file within [MinSupported, Current] and rejects files
 // outside that range. If an unsupported version is selected, data can be misread.
 func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1000)
 

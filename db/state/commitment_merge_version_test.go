@@ -29,10 +29,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
 func TestCommitmentReadableAfterFailedMergeRetry(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		t.Run(domain.String(), func(t *testing.T) {
 			const stepSize = uint64(10)
@@ -91,7 +93,7 @@ func TestCommitmentReadableAfterFailedMergeRetry(t *testing.T) {
 // with a disjoint nibble prefix, so its referenced branches survive as merge winners and reach the
 // flag-off merge.
 func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	setA := mkAddrs(0x10, 12)
 	setB := mkAddrs(0xf0, 12)

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -97,6 +98,7 @@ func readFileBytes(t *testing.T, path string) []byte {
 // returns ErrSkip without producing any output. The orchestrator counts these
 // files as skipped, not converted.
 func TestConvertCommitmentFile_AlreadyTarget(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -129,6 +131,7 @@ func TestConvertCommitmentFile_AlreadyTarget(t *testing.T) {
 //   - every non-state key in the output decodes canonically via DecodeKeyV2
 //   - the key count is preserved
 func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -202,6 +205,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 // short (sub-10-byte) plain-key references — the squeeze marker the read-side
 // detector keys off of.
 func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -262,6 +266,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 // in tmpDir2, and compare tmpDir2/<file>.kv bytes against a snapshot taken
 // before the first conversion.
 func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -353,6 +358,7 @@ func snapshotCommitmentFiles(t *testing.T, snapDir string) map[string][]byte {
 //     the commitment root computed against the reloaded files matches the
 //     root the original files produced.
 func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -510,6 +516,7 @@ func swapVersionExt(kviPath string) string {
 // pre-conversion snapshot. The composed round-trip also implicitly exercises
 // both axes in both directions.
 func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -574,6 +581,7 @@ func runOrchestrator(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) {
 // every file is already in the requested state, the orchestrator emits no
 // backup, no rebuild dir, and modifies nothing on disk.
 func TestConvertCommitmentFiles_AllAlreadyTarget(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -609,6 +617,7 @@ func TestConvertCommitmentFiles_AllAlreadyTarget(t *testing.T) {
 // the orchestrator returns nil without writing anything when at.Files returns
 // an empty list.
 func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -638,6 +647,7 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 // the user hasn't acknowledged), the orchestrator must refuse to start so it
 // can't silently overwrite a recovery point.
 func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -665,6 +675,7 @@ func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
 // if a prior crashed run left junk under snapshots/rebuild/domain/, the
 // orchestrator wipes it on pre-flight and proceeds normally.
 func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -719,6 +730,7 @@ func listVisibleCommitmentKVs(t *testing.T, db kv.TemporalRwDB) []kv.VisibleFile
 // than by counting log lines (which is fragile across line-number /
 // timestamp changes — see the plan's "Decision now" note in Task 5).
 func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -889,6 +901,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 // dummies, runs RestoreCommitmentFiles, and asserts the originals overwrite
 // the dummies while the backup tree is cleaned up.
 func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -926,6 +939,7 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 // to run when snapshots/backup/domains/ is missing — the operator must see a
 // clear error rather than a silent no-op.
 func TestRestoreCommitmentFiles_NoBackup(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -943,6 +957,7 @@ func TestRestoreCommitmentFiles_NoBackup(t *testing.T) {
 // the restored datadir would contain cross-version siblings that confuse
 // erigon at startup.
 func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -989,6 +1004,7 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 // retry must complete the operation without deleting the files that the prior
 // attempt already moved.
 func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1032,6 +1048,7 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 // a foreign file whose name happens to contain `-commitment.<from>-<to>.`
 // could broaden the orphan sweep into unrelated commitment files.
 func TestRestoreCommitmentFiles_RejectsForeignFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1069,6 +1086,7 @@ func TestRestoreCommitmentFiles_RejectsForeignFile(t *testing.T) {
 // the cross-check, restore would silently report success while a file is
 // missing; the operator would only discover it after erigon failed to start.
 func TestRestoreCommitmentFiles_FailsWhenManifestEntryMissingFromBothSides(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1099,6 +1117,7 @@ func TestRestoreCommitmentFiles_FailsWhenManifestEntryMissingFromBothSides(t *te
 // pattern; without the explicit filter it would trigger the foreign-file
 // guard). Restore must complete successfully against the real backup entries.
 func TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1125,6 +1144,7 @@ func TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp(t *testing.T) {
 // `../../etc/passwd-commitment.0-32.kv` would otherwise pass shape validation
 // and let filepath.Join escape backupDir / snapDomain on rename.
 func TestRestoreCommitmentFiles_RejectsPathTraversalInManifest(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1150,6 +1170,7 @@ func TestRestoreCommitmentFiles_RejectsPathTraversalInManifest(t *testing.T) {
 // who manually empties or truncates the manifest mid-debug would see a
 // success log while their backup files remain orphaned in backup/domains/.
 func TestRestoreCommitmentFiles_RejectsEmptyManifest(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}

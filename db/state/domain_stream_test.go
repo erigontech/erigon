@@ -237,6 +237,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 // This is the DomainLatestIterFile counterpart to
 // TestDomain_IteratePrefix_PrefersFilesOverDB which tests debugIteratePrefixLatest.
 func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}

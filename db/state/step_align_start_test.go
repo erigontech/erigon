@@ -26,10 +26,11 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	generateAccountsFile(t, dirs, []testFileRange{{0, 20}})
@@ -45,7 +46,7 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 }
 
 func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
@@ -58,7 +59,7 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 }
 
 func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
@@ -73,7 +74,7 @@ func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
 }
 
 func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 7}, {7, 8}}
@@ -86,7 +87,7 @@ func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
 }
 
 func TestStepAlignedMergesPlanEveryGroupOfEveryList(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}

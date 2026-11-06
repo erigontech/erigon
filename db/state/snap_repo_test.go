@@ -29,6 +29,7 @@ import (
 // 4. merge files
 
 func TestOpenFolder_AccountsDomain(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -82,6 +83,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 }
 
 func TestOpenFolder_CodeII(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -135,6 +137,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 }
 
 func TestIntegrateDirtyFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -183,6 +186,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 }
 
 func TestCloseFilesAfterRootNum(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("slow test")
 	}

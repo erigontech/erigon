@@ -126,6 +126,7 @@ func storageSlotPairs(tb testing.TB) [2][2][]byte {
 }
 
 func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -200,6 +201,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 }
 
 func TestConvertCommitmentFiles_V3History(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -238,6 +240,7 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 }
 
 func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -282,6 +285,7 @@ func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
 }
 
 func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -299,6 +303,7 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 }
 
 func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
 	previousParallel := statecfg.ExperimentalParallelCommitment
 	statecfg.EnableHistoricalCommitment()
@@ -347,6 +352,7 @@ func snapshotCommitmentFilesV3History(t *testing.T, snapDir string) map[string][
 }
 
 func TestConvertCommitmentFiles_V3HistoryExtensionRoot(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize, steps = 4, 8
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()

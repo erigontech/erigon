@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestAggregatorCloseWaitsForMaintenance(t *testing.T) {
@@ -228,7 +229,7 @@ func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 // some of them removed from disk. The buggy path closed those files in place
 // (nil-ing FilesItem.decompressor), crashing the reader that still held them.
 func TestAggregatorOpenFolderKeepsReaderFilesAlive(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// Unix-only: the test's whole point is to unlink a .kv file the aggregator still has
 	// mmapped (an external actor removing a live snapshot). Windows forbids deleting a mapped
 	// file, so neither the setup nor the bug it reproduces can occur there.
@@ -269,7 +270,7 @@ func TestAggregatorOpenFolderKeepsReaderFilesAlive(t *testing.T) {
 // same file is recreated (e.g. re-downloaded) before the pinning reader drains,
 // reclamation must not clobber the recreation.
 func TestAggregatorOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// Unix-only: unlinks a .kv the aggregator still has mmapped (see the sibling test);
 	// Windows forbids deleting a mapped file.
 	if runtime.GOOS == "windows" {

@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -277,6 +278,7 @@ func writeCompleteShard(t *testing.T, dir string, from, to uint64, accessors []s
 }
 
 func TestPreflightResume_continueFalse_wipes(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	tmp := t.TempDir()
 	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
 	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))

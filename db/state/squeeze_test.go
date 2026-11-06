@@ -482,12 +482,7 @@ func TestAggregator_RebuildCommitmentWithHistory(t *testing.T) {
 }
 
 func useCommitmentSchema(t *testing.T, v3 bool) {
-	schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
-	if v3 {
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-		statecfg.ExperimentalCommitmentV3 = true
-	}
+	t.Cleanup(statecfg.SetCommitmentV3(v3))
 }
 
 func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
