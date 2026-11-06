@@ -891,3 +891,24 @@ func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
 		})
 	}
 }
+
+func TestWipeRebuildKeepsRecordsEqualToTheWipedOnes(t *testing.T) {
+	ctx := newMockContext()
+	var addr [32]byte
+	addr[0] = 0x07
+	a := appendPath(nil, 5, append([]byte{5, 1}, bytes.Repeat([]byte{4}, 61)...))
+	b := appendPath(nil, 5, append([]byte{5, 2}, bytes.Repeat([]byte{4}, 61)...))
+	ops := storageOps([][]byte{a, b})
+	root := storageRound(t, ctx, addr, ops)
+	before := maps.Clone(ctx.branches)
+	require.NotEmpty(t, before)
+
+	task := storageTaskFor(addr, ops)
+	task.wipe = true
+	got, err := runStorageTask(ctx, task)
+	require.NoError(t, err)
+	require.Equal(t, root, got)
+	for key, data := range before {
+		require.Equal(t, data, ctx.branches[key], "record %x", key)
+	}
+}

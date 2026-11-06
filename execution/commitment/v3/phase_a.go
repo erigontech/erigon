@@ -21,6 +21,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -218,7 +219,7 @@ func (g graph) rebuildStorage(ctx commitment.PatriciaContext, entries []storageE
 			return [32]byte{}, nil, err
 		}
 	}
-	parts, err := g.persistGraph(ctx, root, foldPlan{})
+	parts, err := g.persistGraph(wipedContext{ctx}, root, foldPlan{})
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
@@ -244,3 +245,7 @@ func (g graph) rebuildStorage(ctx commitment.PatriciaContext, entries []storageE
 	hash, err := fold(root, 0)
 	return hash, out, err
 }
+
+type wipedContext struct{ commitment.PatriciaContext }
+
+func (wipedContext) Branch([]byte) ([]byte, kv.Step, error) { return nil, 0, nil }
