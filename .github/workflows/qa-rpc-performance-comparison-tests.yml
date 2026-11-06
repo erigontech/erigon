@@ -597,7 +597,7 @@ jobs:
         id: perf_eth_getBlockReceipts_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen'
         continue-on-error: true
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_gen_latest 100:20,500:20,1000:20 eth_getBlockReceipts_gen
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_gen_latest 100:20,1000:20,3000:20 eth_getBlockReceipts_gen
 
       - name: Sync clients before eth_getBlockByNumber_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
@@ -608,7 +608,7 @@ jobs:
         id: perf_eth_getBlockByNumber_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen'
         continue-on-error: true
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,5000:20,10000:20 eth_getBlockByNumber_gen
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20,5000:20 eth_getBlockByNumber_gen
 
       - name: Collect the benchmark results
         id: collect_results
