@@ -1728,9 +1728,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	return results, tracingHooks, nil
 }
 
+// doCall traces txn, transaction txIndex of its block; blockTxs, the block's
+// transactions, is set when the engine post-processes each transaction.
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	txn types.Transaction, callParam TraceCallParam,
+	txn types.Transaction, blockTxs types.Transactions, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1833,6 +1835,11 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+	}
+	if blockTxs != nil {
+		if err := protocol.PostProcessTx(engine, chainConfig, ibs, blockTxs, txIndex); err != nil {
+			return nil, err
+		}
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)

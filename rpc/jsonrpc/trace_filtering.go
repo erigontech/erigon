@@ -1096,13 +1096,26 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 
+	// The engine's per-transaction rule reads the transaction's neighbours.
+	var blockTxs types.Transactions
+	if _, ok := engine.(protocolrules.TxPostProcessor); ok {
+		block, err := api.blockWithSenders(ctx, dbtx, header.Hash(), blockNumber)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, fmt.Errorf("block %d not found", blockNumber)
+		}
+		blockTxs = block.Transactions()
+	}
+
 	txnHash := txn.Hash()
 	callParam := TraceCallParam{
 		txHash:     &txnHash,
 		traceTypes: traceTypes,
 	}
 
-	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, callParam,
+	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, blockTxs, callParam,
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
 }
 

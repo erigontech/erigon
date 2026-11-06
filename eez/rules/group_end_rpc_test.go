@@ -182,6 +182,22 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 		}
 	})
 
+	t.Run("trace_replayTransaction", func(t *testing.T) {
+		api := jsonrpc.NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+		blockResults, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(1), []string{"stateDiff"}, nil, nil)
+		require.NoError(t, err)
+		require.Len(t, blockResults, 3)
+		for i, txn := range block.Transactions() {
+			res, err := api.ReplayTransaction(t.Context(), txn.Hash(), []string{"stateDiff"}, nil, nil)
+			require.NoError(t, err)
+			want, err := json.Marshal(blockResults[i].StateDiff)
+			require.NoError(t, err)
+			got, err := json.Marshal(res.StateDiff)
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(got), "transaction %d", i)
+		}
+	})
+
 	t.Run("eth_callMany", func(t *testing.T) {
 		forEachCallState(t, func(t *testing.T) {
 			api := jsonrpc.NewEthAPI(base, m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5_000_000, ReturnDataLimit: 100_000}, log.New())
