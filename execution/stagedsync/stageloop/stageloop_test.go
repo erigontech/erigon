@@ -230,4 +230,5 @@ func TestBlockRangeAnnouncedOncePerMinuteDuringSync(t *testing.T) {
 	require.True(t, h.blockRangeAnnounceDue(100, 200, true), "a synced node announces every 32 blocks")
 	h.lastAnnouncedBlockRangeTime = time.Now().Add(-time.Minute)
 	require.True(t, h.blockRangeAnnounceDue(100, 101, false))
+	require.False(t, h.blockRangeAnnounceDue(100, 101, true), "a synced node is not announced by time")
 }
