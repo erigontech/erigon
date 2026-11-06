@@ -357,7 +357,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 			}
 		}
 	} else if !value.IsZero() || code.Len() == 0 {
-		// A zero-value call to an account with code is a no-op: such an account is not EIP-161 empty.
+		// The Transfer of a zero-value call to an account with code is a no-op: such an account is not EIP-161 empty.
 		if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
