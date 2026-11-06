@@ -24,9 +24,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -50,10 +53,9 @@ func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Head
 	return nil, e.finalizeErr
 }
 
-func newSerialFinalizeTestExec(t *testing.T, engine rules.Engine) (*serialExecutor, *exec.TxTask) {
+func newSerialFinalizeTestExec(t *testing.T, config *chain.Config, engine rules.Engine) (*serialExecutor, *exec.TxTask) {
 	t.Helper()
 
-	config := chain.TestChainOsakaConfig
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
@@ -103,7 +105,7 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cause := errors.New("rules engine finalize failed")
 			engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), finalizeErr: tc.engineErr(cause)}
-			se, task := newSerialFinalizeTestExec(t, engine)
+			se, task := newSerialFinalizeTestExec(t, chain.TestChainOsakaConfig, engine)
 
 			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
 
@@ -121,21 +123,43 @@ func (offByOne) BindTxGas(txn types.Transaction, _ uint64) (types.Transaction, e
 }
 
 // TestSerialResumedBlockTxGas checks that the serial executor checks a bound
-// gas limit in a block executed from its start and not in one resumed after a
-// transaction its gas pool then misses.
+// gas limit in a block executed from its start or resumed before Amsterdam,
+// and not in one resumed from Amsterdam, whose gas pool then lacks the gas of
+// its earlier transactions.
 func TestSerialResumedBlockTxGas(t *testing.T) {
-	for _, start := range []int{0, 1} {
-		se, task := newSerialFinalizeTestExec(t, offByOne{ethash.NewFaker()})
-		task.Txs = types.Transactions{
-			&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}},
-			&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}},
-		}
-		task.TxIndex = start
-		_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
-		if start == 0 {
-			require.ErrorIs(t, err, protocol.ErrGasLimitPosition)
-		} else {
-			require.NotErrorIs(t, err, protocol.ErrGasLimitPosition)
-		}
+	amsterdam := chain.TestChainOsakaConfig.Copy()
+	amsterdam.AmsterdamTime = common.NewUint64(0)
+	to := common.HexToAddress("0x0000000000000000000000000000000000000a11")
+	for _, tc := range []struct {
+		name    string
+		config  *chain.Config
+		start   int
+		checked bool
+	}{
+		{"full", chain.TestChainOsakaConfig, 0, true},
+		{"resumed", chain.TestChainOsakaConfig, 1, true},
+		{"full/amsterdam", amsterdam, 0, true},
+		{"resumed/amsterdam", amsterdam, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			se, task := newSerialFinalizeTestExec(t, tc.config, offByOne{ethash.NewFaker()})
+			signer := types.LatestSignerForChainID(tc.config.ChainID)
+			for range 2 {
+				txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}}, *signer, senderIsCoinbaseKey.key)
+				require.NoError(t, err)
+				task.Txs = append(task.Txs, txn)
+			}
+			// tx0's receipt, as the run that executed it left it.
+			rwTx := se.applyTx.(kv.TemporalRwTx)
+			require.NoError(t, rawtemporaldb.AppendReceiptMetadata(se.doms.AsPutDel(rwTx), 0, 21_000, 0, 0))
+			require.NoError(t, se.doms.Flush(t.Context(), rwTx))
+			task.TxIndex = tc.start
+			_, err := se.executeBlock(t.Context(), []exec.Task{task}, false, false)
+			if tc.checked {
+				require.ErrorIs(t, err, protocol.ErrGasLimitPosition)
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }

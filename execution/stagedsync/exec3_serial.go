@@ -359,19 +359,22 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	}
 
 	var gasPool *protocol.GasPool
+	var lacksPriorGas bool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
 			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			if lacksPriorGas, err = restorePriorGas(se.applyTx, se.cfg.chainConfig, gasPool, task); err != nil {
+				return false, err
+			}
 		}
 
 		txTask.ResetGasPool(gasPool)
 		txTask.Config = se.cfg.chainConfig
 		txTask.Engine = se.cfg.engine
 
-		// A partly executed block's pool misses its earlier transactions.
-		if startTxIndex == 0 && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		if !lacksPriorGas && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
 			if err := protocol.CheckTxGas(se.cfg.engine, txTask.Rules().IsAmsterdam, txTask.Tx(), gasPool); err != nil {
 				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 			}

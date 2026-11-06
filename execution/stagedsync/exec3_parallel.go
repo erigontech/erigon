@@ -1100,7 +1100,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec); err != nil {
+			if err := pe.processRequest(ctx, applyTx, exec); err != nil {
 				return err
 			}
 			continue
@@ -1296,7 +1296,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 	return applyTx, nil
 }
 
-func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
+func (pe *parallelExecutor) processRequest(ctx context.Context, applyTx kv.TemporalTx, execRequest *execRequest) (err error) {
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
@@ -1316,6 +1316,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				// The view finalizeValidatedTx reads the first receipt's offsets from.
+				if executor.lacksPriorGas, err = restorePriorGas(applyTx, pe.cfg.chainConfig, executor.gasPool, txTask); err != nil {
+					return err
+				}
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -2105,12 +2109,6 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 	return versionTxIndex - be.tasks[0].Version().TxIndex
 }
 
-// resumedAfterExecutedTxs reports whether some of the block's transactions
-// ran before this executor started it, so its gas pool lacks their gas.
-func (be *blockExecutor) resumedAfterExecutedTxs() bool {
-	return be.tasks[0].Version().TxIndex > 0
-}
-
 // selfLoopEvaluate validates tv's read-set against the versionMap and, when valid,
 // returns the commit target (task-index space) the tx must reach to be stable — the
 // highest task it actually read from, so it can commit as soon as those deps commit,
@@ -2875,6 +2873,9 @@ type blockExecutor struct {
 	blockGasUsed          uint64
 	blobGasUsed           uint64
 	gasPool               *protocol.GasPool
+	// lacksPriorGas is set when gasPool lacks the gas of the transactions before
+	// tasks[0], which an earlier run executed.
+	lacksPriorGas bool
 
 	execFailed []int
 
@@ -3262,7 +3263,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 			}
 			if chainTx, ok := txTask.(*exec.TxTask); ok && be.gasPool != nil {
-				if !be.resumedAfterExecutedTxs() {
+				if !be.lacksPriorGas {
 					if err := protocol.CheckTxGas(pe.cfg.engine, chainTx.Rules().IsAmsterdam, chainTx.Tx(), be.gasPool); err != nil {
 						return be.invalidBlockResult(fmt.Errorf("%w: block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 					}

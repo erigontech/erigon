@@ -19,6 +19,8 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -72,6 +75,7 @@ const (
 	resumeBALBlockStartTxNum = uint64(2)
 	// resumeBALStepSize makes the first step, txNums [0, 4), end right after tx0.
 	resumeBALStepSize = uint64(4)
+	resumeBlockTime   = uint64(10)
 )
 
 // resumePoint is how far into block 1 the state is committed when execution
@@ -86,29 +90,67 @@ const (
 	beforeBlockEnd resumePoint = 3
 )
 
-// resumeBALFixture is a three-transaction Amsterdam block over a tiny genesis.
-// The block-start system call writes storage, tx0 stores the target's balance,
-// tx1 tops the target up and tx2 stores the balance again, so every resumed
-// prefix writes storage and the suffix changes a slot the prefix wrote.
+// resumeBALFixture is block 1 over a tiny genesis. newResumeBALFixture's is a
+// three-transaction Amsterdam block: the block-start system call writes
+// storage, tx0 stores the target's balance, tx1 tops the target up and tx2
+// stores the balance again, so every resumed prefix writes storage and the
+// suffix changes a slot the prefix wrote.
 type resumeBALFixture struct {
-	config  *chain.Config
-	engine  rules.Engine
-	alloc   types.GenesisAlloc
-	genesis *types.Block
-	block   *types.Block
-	senders []common.Address
+	config   *chain.Config
+	engine   rules.Engine
+	alloc    types.GenesisAlloc
+	genesis  *types.Block
+	block    *types.Block
+	receipts types.Receipts
+	senders  []common.Address
 	// wipeHistory drops the account, storage and code history after seeding.
 	wipeHistory bool
 	// fromStateFiles moves the seeded state into the files of the first step and
 	// empties the state tables, as a snapshot sync leaves them.
 	fromStateFiles bool
+	// noPrefixReceipts leaves the prefix's receipts out of the seed.
+	noPrefixReceipts bool
+	// inspect, when set, sees the state each exec and execSerial run leaves.
+	inspect func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx)
 }
 
 func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 	t.Helper()
 	config := chain.TestChainOsakaConfig.Copy()
-	config.AmsterdamTime = common.NewUint64(10)
+	config.AmsterdamTime = common.NewUint64(resumeBlockTime)
+	return newResumeBlockFixture(t, config)
+}
 
+// newResumeBlockFixture returns the fixture of newResumeBALFixture under config.
+func newResumeBlockFixture(t *testing.T, config *chain.Config) *resumeBALFixture {
+	t.Helper()
+	fx := newResumeFixture(t, config, nil)
+	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
+	observer := common.HexToAddress("0x0000000000000000000000000000000000000b22")
+
+	signer := types.LatestSignerForChainID(config.ChainID)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	var txs types.Transactions
+	for _, txn := range []*types.LegacyTx{
+		{CommonTx: types.CommonTx{Nonce: 0, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
+		{CommonTx: types.CommonTx{Nonce: 1, To: &target, Value: *uint256.NewInt(1), GasLimit: 21_000}, GasPrice: *gasPrice},
+		{CommonTx: types.CommonTx{Nonce: 2, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
+	} {
+		signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
+		require.NoError(t, err)
+		txs = append(txs, signed)
+	}
+	fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), 0), "the block start must write storage")
+	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), 1), "tx0 must write storage")
+	return fx
+}
+
+// newResumeFixture returns a fixture under config without a block, over a
+// genesis of a funded sender, the target and observer, stand-ins for the
+// system contracts, and extra.
+func newResumeFixture(t *testing.T, config *chain.Config, extra types.GenesisAlloc) *resumeBALFixture {
+	t.Helper()
 	sender := senderIsCoinbaseKey.rawAddress
 	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
 	observer := common.HexToAddress("0x0000000000000000000000000000000000000b22")
@@ -128,30 +170,14 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 	} {
 		alloc[contract.Value()] = types.GenesisAccount{Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.STOP)}}
 	}
+	maps.Copy(alloc, extra)
 	genesis, genesisState, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}, datadir.New(t.TempDir()), log.New())
 	require.NoError(t, err)
 	genesisState.Close()
 
 	engine := merge.New(ethash.NewFaker())
 	t.Cleanup(func() { engine.Close() })
-	fx := &resumeBALFixture{config: config, engine: engine, alloc: alloc, genesis: genesis, senders: []common.Address{sender, sender, sender}}
-
-	signer := types.LatestSignerForChainID(config.ChainID)
-	gasPrice := uint256.NewInt(1_000_000_000)
-	var txs types.Transactions
-	for _, txn := range []*types.LegacyTx{
-		{CommonTx: types.CommonTx{Nonce: 0, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
-		{CommonTx: types.CommonTx{Nonce: 1, To: &target, Value: *uint256.NewInt(1), GasLimit: 21_000}, GasPrice: *gasPrice},
-		{CommonTx: types.CommonTx{Nonce: 2, To: &observer, GasLimit: 1_000_000}, GasPrice: *gasPrice},
-	} {
-		signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
-		require.NoError(t, err)
-		txs = append(txs, signed)
-	}
-	fx.block = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
-	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), 0), "the block start must write storage")
-	require.True(t, hasStorageChangeAt(fx.block.BlockAccessList(), 1), "tx0 must write storage")
-	return fx
+	return &resumeBALFixture{config: config, engine: engine, alloc: alloc, genesis: genesis, senders: []common.Address{sender, sender, sender}}
 }
 
 func hasStorageChangeAt(bal types.BlockAccessList, index uint32) bool {
@@ -179,8 +205,8 @@ func allocAccount(ga types.GenesisAccount) accounts.Account {
 }
 
 // seed writes the genesis allocation as block 0 and, for a resumed run, the
-// state the prefix left behind, each access index at its own txNum, and
-// checkpoints the commitment where execution resumes.
+// state and receipts the prefix left behind, each access index at its own
+// txNum, and checkpoints the commitment where execution resumes.
 func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumePoint) {
 	t.Helper()
 	ctx := context.Background()
@@ -214,6 +240,19 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumeP
 		if point != fromBlockStart {
 			if err := rawdbv3.TxNums.Append(tx, 1, resumeBALBlockStartTxNum+uint64(len(fx.block.Transactions()))+1); err != nil {
 				return err
+			}
+			var logIndex uint32
+			var blobGas uint64
+			for i, receipt := range fx.receipts[:point] {
+				if fx.noPrefixReceipts {
+					break
+				}
+				logIndex += uint32(len(receipt.Logs))
+				blobGas += fx.block.Transactions()[i].GetBlobGas()
+				txNum := resumeBALBlockStartTxNum + uint64(i) + 1
+				if err := rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), logIndex, receipt.CumulativeGasUsed, blobGas, txNum); err != nil {
+					return err
+				}
 			}
 			bal := fx.block.BlockAccessList()
 			for i := range bal {
@@ -270,9 +309,11 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumeP
 	require.NoError(t, err)
 }
 
-// assembleBlock builds block 1 with the production block assembler, so the
-// header carries the real state root, receipts and block access list hash.
-func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, coinbase common.Address) *types.Block {
+// assembleBlock builds block 1 and its receipts with the production block
+// assembler, so the header carries the real state root, receipts and, from
+// Amsterdam, block access list hash. The block carries its access list
+// before Amsterdam too, for seed.
+func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, coinbase common.Address) (*types.Block, types.Receipts) {
 	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
@@ -289,14 +330,16 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	header.Root = parent.Root
 	header.Number = *uint256.NewInt(1)
 	header.GasLimit = parent.GasLimit
-	header.Time = *fx.config.AmsterdamTime
+	header.Time = resumeBlockTime
 	header.BaseFee = misc.CalcBaseFee(fx.config, parent)
 	excessBlobGas := misc.CalcExcessBlobGas(fx.config, parent, header.Time)
 	header.ExcessBlobGas = &excessBlobGas
 	header.BlobGasUsed = new(uint64)
 	header.ParentBeaconBlockRoot = &common.Hash{}
-	slot := header.Number.Uint64()
-	header.SlotNumber = &slot
+	if fx.config.IsAmsterdam(header.Time) {
+		slot := header.Number.Uint64()
+		header.SlotNumber = &slot
+	}
 
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -313,7 +356,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	ibs.SetVersionMap(state.NewVersionMap(nil))
 	ibs.SetTxContext(header.Number.Uint64(), -1)
 
-	ba := exec.NewBlockAssembler(exec.AssemblerCfg{ChainConfig: fx.config, Engine: fx.engine}, &exec.AssembledBlock{
+	ba := exec.NewBlockAssembler(exec.AssemblerCfg{ChainConfig: fx.config, Engine: fx.engine, ExperimentalBAL: true}, &exec.AssembledBlock{
 		Header:      header,
 		Uncles:      []*types.Header{},
 		Txns:        types.Transactions{},
@@ -343,9 +386,8 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	finalHeader.Root = common.BytesToHash(root)
 	block := types.NewBlockForAsembling(finalHeader, ba.Txns, ba.Uncles, ba.Receipts, ba.Withdrawals, types.NewBlockAccessListSidecar(ba.BlockAccessList))
 	block.SendersToTxs(fx.senders)
-	require.True(t, fx.config.IsAmsterdam(block.Time()))
 	require.NotEmpty(t, block.BlockAccessList())
-	return block
+	return block, ba.Receipts
 }
 
 // withAccessList commits block 1 to bal: transactions and state root stay
@@ -458,23 +500,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 		}))
 	}
 
-	blockRLP, err := rlp.EncodeToBytes(block)
-	require.NoError(t, err)
-	parentRLP, err := rlp.EncodeToBytes(fx.genesis.Header())
-	require.NoError(t, err)
-	senders := make([][20]byte, len(fx.senders))
-	for i, sender := range fx.senders {
-		senders[i] = sender
-	}
-	blockReader, err := blockreplay.NewMemBlockReader(&blockreplay.Fixture{
-		BlockRLP: blockRLP, ParentHeaderRLP: parentRLP, Senders: senders,
-	})
-	require.NoError(t, err)
-
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = 2
-	cfg := StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB, fx.config, fx.engine, &vm.Config{}, nil, false, false, dirs, blockReader, nil, syncCfg, false, nil)
-
+	cfg := fx.execCfg(t, db, dirs, block)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
@@ -493,13 +519,103 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	if point != fromBlockStart {
 		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
 	}
-	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
+	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header()}
+	if fx.config.IsAmsterdam(block.Time()) {
+		src.bal = block.BlockAccessList()
+	}
 	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err
 	}
+	if fx.inspect != nil {
+		fx.inspect(t, domains, out.applyTx)
+	}
 	return out.verdict, nil
+}
+
+// run executes block from point with the serial or the parallel executor and
+// returns the block's rejection, an invalid-block verdict or an operational
+// error.
+func (fx *resumeBALFixture) run(t *testing.T, block *types.Block, point resumePoint, serial bool) error {
+	t.Helper()
+	if serial {
+		return fx.execSerial(t, block, point)
+	}
+	verdict, err := fx.exec(t, block, point)
+	if verdict != nil {
+		return verdict.err
+	}
+	return err
+}
+
+// execCfg returns the stage configuration for executing block over db.
+func (fx *resumeBALFixture) execCfg(t *testing.T, db kv.TemporalRwDB, dirs datadir.Dirs, block *types.Block) ExecuteBlockCfg {
+	t.Helper()
+	blockRLP, err := rlp.EncodeToBytes(block)
+	require.NoError(t, err)
+	parentRLP, err := rlp.EncodeToBytes(fx.genesis.Header())
+	require.NoError(t, err)
+	senders := make([][20]byte, len(fx.senders))
+	for i, sender := range fx.senders {
+		senders[i] = sender
+	}
+	blockReader, err := blockreplay.NewMemBlockReader(&blockreplay.Fixture{
+		BlockRLP: blockRLP, ParentHeaderRLP: parentRLP, Senders: senders,
+	})
+	require.NoError(t, err)
+
+	syncCfg := ethconfig.Defaults.Sync
+	syncCfg.ExecWorkerCount = 2
+	return StageExecuteBlocksCfg(db, prune.DefaultMode, 512*datasize.MB, fx.config, fx.engine, &vm.Config{}, nil, false, false, dirs, blockReader, nil, syncCfg, false, nil)
+}
+
+// execSerial runs block through the serial executor from point and checks the
+// state root it leaves against the header's.
+func (fx *resumeBALFixture) execSerial(t *testing.T, block *types.Block, point resumePoint) error {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := newResumeTestDB(t)
+	fx.seed(t, db, point)
+	cfg := fx.execCfg(t, db, dirs, block)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
+	se := &serialExecutor{txExecutor: txExecutor{cfg: cfg, rs: rs, doms: domains, applyTx: rwTx, logger: logger}}
+	require.NoError(t, se.resetWorkers(ctx, rs, rwTx))
+	t.Cleanup(func() { _ = se.worker.ResetTx(nil) })
+
+	header := block.HeaderNoCopy()
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
+	var tasks []exec.Task
+	txNum := resumeBALBlockStartTxNum
+	for txIndex := -1; txIndex <= len(block.Transactions()); txIndex++ {
+		if txIndex >= int(point) {
+			tasks = append(tasks, &exec.TxTask{
+				TxNum: txNum, TxIndex: txIndex, Header: header, Txs: block.Transactions(), Uncles: block.Uncles(),
+				Withdrawals: block.Withdrawals(), EvmBlockContext: blockContext, Logger: logger,
+			})
+		}
+		txNum++
+	}
+	if _, err := se.executeBlock(ctx, tasks, true, false); err != nil {
+		return err
+	}
+	if fx.inspect != nil {
+		fx.inspect(t, domains, rwTx)
+	}
+	root, err := domains.ComputeCommitment(ctx, rwTx, false, 1, txNum-1, "resume-serial", nil)
+	require.NoError(t, err)
+	if have := common.BytesToHash(root); have != block.Root() {
+		return fmt.Errorf("%w: %x, want %x", ErrWrongTrieRoot, have, block.Root())
+	}
+	return nil
 }
 
 // TestResumedBlockValidatesBlockAccessList pins that a block resumed after a
@@ -645,10 +761,28 @@ func (b boundAt) BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transac
 }
 
 // TestResumedBlockTxGas checks that a gas limit bound to its position is
-// checked in a block executed from its start, and left alone in a block
-// resumed after a transaction its gas pool then misses.
+// checked in a block executed from its start or resumed before Amsterdam, and
+// left alone in a block resumed from Amsterdam or after transactions without
+// receipts, whose gas its pool then lacks.
 func TestResumedBlockTxGas(t *testing.T) {
-	fx := newResumeBALFixture(t)
+	amsterdam := chain.TestChainOsakaConfig.Copy()
+	amsterdam.AmsterdamTime = common.NewUint64(resumeBlockTime)
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{"osaka", chain.TestChainOsakaConfig},
+		{"amsterdam", amsterdam},
+	} {
+		t.Run(fork.name, func(t *testing.T) {
+			testResumedBlockTxGas(t, fork.config)
+		})
+	}
+}
+
+func testResumedBlockTxGas(t *testing.T, config *chain.Config) {
+	fx := newResumeBlockFixture(t, config)
+	isAmsterdam := config.IsAmsterdam(resumeBlockTime)
 	base := fx.engine
 	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
 	observer := common.HexToAddress("0x0000000000000000000000000000000000000b22")
@@ -678,35 +812,238 @@ func TestResumedBlockTxGas(t *testing.T) {
 	require.Greater(t, left, uint64(offset+100_000))
 	bound, unbound := txsWith(left-offset), txsWith(left-offset-1)
 	fx.engine = boundAt{base, bound[2].Hash(), offset}
-	valid := fx.assembleBlock(t, bound, coinbase)
+	valid, _ := fx.assembleBlock(t, bound, coinbase)
 	fx.engine = base
-	invalid := fx.assembleBlock(t, unbound, coinbase)
+	invalid, _ := fx.assembleBlock(t, unbound, coinbase)
 
+	type testCase struct {
+		name             string
+		block            *types.Block
+		mark             common.Hash
+		offset           uint64
+		point            resumePoint
+		noPrefixReceipts bool
+		err              error
+	}
+	cases := []testCase{
+		{"full/bound", valid, bound[2].Hash(), offset, fromBlockStart, false, nil},
+		{"full/unbound", invalid, unbound[2].Hash(), offset, fromBlockStart, false, protocol.ErrGasLimitPosition},
+		{"full/first unbound", valid, bound[0].Hash(), 0, fromBlockStart, false, protocol.ErrGasLimitPosition},
+		{"after block start/unbound", invalid, unbound[2].Hash(), offset, afterBlockInit, false, protocol.ErrGasLimitPosition},
+		{"after tx0/bound", valid, bound[2].Hash(), offset, afterTx0, false, nil},
+		{"after tx0 without receipts/bound", valid, bound[2].Hash(), offset, afterTx0, true, nil},
+	}
+	if !isAmsterdam {
+		cases = append(cases, testCase{"after tx0/unbound", invalid, unbound[2].Hash(), offset, afterTx0, false, protocol.ErrGasLimitPosition})
+	}
+	for _, tc := range cases {
+		for _, serial := range []bool{false, true} {
+			// The serial executor refuses Amsterdam blocks.
+			if serial && isAmsterdam {
+				continue
+			}
+			name := "parallel/" + tc.name
+			if serial {
+				name = "serial/" + tc.name
+			}
+			t.Run(name, func(t *testing.T) {
+				fx.engine = boundAt{base, tc.mark, tc.offset}
+				fx.noPrefixReceipts = tc.noPrefixReceipts
+				err := fx.run(t, tc.block, tc.point, serial)
+				if tc.err == nil {
+					require.NoError(t, err)
+					return
+				}
+				require.ErrorIs(t, err, tc.err)
+			})
+		}
+	}
+}
+
+// fromBlockTxn is a transaction whose message takes its gas from the block, at
+// most its gas limit, which its position does not bind.
+type fromBlockTxn struct{ types.Transaction }
+
+func (txn fromBlockTxn) AsMessage(s types.Signer, baseFee *uint256.Int, rules *chain.Rules) (*types.Message, error) {
+	msg, err := txn.Transaction.AsMessage(s, baseFee, rules)
+	if err != nil {
+		return nil, err
+	}
+	msg.SetGasFromBlock(true)
+	return msg, nil
+}
+
+// TestResumedBlockGasFromBlock checks that both executors, resuming a block
+// after a transaction that left less gas than a later message's limit, give
+// that message, which takes its gas from the block, what the transaction
+// left, and check the message's bound gas limit against it.
+func TestResumedBlockGasFromBlock(t *testing.T) {
+	burner := common.HexToAddress("0x000000000000000000000000000000000000b0e4")
+	recorder := common.HexToAddress("0x000000000000000000000000000000000000ea51")
+	fx := newResumeFixture(t, chain.TestChainOsakaConfig, types.GenesisAlloc{
+		// JUMPDEST PUSH1 0 JUMP: burns all the gas it gets.
+		burner: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}},
+		// GAS PUSH1 0 SSTORE: stores the gas it has left.
+		recorder: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.GAS), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}},
+	})
+	signer := types.LatestSignerForChainID(fx.config.ChainID)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	var txs types.Transactions
+	for _, txn := range []*types.LegacyTx{
+		{CommonTx: types.CommonTx{Nonce: 0, To: &burner, GasLimit: 16_000_000}, GasPrice: *gasPrice},
+		{CommonTx: types.CommonTx{Nonce: 1, To: &recorder, GasLimit: params.MaxTxnGasLimit}, GasPrice: *gasPrice},
+	} {
+		signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
+		require.NoError(t, err)
+		txs = append(txs, signed)
+	}
+	txs[1] = fromBlockTxn{txs[1]}
+	var left uint64
+	fx.engine = gasLeftAt{fx.engine, txs[1].Hash(), &left}
+	fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+	wantLeft := fx.block.GasLimit() - fx.receipts[0].GasUsed
+	require.Less(t, wantLeft, params.MaxTxnGasLimit)
+	require.Equal(t, wantLeft, left)
+	var want uint256.Int
+	for _, account := range fx.block.BlockAccessList() {
+		if account.Address == recorder {
+			want = account.StorageChanges[0].Changes[0].Value
+		}
+	}
+	require.False(t, want.IsZero())
+
+	var recorded uint256.Int
+	fx.inspect = func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx) {
+		v, _, err := sd.GetLatest(kv.StorageDomain, tx, dbutils.GenerateStoragePlainKey(recorder, common.Hash{}))
+		require.NoError(t, err)
+		recorded.SetBytes(v)
+	}
 	for _, tc := range []struct {
-		name   string
-		block  *types.Block
-		mark   common.Hash
-		offset uint64
-		point  resumePoint
-		err    error
+		name  string
+		point resumePoint
 	}{
-		{"full/bound", valid, bound[2].Hash(), offset, fromBlockStart, nil},
-		{"full/unbound", invalid, unbound[2].Hash(), offset, fromBlockStart, protocol.ErrGasLimitPosition},
-		{"full/first unbound", valid, bound[0].Hash(), 0, fromBlockStart, protocol.ErrGasLimitPosition},
-		{"after block start/unbound", invalid, unbound[2].Hash(), offset, afterBlockInit, protocol.ErrGasLimitPosition},
-		{"after tx0/bound", valid, bound[2].Hash(), offset, afterTx0, nil},
+		{"full", fromBlockStart},
+		{"after tx0", afterTx0},
+	} {
+		t.Run("parallel/"+tc.name, func(t *testing.T) {
+			left, recorded = 0, uint256.Int{}
+			verdict, err := fx.exec(t, fx.block, tc.point)
+			require.NoError(t, err)
+			if verdict != nil {
+				t.Fatal(verdict.err)
+			}
+			require.Equal(t, want, recorded, "gas recorded by tx1")
+			require.Equal(t, wantLeft, left, "gas left checked at tx1")
+		})
+		t.Run("serial/"+tc.name, func(t *testing.T) {
+			left, recorded = 0, uint256.Int{}
+			err := fx.execSerial(t, fx.block, tc.point)
+			require.Equal(t, want, recorded, "gas recorded by tx1")
+			require.NoError(t, err)
+			require.Equal(t, wantLeft, left, "gas left checked at tx1")
+		})
+	}
+}
+
+// TestRestorePriorGas checks that a resumed block's gas pool loses the gas and
+// blob gas its earlier transactions' receipts tell, and is left as it is, and
+// reported to lack them, where they do not tell it.
+func TestRestorePriorGas(t *testing.T) {
+	const gasLimit = 30_000_000
+	db := newResumeTestDB(t)
+	// The receipt of the transaction at txNum 4: 1M gas and a blob so far in its block.
+	require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		if err := rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 0, 1_000_000, params.GasPerBlob, 4); err != nil {
+			return err
+		}
+		return domains.Flush(t.Context(), tx)
+	}))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	amsterdam := chain.TestChainOsakaConfig.Copy()
+	amsterdam.AmsterdamTime = common.NewUint64(0)
+	maxBlobGas := chain.TestChainOsakaConfig.GetMaxBlobGasPerBlock(0)
+	for _, tc := range []struct {
+		name        string
+		config      *chain.Config
+		txNum       uint64
+		txIndex     int
+		lacking     bool
+		gasUsed     uint64
+		blobGasUsed uint64
+	}{
+		{"resumed", chain.TestChainOsakaConfig, 5, 1, false, 1_000_000, params.GasPerBlob},
+		{"resumed without receipts", chain.TestChainOsakaConfig, 4, 1, true, 0, 0},
+		{"resumed from amsterdam", amsterdam, 5, 1, true, 0, 0},
+		// The receipt before the first transaction is the parent block's last.
+		{"first transaction", chain.TestChainOsakaConfig, 5, 0, false, 0, 0},
+		{"block start", chain.TestChainOsakaConfig, 5, -1, false, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fx.engine = boundAt{base, tc.mark, tc.offset}
-			verdict, err := fx.exec(t, tc.block, tc.point)
-			if verdict != nil {
-				err = verdict.err
-			}
-			if tc.err == nil {
-				require.NoError(t, err)
-				return
-			}
-			require.ErrorIs(t, err, tc.err)
+			gp := protocol.NewGasPool(gasLimit, maxBlobGas)
+			task := &exec.TxTask{TxNum: tc.txNum, TxIndex: tc.txIndex, Header: &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit}}
+			lacking, err := restorePriorGas(tx, tc.config, gp, task)
+			require.NoError(t, err)
+			require.Equal(t, tc.lacking, lacking)
+			require.Equal(t, gasLimit-tc.gasUsed, gp.ExecutionGasAvailable())
+			require.Equal(t, maxBlobGas-tc.blobGasUsed, gp.BlobGas())
+		})
+	}
+}
+
+// TestResumedBlockBlobGas checks that both executors, resuming a block after a
+// transaction that used blob gas, reject a later one whose blobs the rest of
+// the block's blob gas does not fit.
+func TestResumedBlockBlobGas(t *testing.T) {
+	fx := newResumeFixture(t, chain.TestChainOsakaConfig, nil)
+	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
+	coinbase := common.HexToAddress("0x000000000000000000000000000000000000c01b")
+	signer := types.LatestSignerForChainID(fx.config.ChainID)
+	blobTx := func(nonce uint64) types.Transaction {
+		hashes := make([]common.Hash, params.MaxBlobsPerTxn)
+		for i := range hashes {
+			hashes[i][0] = 0x01 // KZG version
+			hashes[i][31] = byte(nonce<<4 | uint64(i))
+		}
+		txn, err := types.SignTx(&types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce, To: &target, GasLimit: 21_000},
+				ChainID:  *fx.config.ChainID, TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1_000_000_000),
+			},
+			MaxFeePerBlobGas:    *uint256.NewInt(1_000_000_000),
+			BlobVersionedHashes: hashes,
+		}, *signer, senderIsCoinbaseKey.key)
+		require.NoError(t, err)
+		return txn
+	}
+	// tx0's blobs leave the block too few for tx1's; the header is the one of
+	// the block of tx0 alone.
+	require.Less(t, fx.config.GetMaxBlobsPerBlock(resumeBlockTime), uint64(2*params.MaxBlobsPerTxn))
+	txs := types.Transactions{blobTx(0), blobTx(1)}
+	prefix, receipts := fx.assembleBlock(t, txs[:1], coinbase)
+	fx.block = types.NewBlockForAsembling(prefix.Header(), txs, nil, receipts, prefix.Withdrawals(), prefix.BlockAccessListSidecar())
+	fx.block.SendersToTxs(fx.senders)
+	fx.receipts = receipts
+
+	for _, tc := range []struct {
+		name  string
+		point resumePoint
+	}{
+		{"full", fromBlockStart},
+		{"after tx0", afterTx0},
+	} {
+		t.Run("parallel/"+tc.name, func(t *testing.T) {
+			require.ErrorIs(t, fx.run(t, fx.block, tc.point, false), protocol.ErrBlobGasLimitReached)
+		})
+		t.Run("serial/"+tc.name, func(t *testing.T) {
+			require.ErrorIs(t, fx.run(t, fx.block, tc.point, true), protocol.ErrBlobGasLimitReached)
 		})
 	}
 }

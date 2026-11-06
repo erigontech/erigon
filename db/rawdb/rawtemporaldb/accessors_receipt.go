@@ -61,6 +61,20 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
+// ReceiptGasAsOf returns the cumulative gas and blob gas of the last receipt
+// before txNum, and whether the receipt domain holds them.
+func ReceiptGasAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed, cumBlobGasUsed uint64, ok bool, err error) {
+	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum)
+	if err != nil || !ok || len(v) == 0 {
+		return 0, 0, false, err
+	}
+	cumGasUsed = uvarint(v)
+	if v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, txNum); err != nil || !ok || len(v) == 0 {
+		return 0, 0, false, err
+	}
+	return cumGasUsed, uvarint(v), true, nil
+}
+
 // FirstLogIndex returns the block-wide index the first log of the txn at txNum
 // takes. Which record holds it depends on the receipt domain version, so this is
 // the one place that knows: before V1_1 the txn's own record holds it, from V1_1

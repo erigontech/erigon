@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -589,6 +590,34 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 		return nil, fmt.Errorf("failed to reconstruct prior receipts for partial block %d (startTxIndex %d): %w", header.Number.Uint64(), startTxIndex, err)
 	}
 	return priorReceipts, nil
+}
+
+// restorePriorGas takes from gp, the gas pool of the block of first, the gas
+// and blob gas used by the block's transactions before first, which an earlier
+// run executed, from their receipts. It reports whether gp lacks that gas
+// instead: the receipts are missing, or from Amsterdam a receipt's cumulative
+// gas is not its block's (EIP-7778, EIP-8037).
+func restorePriorGas(tx kv.TemporalTx, config *chain.Config, gp *protocol.GasPool, first exec.Task) (lacking bool, err error) {
+	if first.Version().TxIndex <= 0 {
+		return false, nil
+	}
+	if config.IsAmsterdam(first.BlockTime()) {
+		return true, nil
+	}
+	gasUsed, blobGasUsed, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, first.Version().TxNum)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return true, nil
+	}
+	if err := gp.ConsumeExecution(gasUsed); err != nil {
+		return false, fmt.Errorf("block %d: gas used before tx %d: %w", first.BlockNumber(), first.Version().TxIndex, err)
+	}
+	if err := gp.SubBlobGas(blobGasUsed); err != nil {
+		return false, fmt.Errorf("block %d: blob gas used before tx %d: %w", first.BlockNumber(), first.Version().TxIndex, err)
+	}
+	return false, nil
 }
 
 func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
