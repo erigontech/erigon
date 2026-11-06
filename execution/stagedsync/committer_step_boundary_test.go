@@ -1244,3 +1244,27 @@ func TestComputeAhead_BALDrainedEmptyAccountFoldsAsAbsent(t *testing.T) {
 	require.NoError(t, got.err, "root with the drained empty account must equal the root of a base without it (%x)", want)
 	require.Equal(t, want[:], got.rootHash)
 }
+
+// A fold reads the folding block's accounts through its version map; it must read their code the same way,
+// or a code write that the apply loop has not landed yet disagrees with the account's code hash.
+func TestAsOfStateReaderReadsFoldingBlockCode(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	addr := common.HexToAddress("0xc0de")
+	oldCode, newCode := []byte{0xef, 0x01, 0x00, 0x01}, []byte{0xef, 0x01, 0x00, 0x02}
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, addr[:], oldCode, 1, nil))
+
+	vm := state.NewVersionMap(nil)
+	vm.SetBaseTxNum(10)
+	vm.WriteCode(accounts.InternAddress(addr), state.Version{TxIndex: 0}, accounts.NewCode(newCode), true)
+
+	reader := &asOfStateReader{sd: doms, roTx: tx, txNum: 12, dr: state.NewLayeredDomainReader(doms, nil, nil), cur: vm, curTxNum: 11}
+	code, _, err := reader.Read(kv.CodeDomain, addr[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, newCode, code)
+
+	other := common.HexToAddress("0xc0df")
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, other[:], oldCode, 1, nil))
+	code, _, err = reader.Read(kv.CodeDomain, other[:], doms.StepSize())
+	require.NoError(t, err)
+	require.Equal(t, oldCode, code, "code without a cell in the block falls back to the domain")
+}

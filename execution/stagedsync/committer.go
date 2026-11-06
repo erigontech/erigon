@@ -1010,8 +1010,8 @@ type asOfStateReader struct {
 	// concurrent users never share one.
 	dr *state.LayeredDomainReader
 
-	// cur layers the folding block's own writes up to curTxNum: the trie also reads
-	// untouched siblings, and dr sees them only after the apply loop lands them in sd.mem.
+	// cur layers the folding block's own writes up to curTxNum (accounts, storage and code): the trie
+	// also reads untouched siblings, and dr sees them only after the apply loop lands them in sd.mem.
 	cur      *state.VersionMap
 	curTxNum uint64
 }
@@ -1036,6 +1036,11 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	if r.cur != nil && (d == kv.AccountsDomain || d == kv.StorageDomain) {
 		enc, err = r.readFoldingBlock(d, plainKey)
 		return enc, step, err
+	}
+	if r.cur != nil && d == kv.CodeDomain {
+		if code, ok := r.cur.View(r.curTxNum, nil).GetCode(accounts.InternAddress(common.BytesToAddress(plainKey))); ok {
+			return code, step, nil
+		}
 	}
 	// Account/storage/code: the window layered over sd.mem + files.
 	enc, ok, err := r.dr.ReadDomain(d, plainKey, r.txNum)
