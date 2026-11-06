@@ -21,12 +21,15 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
 
 	bls "github.com/consensys/gnark-crypto/ecc/bls12-381"
+	evmone "github.com/erigontech/evmone_precompiles"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -218,6 +221,72 @@ func BenchmarkBLSRepeatedPoints(b *testing.B) {
 					}
 				}
 			})
+		}
+	}
+}
+
+// BenchmarkModExpClasses reports Mgas/s (EIP-7883 pricing) of the MODEXP precompile per input class, next to evmone's
+// modexp called directly and math/big, on the same inputs: base, exponent and modulus of n bytes, odd or even modulus,
+// a small (1-byte) or full-width exponent.
+func BenchmarkModExpClasses(b *testing.B) {
+	rnd := func(n int, seed byte) []byte {
+		out := make([]byte, n)
+		x := uint32(seed)*2654435761 + 1
+		for i := range out {
+			x = x*1103515245 + 12345
+			out[i] = byte(x >> 16)
+		}
+		out[0] |= 0x80
+		return out
+	}
+	p := &bigModExp{eip2565: true, osaka: true}
+	for _, n := range []int{32, 64, 128, 256, 512, 1024} {
+		for _, odd := range []bool{true, false} {
+			for _, bigExp := range []bool{false, true} {
+				base, mod := rnd(n, 1), rnd(n, 2)
+				if odd {
+					mod[n-1] |= 1
+				} else {
+					mod[n-1] &^= 1
+				}
+				exp := []byte{0x03}
+				if bigExp {
+					exp = rnd(n, 3)
+				}
+				input := make([]byte, 96)
+				binary.BigEndian.PutUint64(input[24:32], uint64(len(base)))
+				binary.BigEndian.PutUint64(input[56:64], uint64(len(exp)))
+				binary.BigEndian.PutUint64(input[88:96], uint64(len(mod)))
+				input = append(append(append(input, base...), exp...), mod...)
+				gas := p.RequiredGas(input)
+				name := fmt.Sprintf("n=%d/%s/%s", n, map[bool]string{true: "odd", false: "even"}[odd], map[bool]string{true: "bigexp", false: "exp3"}[bigExp])
+				mgas := func(b *testing.B) {
+					b.ReportMetric(float64(gas)*float64(b.N)/float64(b.Elapsed().Nanoseconds())*1e3, "Mgas/s")
+				}
+				b.Run(name+"/erigon", func(b *testing.B) {
+					for b.Loop() {
+						if _, err := p.Run(input); err != nil {
+							b.Fatal(err)
+						}
+					}
+					mgas(b)
+				})
+				b.Run(name+"/evmone", func(b *testing.B) {
+					out := make([]byte, n)
+					for b.Loop() {
+						evmone.ModExp(out, base, exp, mod)
+					}
+					mgas(b)
+				})
+				b.Run(name+"/bigint", func(b *testing.B) {
+					out := make([]byte, n)
+					bb, eb, mb := new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), new(big.Int).SetBytes(mod)
+					for b.Loop() {
+						new(big.Int).Exp(bb, eb, mb).FillBytes(out)
+					}
+					mgas(b)
+				})
+			}
 		}
 	}
 }
