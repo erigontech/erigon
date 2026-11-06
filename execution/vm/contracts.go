@@ -648,6 +648,12 @@ func modexpU256(dst, base, exp, mod []byte) {
 	if b.IsZero() {
 		return // 0^exp with exp > 0; dst is already zero
 	}
+	if m[0]&1 == 1 {
+		r := montExpU256(&b, &m, exp)
+		b32 := r.Bytes32()
+		copy(dst, b32[32-len(dst):])
+		return
+	}
 	mu := uint256.Reciprocal(&m)
 
 	// started stays false until the first set exponent bit, so leading zero bits
@@ -1453,4 +1459,89 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 
 func (c *p256Verify) Name() string {
 	return "P256VERIFY"
+}
+
+// montExpU256 returns b^exp mod m for an odd m and 0 < b < m, by square-and-multiply in the Montgomery domain.
+// exp[0] must be non-zero.
+func montExpU256(b, m *uint256.Int, exp []byte) uint256.Int {
+	inv := m[0] // m[0]*m[0] = 1 mod 8; each Newton step doubles the correct low bits
+	for range 5 {
+		inv *= 2 - m[0]*inv
+	}
+	inv = -inv
+	var r, r2 uint256.Int
+	r.Sub(&r, m).Mod(&r, m) // 2^256 mod m
+	r2.MulMod(&r, &r, m)
+	bm := montMulU256(b, &r2, m, inv)
+	acc := bm
+	started := false
+	for _, by := range exp {
+		for bit := 7; bit >= 0; bit-- {
+			if started {
+				acc = montMulU256(&acc, &acc, m, inv)
+			}
+			if (by>>uint(bit))&1 == 1 {
+				if started {
+					acc = montMulU256(&acc, &bm, m, inv)
+				}
+				started = true
+			}
+		}
+	}
+	return montMulU256(&acc, &uint256.Int{1}, m, inv)
+}
+
+// montMulU256 returns x*y/2^256 mod m for x, y < m (CIOS Montgomery multiplication); inv is -m^-1 mod 2^64.
+func montMulU256(x, y, m *uint256.Int, inv uint64) uint256.Int {
+	var t0, t1, t2, t3, t4 uint64
+	for i := range 4 {
+		yi := y[i]
+		var c, k, hi, lo, t5 uint64
+		hi, lo = bits.Mul64(x[0], yi)
+		t0, k = bits.Add64(lo, t0, 0)
+		c = hi + k
+		hi, lo = bits.Mul64(x[1], yi)
+		lo, k = bits.Add64(lo, t1, 0)
+		hi += k
+		t1, k = bits.Add64(lo, c, 0)
+		c = hi + k
+		hi, lo = bits.Mul64(x[2], yi)
+		lo, k = bits.Add64(lo, t2, 0)
+		hi += k
+		t2, k = bits.Add64(lo, c, 0)
+		c = hi + k
+		hi, lo = bits.Mul64(x[3], yi)
+		lo, k = bits.Add64(lo, t3, 0)
+		hi += k
+		t3, k = bits.Add64(lo, c, 0)
+		c = hi + k
+		t4, t5 = bits.Add64(t4, c, 0)
+
+		q := t0 * inv
+		hi, lo = bits.Mul64(q, m[0])
+		_, k = bits.Add64(lo, t0, 0)
+		c = hi + k
+		hi, lo = bits.Mul64(q, m[1])
+		lo, k = bits.Add64(lo, t1, 0)
+		hi += k
+		t0, k = bits.Add64(lo, c, 0)
+		c = hi + k
+		hi, lo = bits.Mul64(q, m[2])
+		lo, k = bits.Add64(lo, t2, 0)
+		hi += k
+		t1, k = bits.Add64(lo, c, 0)
+		c = hi + k
+		hi, lo = bits.Mul64(q, m[3])
+		lo, k = bits.Add64(lo, t3, 0)
+		hi += k
+		t2, k = bits.Add64(lo, c, 0)
+		c = hi + k
+		t3, k = bits.Add64(t4, c, 0)
+		t4 = t5 + k
+	}
+	z := uint256.Int{t0, t1, t2, t3}
+	if t4 != 0 || !z.Lt(m) {
+		z.Sub(&z, m)
+	}
+	return z
 }
