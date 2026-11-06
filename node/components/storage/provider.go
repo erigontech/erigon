@@ -1029,10 +1029,9 @@ func (p *Provider) Initialize(deps Deps) error {
 		}
 		metaInv := deps.Inventory
 		p.LifecycleDriver = &lifecycle.Driver{
-			Inv:        deps.Inventory,
-			Logger:     logger,
-			SnapDir:    snapDir,
-			OnIndexing: lifecycle.BuildOnIndexing(builder, deps.Inventory, logger),
+			Inv:     deps.Inventory,
+			Logger:  logger,
+			SnapDir: snapDir,
 			OnValidation: lifecycle.BuildOnBatchValidationWithHook(batchChain, deps.Inventory, logger,
 				// Single fire-path for "this file is now ready to be
 				// part of the public set." Triggered when the lifecycle
@@ -1062,6 +1061,8 @@ func (p *Provider) Initialize(deps Deps) error {
 				return nil
 			},
 		}
+		p.LifecycleDriver.OnIndexing = lifecycle.BuildOnIndexing(
+			builder, deps.Inventory, snapDir, p.LifecycleDriver.SweepEpoch, logger)
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
 		}

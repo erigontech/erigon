@@ -62,10 +62,10 @@ func buildIndexingStack(t *testing.T, ctx context.Context, snapDir string, build
 		Inv:           inv,
 		SnapDir:       snapDir,
 		SweepInterval: 50 * time.Millisecond,
-		OnIndexing:    lifecycle.BuildOnIndexing(builder, inv, nil),
 		OnValidation: lifecycle.BuildOnBatchValidation(
 			validation.StepChain{validation.AllFilesPresent{SnapDir: snapDir}}, inv, nil),
 	}
+	driver.OnIndexing = lifecycle.BuildOnIndexing(builder, inv, snapDir, driver.SweepEpoch, nil)
 	require.NoError(t, driver.Start(ctx))
 	t.Cleanup(driver.Stop)
 	return driver, inv

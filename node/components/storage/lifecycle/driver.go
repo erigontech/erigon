@@ -148,6 +148,7 @@ type Driver struct {
 	subUnsub    func() // returned by Inv.Subscribe; called on Stop
 	failures    map[string]int
 	quarantined map[string]bool
+	sweepEpoch  uint64
 
 	// quarantineBlame maps a quarantined entry to the file a validator
 	// actually rejected. A StepValidator runs across a whole group, so that
@@ -302,6 +303,9 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	if logger == nil {
 		logger = log.Root()
 	}
+	d.mu.Lock()
+	d.sweepEpoch++
+	d.mu.Unlock()
 	d.clearRetiredGoneFiles(logger)
 	d.discoverNewFiles(logger)
 	d.removeGoneFiles(logger)
@@ -330,6 +334,15 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	for _, e := range view.CaplinFiles() {
 		d.dispatch(ctx, e, logger)
 	}
+}
+
+// SweepEpoch counts sweeps that have begun. Handlers whose work is a global
+// scan use it to collapse a sweep's worth of per-file calls into one: a second
+// scan in the same sweep would run over the same inputs.
+func (d *Driver) SweepEpoch() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sweepEpoch
 }
 
 // snapshotScannableExts is the set of file extensions the disk-scan

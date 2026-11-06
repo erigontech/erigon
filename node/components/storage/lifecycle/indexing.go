@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -47,49 +48,142 @@ type IndexBuilder interface {
 
 // BuildOnIndexing returns a Handler suitable for Driver.OnIndexing.
 //
-// Inventory-driven dispatch: the handler first checks whether all of
-// the entry's Dependencies are already Local in the inventory. If
-// they are, it advances directly to LifecycleIndexed without calling
-// the builder. Only when at least one dependency is missing does the
-// handler invoke builder.BuildMissedIndices.
+// The entry advances to LifecycleIndexed once its accessors are on disk, which
+// is what the gates waiting on that state assume. The question is asked of the
+// disk rather than of FileEntry.Dependencies: an accessor carries its own
+// version prefix, so its name is not derivable from the primary's. Entries the
+// disk cannot answer for — those with no accessors, or when snapDir is unset —
+// keep the Dependencies path.
 //
-// This is §5c of the app-integration completion plan: skipping the
-// build call when the inventory already reflects satisfied deps
-// drops invocation counts from N (every Downloaded file every sweep)
-// to ~K (one per file that genuinely needs work). In the 2026-05-04
-// hoodi rerun pre-fix, the driver fired 776 BuildMissedIndices calls
-// to advance 22 files; the pre-check removes the 754 redundant
-// invocations.
+// epoch supplies the driver's sweep number. The builder is a single global
+// scan, so a second call within one sweep would run over the inputs the first
+// already covered; the handler scans at most once per epoch and lets the
+// remaining entries re-read the disk. A nil epoch disables that latch.
 //
-// If a dependency is still missing after the build (e.g. because the
-// production OnFilesChange path hasn't yet propagated the new file
-// into the inventory), the handler returns nil — the next sweep or
-// ChangeSet event will re-check. This is the standard idempotent
-// retry pattern; failure to advance is not an error.
-//
-// Builder errors propagate to the caller, which logs them at Debug
+// An entry whose accessors are still missing after the scan stays at
+// LifecycleDownloaded and is retried on the next sweep — not advancing is not
+// an error. Builder errors propagate to the caller, which logs them at Debug
 // per Driver.dispatch's contract.
 //
 // logger may be nil; on successful advance the handler emits an Info
 // log line "advanced X to LifecycleIndexed" so each completed step is
 // observable. nil logger silently skips the line.
-func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, logger log.Logger) Handler {
+func BuildOnIndexing(builder IndexBuilder, inv *snapshot.Inventory, snapDir string, epoch func() uint64, logger log.Logger) Handler {
+	sweep := &sweepScope{snapDir: snapDir, epoch: epoch}
 	return func(ctx context.Context, e *snapshot.FileEntry) error {
-		if depsAllLocal(inv, e.Dependencies) {
+		if !canAskDisk(snapDir, e) {
+			if depsAllLocal(inv, e.Dependencies) {
+				advance(inv, e.Name, logger)
+				return nil
+			}
+			if err := builder.BuildMissedIndices(ctx, e); err != nil {
+				return err
+			}
+			if depsAllLocal(inv, e.Dependencies) {
+				advance(inv, e.Name, logger)
+			}
+			return nil
+		}
+
+		if sweep.accessors().Has(e.Name) {
 			advance(inv, e.Name, logger)
 			return nil
 		}
-
-		if err := builder.BuildMissedIndices(ctx, e); err != nil {
-			return err
-		}
-
-		if !depsAllLocal(inv, e.Dependencies) {
+		if !sweep.claimScan() {
 			return nil
 		}
-		advance(inv, e.Name, logger)
+		if err := builder.BuildMissedIndices(ctx, e); err != nil {
+			sweep.releaseScan()
+			return err
+		}
+		// The scan wrote accessors the index predates, so ask the disk again.
+		sweep.forgetAccessors()
+		if sweep.accessors().Has(e.Name) {
+			advance(inv, e.Name, logger)
+		}
 		return nil
 	}
+}
+
+// sweepScope holds the work a sweep does once and every entry in it reuses:
+// the reading of the snapshot directories, and the one global index build the
+// sweep is allowed. A nil epoch means the caller cannot tell sweeps apart, so
+// nothing is reused.
+type sweepScope struct {
+	snapDir string
+	epoch   func() uint64
+
+	mu       sync.Mutex
+	at       uint64
+	scanning bool
+	index    *snapshot.AccessorIndex
+}
+
+func (s *sweepScope) now() uint64 {
+	if s.epoch == nil {
+		return 0
+	}
+	return s.epoch()
+}
+
+// enterLocked drops state belonging to an earlier sweep. Caller holds s.mu.
+func (s *sweepScope) enterLocked(now uint64) {
+	if s.epoch != nil && s.at == now {
+		return
+	}
+	s.at, s.scanning, s.index = now, false, nil
+}
+
+// accessors reads the snapshot directories once per sweep. Asking per entry
+// instead costs a directory read and a name parse per candidate, which over a
+// sweep is quadratic in the number of files.
+func (s *sweepScope) accessors() *snapshot.AccessorIndex {
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enterLocked(now)
+	if s.index == nil || s.epoch == nil {
+		s.index = snapshot.NewAccessorIndex(s.snapDir)
+	}
+	return s.index
+}
+
+func (s *sweepScope) forgetAccessors() {
+	s.mu.Lock()
+	s.index = nil
+	s.mu.Unlock()
+}
+
+// claimScan reports whether the caller should run the global index build. One
+// sweep gets one: a second would run over the inputs the first already covered.
+func (s *sweepScope) claimScan() bool {
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enterLocked(now)
+	if s.epoch != nil && s.scanning {
+		return false
+	}
+	s.scanning = true
+	return true
+}
+
+// releaseScan returns the sweep's claim after a failed build, so the next entry
+// retries rather than waiting for a sweep that may find no other trigger.
+func (s *sweepScope) releaseScan() {
+	s.mu.Lock()
+	s.scanning = false
+	s.mu.Unlock()
+}
+
+// canAskDisk reports whether the snapshot directories can answer for this
+// entry. Those they cannot speak for — caplin, accessors themselves, anything
+// without a snapshot dir — keep the Dependencies path.
+func canAskDisk(snapDir string, e *snapshot.FileEntry) bool {
+	if snapDir == "" || e == nil || e.Kind == snapshot.KindCaplin {
+		return false
+	}
+	return snapshot.HasAccessors(e.Name)
 }
 
 func depsAllLocal(inv *snapshot.Inventory, deps []string) bool {

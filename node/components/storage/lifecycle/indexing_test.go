@@ -19,6 +19,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,7 +70,7 @@ func TestBuildOnIndexing_BuildsThenAdvancesWhenDepsMissing(t *testing.T) {
 	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	handler := BuildOnIndexing(builder, inv, nil)
+	handler := BuildOnIndexing(builder, inv, "", nil, nil)
 
 	require.NoError(t, handler(context.Background(), primary))
 	state, _ := inv.LifecycleState(primary.Name)
@@ -98,7 +100,7 @@ func TestBuildOnIndexing_DepsAlreadyLocal_SkipsBuild(t *testing.T) {
 	})
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, "", nil, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state)
@@ -119,7 +121,7 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, "", nil, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state)
@@ -127,24 +129,11 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 		"no deps means no build call")
 }
 
-// Block-file entries (headers/bodies/transactions .seg) also arrive
-// with empty Dependencies on the bootstrap-from-preverified path —
-// preverified.toml carries only .seg files, not their .idx accessors,
-// and entryFromPreverifiedItem does not populate Dependencies for
-// block files. This test pins that block files share the same
-// trivially-advance behaviour as salt/meta/caplin.
-//
-// The trap: lifecycle's BuildOnIndexing short-circuits without
-// calling the builder, so the .idx accessor is never built via this
-// path. RecalcVisibleSegments excludes any DirtySegment where
-// !IsIndexed(), so headers without .idx are invisible — FrozenBlocks()
-// returns 0 and Caplin walks from genesis.
-//
-// Resolution lives in storage.Provider.tryFireBlockHeadersReady:
-// it invokes the IndexBuilder itself before OpenSegments(Headers)
-// (mirroring what stage_snapshots does in the non-storage-driven
-// path). This test documents the lifecycle-side gap that motivates
-// that explicit build call.
+// Without a snapshot dir the handler cannot ask the disk, so it falls back to
+// Dependencies — which block .seg files never carry: preverified.toml lists
+// primaries only, and entryFromPreverifiedItem populates nothing. Production
+// passes a snapshot dir and takes the disk path instead; see
+// TestBuildOnIndexing_AccessorMissingDoesNotAdvance for what it decides there.
 func TestBuildOnIndexing_HandlesNoDependencies_BlockFile(t *testing.T) {
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
@@ -154,13 +143,12 @@ func TestBuildOnIndexing_HandlesNoDependencies_BlockFile(t *testing.T) {
 	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
-	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(builder, inv, "", nil, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleIndexed, state,
-		"block .seg files with empty Dependencies advance trivially — the builder is NOT called via lifecycle")
-	require.Equal(t, 0, builder.calls,
-		"empty deps → no build call; storage Provider must invoke the builder itself for block-file index accessors")
+		"with no snapshot dir to ask, empty Dependencies is all the handler has to go on")
+	require.Equal(t, 0, builder.calls, "nothing to build for satisfied deps")
 }
 
 func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
@@ -181,7 +169,7 @@ func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
 		},
 	}
 
-	err := BuildOnIndexing(builder, inv, nil)(context.Background(), primary)
+	err := BuildOnIndexing(builder, inv, "", nil, nil)(context.Background(), primary)
 	require.ErrorIs(t, err, wantErr)
 
 	// State stays at Downloaded — driver leaves it there for retry.
@@ -204,7 +192,7 @@ func TestBuildOnIndexing_DepsNotYetPropagatedNoOps(t *testing.T) {
 
 	// noopIndexBuilder reports success without producing the dep.
 	// Handler should return nil but NOT advance.
-	require.NoError(t, BuildOnIndexing(noopIndexBuilder{}, inv, nil)(
+	require.NoError(t, BuildOnIndexing(noopIndexBuilder{}, inv, "", nil, nil)(
 		context.Background(), primary,
 	))
 
@@ -236,7 +224,7 @@ func TestBuildOnIndexing_PartialDepsNoOps(t *testing.T) {
 	// Builder no-ops (doesn't add anything). Use a builder with no
 	// auto-add behaviour.
 	noopBuilder := noopIndexBuilder{}
-	require.NoError(t, BuildOnIndexing(noopBuilder, inv, nil)(context.Background(), primary))
+	require.NoError(t, BuildOnIndexing(noopBuilder, inv, "", nil, nil)(context.Background(), primary))
 
 	state, _ := inv.LifecycleState(primary.Name)
 	require.Equal(t, snapshot.LifecycleDownloaded, state,
@@ -247,4 +235,91 @@ type noopIndexBuilder struct{}
 
 func (noopIndexBuilder) BuildMissedIndices(_ context.Context, _ *snapshot.FileEntry) error {
 	return nil
+}
+
+// countingNoopBuilder reports success without producing anything, and counts
+// how often it was asked.
+type countingNoopBuilder struct{ calls int }
+
+func (b *countingNoopBuilder) BuildMissedIndices(_ context.Context, _ *snapshot.FileEntry) error {
+	b.calls++
+	return nil
+}
+
+func writeFile(t *testing.T, snapDir, name string) {
+	t.Helper()
+	path := filepath.Join(snapDir, filepath.FromSlash(name))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+}
+
+// Indexed is the gate the post-Indexed readiness check waits on, so it must
+// mean the accessors exist — not merely that the primary landed. Dependencies
+// cannot carry that: an accessor takes its own version prefix, so its name is
+// not derivable from the primary's, and nothing populates the field.
+func TestBuildOnIndexing_AccessorMissingDoesNotAdvance(t *testing.T) {
+	snapDir := t.TempDir()
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{Name: "v1.1-025050-025060-headers.seg", Local: true}
+	require.NoError(t, inv.AddFile(primary))
+	writeFile(t, snapDir, primary.Name)
+
+	builder := &countingNoopBuilder{}
+	require.NoError(t, BuildOnIndexing(builder, inv, snapDir, nil, nil)(context.Background(), primary))
+
+	state, _ := inv.LifecycleState(primary.Name)
+	require.Equal(t, snapshot.LifecycleDownloaded, state,
+		"a primary whose accessor was never built must not count as Indexed")
+}
+
+func TestBuildOnIndexing_AccessorPresentAdvances(t *testing.T) {
+	snapDir := t.TempDir()
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{Name: "v1.1-025050-025060-headers.seg", Local: true}
+	require.NoError(t, inv.AddFile(primary))
+	writeFile(t, snapDir, primary.Name)
+	writeFile(t, snapDir, "v2.0-025050-025060-headers.idx")
+
+	builder := &countingNoopBuilder{}
+	require.NoError(t, BuildOnIndexing(builder, inv, snapDir, nil, nil)(context.Background(), primary))
+
+	state, _ := inv.LifecycleState(primary.Name)
+	require.Equal(t, snapshot.LifecycleIndexed, state)
+	require.Zero(t, builder.calls, "accessor already on disk — no scan needed")
+}
+
+// The builder is one global scan over every entity, so a second call within the
+// same sweep runs over inputs the first already covered. Files are dispatched
+// one at a time, so without a per-sweep latch a bootstrap with hundreds of
+// missing accessors costs hundreds of scans.
+func TestBuildOnIndexing_OneScanPerSweep(t *testing.T) {
+	snapDir := t.TempDir()
+	inv := snapshot.NewInventory()
+	primaries := []*snapshot.FileEntry{
+		{Name: "v1.1-025050-025060-headers.seg", Local: true},
+		{Name: "v1.1-025050-025060-bodies.seg", Local: true},
+		{Name: "v1.1-025060-025070-headers.seg", Local: true},
+		{Name: "v1.1-025060-025070-bodies.seg", Local: true},
+	}
+	for _, p := range primaries {
+		require.NoError(t, inv.AddFile(p))
+		writeFile(t, snapDir, p.Name)
+	}
+
+	builder := &countingNoopBuilder{}
+	epoch := uint64(1)
+	handler := BuildOnIndexing(builder, inv, snapDir, func() uint64 { return epoch }, nil)
+
+	for _, p := range primaries {
+		require.NoError(t, handler(context.Background(), p))
+	}
+	require.Equal(t, 1, builder.calls,
+		"four primaries in one sweep must cost one global scan, not four")
+
+	epoch = 2
+	for _, p := range primaries {
+		require.NoError(t, handler(context.Background(), p))
+	}
+	require.Equal(t, 2, builder.calls,
+		"the next sweep gets its own scan — accessors are still missing")
 }
