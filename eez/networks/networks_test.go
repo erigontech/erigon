@@ -16,6 +16,9 @@
 package networks
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -46,9 +49,17 @@ func TestDevnetGenesis(t *testing.T) {
 	require.Equal(t, common.HexToHash("0x958bcd64899023e3ab7cea07a73c4f8e65731f3df69d640a5d91737377d976ed"), codeHash.Value())
 }
 
+// TestMain checks, before any test registers them, that the networks are not
+// registered on import.
+func TestMain(m *testing.M) {
+	if _, err := chainspec.ChainSpecByName("eez-devnet"); !errors.Is(err, chainspec.ErrChainSpecUnknown) {
+		fmt.Fprintf(os.Stderr, "eez-devnet registered before Register: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
 func TestDevnetRegistered(t *testing.T) {
-	_, err := chainspec.ChainSpecByName("eez-devnet")
-	require.ErrorIs(t, err, chainspec.ErrChainSpecUnknown)
 	Register()
 	Register()
 	spec, err := chainspec.ChainSpecByName("eez-devnet")
