@@ -2861,9 +2861,7 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			continue
 		}
 		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
-			if dbg.AssertEnabled {
-				ibs.assertCreatedSelfDestructEmpty(writes, addr, empty)
-			}
+			ibs.assertCreatedSelfDestructEmpty(writes, addr, empty) // probe: always on, so CI's EEST shards check it
 			if empty {
 				writes.SetContractRemoval(addr, ibs.Version())
 			}
