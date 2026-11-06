@@ -281,12 +281,11 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, nil, err
 		}
 	}
-	accountParts, err := g.persistGraph(rawCtx, root, accountFold)
+	accountParts, hash, err := g.persistGraph(rawCtx, root, accountFold)
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
-	hash, err := fold(root, 0)
-	return hash, slices.Concat(slices.Concat(storageParts...), slices.Concat(groupParts[:]...), accountParts), err
+	return hash, slices.Concat(slices.Concat(storageParts...), slices.Concat(groupParts[:]...), accountParts), nil
 }
 
 type pendingRemoval struct {

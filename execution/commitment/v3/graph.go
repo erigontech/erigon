@@ -329,9 +329,9 @@ func (g graph) materializeRootChildren(ctx commitment.PatriciaContext, root *nod
 	return accs, nil
 }
 
-func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) (deltaParts, error) {
+func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) (deltaParts, [32]byte, error) {
 	if err := promoteRootExtension(root); err != nil {
-		return nil, err
+		return nil, [32]byte{}, err
 	}
 	var acc deltaParts
 	g.dropDead(root, root.dead, &acc)
@@ -340,11 +340,12 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
 		if accs, err = g.materializeRootChildren(ctx, root, plan); err != nil {
-			return nil, err
+			return nil, [32]byte{}, err
 		}
 	}
-	if _, err := g.materialize(ctx, root, root, &acc); err != nil {
-		return nil, err
+	hash, err := g.materialize(ctx, root, root, &acc)
+	if err != nil {
+		return nil, [32]byte{}, err
 	}
-	return append(slices.Concat(accs...), acc...), nil
+	return append(slices.Concat(accs...), acc...), hash, nil
 }

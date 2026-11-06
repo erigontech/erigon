@@ -104,7 +104,7 @@ func TestDeltas(t *testing.T) {
 						require.NoError(t, insert(root, path, []byte{byte(i)}))
 					}
 					g := graph{plane: planeStorage, addrHash: addr[:]}
-					parts, err := g.persistGraph(ctx, root, foldPlan{})
+					parts, _, err := g.persistGraph(ctx, root, foldPlan{})
 					require.NoError(t, err)
 					require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 					require.NotEmpty(t, ctx.branches)
@@ -133,7 +133,7 @@ func TestDeltas(t *testing.T) {
 
 			diverging := commitmenttest.Path([]byte{0x0c, 0x07}, 0x05)
 			require.NoError(t, insert(root, diverging, []byte{0x01}))
-			parts, err := g.persistGraph(ctx, root, foldPlan{})
+			parts, _, err := g.persistGraph(ctx, root, foldPlan{})
 			require.NoError(t, err)
 			require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 
