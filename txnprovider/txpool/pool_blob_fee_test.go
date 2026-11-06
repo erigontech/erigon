@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"math"
+	"sort"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -72,22 +73,48 @@ func TestBestDemotesABlobTxnBelowTheBlobFee(t *testing.T) {
 	require.Equal(t, 1, pool.baseFee.Len())
 }
 
-// A pending txn whose RLP is gone can never be provided; it leaves every index, not only pending.
-func TestBestDiscardsATxnWithoutRlp(t *testing.T) {
+// best() reads RLPs through a snapshot taken before it retakes the pool lock, so a flush in between can move a txn's RLP
+// to a row the snapshot does not see. The txn stays pending and is offered on the next call.
+func TestBestKeepsATxnWhoseRlpTheSnapshotMisses(t *testing.T) {
 	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
 	mt := pool.pending.best.ms[0]
+	rlp := mt.TxnSlot.Rlp
 	mt.TxnSlot.Rlp = nil
 
 	require.Zero(t, bestOf(t, pool))
-	require.Zero(t, pool.pending.Len())
-	require.NotContains(t, pool.byHash, string(mt.TxnSlot.IDHash[:]))
-	require.Nil(t, pool.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce))
+	require.Equal(t, 1, pool.pending.Len())
+	require.Contains(t, pool.byHash, string(mt.TxnSlot.IDHash[:]))
 
-	// Peers can still serve it, so the pool must not treat the hash as known.
-	tx, err := pool.poolDB.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	known, err := pool.IdHashKnown(tx, mt.TxnSlot.IDHash[:])
-	require.NoError(t, err)
-	require.False(t, known)
+	mt.TxnSlot.Rlp = rlp
+	require.Equal(t, 1, bestOf(t, pool))
+}
+
+// Removing a txn from the middle of pending swaps the last one into its place; best() must leave pending sorted.
+func TestBestKeepsPendingSortedAfterADemotion(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000, 21_000, 21_000)
+	pool.pending.best.ms[0].minFeeCap = *uint256.NewInt(1) // below the pending base fee, still first
+	require.Equal(t, 2, bestOf(t, pool))
+	require.Equal(t, 2, pool.pending.Len())
+	require.True(t, sort.IsSorted(pool.pending.best))
+}
+
+// A blob txn waiting only for the blob fee must not hold back the base fee pool txns ordered after it.
+func TestPromoteSkipsABlobTxnWaitingForTheBlobFee(t *testing.T) {
+	_, pool, _, _ := newPoolWithBlobTxn(t, "Osaka")
+	blob := newTestBlobTxnSlot(0, 1, 1, 100, 21_000)
+	blob.Txn.(*types.BlobTx).MaxFeePerBlobGas = *uint256.NewInt(5)
+	ordinary := newTestTxnSlot(0, 2, 1, 10, 21_000)
+	for _, slot := range []*TxnSlot{blob, ordinary} {
+		mt := newMetaTxn(slot, false, 0)
+		mt.minFeeCap = *slot.GetFeeCap()
+		mt.subPool = BaseFeePoolBits
+		pool.baseFee.Add(mt, "test", log.New())
+	}
+
+	var announcements Announcements
+	pool.promoteSubPools(1, 6, &announcements, log.New())
+	require.Equal(t, 1, pool.pending.Len())
+	require.Equal(t, ordinary, pool.pending.Best().TxnSlot)
+	require.Equal(t, 1, pool.baseFee.Len())
+	require.Equal(t, blob, pool.baseFee.Best().TxnSlot)
 }
