@@ -28,22 +28,27 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
+	"github.com/erigontech/erigon/eez/internal/stateless"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -219,4 +224,97 @@ func TestReplayGasFromBlockFirstInBlock(t *testing.T) {
 	require.Equal(t, sys.GetGasLimit(), third.Receipts[0].GasUsed)
 	require.Equal(t, third.Receipts[0].GasUsed, traceGasUsed(t, m, third.Block.Transactions()[0]), "debug_traceTransaction")
 	require.Equal(t, third.Receipts[0].GasUsed, generatedGasUsed(t, m, m.ChainConfig, third.Block, 0), "GetReceipt")
+}
+
+// TestExecutionWitnessGasFromBlock checks that the witness of a block proves
+// it, to its own stateless check and to the stateless executor, when a
+// type-0x76 transaction gets less than its limit from the block and its
+// target reads another account with its limit.
+func TestExecutionWitnessGasFromBlock(t *testing.T) {
+	// The witness reads the parent's commitment from history.
+	schema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = schema })
+
+	eezl2 := protocol.RollupXEEZL2Address
+	burner := common.HexToAddress("0x00000000000000000000000000000000000b0123")
+	low, high := common.HexToAddress("0x8eb1"), common.HexToAddress("0x8eb2")
+	threshold := uint64(16_000_000)
+	storeBalance := func(code []byte, addr common.Address) []byte {
+		code = append(append(code, byte(vm.PUSH20)), addr[:]...)
+		return append(code, byte(vm.BALANCE), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP))
+	}
+	// Stores in slot 0 the balance of high when GAS exceeds threshold, else of low.
+	code := []byte{byte(vm.GAS), byte(vm.PUSH3), byte(threshold >> 16), byte(threshold >> 8), byte(threshold), byte(vm.LT), byte(vm.PUSH1), 0, byte(vm.JUMPI)}
+	code = storeBalance(code, low)
+	code[7] = byte(len(code))
+	code = storeBalance(append(code, byte(vm.JUMPDEST)), high)
+
+	spec := networks.Chiado699069
+	genesis := *spec.Genesis
+	genesis.Alloc = maps.Clone(genesis.Alloc)
+	genesis.Alloc[derivertest.UserAddress()] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)}
+	genesis.Alloc[eezl2] = types.GenesisAccount{Code: code}
+	// JUMPDEST PUSH1 0 JUMP: burns all the gas it gets.
+	genesis.Alloc[burner] = types.GenesisAccount{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}}
+	genesis.Alloc[low] = types.GenesisAccount{Balance: big.NewInt(1)}
+	genesis.Alloc[high] = types.GenesisAccount{Balance: big.NewInt(2)}
+	spec.Genesis = &genesis
+	l2 := genesis.Config.L2.(*config.L2Config)
+	require.Equal(t, config.RollupX, l2.RuleSet())
+	m, execChain := derivertest.NewL2Of(t, spec)
+
+	parent, err := execChain.HeaderByNumber(t.Context(), 0)
+	require.NoError(t, err)
+	nonce, err := execChain.Nonce(t.Context(), 0, protocol.SystemAddress)
+	require.NoError(t, err)
+	sys, err := systemtx.New(protocol.SystemTx{ChainID: genesis.Config.ChainID.Uint64(), Nonce: nonce, To: eezl2})
+	require.NoError(t, err)
+	left := sys.GetGasLimit() - 1_000_000
+	require.Less(t, left, threshold)
+	require.Greater(t, sys.GetGasLimit()-params.TxGas, threshold)
+	user, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{GasLimit: l2.BlockGasLimit - left, To: &burner},
+		ChainID:  *genesis.Config.ChainID,
+		FeeCap:   *uint256.NewInt(100 * common.GWei),
+	}, *types.LatestSignerForChainID(genesis.Config.ChainID), derivertest.UserKey)
+	require.NoError(t, err)
+	built, err := execChain.Extend(t.Context(), parent, deriver.HeaderInputs{
+		Number:     1,
+		ParentHash: parent.Hash(),
+		Time:       parent.Time + l2.BlockInterval,
+		Extra:      []byte{},
+		GasLimit:   l2.BlockGasLimit,
+	}, []types.Transaction{user, sys}, common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, l2.BlockGasLimit-left, built.Receipts[0].GasUsed)
+	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[1].Status)
+	stored, err := execChain.Storage(t.Context(), 1, eezl2, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, common.BigToHash(big.NewInt(1)), stored, "block execution reads low")
+
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := jsonrpc.NewPrivateDebugAPI(
+		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+		m.DB, nil, &rpccfg.DebugApiConfig{})
+	number := rpc.BlockNumber(1)
+	// The witness checks itself statelessly under assertions only.
+	res, err := func() (*jsonrpc.ExecutionWitnessResult, error) {
+		defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		return api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &number}, nil)
+	}()
+	require.NoError(t, err)
+	raw := func(bs []hexutil.Bytes) [][]byte {
+		out := make([][]byte, len(bs))
+		for i, b := range bs {
+			out[i] = b
+		}
+		return out
+	}
+	w := &stateless.Witness{State: raw(res.State), Codes: raw(res.Codes), Headers: raw(res.Headers)}
+	_, err = stateless.Verify(m.ChainConfig, m.Engine, built.Block, w)
+	require.NoError(t, err)
 }

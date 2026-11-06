@@ -666,6 +666,7 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	// Execute all transactions in the block
+	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	for txIndex, txn := range block.Transactions() {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -678,7 +679,6 @@ func (api *BaseAPI) buildAccessedState(
 		txCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
-		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		ibs.SetTxContext(blockNum, txIndex)
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
@@ -2100,6 +2100,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	}
 
 	// Execute all transactions in the block
+	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
@@ -2109,7 +2110,6 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		txCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
-		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		ibs.SetTxContext(blockNum, txIndex)
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
