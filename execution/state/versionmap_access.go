@@ -99,6 +99,13 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 	return uint256.Int{}, false
 }
 
+// GetCode returns addr's code written in this map at or below the view's txNum; false ok means
+// no tx of the map wrote it, and the caller reads its base.
+func (view *VersionMapView) GetCode(addr accounts.Address) ([]byte, bool) {
+	code, _, ok := view.vm.ReadCode(addr, view.txIdx())
+	return code.Bytes, ok
+}
+
 // DestroyedAt reports whether addr was destroyed or removed (self-destruct or EIP-161
 // touched-empty removal) at or below the view's txNum, and the tx index of that destruct —
 // the lifecycle verdict the commitment uses to delete the account's whole storage subtree.
