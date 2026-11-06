@@ -3175,12 +3175,6 @@ func (be *blockExecutor) validateNow(txIdx int) bool {
 		}, false, "") == state.VersionValid
 }
 
-func (be *blockExecutor) arrivalValid(txIdx int) bool {
-	// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
-	// write stamp does not imply an unchanged read set.
-	return be.validateNow(txIdx)
-}
-
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
 // contiguous validated-but-not-finalized prefix, then validates the dependency-ready
 // txs out of order, committing each or cascading a re-validation of successors on
@@ -3206,12 +3200,9 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			// Trust the worker's verdict only when no tx below this one wrote since it was
-			// stamped. Otherwise re-validate against the CURRENT versionMap: a predecessor
-			// may have changed or sealed since (including an in-flight Validated cell the
-			// reader early-broke on), so a stale verdict would commit against a value that
-			// has moved.
-			valid := be.arrivalValid(txVersion.TxIndex)
+			// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
+			// write stamp does not imply an unchanged read set.
+			valid := be.validateNow(txVersion.TxIndex)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
