@@ -98,22 +98,22 @@ func TestDeletedMappingsCountsAMappedFileUntilUnmap(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	n, size, err := DeletedMappings(dir)
+	paths, _, err := DeletedMappings(dir)
 	require.NoError(t, err)
-	require.Zero(t, n, "a mapped file that still exists is not counted")
+	require.Empty(t, paths, "a mapped file that still exists is not counted")
 
 	require.NoError(t, os.Remove(p))
-	n, size, err = DeletedMappings(dir)
+	paths, size, err := DeletedMappings(dir)
 	require.NoError(t, err)
-	require.Equal(t, 1, n)
+	require.Equal(t, []string{p}, paths)
 	require.Equal(t, uint64(pg*4), size)
 
-	n, _, err = DeletedMappings(filepath.Join(dir, "other"))
+	paths, _, err = DeletedMappings(dir[:len(dir)-1])
 	require.NoError(t, err)
-	require.Zero(t, n, "mappings outside dir are not counted")
+	require.Empty(t, paths, "a sibling directory with the same prefix is not counted")
 
 	require.NoError(t, m.Unmap())
-	n, _, err = DeletedMappings(dir)
+	paths, _, err = DeletedMappings(dir)
 	require.NoError(t, err)
-	require.Zero(t, n)
+	require.Empty(t, paths)
 }

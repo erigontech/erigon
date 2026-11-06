@@ -91,17 +91,28 @@ func TestMCPNamespacesFollowHTTPAPI(t *testing.T) {
 	}
 }
 
-func TestDeletedMappingsWatchWarnsOnlyAfterTheyStay(t *testing.T) {
-	var w deletedMappingsWatch
+func TestDeletedFilesWatchWarnsOnlyForAFileThatStays(t *testing.T) {
+	var w deletedFilesWatch
 	t0 := time.Unix(1_000_000, 0)
-	require.False(t, w.warn(t0, 3))
-	require.False(t, w.warn(t0.Add(deletedMappingsWarnAfter-time.Second), 3), "mappings of files that readers still drain are normal")
-	require.True(t, w.warn(t0.Add(deletedMappingsWarnAfter), 3))
-	require.False(t, w.warn(t0.Add(deletedMappingsWarnAfter+time.Minute), 3), "one warning per period")
-	require.True(t, w.warn(t0.Add(2*deletedMappingsWarnAfter), 3))
+	_, _, ok := w.warn(t0, []string{"/d/a.seg"})
+	require.False(t, ok)
+	_, _, ok = w.warn(t0.Add(deletedFileWarnAfter-time.Second), []string{"/d/a.seg", "/d/b.seg"})
+	require.False(t, ok, "a file that readers still drain is normal")
+	oldest, since, ok := w.warn(t0.Add(deletedFileWarnAfter), []string{"/d/a.seg", "/d/b.seg"})
+	require.True(t, ok)
+	require.Equal(t, "/d/a.seg", oldest)
+	require.Equal(t, t0, since)
+	_, _, ok = w.warn(t0.Add(deletedFileWarnAfter+time.Minute), []string{"/d/a.seg"})
+	require.False(t, ok, "one warning per period")
+	_, _, ok = w.warn(t0.Add(2*deletedFileWarnAfter), []string{"/d/a.seg"})
+	require.True(t, ok)
+}
 
-	require.False(t, w.warn(t0.Add(3*deletedMappingsWarnAfter), 0))
-	t1 := t0.Add(4 * deletedMappingsWarnAfter)
-	require.False(t, w.warn(t1, 1), "a count that dropped to zero starts the period again")
-	require.True(t, w.warn(t1.Add(deletedMappingsWarnAfter), 1))
+func TestDeletedFilesWatchIgnoresChurnOfShortLivedFiles(t *testing.T) {
+	var w deletedFilesWatch
+	t0 := time.Unix(1_000_000, 0)
+	for i := range 3 * int(deletedFileWarnAfter/time.Minute) {
+		_, _, ok := w.warn(t0.Add(time.Duration(i)*time.Minute), []string{fmt.Sprintf("/d/%d.seg", i)})
+		require.False(t, ok, "every file went away within a minute")
+	}
 }

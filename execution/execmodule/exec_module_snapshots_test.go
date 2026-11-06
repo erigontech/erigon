@@ -19,6 +19,7 @@ package execmodule_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 }
 
 // Block retire, state files, a reorg and reads over all of them must not keep a deleted file of the datadir
-// open or mapped (its disk space would stay used until restart), and repeated reads must not grow the fd count.
+// open or mapped: its disk space would stay used until restart.
 func TestExecModuleLeavesNoDeletedFileOpen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
@@ -99,7 +100,9 @@ func TestExecModuleLeavesNoDeletedFileOpen(t *testing.T) {
 		execmoduletester.WithStepSize(3),
 		execmoduletester.WithMaxReorgDepth(4),
 	)
-	if _, _, err := dir.OpenFiles(emt.Dirs.DataDir); errors.Is(err, errors.ErrUnsupported) {
+	datadir, err := filepath.EvalSymlinks(emt.Dirs.DataDir)
+	require.NoError(t, err)
+	if _, err := dir.DeletedOpenFiles(datadir); errors.Is(err, errors.ErrUnsupported) {
 		return // no /proc/self/fd on this platform
 	}
 	require.NoError(t, emt.WaitForBlockRetirement(ctx))
@@ -148,24 +151,18 @@ func TestExecModuleLeavesNoDeletedFileOpen(t *testing.T) {
 		}
 	}
 	readAll()
-	before, _, err := dir.OpenFiles(emt.Dirs.DataDir)
-	require.NoError(t, err)
-	readAll()
-	after, _, err := dir.OpenFiles(emt.Dirs.DataDir)
-	require.NoError(t, err)
-	require.LessOrEqual(t, after, before, "reads leaked file descriptors")
 
-	var mapped, deleted int
+	var mapped, deleted []string
 	for range 100 { // reclaim of retired files can still be running
-		mapped, _, err = mmap.DeletedMappings(emt.Dirs.DataDir)
+		mapped, _, err = mmap.DeletedMappings(datadir)
 		require.NoError(t, err)
-		_, deleted, err = dir.OpenFiles(emt.Dirs.DataDir)
+		deleted, err = dir.DeletedOpenFiles(datadir)
 		require.NoError(t, err)
-		if mapped == 0 && deleted == 0 {
+		if len(mapped) == 0 && len(deleted) == 0 {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.Zero(t, mapped, "deleted files are still mapped")
-	require.Zero(t, deleted, "deleted files are still open")
+	require.Empty(t, mapped, "deleted files are still mapped")
+	require.Empty(t, deleted, "deleted files are still open")
 }

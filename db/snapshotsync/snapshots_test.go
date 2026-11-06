@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
@@ -1887,10 +1887,10 @@ func TestMergeCyclesLeaveNoDeletedFileMapped(t *testing.T) {
 	require.NoError(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil))
 	reader.Close()
 
-	n, _, err := mmap.DeletedMappings(dir)
+	paths, _, err := mmap.DeletedMappings(dir)
 	if errors.Is(err, errors.ErrUnsupported) {
 		return // no /proc/self/maps on this platform
 	}
 	require.NoError(err)
-	require.Zero(n, "deleted files are still mapped")
+	require.Empty(paths, "deleted files are still mapped")
 }

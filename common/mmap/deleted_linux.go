@@ -25,30 +25,28 @@ import (
 	"strings"
 )
 
-// DeletedMappings counts this process's mappings of files under dir that were deleted on disk, and their total size.
-func DeletedMappings(dir string) (count int, size uint64, err error) {
+// DeletedMappings returns the path of each of this process's mappings of a file under dir that was deleted on disk,
+// and their total size. dir must be symlink-resolved, as /proc shows paths.
+func DeletedMappings(dir string) (paths []string, size uint64, err error) {
 	f, err := os.Open("/proc/self/maps")
 	if err != nil {
-		return 0, 0, err
+		return nil, 0, err
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
-		path, deleted := strings.CutSuffix(line, " (deleted)")
-		if !deleted {
-			continue
-		}
-		fields := strings.Fields(path)
-		if len(fields) < 6 || !strings.HasPrefix(fields[5], dir) {
+		line, deleted := strings.CutSuffix(line, " (deleted)")
+		i := strings.IndexByte(line, '/')
+		if !deleted || i < 0 || !strings.HasPrefix(line[i:], dir+"/") {
 			continue
 		}
 		var start, end uint64
-		if _, err := fmt.Sscanf(fields[0], "%x-%x", &start, &end); err != nil {
-			return 0, 0, err
+		if _, err := fmt.Sscanf(line, "%x-%x", &start, &end); err != nil {
+			return nil, 0, err
 		}
-		count++
+		paths = append(paths, line[i:])
 		size += end - start
 	}
-	return count, size, sc.Err()
+	return paths, size, sc.Err()
 }

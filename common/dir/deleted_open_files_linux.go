@@ -14,10 +14,30 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
+//go:build linux
 
 package dir
 
-import "errors"
+import (
+	"os"
+	"strings"
+)
 
-func OpenFiles(string) (int, int, error) { return 0, 0, errors.ErrUnsupported }
+// DeletedOpenFiles returns the path of each of this process's open fds of a file under dir that was deleted on disk.
+// dir must be symlink-resolved, as /proc shows paths.
+func DeletedOpenFiles(dir string) (paths []string, err error) {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		target, err := os.Readlink("/proc/self/fd/" + e.Name())
+		if err != nil {
+			continue // closed since ReadDir
+		}
+		if path, ok := strings.CutSuffix(target, " (deleted)"); ok && strings.HasPrefix(path, dir+"/") {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}

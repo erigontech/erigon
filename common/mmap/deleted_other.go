@@ -20,4 +20,4 @@ package mmap
 
 import "errors"
 
-func DeletedMappings(string) (int, uint64, error) { return 0, 0, errors.ErrUnsupported }
+func DeletedMappings(string) ([]string, uint64, error) { return nil, 0, errors.ErrUnsupported }

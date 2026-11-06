@@ -14,30 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build linux
+//go:build !linux
 
 package dir
 
-import (
-	"os"
-	"strings"
-)
+import "errors"
 
-// OpenFiles counts this process's open file descriptors, and those of files under dir that were deleted on disk.
-func OpenFiles(dir string) (open, deleted int, err error) {
-	entries, err := os.ReadDir("/proc/self/fd")
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, e := range entries {
-		open++
-		target, err := os.Readlink("/proc/self/fd/" + e.Name())
-		if err != nil {
-			continue // closed since ReadDir
-		}
-		if path, ok := strings.CutSuffix(target, " (deleted)"); ok && strings.HasPrefix(path, dir) {
-			deleted++
-		}
-	}
-	return open, deleted, nil
-}
+func DeletedOpenFiles(string) ([]string, error) { return nil, errors.ErrUnsupported }

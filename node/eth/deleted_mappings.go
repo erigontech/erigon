@@ -18,6 +18,8 @@ package eth
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -28,59 +30,74 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// deletedMappingsWarnAfter is longer than readers of a retired file normally take to drain.
-const deletedMappingsWarnAfter = 10 * time.Minute
+// deletedFileWarnAfter is longer than readers of a retired file normally take to drain.
+const deletedFileWarnAfter = 10 * time.Minute
 
 var (
 	mxDeletedMappedFiles = metrics.GetOrCreateGauge("mmap_deleted_files")
 	mxDeletedMappedBytes = metrics.GetOrCreateGauge("mmap_deleted_bytes")
-	mxOpenFds            = metrics.GetOrCreateGauge("fd_open")
 	mxDeletedOpenFds     = metrics.GetOrCreateGauge("fd_deleted")
 )
 
-type deletedMappingsWatch struct{ since, lastWarn time.Time }
-
-func (w *deletedMappingsWatch) warn(now time.Time, count int) bool {
-	if count == 0 {
-		w.since = time.Time{}
-		return false
-	}
-	if w.since.IsZero() {
-		w.since = now
-	}
-	if now.Sub(w.since) < deletedMappingsWarnAfter || now.Sub(w.lastWarn) < deletedMappingsWarnAfter {
-		return false
-	}
-	w.lastWarn = now
-	return true
+// deletedFilesWatch remembers when each deleted path was first seen, so files that come and go during a long
+// merge do not add up to one warning.
+type deletedFilesWatch struct {
+	firstSeen map[string]time.Time
+	lastWarn  time.Time
 }
 
-// watchDeletedMappings exports open fds and how many files under datadir stay open or mapped after deletion,
-// and warns when those do not go away.
+// warn returns the path deleted longest ago when it has stayed for deletedFileWarnAfter, at most once per that period.
+func (w *deletedFilesWatch) warn(now time.Time, paths []string) (oldest string, since time.Time, ok bool) {
+	seen := make(map[string]time.Time, len(paths))
+	for _, p := range paths {
+		t, found := w.firstSeen[p]
+		if !found {
+			t = now
+		}
+		seen[p] = t
+		if oldest == "" || t.Before(since) {
+			oldest, since = p, t
+		}
+	}
+	w.firstSeen = seen
+	if oldest == "" || now.Sub(since) < deletedFileWarnAfter || now.Sub(w.lastWarn) < deletedFileWarnAfter {
+		return "", time.Time{}, false
+	}
+	w.lastWarn = now
+	return oldest, since, true
+}
+
+// watchDeletedMappings exports how many files under datadir stay open or mapped after deletion, and warns when
+// one of them does not go away.
 func watchDeletedMappings(ctx context.Context, datadir string, logger log.Logger) {
+	if resolved, err := filepath.EvalSymlinks(datadir); err == nil {
+		datadir = resolved
+	}
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	var w deletedMappingsWatch
+	var w deletedFilesWatch
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
 			mapped, size, err := mmap.DeletedMappings(datadir)
-			if err != nil {
+			if errors.Is(err, errors.ErrUnsupported) {
 				return
 			}
-			open, deleted, err := dir.OpenFiles(datadir)
 			if err != nil {
-				return
+				continue
 			}
-			mxDeletedMappedFiles.SetUint64(uint64(mapped))
+			fds, err := dir.DeletedOpenFiles(datadir)
+			if err != nil {
+				continue
+			}
+			mxDeletedMappedFiles.SetUint64(uint64(len(mapped)))
 			mxDeletedMappedBytes.SetUint64(size)
-			mxOpenFds.SetUint64(uint64(open))
-			mxDeletedOpenFds.SetUint64(uint64(deleted))
-			if w.warn(now, mapped+deleted) {
+			mxDeletedOpenFds.SetUint64(uint64(len(fds)))
+			if oldest, since, ok := w.warn(now, append(mapped, fds...)); ok {
 				logger.Warn("[files] deleted files are still open or mapped; their disk space is freed only after close and unmap",
-					"mapped", mapped, "mappedSize", datasize.ByteSize(size).HR(), "openFds", deleted, "since", w.since.Format(time.DateTime))
+					"mapped", len(mapped), "mappedSize", datasize.ByteSize(size).HR(), "deletedFds", len(fds), "oldest", oldest, "since", since.Format(time.DateTime))
 			}
 		}
 	}
