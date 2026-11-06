@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -2241,7 +2242,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	// has no floor, so a nonce=0 write there is a net-zero change the BAL wrongly reports.
 	if previous != nil {
 		ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
-	} else if ibs.versionMap != nil {
+	} else if ibs.versionMap != nil && !x3StubCreateReads {
 		if _, res, ok := ibs.versionMap.ReadNonce(addr, ibs.txIndex); ok && res.resolved() {
 			ibs.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
 		}
@@ -3836,3 +3837,6 @@ func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 	}
 	return nil
 }
+
+// x3StubCreateReads is a probe bound: X3_STUB=1 skips createObject's version-map reads for a fresh account.
+var x3StubCreateReads = os.Getenv("X3_STUB") == "1"
