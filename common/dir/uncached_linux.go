@@ -49,15 +49,12 @@ func (w *uncachedWriter) Write(p []byte) (int, error) {
 	written := 0
 	for written < len(p) && !w.unsupported {
 		n, err := unix.Pwritev2(int(w.f.Fd()), [][]byte{p[written:]}, w.off, unix.RWF_DONTCACHE)
-		if errors.Is(err, unix.EOPNOTSUPP) {
-			w.unsupported = true
-			break
-		}
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
-			return written, err
+			w.unsupported = true
+			break
 		}
 		if n == 0 {
 			return written, io.ErrShortWrite
