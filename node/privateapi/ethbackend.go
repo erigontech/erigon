@@ -569,10 +569,8 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	ibs := state.New(reader)
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
-	// The validation hook forbids BLOCKHASH, but cancellation does not stop
-	// the current opcode from calling GetHash.
-	// The validation tracer rejects BLOCKHASH. A lookup error would be taken for the node's own
-	// failure, not for an invalid transaction.
+	// The validation hook rejects BLOCKHASH but does not stop the opcode from calling GetHash, where
+	// an error would be taken for the node's failure, not for an invalid transaction.
 	noBlockHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
 	// State comes from the published head, but inclusion would happen in the next
 	// block. Its context must account for fee changes and fork activation.

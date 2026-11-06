@@ -29,12 +29,24 @@ import (
 // A block after the reference header has no hash yet, like the block being executed. Block
 // overrides in a trace can ask for one.
 func TestGetHashFnAnswersZeroForALaterBlock(t *testing.T) {
-	header := &types.Header{Number: *uint256.NewInt(10)}
-	getHash := GetHashFn(header, func(common.Hash, uint64) (*types.Header, error) {
-		t.Fatal("a later block needs no header lookup")
-		return nil, nil
-	})
-	hash, err := getHash(10)
-	require.NoError(t, err)
-	require.Equal(t, common.Hash{}, hash)
+	for _, test := range []struct {
+		name      string
+		refNumber uint64
+		n         uint64
+	}{
+		{"the reference block", 10, 10},
+		{"a block after it", 10, 11},
+		{"the genesis reference block", 0, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := &types.Header{Number: *uint256.NewInt(test.refNumber)}
+			getHash := GetHashFn(header, func(common.Hash, uint64) (*types.Header, error) {
+				t.Fatal("a later block needs no header lookup")
+				return nil, nil
+			})
+			hash, err := getHash(test.n)
+			require.NoError(t, err)
+			require.Equal(t, common.Hash{}, hash)
+		})
+	}
 }
