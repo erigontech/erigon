@@ -489,8 +489,12 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 			touch := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(touch.Close)
 			touch.SetTxContext(1, 0)
+			vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, false)
 			require.NoError(t, touch.TouchAccount(addr))
-			vm.FlushVersionedWrites(finalizedWrites(t, touch, rules), true)
+			removal := finalizedWrites(t, touch, rules)
+			bal, ok := removal.GetBalance(addr)
+			require.True(t, ok && bal.Deletes(), "the touching tx removes the account")
+			vm.FlushVersionedWrites(removal, true)
 
 			recreate := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(recreate.Close)
