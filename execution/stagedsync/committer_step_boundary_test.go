@@ -1277,7 +1277,7 @@ func TestAsOfStateReaderReadsFoldingBlockAtCurTxNum(t *testing.T) {
 	slot := func(b byte) ([]byte, accounts.StorageKey) {
 		var h common.Hash
 		h[31] = b
-		return append(common.Copy(addr[:]), h[:]...), accounts.InternKey(h)
+		return append(bytes.Clone(addr[:]), h[:]...), accounts.InternKey(h)
 	}
 	changed, changedKey := slot(1)
 	untouched, _ := slot(2)
