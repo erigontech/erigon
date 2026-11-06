@@ -1491,3 +1491,16 @@ func TestAlternateQuotaBoundsAPeerAndIsReleased(t *testing.T) {
 	a.timeoutSweep()
 	require.Empty(t, a.fetch.alternatesOf, "resolved requests release their alternates")
 }
+
+func TestDisconnectedPeerLeavesTheAlternates(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, gone, peerC := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	a.announce(t, peerA, hash)
+	a.announce(t, gone, hash)
+	a.announce(t, peerC, hash)
+	require.NoError(t, a.fetch.handleNewPeer(a.sentryClient, &sentryproto.PeerEvent{PeerId: gointerfaces.ConvertHashToH512(gone), EventId: sentryproto.PeerEvent_Disconnect}))
+	require.NotContains(t, a.fetch.alternatesOf, fetchPeer{a.sentryClient, gone}, "a disconnected peer holds no alternate quota")
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerC}, a.requestedFrom, "the disconnected peer is not asked")
+}

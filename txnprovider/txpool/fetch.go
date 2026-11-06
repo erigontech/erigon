@@ -1043,7 +1043,7 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 		if req == nil {
 			return nil
 		}
-		if err := f.handleNewPeer(req); err != nil {
+		if err := f.handleNewPeer(sentryClient, req); err != nil {
 			return err
 		}
 		if f.wg != nil {
@@ -1052,15 +1052,34 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 	}
 }
 
-func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
+func (f *Fetch) handleNewPeer(sentryClient sentryproto.SentryClient, req *sentryproto.PeerEvent) error {
 	if req == nil {
 		return nil
 	}
-	if req.EventId == sentryproto.PeerEvent_Connect {
+	switch req.EventId {
+	case sentryproto.PeerEvent_Connect:
 		f.pool.AddNewGoodPeer(req.PeerId)
+	case sentryproto.PeerEvent_Disconnect:
+		f.dropAlternate(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)})
 	}
-
 	return nil
+}
+
+// dropAlternate removes a disconnected peer from the hashes it waits on as an alternate: fresh peer IDs would
+// otherwise grow the alternates without bound.
+func (f *Fetch) dropAlternate(peer fetchPeer) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	for _, p := range f.pending {
+		if f.alternatesOf[peer] == 0 {
+			return
+		}
+		if r, ok := f.requested.Get(p.hash[:]); ok && r.at.Equal(p.at) {
+			if i := slices.Index(r.alternates, peer); i >= 0 {
+				f.removeAlternate(r, i)
+			}
+		}
+	}
 }
 
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
