@@ -346,16 +346,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	var poolTx kv.Tx
-	if p.poolDB != nil {
-		if poolTx, err = p.beginRoThenLock(ctx); err != nil {
-			return err
-		}
-		defer poolTx.Rollback()
-	} else {
-		p.lock.Lock()
-	}
-	frames, err := p.applyBlockUpdate(stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView, poolTx)
+	frames, err := p.applyBlockUpdate(ctx, stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView)
 	if err != nil {
 		return err
 	}
@@ -364,10 +355,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 // applyBlockUpdate applies the announced state under the pool lock and returns
 // revalidation work that needs frame simulation after releasing it.
-func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots,
-	cacheView kvcache.CacheView, poolTx kv.Tx,
+func (p *TxPool) applyBlockUpdate(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots,
+	cacheView kvcache.CacheView,
 ) (frames frameRevalidationBatch, err error) {
-	defer p.lock.Unlock() // the caller takes the lock after opening poolTx
+	poolTx, err := p.beginRoThenLock(ctx)
+	if err != nil {
+		return frames, err
+	}
+	defer p.lock.Unlock()
+	if poolTx != nil {
+		defer poolTx.Rollback()
+	}
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
@@ -2780,8 +2778,12 @@ func (p *TxPool) Run(ctx context.Context) error {
 
 // beginRoThenLock opens a pool read tx and then takes p.lock, the order every other caller uses. It
 // retries when a flush commits in between, because the flush clears the Rlp of pooled slots and the
-// older snapshot does not have the rows it wrote.
+// older snapshot does not have the rows it wrote. Without a pool DB it only takes the lock and returns a nil tx.
 func (p *TxPool) beginRoThenLock(ctx context.Context) (kv.Tx, error) {
+	if p.poolDB == nil {
+		p.lock.Lock()
+		return nil, nil
+	}
 	for {
 		flushes := p.flushes.Load()
 		tx, err := p.poolDB.BeginRo(ctx) //nolint:gocritic // The caller owns Rollback.
