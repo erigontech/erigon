@@ -79,6 +79,7 @@ type DB struct {
 	// blockFiles: block snapshots, the peer of stateFiles. Nil for state-only
 	// tools; a tx from such a DB pins no view and panics on any block read.
 	blockFiles *blocksnapshots.RoSnapshots
+	closeOnce  sync.Once // a second Close waits for the first: RwDB.Close returns at once when already closing
 }
 
 // New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
@@ -270,13 +271,15 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 // ones like the background block-retire goroutine. The aggregator's own
 // goroutines hold mdbx read txs, so they must be joined before that drain.
 func (db *DB) Close() {
-	if db.stateFiles != nil {
-		db.stateFiles.StopBackground()
-	}
-	db.RwDB.Close()
-	if db.stateFiles != nil {
-		db.stateFiles.Close()
-	}
+	db.closeOnce.Do(func() {
+		if db.stateFiles != nil {
+			db.stateFiles.StopBackground()
+		}
+		db.RwDB.Close()
+		if db.stateFiles != nil {
+			db.stateFiles.Close()
+		}
+	})
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {

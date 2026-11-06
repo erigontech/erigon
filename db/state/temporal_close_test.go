@@ -66,3 +66,39 @@ func TestTemporalDBClose_KeepsFilesUntilOpenTxIsDone(t *testing.T) {
 	}
 	require.Zero(t, agg.EndTxNumMinimax())
 }
+
+// A second Close that overlaps the first must wait for the same drain, not close the files under the open tx.
+func TestTemporalDBClose_OverlappingCloseWaitsForTheDrain(t *testing.T) {
+	t.Parallel()
+
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 2})
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	closed := make(chan struct{}, 2)
+	go func() { db.Close(); closed <- struct{}{} }()
+	raw := db.(*temporal.DB).InternalDB()
+	for {
+		rtx, err := raw.BeginRo(t.Context()) //nolint:gocritic
+		if err != nil {
+			break
+		}
+		rtx.Rollback()
+		time.Sleep(time.Millisecond)
+	}
+	go func() { db.Close(); closed <- struct{}{} }()
+	time.Sleep(100 * time.Millisecond) // the second Close, if it does not wait, closes the files by now
+
+	require.NotZero(t, agg.EndTxNumMinimax(), "an overlapping Close closed the state files while a temporal tx was still open")
+	require.Empty(t, closed, "no Close returns while the tx is open")
+
+	tx.Rollback()
+	for range 2 {
+		select {
+		case <-closed:
+		case <-time.After(time.Minute):
+			t.Fatal("Close did not return after the temporal tx was rolled back")
+		}
+	}
+}
