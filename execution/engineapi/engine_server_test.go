@@ -417,6 +417,9 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 		blobHashes          []common.Hash
 		l2                  bool
 		busy                bool
+		parentBeforeTTD     bool
+		noTTD               bool
+		wantRPCErr          string
 		wantStatus          engine_types.EngineStatus
 		wantErr             string
 		wantLatestValidHash *common.Hash
@@ -424,12 +427,15 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 	}{
 		{name: "5 txs above the parent's gas limit", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "gas limit above the parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block: invalid gas limit: have 134400, want 67200 +-= 64", wantLatestValidHash: &parentHash, wantBad: true},
+		{name: "gas limit above the parent's, parent before the terminal total difficulty", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, parentBeforeTTD: true, wantStatus: engine_types.InvalidStatus, wantErr: "Beacon Chain request before TTD", wantLatestValidHash: &common.Hash{}},
+		{name: "gas limit above the parent's, chain without a terminal total difficulty", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, noTTD: true, wantRPCErr: "not a proof-of-stake chain"},
 		{name: "time of the parent", txCount: 4, gasLimit: parent.GasLimit, time: 1000, parentValidated: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block: timestamp older than parent", wantLatestValidHash: &parentHash, wantBad: true},
 		{name: "gas limit above the parent's, block already stored", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, stored: true, wantStatus: engine_types.AcceptedStatus},
 		{name: "gas limit above the parent's, block lookup fails", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, lookupErr: context.Canceled, wantStatus: engine_types.AcceptedStatus},
 		{name: "gas limit above an unvalidated parent's", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.AcceptedStatus},
 		{name: "gas limit above the parent's with a wrong block hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, wrongBlockHash: true, wantStatus: engine_types.InvalidStatus, wantErr: "invalid block hash"},
 		{name: "gas limit above the parent's with a wrong blob hash", txCount: 4, gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{{0x01}}, wantStatus: engine_types.InvalidStatus, wantErr: "mismatch blob hashes"},
+		{name: "5 txs above an unvalidated parent's gas limit, parent before the terminal total difficulty", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, parentBeforeTTD: true, wantStatus: engine_types.InvalidStatus, wantErr: "Beacon Chain request before TTD", wantLatestValidHash: &common.Hash{}},
 		{name: "5 txs above an unvalidated parent's gas limit", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 5 transactions use at least 16800 gas each"},
 		{name: "5 txs above an unvalidated parent's gas limit, execution module busy", txCount: 5, gasLimit: 2 * parent.GasLimit, time: 1001, busy: true, wantStatus: engine_types.SyncingStatus},
 		{name: "4 txs above the payload's own gas limit, below the parent's", txCount: 4, gasLimit: 3 * 16_800, time: 1001, wantStatus: engine_types.InvalidStatus, wantErr: "gas limit reached: 4 transactions use at least 16800 gas each"},
@@ -463,6 +469,12 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 			if test.l2 {
 				cfg.L2 = testL2Config{}
 			}
+			if test.parentBeforeTTD {
+				cfg.TerminalTotalDifficulty = uint256.NewInt(2)
+			}
+			if test.noTTD {
+				cfg.TerminalTotalDifficulty = nil
+			}
 			header.BaseFee = misc.CalcBaseFee(cfg, parent)
 			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
 			payload, err := engine_types.ExecutionPayloadFromBlock(block)
@@ -488,6 +500,12 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 				isValidatedFunc:        func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
 				addSendersRecoveryFunc: func(common.Hash, *exec.SendersRecovery) { recovered = true },
 				readyFunc:              func(context.Context) (bool, error) { return !test.busy, nil },
+				getTDFunc: func(_ context.Context, hash *common.Hash, number *uint64) (*uint256.Int, error) {
+					if hash != nil && *hash == parentHash && number != nil && *number == parent.Number.Uint64() {
+						return uint256.NewInt(1), nil
+					}
+					return nil, nil
+				},
 			}
 			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
@@ -498,6 +516,10 @@ func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
 				status, err = srv.NewPayloadV3(t.Context(), payload, test.blobHashes, header.ParentBeaconBlockRoot)
 			} else {
 				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			if test.wantRPCErr != "" {
+				require.EqualError(t, err, test.wantRPCErr)
+				return
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.wantStatus, status.Status)

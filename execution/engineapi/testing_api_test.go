@@ -70,6 +70,7 @@ type stubExecutionModule struct {
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 	isValidatedFunc        func(hash common.Hash) bool
 	readyFunc              func(ctx context.Context) (bool, error)
+	getTDFunc              func(ctx context.Context, hash *common.Hash, number *uint64) (*uint256.Int, error)
 
 	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
 }
@@ -190,7 +191,10 @@ func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash comm
 	return nil, nil
 }
 
-func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
+func (s *stubExecutionModule) GetTD(ctx context.Context, hash *common.Hash, number *uint64) (*uint256.Int, error) {
+	if s.getTDFunc != nil {
+		return s.getTDFunc(ctx, hash, number)
+	}
 	return nil, nil
 }
 
