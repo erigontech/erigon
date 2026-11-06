@@ -1441,89 +1441,84 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			wtx, stamped = writes.txIndex(), true
 			vm.mutBegin(wtx)
 		}
-		vm.flushAccount(vm.entryOrCreate(addr), addr, writes, flag)
+		e := vm.entryOrCreate(addr)
+		e.mu.Lock()
+		defer e.mu.Unlock() // a recovered panic (an assert) must not leave the account's readers blocked
+		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
+		destructed := false
+		if sd, ok := writes.selfDestruct[addr]; ok {
+			destructed = sd.Val
+			if !destructed {
+				state, _, _, _ := accountLifecycleLocked(e, sd.Version.TxIndex, false)
+				destructed = state != LifecycleLive
+			}
+		}
+		if vw, ok := writes.address[addr]; ok {
+			e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, destructed)
+		}
+		if vw, ok := writes.selfDestruct[addr]; ok {
+			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
+		}
+		if vw, ok := writes.balance[addr]; ok {
+			e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, destructed)
+		}
+		if vw, ok := writes.nonce[addr]; ok {
+			e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, destructed)
+		}
+		if vw, ok := writes.incarnation[addr]; ok {
+			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
+		}
+		if vw, ok := writes.code[addr]; ok {
+			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
+		}
+		if vw, ok := writes.codeHash[addr]; ok {
+			e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, destructed)
+		}
+		if vw, ok := writes.codeSize[addr]; ok {
+			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
+		}
+		if vw, ok := writes.createContract[addr]; ok {
+			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
+		}
+		if inner, ok := writes.storage[addr]; ok {
+			if e.Storage == nil {
+				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
+			}
+			for key, vw := range inner {
+				// On a BAL block a net-zero write is omitted from the BAL and folded away by
+				// StorageChanges, so it is never materialized here (nor sealed below). The slot
+				// must read as the access list seeds it, so a cell an earlier run of the tx left
+				// goes back to the seed or away. Before the seal a Done cell holds the seed.
+				if vm.HasBAL && vw.valStatus == ValueUnchanged {
+					if cells := e.Storage[key]; cells != nil {
+						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
+							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
+								// As in flushCell, a changed value needs a new version, so that the
+								// readers of the earlier value are invalidated.
+								if !c.Value.Eq(&seed) {
+									c.incarnation = vw.Version.Incarnation
+								}
+								c.Value, c.valStatus = seed, ValueChanged
+								c.flag.Store(uint32(FlagDone))
+							} else {
+								cells.Delete(vw.Version.TxIndex)
+								releaseCellStorage(c)
+							}
+						}
+					}
+					continue
+				}
+				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
+			}
+		}
 	})
 }
 
-// flushAllNoOpRLocked is flushAllNoOp under the account's read lock; a panic inside still releases it.
+// flushAllNoOpRLocked is flushAllNoOp under the account's read lock, released before the flush takes the write lock.
 func flushAllNoOpRLocked(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return flushAllNoOp(e, writes, addr, flag)
-}
-
-// flushAccount writes one account's cells under its lock; a panic inside (an assert) still releases it,
-// so a worker that recovers the panic leaves no reader of the account blocked.
-func (vm *VersionMap) flushAccount(e *AddressEntry, addr accounts.Address, writes *WriteSet, flag statusFlag) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
-	destructed := false
-	if sd, ok := writes.selfDestruct[addr]; ok {
-		destructed = sd.Val
-		if !destructed {
-			state, _, _, _ := accountLifecycleLocked(e, sd.Version.TxIndex, false)
-			destructed = state != LifecycleLive
-		}
-	}
-	if vw, ok := writes.address[addr]; ok {
-		e.Address = flushCell(vm, e.Address, addr, AddressPath, vw.Version, flag, vw.Val, vw.valStatus, getCellAccount, eqAccount, destructed)
-	}
-	if vw, ok := writes.selfDestruct[addr]; ok {
-		e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellSelfDestruct)
-	}
-	if vw, ok := writes.balance[addr]; ok {
-		e.Balance = flushCell(vm, e.Balance, addr, BalancePath, vw.Version, flag, vw.Val, vw.valStatus, getCellBalance, eqUint256, destructed)
-	}
-	if vw, ok := writes.nonce[addr]; ok {
-		e.Nonce = flushCell(vm, e.Nonce, addr, NoncePath, vw.Version, flag, vw.Val, vw.valStatus, getCellNonce, eqUint64, destructed)
-	}
-	if vw, ok := writes.incarnation[addr]; ok {
-		e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellIncarnation)
-	}
-	if vw, ok := writes.code[addr]; ok {
-		e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCode)
-	}
-	if vw, ok := writes.codeHash[addr]; ok {
-		e.CodeHash = flushCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version, flag, vw.Val, vw.valStatus, getCellCodeHash, eqCodeHash, destructed)
-	}
-	if vw, ok := writes.codeSize[addr]; ok {
-		e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCodeSize)
-	}
-	if vw, ok := writes.createContract[addr]; ok {
-		e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus, getCellCreateContract)
-	}
-	if inner, ok := writes.storage[addr]; ok {
-		if e.Storage == nil {
-			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
-		}
-		for key, vw := range inner {
-			// On a BAL block a net-zero write is omitted from the BAL and folded away by
-			// StorageChanges, so it is never materialized here (nor sealed below). The slot
-			// must read as the access list seeds it, so a cell an earlier run of the tx left
-			// goes back to the seed or away. Before the seal a Done cell holds the seed.
-			if vm.HasBAL && vw.valStatus == ValueUnchanged {
-				if cells := e.Storage[key]; cells != nil {
-					if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
-						if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
-							// As in flushCell, a changed value needs a new version, so that the
-							// readers of the earlier value are invalidated.
-							if !c.Value.Eq(&seed) {
-								c.incarnation = vw.Version.Incarnation
-							}
-							c.Value, c.valStatus = seed, ValueChanged
-							c.flag.Store(uint32(FlagDone))
-						} else {
-							cells.Delete(vw.Version.TxIndex)
-							releaseCellStorage(c)
-						}
-					}
-				}
-				continue
-			}
-			e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
-		}
-	}
 }
 
 // hasDestruct reports a true SelfDestruct cell; a created account holds only false markers.
