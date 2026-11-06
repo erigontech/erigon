@@ -26,6 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -33,7 +35,75 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
+
+func TestBALFetcherTracksAvailability(t *testing.T) {
+	malformed := rlp.RawValue{0xc2, 0x01, 0x02}
+	invalid, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+		Address: common.Address{1},
+		StorageChanges: []types.SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{1}),
+			Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
+		}},
+		StorageReads: []common.Hash{{1}},
+	}})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name         string
+		response     []rlp.RawValue
+		expectedHash common.Hash
+		missing      bool
+	}{
+		{"malformed committed BAL", []rlp.RawValue{malformed}, crypto.Keccak256Hash(malformed), false},
+		{"invalid committed BAL", []rlp.RawValue{invalid}, crypto.Keccak256Hash(invalid), false},
+		{"unavailable BAL", []rlp.RawValue{{0x80}}, empty.BlockAccessListHash, true},
+		{"empty entry", []rlp.RawValue{{}}, empty.BlockAccessListHash, true},
+		{"truncated response", nil, empty.BlockAccessListHash, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := newMessageListenerTest(t)
+			t.Cleanup(test.ctxCancel)
+			peerId := PeerIdFromUint64(1)
+			tracker := NewPeerTracker(test.logger, test.messageListener)
+			tracker.PeerConnected(peerId)
+			fetcher := &balFetcher{
+				logger:          test.logger,
+				messageListener: test.messageListener,
+				messageSender:   NewMessageSender(test.sentryClient),
+				peerPenalizer:   NewPeerPenalizer(test.sentryClient),
+				peerTracker:     tracker,
+			}
+			reqs := []BALRequest{{Hash: common.Hash{1}, Number: 100, GasLimit: 3 * types.BalItemCost, ExpectedHash: tc.expectedHash}}
+			test.sentryClient.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
+				DoAndReturn(func(_ context.Context, req *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+					require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, req.Data.Id)
+					require.Equal(t, peerId.H512(), req.PeerId)
+					var packet eth.GetBlockAccessListsPacket66
+					require.NoError(t, rlp.DecodeBytes(req.Data.Data, &packet))
+					require.Equal(t, eth.GetBlockAccessListsPacket{reqs[0].Hash}, packet.GetBlockAccessListsPacket)
+					test.messageListener.blockAccessListsObservers.Notify(&DecodedInboundMessage[*eth.BlockAccessListsPacket66]{
+						InboundMessage: &sentryproto.InboundMessage{},
+						PeerId:         peerId,
+						Decoded: &eth.BlockAccessListsPacket66{
+							RequestId:              packet.RequestId,
+							BlockAccessListsPacket: tc.response,
+						},
+					})
+					return &sentryproto.SentPeers{Peers: []*typesproto.H512{peerId.H512()}}, nil
+				})
+			out, err := fetcher.fetchFromPeer(t.Context(), reqs, peerId, time.Second)
+			require.NoError(t, err)
+			require.Empty(t, out)
+			require.Equal(t, !tc.missing, tracker.PeerMayHaveBALNum(peerId, 100))
+			require.Equal(t, !tc.missing, tracker.PeerMayHaveBALNum(peerId, 99))
+			require.True(t, tracker.PeerMayHaveBALNum(peerId, 101))
+		})
+	}
+}
 
 func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 	reads := make([]uint64, 100_000)

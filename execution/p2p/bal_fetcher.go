@@ -199,11 +199,12 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 		f.logger.Debug("[p2p.bal] penalizing peer for bad BAL response", "peerId", peerId, "err", err)
 		f.penalize(ctx, peerId)
 	}
-	// An answered-but-undelivered entry (explicit 0x80 or a skipped violation)
-	// means the peer does not have that BAL; entries beyond the response length
-	// are only truncation and say nothing.
+	// A discarded BAL can still match the header commitment, so absence from out
+	// does not prove that the peer lacks it. Only explicit unavailable entries
+	// update the tracker; a truncated response also gives no availability evidence.
 	for i := 0; i < len(response) && i < len(reqs); i++ {
-		if _, ok := out[reqs[i].Hash]; !ok {
+		entry := response[i]
+		if len(entry) == 0 || (len(entry) == 1 && entry[0] == 0x80) {
 			f.peerTracker.BALNumMissing(peerId, reqs[i].Number)
 		}
 	}
