@@ -156,21 +156,29 @@ func (sd *TemporalMemBatch) runlockDomain(domain kv.Domain) {
 	}
 }
 
+func (sd *TemporalMemBatch) lockDomain(domain kv.Domain) {
+	shards := sd.shards(domain)
+	for i := range shards {
+		shards[i].Lock()
+	}
+}
+
+func (sd *TemporalMemBatch) unlockDomain(domain kv.Domain) {
+	shards := sd.shards(domain)
+	for i := range shards {
+		shards[i].Unlock()
+	}
+}
+
 func (sd *TemporalMemBatch) lockAllDomains() {
 	for d := range sd.latest {
-		shards := sd.shards(kv.Domain(d))
-		for i := range shards {
-			shards[i].Lock()
-		}
+		sd.lockDomain(kv.Domain(d))
 	}
 }
 
 func (sd *TemporalMemBatch) unlockAllDomains() {
 	for d := range sd.latest {
-		shards := sd.shards(kv.Domain(d))
-		for i := range shards {
-			shards[i].Unlock()
-		}
+		sd.unlockDomain(kv.Domain(d))
 	}
 }
 
