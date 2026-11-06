@@ -420,7 +420,7 @@ func TestScheduling(t *testing.T) {
 				calls.Add(1)
 				return newMockContext(), nil
 			}
-			require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, tasks, make([][32]byte, len(tasks)), make([]deltaParts, len(tasks)), workers, fanOutMin))
+			require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, tasks, make([][32]byte, len(tasks)), make([]deltaParts, len(tasks)), workers, fanOutMin, func(int) {}))
 			return calls.Load()
 		}
 		wipes := make([]storageTask, 64)
@@ -887,7 +887,7 @@ func TestBoundedContextFactoryNeverDeadlocks(t *testing.T) {
 		f := &slotFactory{ctx: c, slots: make(chan struct{}, 2)}
 		roots, parts := make([][32]byte, len(tasks)), make([]deltaParts, len(tasks))
 		requireFinishes(t, fmt.Sprintf("storage phase run %d", i), func() error {
-			return runStoragePhase(context.Background(), c, f.factory, tasks, roots, parts, 2, 16)
+			return runStoragePhase(context.Background(), c, f.factory, tasks, roots, parts, 2, 16, func(int) {})
 		})
 	}
 }

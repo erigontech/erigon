@@ -264,15 +264,23 @@ func (p foldPlan) parallel() bool {
 }
 
 func (p foldPlan) run(caller commitment.PatriciaContext, nibs []int, fn func(commitment.PatriciaContext, int, int) error) error {
+	return p.runEach(caller, len(nibs), func(k int) int { return nibs[k] }, fn)
+}
+
+func (p foldPlan) runEach(caller commitment.PatriciaContext, n int, nibAt func(k int) int, fn func(commitment.PatriciaContext, int, int) error) error {
 	eg, egCtx := errgroup.WithContext(p.ctx)
-	eg.SetLimit(min(p.workers, len(nibs)))
+	eg.SetLimit(min(p.workers, n))
 	acquireCtx := egCtx
 	if p.tryAcquire {
 		acquireCtx = kv.WithNonBlockingAcquire(egCtx)
 	}
 	var mu sync.Mutex
-	var left []int
-	for k, nib := range nibs {
+	var left [][2]int
+	for k := range n {
+		nib := nibAt(k)
+		if nib < 0 {
+			break
+		}
 		eg.Go(func() error {
 			workerCtx, cleanup := p.factory(acquireCtx)
 			if cleanup != nil {
@@ -283,7 +291,7 @@ func (p foldPlan) run(caller commitment.PatriciaContext, nibs []int, fn func(com
 					return errNodeRecord
 				}
 				mu.Lock()
-				left = append(left, k)
+				left = append(left, [2]int{k, nib})
 				mu.Unlock()
 				return nil
 			}
@@ -293,9 +301,9 @@ func (p foldPlan) run(caller commitment.PatriciaContext, nibs []int, fn func(com
 	if err := eg.Wait(); err != nil {
 		return err
 	}
-	slices.Sort(left)
-	for _, k := range left {
-		if err := fn(caller, k, nibs[k]); err != nil {
+	slices.SortFunc(left, func(a, b [2]int) int { return a[0] - b[0] })
+	for _, kn := range left {
+		if err := fn(caller, kn[0], kn[1]); err != nil {
 			return err
 		}
 	}

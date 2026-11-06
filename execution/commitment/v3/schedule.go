@@ -48,7 +48,7 @@ const (
 	accountPlaneFanout   = 16
 )
 
-func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers, fanOutMin int) error {
+func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers, fanOutMin int, done func(i int)) error {
 	if len(storage) == 0 {
 		return nil
 	}
@@ -62,6 +62,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 				return err
 			}
 			roots[i], parts[i] = root, taskParts
+			done(i)
 		}
 		return nil
 	}
@@ -92,6 +93,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 					return err
 				}
 				roots[i], parts[i] = root, taskParts
+				done(i)
 			}
 		})
 	}
@@ -110,18 +112,42 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
 	storageAsync := factory != nil && storageWorkers > 1
 	g := graph{plane: planeAccount}
+	var hasAccounts [16]bool
+	for i := range accounts {
+		hasAccounts[accounts[i].hashedKey[0]] = true
+	}
+	taskOf := make(map[[32]byte]int, len(storage))
+	var storageLeft [16]atomic.Int32
+	for i, task := range storage {
+		taskOf[task.addrHash] = i
+		storageLeft[task.addrHash[0]>>4].Add(1)
+	}
+	ready := make(chan int, 16)
+	for nib := range 16 {
+		if hasAccounts[nib] && storageLeft[nib].Load() == 0 {
+			ready <- nib
+		}
+	}
+	taskDone := func(i int) {
+		if nib := storage[i].addrHash[0] >> 4; storageLeft[nib].Add(-1) == 0 && hasAccounts[nib] {
+			ready <- int(nib)
+		}
+	}
 	storageReady := make(chan struct{})
 	var storageErr error
-	var results map[[32]byte][32]byte
 	collectStorage := func() {
 		defer close(storageReady)
-		storageErr = runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
-		if storageErr != nil {
-			return
-		}
-		results = make(map[[32]byte][32]byte, len(storage))
-		for i, task := range storage {
-			results[task.addrHash] = storageRoots[i]
+		storageErr = runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, taskDone)
+	}
+	nextReady := func() int {
+		select {
+		case nib := <-ready:
+			return nib
+		case <-storageReady:
+			if storageErr != nil {
+				return -1
+			}
+			return <-ready
 		}
 	}
 	if storageAsync {
@@ -144,12 +170,12 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		}
 		storageRoot := empty.RootHash
 		if plan.entry.storageDirty {
-			var ok bool
-			storageRoot, ok = results[hashAddressPath(plan.entry.hashedKey)]
+			task, ok := taskOf[hashAddressPath(plan.entry.hashedKey)]
 			if !ok {
 				accountResults[i].err = errNodeRecord
 				return
 			}
+			storageRoot = storageRoots[task]
 			if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
 				plan.skip = true
 				return
@@ -172,9 +198,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groupParts [16]deltaParts
 	var pending [16]*pendingRemoval
 	pipeline := func(ctx commitment.PatriciaContext, nib int, group []int) error {
-		<-storageReady
 		child := root.child(nib)
-		if storageErr != nil || len(root.path) != 0 || child == nil || len(child.path) != 1 {
+		if len(root.path) != 0 || child == nil || len(child.path) != 1 {
 			return nil
 		}
 		for k, i := range group {
@@ -207,7 +232,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		groupHashes[nib], pipelined[nib] = hash, true
 		return nil
 	}
-	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, func() { <-storageReady }, pipeline)
+	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, nextReady, pipeline)
 	<-storageReady
 	if storageErr != nil {
 		return [32]byte{}, nil, storageErr
@@ -293,13 +318,13 @@ type pendingRemoval struct {
 	rest  []int
 }
 
-func (g graph) planAccounts(ctx commitment.PatriciaContext, root *node, accounts []accountEntry, plans []accountPlan, plan foldPlan, wait func(), after func(ctx commitment.PatriciaContext, nib int, group []int) error) error {
+func (g graph) planAccounts(ctx commitment.PatriciaContext, root *node, accounts []accountEntry, plans []accountPlan, plan foldPlan, next func() int, after func(ctx commitment.PatriciaContext, nib int, group []int) error) error {
 	planOne := func(ctx commitment.PatriciaContext, i int) error {
 		p, err := g.accountPlanFor(ctx, root, accounts[i])
 		plans[i] = p
 		return err
 	}
-	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne, wait, after)
+	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne, next, after)
 	if err != nil || fanned {
 		return err
 	}
@@ -376,7 +401,7 @@ func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, ni
 	return nil
 }
 
-func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error, wait func(), after func(ctx commitment.PatriciaContext, nib int, group []int) error) (bool, error) {
+func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error, next func() int, after func(ctx commitment.PatriciaContext, nib int, group []int) error) (bool, error) {
 	if !plan.parallel() || len(root.path) != 0 {
 		return false, nil
 	}
@@ -407,10 +432,11 @@ func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nib
 	}); err != nil || after == nil {
 		return true, err
 	}
-	if wait != nil {
-		wait()
+	nibAt := func(k int) int { return nibs[k] }
+	if next != nil {
+		nibAt = func(int) int { return next() }
 	}
-	return true, plan.run(ctx, nibs, func(workerCtx commitment.PatriciaContext, _, nib int) error {
+	return true, plan.runEach(ctx, len(nibs), nibAt, func(workerCtx commitment.PatriciaContext, _, nib int) error {
 		return after(workerCtx, nib, groups[nib])
 	})
 }
