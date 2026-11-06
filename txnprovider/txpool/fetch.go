@@ -316,7 +316,11 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		p := f.pending[0]
 		f.pending = f.pending[1:]
 		r, ok := f.requested.Get(p.hash[:])
-		if !ok || !r.at.Equal(p.at) || r.unsent { // an unsent request times out from its send
+		if !ok || !r.at.Equal(p.at) {
+			continue
+		}
+		if r.unsent { // it times out from its send; until then it keeps its entry for cleanup and admission
+			deferred = append(deferred, p)
 			continue
 		}
 		if isHeld, found := state[p.hash]; found {

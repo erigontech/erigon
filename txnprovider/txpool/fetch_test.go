@@ -1456,6 +1456,23 @@ func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 	require.Equal(t, [][64]byte{peerB, peerC, peerB}, a.requestedFrom, "only the sent hash moves on to C; the unsent one goes to B once")
 }
 
+func TestDisconnectDuringAStalledSendReachesTheUnsentRequest(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, peerB, peerC := [32]byte{0xd5}, [32]byte{0xd6}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	const blobTxnSize = 131 * 1024
+	for _, peer := range [][64]byte{peerA, peerB, peerC} {
+		a.announceSized(t, peer, blobTxnSize, h1, h2)
+	}
+	gone := fetchPeer{a.sentryClient, peerC}
+	a.onSend = func() { // the first send to B stalls: a sweep runs, then C disconnects
+		a.timeoutSweep()
+		a.fetch.dropAlternate(gone)
+	}
+	a.timeoutSweep()
+	require.Zero(t, a.fetch.alternatesOf[gone], "the unsent request keeps its pending entry, so the cleanup finds C there")
+}
+
 func TestStalledSendKeepsTheFinalFallback(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
