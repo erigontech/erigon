@@ -164,6 +164,14 @@ func ResetSenders(ctx context.Context, db kv.RwDB) error {
 }
 
 func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
+	return resetExec(ctx, db, false)
+}
+
+func ResetExecKeepStoppedCommitment(ctx context.Context, db kv.TemporalRwDB) error {
+	return resetExec(ctx, db, true)
+}
+
+func resetExec(ctx context.Context, db kv.TemporalRwDB, keepStopped bool) error {
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
 			var stopped [kv.DomainLen]bool
@@ -204,6 +212,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return fmt.Errorf("reset exec state tables: %w", err)
 		}
+		if keepStopped {
+			return nil
+		}
 		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 			if err := rawdb.DeleteCommitmentDomainStopped(tx, domain); err != nil {
 				return fmt.Errorf("reset commitment stop marker: %w", err)
@@ -220,7 +231,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	branchCacheCleared := false
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
-			agg.ClearStoppedCommitmentDomains()
+			if !keepStopped {
+				agg.ClearStoppedCommitmentDomains()
+			}
 			aggTx := agg.BeginFilesRo()
 			defer aggTx.Close()
 			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
