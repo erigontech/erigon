@@ -25,8 +25,8 @@ on:
           - eth_getLogs_topics
           - eth_getLogs_wide
           - eth_getLogs_latest
-          - eth_getBlockReceipts_gen
-          - eth_getBlockByNumber_gen
+          - eth_getBlockReceipts_latest
+          - eth_getBlockByNumber_latest
   schedule:
     - cron: '0 2 * * *'   # Run daily at 02:00 UTC
 
@@ -352,17 +352,17 @@ jobs:
               --counts 200000 --block-tag latest --verify --keep ok --fees drop \
               --out "perf/pattern/$CHAIN/stress_test_eth_getLogs_latest_gen_latest.jsonl"
           fi
-          # The block patterns hold one request per block, so rpc_perf cycles them at the higher rates.
-          # 8000 blocks (about 27 hours) stay within the recent history that full nodes keep.
-          if selected eth_getBlockReceipts_gen; then
+          # With --block-tag latest every block lookup asks for "latest", the chain head of each client when the
+          # request runs: the requests are all the same, so a few are enough and rpc_perf cycles them.
+          if selected eth_getBlockReceipts_latest; then
             ./build/bin/rpc_pattern_gen eth_getBlockReceipts --url http://localhost:8545 \
-              --counts 8000 --block-tag latest --verify --keep ok \
-              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockReceipts_gen_latest.jsonl"
+              --counts 1000 --block-tag latest --verify --keep ok \
+              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockReceipts_latest_gen_latest.jsonl"
           fi
-          if selected eth_getBlockByNumber_gen; then
+          if selected eth_getBlockByNumber_latest; then
             ./build/bin/rpc_pattern_gen eth_getBlockByNumber --url http://localhost:8545 \
-              --option full=true --counts 8000 --block-tag latest --verify --keep ok \
-              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockByNumber_gen_latest.jsonl"
+              --option full=true --counts 1000 --block-tag latest --verify --keep ok \
+              --out "perf/pattern/$CHAIN/stress_test_eth_getBlockByNumber_latest_gen_latest.jsonl"
           fi
           # The patterns that trace recent blocks are generated last, in the reverse order of their run.
           # --max-blocks 32 keeps the traced blocks inside the recent state that full nodes keep (e.g. 128 blocks for Geth).
@@ -395,8 +395,8 @@ jobs:
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_topics_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_wide_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getLogs_latest_gen_latest.jsonl
-            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockReceipts_gen_latest.jsonl
-            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockByNumber_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockReceipts_latest_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_getBlockByNumber_latest_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl
@@ -588,27 +588,27 @@ jobs:
         continue-on-error: true
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_latest_gen_latest 2000:20,10000:20 eth_getLogs_latest
 
-      - name: Sync clients before eth_getBlockReceipts_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
+      - name: Sync clients before eth_getBlockReceipts_latest
+        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK"
 
-      - name: Run eth_getBlockReceipts_gen
-        id: perf_eth_getBlockReceipts_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen'
+      - name: Run eth_getBlockReceipts_latest
+        id: perf_eth_getBlockReceipts_latest
+        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest'
         continue-on-error: true
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_gen_latest 100:20,1000:20,3000:20 eth_getBlockReceipts_gen
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_latest_gen_latest 100:20,1000:20,3000:20 eth_getBlockReceipts_latest
 
-      - name: Sync clients before eth_getBlockByNumber_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
+      - name: Sync clients before eth_getBlockByNumber_latest
+        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK"
 
-      - name: Run eth_getBlockByNumber_gen
-        id: perf_eth_getBlockByNumber_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen'
+      - name: Run eth_getBlockByNumber_latest
+        id: perf_eth_getBlockByNumber_latest
+        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest'
         continue-on-error: true
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20,5000:20 eth_getBlockByNumber_gen
+        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_latest_gen_latest 1000:20,3000:20,5000:20 eth_getBlockByNumber_latest
 
       - name: Collect the benchmark results
         id: collect_results
@@ -625,8 +625,8 @@ jobs:
             eth_getLogs_topics=${{ steps.perf_eth_getLogs_topics.outcome }}
             eth_getLogs_wide=${{ steps.perf_eth_getLogs_wide.outcome }}
             eth_getLogs_latest=${{ steps.perf_eth_getLogs_latest.outcome }}
-            eth_getBlockReceipts_gen=${{ steps.perf_eth_getBlockReceipts_gen.outcome }}
-            eth_getBlockByNumber_gen=${{ steps.perf_eth_getBlockByNumber_gen.outcome }}
+            eth_getBlockReceipts_latest=${{ steps.perf_eth_getBlockReceipts_latest.outcome }}
+            eth_getBlockByNumber_latest=${{ steps.perf_eth_getBlockByNumber_latest.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"
@@ -731,8 +731,8 @@ jobs:
         run: |
           for run_id in "$RUN_ID" "$RUN_ID-trace_block_call_tracer" "$RUN_ID-trace_block_struct_log" "$RUN_ID-eth_call_gen" \
             "$RUN_ID-eth_createAccessList_gen" "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" \
-            "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_latest" "$RUN_ID-eth_getBlockReceipts_gen" \
-            "$RUN_ID-eth_getBlockByNumber_gen"; do
+            "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_latest" "$RUN_ID-eth_getBlockReceipts_latest" \
+            "$RUN_ID-eth_getBlockByNumber_latest"; do
             python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
