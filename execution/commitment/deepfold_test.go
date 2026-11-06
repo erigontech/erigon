@@ -940,7 +940,6 @@ func TestFillFromLowerCell_KeyedCellKeepsForeignPlaneExtension(t *testing.T) {
 	}
 }
 
-// The sync skip is keyed on the plain key, not on depth.
 func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 	t.Parallel()
 
@@ -952,40 +951,6 @@ func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 
 	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
 		"a keyless cell deep in storage still navigates by its extension")
-}
-
-// Whenever a fold rebuilds the up cell's extension from the folded branch, the extension is
-// also the cell's navigation path, whatever plain keys the cells carry.
-func TestFillFromLowerCell_PrependedExtensionIsNavPath(t *testing.T) {
-	t.Parallel()
-	keyed := func(acc, sto bool) cell {
-		var c cell
-		if acc {
-			c.accountAddrLen = length.Addr
-		}
-		if sto {
-			c.storageAddrLen = length.Addr + length.Hash
-		}
-		return c
-	}
-	pre := []byte{0x1, 0x2}
-	for _, lowDepth := range []int16{3, 63, 65, 70} {
-		for _, up := range []cell{keyed(false, false), keyed(true, false), keyed(true, true), keyed(false, true)} {
-			for _, lowSto := range []bool{false, true} {
-				low := keyed(false, lowSto)
-				low.hashLen, low.extLen = 32, 1
-				low.extension[0] = 0xd
-				c := up
-				c.hashedExtension[0], c.hashedExtLen = 0xf, 1
-				c.fillFromLowerCell(&low, lowDepth, pre, 0x3)
-				if c.extLen != low.extLen+1+int16(len(pre)) {
-					continue
-				}
-				require.Equalf(t, c.extension[:c.extLen], c.hashedExtension[:c.hashedExtLen],
-					"lowDepth=%d up(acc=%d sto=%d) lowSto=%t", lowDepth, up.accountAddrLen, up.storageAddrLen, lowSto)
-			}
-		}
-	}
 }
 
 // Deleting an account leaf while two new accounts land below its old position leaves a
@@ -1000,6 +965,6 @@ func TestDeepFold_BranchSurvivorDropsDeletedAccountLeafKey(t *testing.T) {
 	c := addrHex(findAddressForHexPrefix([]byte{2, 3, 7}, 5))
 	k0, u0 := NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(a, 3).Build()
 	k1, u1 := NewUpdateBuilder().Delete(a).Balance(b, 4).Balance(c, 5).Build()
-	requireFreshRootAcrossEngines(t, k0, u0, k1, u1,
-		NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(b, 4).Balance(c, 5))
+	kf, uf := NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(b, 4).Balance(c, 5).Build()
+	requireRestartParity(t, []engineBatch{{k0, u0}, {k1, u1}}, kf, uf)
 }

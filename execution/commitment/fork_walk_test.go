@@ -747,44 +747,38 @@ func TestForkWalk_UpdatedAccountDropsItsDeletedSlotsTouchBit(t *testing.T) {
 }
 
 // A fork inside the storage of an account with no stored storage opens its row directly
-// under the account row. When that row folds to one branch, the next key of the account
-// must not read a storage root branch that was never written.
-func TestForkWalk_StorageBranchSurvivorFoldsIntoAccountWithoutStorage(t *testing.T) {
+// under the account row. When that row folds into the account cell, through its one
+// surviving branch or as a branch itself, the next key of the account must not read a
+// storage root branch that was never written.
+func TestForkWalk_StorageRowFoldsIntoAccountWithoutStorage(t *testing.T) {
 	a := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
 	k0, u0 := NewUpdateBuilder().
 		Balance(addrHex(findAddressForHexPrefix([]byte{0, 0}, 2)), 2).
 		Balance(addrHex(findAddressForHexPrefix([]byte{0, 1}, 3)), 3).
 		Balance(a, 1).
 		Build()
-	ub := NewUpdateBuilder()
-	for i, loc := range slotLocsForHexPrefix([]byte{0xa, 0}, 3, 1) {
-		ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 1}))
+	for _, tc := range []struct {
+		name         string
+		writeSibling bool
+	}{
+		{"one_branch_survives", false},
+		{"row_folds_as_branch", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ub := NewUpdateBuilder()
+			for i, loc := range slotLocsForHexPrefix([]byte{0xa, 0}, 3, 1) {
+				ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 1}))
+			}
+			for i, loc := range slotLocsForHexPrefix([]byte{0xa, 1}, 3, 1) {
+				if tc.writeSibling {
+					ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 0x11}))
+				} else {
+					ub.DeleteStorage(a, loc)
+				}
+			}
+			ub.Storage(a, slotLocsForHexPrefix([]byte{0xb}, 1, 1)[0], "0b")
+			k1, u1 := ub.Build()
+			requireForkParityAcrossGrains(t, k0, u0, k1, u1)
+		})
 	}
-	for _, loc := range slotLocsForHexPrefix([]byte{0xa, 1}, 3, 1) {
-		ub.DeleteStorage(a, loc)
-	}
-	ub.Storage(a, slotLocsForHexPrefix([]byte{0xb}, 1, 1)[0], "0b")
-	k1, u1 := ub.Build()
-	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
-}
-
-// Same shape as TestForkWalk_StorageBranchSurvivorFoldsIntoAccountWithoutStorage, but both
-// children of the opened row survive, so the row folds as a branch into the account cell.
-func TestForkWalk_StorageBranchRowFoldsIntoAccountWithoutStorage(t *testing.T) {
-	a := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
-	k0, u0 := NewUpdateBuilder().
-		Balance(addrHex(findAddressForHexPrefix([]byte{0, 0}, 2)), 2).
-		Balance(addrHex(findAddressForHexPrefix([]byte{0, 1}, 3)), 3).
-		Balance(a, 1).
-		Build()
-	ub := NewUpdateBuilder()
-	for i, loc := range slotLocsForHexPrefix([]byte{0xa, 0}, 3, 1) {
-		ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 1}))
-	}
-	for i, loc := range slotLocsForHexPrefix([]byte{0xa, 1}, 3, 1) {
-		ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 0x11}))
-	}
-	ub.Storage(a, slotLocsForHexPrefix([]byte{0xb}, 1, 1)[0], "0b")
-	k1, u1 := ub.Build()
-	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }

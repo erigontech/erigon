@@ -205,24 +205,6 @@ func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []
 	return root, ms
 }
 
-// requireFreshRootAcrossEngines checks the two-round incremental root of the sequential
-// engine and of the parallel engine at several fork grains against a trie built from
-// scratch over the final state. Parity alone is blind to a bug shared by both engines.
-func requireFreshRootAcrossEngines(t *testing.T, k0 [][]byte, u0 []Update, k1 [][]byte, u1 []Update, final *UpdateBuilder) {
-	t.Helper()
-	kf, uf := final.Build()
-	_, want := processFreshTrie(t, kf, uf)
-	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k0, u0, k1, u1)
-	require.Equal(t, want, seqRoot, "sequential incremental root != fresh rebuild")
-	for _, grain := range []uint32{1, 2, 3, ForkGrainNever} {
-		parMs := NewMockState(t)
-		parMs.SetConcurrentCommitment(true)
-		_, blob, _ := parallelBatchForks(t, parMs, 1, grain, k0, u0, nil)
-		parRoot, _, _ := parallelBatchForks(t, parMs, 1, grain, k1, u1, blob)
-		require.Equal(t, want, parRoot, "parallel incremental root != fresh rebuild, grain %d", grain)
-	}
-}
-
 func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int) []byte {
 	t.Helper()
 	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
