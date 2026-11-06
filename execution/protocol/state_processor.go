@@ -45,6 +45,16 @@ func PostProcessTx(engine rules.EngineReader, config *chain.Config, ibs *state.I
 	return p.PostProcessTx(config, ibs, txs, i)
 }
 
+// TxPostProcess returns PostProcessTx of txs[i] for the postProcess argument
+// of the Apply*PostProcessed functions, nil when engine has no rule.
+func TxPostProcess(engine rules.EngineReader, config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) func() error {
+	p, ok := engine.(rules.TxPostProcessor)
+	if !ok {
+		return nil
+	}
+	return func() error { return p.PostProcessTx(config, ibs, txs, i) }
+}
+
 // BindTxGas returns txn with the gas limit engine binds it to when gp is its
 // block's pool before it.
 func BindTxGas(engine rules.EngineReader, isAmsterdam bool, txn types.Transaction, gp *GasPool) (types.Transaction, error) {

@@ -96,8 +96,14 @@ func (c *groupEndChain) nativeTx(selector [4]byte, value uint64) types.Transacti
 // serial builds block 1 with txs and coinbase without the parallel executor,
 // unless opts ask for block access lists.
 func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction, opts ...execmoduletester.Option) (*deriver.ExecChain, *types.BlockWithReceipts) {
+	_, chain, built := c.build(coinbase, txs, opts...)
+	return chain, built
+}
+
+// build is serial with the tester holding the chain.
+func (c *groupEndChain) build(coinbase common.Address, txs []types.Transaction, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *deriver.ExecChain, *types.BlockWithReceipts) {
 	dbg.Exec3Parallel = false
-	_, chain := derivertest.NewL2Of(c.t, c.spec, opts...)
+	m, chain := derivertest.NewL2Of(c.t, c.spec, opts...)
 	parent, err := chain.HeaderByNumber(c.t.Context(), 0)
 	require.NoError(c.t, err)
 	built, err := chain.Extend(c.t.Context(), parent, deriver.HeaderInputs{
@@ -110,7 +116,7 @@ func (c *groupEndChain) serial(coinbase common.Address, txs []types.Transaction,
 	}, txs, common.Hash{}, common.Hash{})
 	require.NoError(c.t, err)
 	require.LessOrEqual(c.t, built.Block.BaseFee().Uint64()+groupEndTipCap, groupEndFeeCap)
-	return chain, built
+	return m, chain, built
 }
 
 // parallel imports block into a fresh chain with the parallel executor.

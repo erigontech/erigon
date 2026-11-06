@@ -128,10 +128,8 @@ func ExecuteBlockEphemerally(
 		err := CheckTxGas(engine, chainConfig.IsAmsterdam(header.Time), txn, gp)
 		var receipt *types.Receipt
 		if err == nil {
-			receipt, err = ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
-		}
-		if err == nil {
-			err = PostProcessTx(engine, chainConfig, ibs, block.Transactions(), i)
+			receipt, err = ApplyTransactionPostProcessed(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig,
+				TxPostProcess(engine, chainConfig, ibs, block.Transactions(), i))
 		}
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
