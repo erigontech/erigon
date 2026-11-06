@@ -188,19 +188,18 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("failed to get block root: %w", err)
 	}
 
-	// A column outside custody is still validated and relayed on a subscribed subnet; it is just not stored.
-	inCustody := true
+	// A column this node does not store is still validated and relayed on a subscribed subnet. An archive node
+	// stores columns only until it can recover, or has recovered, the blobs.
+	var store bool
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
-			return ErrIgnore
-		}
+		store = !s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) &&
+			!s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot)
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
 			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
-		_, inCustody = myCustodyColumns[msg.Index]
+		_, store = myCustodyColumns[msg.Index]
 	}
 
 	blobParameters := s.cfg.GetBlobParameters(blockHeader.Slot / s.cfg.SlotsPerEpoch)
@@ -288,7 +287,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	if seen, _ := s.seenSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
 		return ErrIgnore
 	}
-	if !inCustody {
+	if !store {
 		// Storage sends the data_column_sidecar event for a stored column, so a column that is not stored gets it here.
 		msg.BlockRoot = blockRoot
 		msg.Slot = blockHeader.Slot
@@ -388,25 +387,23 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	inCustody := true
+	var store bool
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
-			return ErrIgnore
-		}
+		store = !s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) &&
+			!s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot)
 	} else {
 		myCustodyColumns, err := s.forkChoice.GetPeerDas().StateReader().GetMyCustodyColumns()
 		if err != nil {
 			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
-		_, inCustody = myCustodyColumns[msg.Index]
+		_, store = myCustodyColumns[msg.Index]
 	}
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
-		if !inCustody {
+		if !store {
 			return ErrIgnore
 		}
 		return errGloasSidecarBlockUnavailable
@@ -440,7 +437,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
-	if !inCustody {
+	if !store {
 		if seen, _ := s.seenGloasSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
 			return ErrIgnore
 		}

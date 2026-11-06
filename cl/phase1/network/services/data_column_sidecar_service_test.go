@@ -715,6 +715,51 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidSidecarOutsid
 	t.Empty(events)
 }
 
+// archivePeerDas is an archive node whose block has its blobs recovered, or else over half of its columns stored.
+// Such a node stores no more columns of the block, so it must not write or schedule a recovery.
+func (t *dataColumnSidecarTestSuite) archivePeerDas(blobsRecovered bool) *das_mock.MockPeerDas {
+	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
+	peerDas.EXPECT().IsArchivedMode().Return(true).AnyTimes()
+	peerDas.EXPECT().IsColumnOverHalf(gomock.Any(), gomock.Any()).Return(!blobsRecovered).AnyTimes()
+	peerDas.EXPECT().IsBlobAlreadyRecovered(gomock.Any()).Return(blobsRecovered).AnyTimes()
+	return peerDas
+}
+
+func (t *dataColumnSidecarTestSuite) assertFuluArchiveSidecar(blobsRecovered, kzgProofsValid bool) {
+	t.expectFuluSidecarOutsideCustody(kzgProofsValid)
+	t.mockForkChoice.MockPeerDas = t.archivePeerDas(blobsRecovered)
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
+
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: 1})
+	if kzgProofsValid {
+		t.NoError(err)
+		t.True(seen)
+		return
+	}
+	t.ErrorContains(err, "invalid kzg proofs")
+	t.NotErrorIs(err, ErrIgnore)
+	t.False(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOverHalf_AcceptsValidSidecar() {
+	t.assertFuluArchiveSidecar(false, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOverHalf_RejectsInvalidSidecar() {
+	t.assertFuluArchiveSidecar(false, false)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndBlobsRecovered_AcceptsValidSidecar() {
+	t.assertFuluArchiveSidecar(true, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndBlobsRecovered_RejectsInvalidSidecar() {
+	t.assertFuluArchiveSidecar(true, false)
+}
+
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenNotFromExpectedProposer_ReturnsError() {
 	t.expectFuluSidecarOutsideCustody(true)
 	t.setExpectedProposer(2, nil)
@@ -1325,6 +1370,39 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSidecarOutsideC
 
 	t.Equal(ErrIgnore, err)
 	t.Len(events, 1)
+}
+
+func (t *dataColumnSidecarTestSuite) assertGloasArchiveSidecar(blobsRecovered, kzgProofsValid bool) {
+	t.expectGloasSidecarOutsideCustody(kzgProofsValid)
+	t.mockForkChoice.MockPeerDas = t.archivePeerDas(blobsRecovered)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
+
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	if kzgProofsValid {
+		t.NoError(err)
+		t.True(seen)
+		return
+	}
+	t.EqualError(err, "invalid kzg proofs for data column sidecar")
+	t.False(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndColumnsOverHalf_AcceptsValidSidecar() {
+	t.assertGloasArchiveSidecar(false, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndColumnsOverHalf_RejectsInvalidSidecar() {
+	t.assertGloasArchiveSidecar(false, false)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndBlobsRecovered_AcceptsValidSidecar() {
+	t.assertGloasArchiveSidecar(true, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndBlobsRecovered_RejectsInvalidSidecar() {
+	t.assertGloasArchiveSidecar(true, false)
 }
 
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveMode_StoresSidecar() {
