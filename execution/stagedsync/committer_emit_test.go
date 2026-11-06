@@ -442,13 +442,17 @@ func (d *countingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
 func TestPrefetchBaseAccounts_SkipsBlocksWithFewTxs(t *testing.T) {
 	t.Parallel()
 
-	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
 	for _, tc := range []struct {
 		txs       int
 		wantReads bool
 	}{{txs: 20, wantReads: false}, {txs: baseAccountPrefetchMinTxs - 1, wantReads: false}, {txs: baseAccountPrefetchMinTxs, wantReads: true}} {
-		vm := state.NewVersionMap(bal)
-		vm.InitStamps(tc.txs) // as exec does: the index of the block-end task, after the txs
+		// Each tx raises its sender's nonce at its block-access index 1..txs; the block-end system call raises none.
+		sender := types.AccountChanges{Address: common.Address{19: 1}}
+		for i := 1; i <= tc.txs; i++ {
+			sender.NonceChanges = append(sender.NonceChanges, &types.NonceChange{Index: uint32(i), Value: uint64(i)})
+		}
+		coinbase := types.AccountChanges{Address: common.Address{19: 2}, BalanceChanges: []*types.BalanceChange{{Index: uint32(tc.txs + 1)}}}
+		vm := state.NewVersionMap(types.BlockAccessList{sender, coinbase})
 		db := &countingRoDB{}
 		cc := &commitmentCalculator{db: db, asOfReader: &asOfStateReader{}, baseAccounts: map[accounts.Address]*accounts.Account{}}
 		cc.prefetchBaseAccounts(t.Context(), vm, 0)

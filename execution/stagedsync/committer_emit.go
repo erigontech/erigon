@@ -212,7 +212,7 @@ const baseAccountPrefetchMinTxs = 1000
 // per-tx touch bookkeeping does not read them one by one on the calculator's goroutine.
 func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *state.VersionMap, txNum uint64) {
 	bal := vm.BALAccounts()
-	if len(bal) == 0 || vm.TxCount() < baseAccountPrefetchMinTxs || cc.db == nil || cc.asOfReader == nil {
+	if len(bal) == 0 || balTxCount(bal) < baseAccountPrefetchMinTxs || cc.db == nil || cc.asOfReader == nil {
 		return
 	}
 	got, err := readBaseAccounts(ctx, bal, baseAccountReaders, func() (state.StateReader, func(), error) {
@@ -226,6 +226,18 @@ func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *st
 		return // the touch reads the account itself
 	}
 	maps.Copy(cc.baseAccounts, got)
+}
+
+// balTxCount is the number of txs a BAL block holds: every tx raises its sender's nonce at its own block-access index
+// 1..n, and the pre- and post-block system calls raise none.
+func balTxCount(bal types.BlockAccessList) int {
+	n := uint32(0)
+	for i := range bal {
+		for _, c := range bal[i].NonceChanges {
+			n = max(n, c.Index)
+		}
+	}
+	return int(n)
 }
 
 // readBaseAccounts reads every BAL account through workers readers, each from newReader; an absent account maps to nil.
