@@ -266,15 +266,17 @@ func (w *witnessWalk) leaf(plane byte, fullKey, k, leafKey, payload []byte) erro
 }
 
 func branchRLP(n *node) ([]byte, error) {
-	refs, err := branchRefs(n)
+	var refStore [16][32]byte
+	refLens, err := branchRefs(n, &refStore)
 	if err != nil {
 		return nil, err
 	}
+	refs := refSlices(n, &refStore, &refLens)
 	return appendBranchRLP(nil, &refs), nil
 }
 
 func leafRLP(n *node, nib int, includeNib bool) (rlp, leafKey, payload []byte, err error) {
-	compact, leafKey, payload, encodedPayload, err := leafParts(n, nib, includeNib, nil, nil)
+	compact, leafKey, payload, encodedPayload, err := leafParts(n, nib, includeNib, nil, nil, nil)
 	if err != nil {
 		return nil, nil, nil, err
 	}
