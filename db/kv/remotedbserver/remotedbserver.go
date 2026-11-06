@@ -69,7 +69,8 @@ const MaxTxTTL = 60 * time.Second
 // 7.3.0 - Remove HasPrefix from the remote KV service
 // 7.3.1 - Include pinned history-file generations in transaction replies
 // 7.3.2 - Add IndexJoin
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 2}
+// 7.3.3 - Include block slots in state-change notifications
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 3}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.

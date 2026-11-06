@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"encoding/binary"
 	"math"
 	"testing"
@@ -32,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -49,16 +47,13 @@ func recentRootPoolSlot(t *testing.T, sender common.Address, rootSlot, fee uint6
 		},
 		Fees: types.FrameFees{TipCap: *uint256.NewInt(fee), FeeCap: *uint256.NewInt(fee)},
 	}
-	var encoded bytes.Buffer
-	require.NoError(t, tx.MarshalBinary(&encoded))
-	return &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+	return framePoolSlotFromTransaction(t, tx)
 }
 
 func TestFramePoolRecentRootAddressAsPaymaster(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.payer, backend.paymaster = types.FrameRecentRootVerifier, true
-	backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
 	tx := &types.FrameTransaction{
 		NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: sender,
 		Frames: []types.Frame{
@@ -68,9 +63,7 @@ func TestFramePoolRecentRootAddressAsPaymaster(t *testing.T) {
 		Fees: types.FrameFees{TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1)},
 	}
 	require.NoError(t, protocol.ValidateFrameTransactionPrefix(tx))
-	var encoded bytes.Buffer
-	require.NoError(t, tx.MarshalBinary(&encoded))
-	slot := &TxnSlot{Txn: tx, IDHash: tx.Hash(), Rlp: encoded.Bytes(), Size: uint32(encoded.Len())}
+	slot := framePoolSlotFromTransaction(t, tx)
 	var txns TxnSlots
 	txns.Append(slot, sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txns)
@@ -128,17 +121,14 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 		initialTime uint64
 		initialSlot uint64
 		direction   remoteproto.Direction
-		valid       bool
 	}{
-		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, true},
-		{"activation unwound", 100, 21, remoteproto.Direction_UNWIND, true},
-		{"invalid after unwind", 100, 21, remoteproto.Direction_UNWIND, false},
+		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD},
+		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			pool.chainConfig.BogotaTime = common.NewUint64(100)
 			backend := pool.ethBackend.(*frameValidationBackend)
-			backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
 			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
 			initial.ChangeBatch[0].BlockTime = tc.initialTime
 			initial.ChangeBatch[0].SlotNumber = common.NewUint64(tc.initialSlot)
@@ -150,20 +140,14 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 
-			backend.valid, backend.calls = tc.valid, nil
+			backend.calls = nil
 			change := newBlockChangeForAccounts(common.Hash{2}, 0)
 			change.ChangeBatch[0].BlockTime = 88
 			change.ChangeBatch[0].SlotNumber = common.NewUint64(20)
 			change.ChangeBatch[0].Direction = tc.direction
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-			require.Equal(t, []common.Hash{slot.IDHash}, backend.calls, "simulation decides activation using the next payload's rules")
-			if tc.valid {
-				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
-			} else {
-				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
-				require.Empty(t, pool.frameReservations)
-				require.Empty(t, pool.all.senderIDFrameTxn)
-			}
+			require.Empty(t, backend.calls, "pending-block rules remain active even when the head is pre-fork")
+			require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 		})
 	}
 }
@@ -190,7 +174,6 @@ func TestFramePoolRecentRootDependencies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
 			backend := pool.ethBackend.(*frameValidationBackend)
-			backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
 			slot := recentRootPoolSlot(t, sender, 10, 1)
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)

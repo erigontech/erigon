@@ -199,6 +199,9 @@ func TestFrameValidationRecentRootAge(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecentRootReferenceAgeOverflow(t *testing.T) {
 	ref := RecentRootReference{Slot: math.MaxUint64 - 1}
 	require.True(t, ref.ValidAt(math.MaxUint64))
 	require.False(t, ref.ValidAt(0))
@@ -273,7 +276,10 @@ func TestFrameValidationRecentRootGas(t *testing.T) {
 			}
 		})
 	}
-	_, tx = recentRootTestEnv(t)
+}
+
+func TestFrameValidationRecentRootGasBudget(t *testing.T) {
+	_, tx := recentRootTestEnv(t)
 	tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureArbitrary}}
 	tx.Frames[0].Limits.Execution = 100_000 - tx.Frames[1].Limits.Execution - tx.Signatures[0].VerificationGas()
 	require.NoError(t, ValidateFrameTransactionPrefix(tx))

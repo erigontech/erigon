@@ -40,8 +40,8 @@ var (
 	recentRootStorageDomain = crypto.Keccak256Hash([]byte("RECENT_ROOT_STORAGE"))
 )
 
-// RecentRootReference records a storage dependency and the referenced slot.
-// It is usable only at later slots and expires at Slot + RecentRootLength;
+// RecentRootReference records the (storage_key, entry_hash) dependency required by
+// EIP-8272. It is usable only at later slots and expires at Slot + RecentRootLength;
 // keeping Slot avoids storing an expiry that can overflow uint64.
 type RecentRootReference struct {
 	StorageKey common.Hash
@@ -85,8 +85,7 @@ func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
 	var storageData [32 + 32 + 8]byte
 	copy(entryData[:], recentRootEntryDomain[:])
 	copy(storageData[:], recentRootStorageDomain[:])
-	for len(data) != 0 {
-		tuple := data[:recentRootTupleSize]
+	for tuple := range slices.Chunk(data, recentRootTupleSize) {
 		slot := binary.BigEndian.Uint64(tuple[32:40])
 		copy(entryData[32:], tuple)
 		copy(storageData[32:64], tuple[:32])
@@ -100,7 +99,6 @@ func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
 		if !slices.Contains(refs, ref) {
 			refs = append(refs, ref)
 		}
-		data = data[recentRootTupleSize:]
 	}
 	return refs, nil
 }

@@ -507,14 +507,14 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	}
 	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
 	blockTime := head.BlockTime
-	// Match validation's pending-block time so expired frames release their reservations.
+	// Expiry and activation checks use the same pending-block time as validation.
 	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	var pendingSlot uint64
 	hasPendingSlot := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
 	if hasPendingSlot {
 		pendingSlot = *head.SlotNumber + 1
 	}
-	isBogota := p.chainConfig.IsBogota(blockTime)
+	isBogota := p.chainConfig.IsBogota(pendingTime)
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -563,8 +563,6 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 				continue
 			}
-			// A pre-fork head may still produce a post-fork payload. Recheck
-			// activation through simulation using the same rules as admission.
 			affected = affected || !isBogota
 		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
