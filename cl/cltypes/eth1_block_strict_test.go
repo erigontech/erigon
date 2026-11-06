@@ -108,7 +108,7 @@ func TestEth1BlockWithdrawalLimitsChangeAtGloas(t *testing.T) {
 		version   clparams.StateVersion
 		wantError bool
 	}{
-		{version: clparams.ElectraVersion, wantError: true},
+		{version: clparams.FuluVersion, wantError: true},
 		{version: clparams.GloasVersion},
 	} {
 		t.Run(test.version.String(), func(t *testing.T) {
