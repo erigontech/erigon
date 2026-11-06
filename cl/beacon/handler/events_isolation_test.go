@@ -162,24 +162,24 @@ func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
 	}
 }
 
-// floodUntilDropped sends head events from several goroutines until one is dropped for every subscriber, so the only
-// subscriber has lagged.
-func floodUntilDropped(t *testing.T, emitters *beaconevents.EventEmitter) {
+// floodUntilLagged sends at most limit head events from several goroutines and stops at the first one that reaches
+// fewer than subscribers, so one subscriber has lagged while still subscribed.
+func floodUntilLagged(t *testing.T, emitters *beaconevents.EventEmitter, subscribers, limit int) {
 	t.Helper()
-	var dropped atomic.Bool
+	var sends atomic.Int64
+	var lagged atomic.Bool
 	var senders sync.WaitGroup
-	deadline := time.Now().Add(5 * time.Second)
 	for range 4 {
 		senders.Go(func() {
-			for !dropped.Load() && time.Now().Before(deadline) {
-				if emitters.State().TrySendHead(&beaconevents.HeadData{}) == 0 {
-					dropped.Store(true)
+			for !lagged.Load() && sends.Add(1) <= int64(limit) {
+				if emitters.State().TrySendHead(&beaconevents.HeadData{}) < subscribers {
+					lagged.Store(true)
 				}
 			}
 		})
 	}
 	senders.Wait()
-	require.True(t, dropped.Load(), "the subscriber never lagged")
+	require.True(t, lagged.Load(), "no subscriber lagged within %d head events", limit)
 }
 
 // A stream that cannot take a head event is closed, so the client reconnects instead of missing the head silently.
@@ -197,7 +197,9 @@ func TestEventStreamClosesWhenItMissesAHeadEvent(t *testing.T) {
 		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
 	}, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
 
-	floodUntilDropped(t, a.emitters)
+	// Fewer events than the write queue holds cannot close the stream through a queue overflow, so only the lag
+	// error can close it.
+	floodUntilLagged(t, a.emitters, 1, eventStreamWriteQueueSize-1)
 	select {
 	case <-handlerDone:
 	case <-time.After(5 * time.Second):
