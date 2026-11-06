@@ -27,6 +27,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -139,7 +140,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 		if errors.Is(err, p2p.ErrChainLengthExceedsLimit) {
 			// Expected: gap is unbridgeable by a chain-length-limited download; the EL relies on FCU or staged sync.
 			e.logger.Info("[EngineBlockDownloader] backward download skipped — gap exceeds limit, awaiting FCU/staged sync", args...)
-		} else {
+		} else if !commonerrors.IsOnlyCanceled(err) {
 			e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
 		}
 		e.status.Store(Idle)
