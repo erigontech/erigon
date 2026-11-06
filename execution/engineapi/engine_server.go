@@ -514,7 +514,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// A stored block with such a gas limit was stored without the cap. It takes the normal path, which
 	// validates and removes it as any stored invalid block.
 	aboveCappedBound := uint64(len(req.Transactions)) > gasLimit/minTxBlockGas
-	if aboveCappedBound && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
+	if aboveCappedBound && !e.parentBeforeTTD(ctx, req) && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
 		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
 	}
 
@@ -590,7 +590,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// Answered after the block hash check and the other payload checks, so that their answers come
 	// first and only a verified block hash is reported as bad. A block that is stored, or may be,
 	// takes the normal path, where a block validation that rejects it also removes it.
-	if headerErr != nil && !e.mayBeStored(ctx, blockHash, header.Number.Uint64()) {
+	if headerErr != nil && !e.parentBeforeTTD(ctx, req) && !e.mayBeStored(ctx, blockHash, header.Number.Uint64()) {
 		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
 		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)
 		e.blockDownloader.ReportBadHeader(blockHash, req.ParentHash, err.Error())
@@ -686,6 +686,19 @@ func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
 	return min(time.Duration(secondsPerSlot)*time.Second, maxAttributesReadinessWait)
 }
 
+// beforeTTD reports whether a block with total difficulty td precedes the terminal total
+// difficulty. An unknown td does not, and a chain without one never reaches it.
+func (e *EngineServer) beforeTTD(td *uint256.Int) bool {
+	ttd := e.config.TerminalTotalDifficulty
+	return ttd == nil || (td != nil && td.Cmp(ttd) < 0)
+}
+
+// parentBeforeTTD reports whether the payload's parent precedes the terminal total difficulty, as
+// the quick status decides it. The early answers leave such a payload to the quick status.
+func (e *EngineServer) parentBeforeTTD(ctx context.Context, req *engine_types.ExecutionPayload) bool {
+	return e.beforeTTD(e.chainRW.GetTd(ctx, req.ParentHash, uint64(req.BlockNumber)-1))
+}
+
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated. For a
 // newPayload, parent is the stored parent header, or nil.
 func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, parent *types.Header, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
@@ -731,7 +744,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		td = e.chainRW.GetTd(ctx, blockHash, blockNumber)
 	}
 
-	if td != nil && td.Cmp(e.config.TerminalTotalDifficulty) < 0 {
+	if e.beforeTTD(td) {
 		e.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}
