@@ -889,7 +889,8 @@ func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
 	}
 }
 
-func TestRunPeer_BlockRangeUpdateFloodKicksPeer(t *testing.T) {
+// An Erigon peer in fast catch-up announces every 32 blocks, which can exceed the rate.
+func TestRunPeer_BlockRangeUpdateBurstIsDroppedWithoutDisconnect(t *testing.T) {
 	peerInfo, peerID := newTestPeerInfoWithEth(t)
 	rw := NewMockMsgReadWriter()
 	for range 40 {
@@ -903,8 +904,8 @@ func TestRunPeer_BlockRangeUpdateFloodKicksPeer(t *testing.T) {
 		rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
 		func(sentryproto.MessageId) bool { return true }, log.Root())
 	require.NotNil(t, peerErr)
-	require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
-	require.Positive(t, forwarded)
+	require.NotEqual(t, p2p.PeerErrorInvalidMessage, peerErr.Code, "the peer stays until its stream ends")
+	require.GreaterOrEqual(t, forwarded, blockAnnouncementsBurst)
 	require.Less(t, forwarded, 40)
 }
 

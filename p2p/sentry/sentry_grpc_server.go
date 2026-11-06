@@ -392,7 +392,7 @@ const (
 	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
 	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
 	// Each peer gets independent limits for full blocks, block hashes and block range updates.
-	// Short bursts are allowed; sustained announcement floods disconnect the peer.
+	// Short bursts are allowed; sustained block announcement floods disconnect the peer, excess range updates are dropped.
 	blockAnnouncementsBurst            = 30
 	blockAnnouncementsRate  rate.Limit = 10
 
@@ -646,8 +646,8 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
 			if !blockRangeUpdateLimiter.Allow() {
-				msg.Discard()
-				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: BlockRangeUpdate rate limit exceeded")
+				msg.Discard() // a later update carries the newer range
+				continue
 			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
