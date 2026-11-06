@@ -31,14 +31,18 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	eezconfig "github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/systemtx"
+	"github.com/erigontech/erigon/execution/bal"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -346,9 +350,22 @@ func TestGroupEndBurnBlockAccessList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newGroupEndChain(t, tc.alloc)
 			_, plain := c.serial(tc.coinbase, tc.txs(c))
-			_, built := c.serial(tc.coinbase, tc.txs(c), execmoduletester.WithExperimentalBAL())
+			m, _, built := c.build(tc.coinbase, tc.txs(c), execmoduletester.WithExperimentalBAL())
 			require.Equal(t, plain.Block.Hash(), built.Block.Hash(), "assembled with block access lists")
 			require.NotEmpty(t, built.BlockAccessList)
+
+			t.Run("rederived", func(t *testing.T) {
+				var vio *state.VersionedIO
+				require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+					start, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, 1)
+					if err != nil {
+						return err
+					}
+					vio, err = bal.RederiveFromHistory(t.Context(), m.ChainConfig, m.Engine, m.BlockReader, tx, built.Block, start, log.New())
+					return err
+				}))
+				require.Equal(t, built.BlockAccessList.DebugString(), vio.AsBlockAccessList().DebugString())
+			})
 
 			for _, workers := range []int{1, 2, 4, 8} {
 				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
