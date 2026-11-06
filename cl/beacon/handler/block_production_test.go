@@ -3010,8 +3010,12 @@ func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testi
 	releaseWrites()
 	require.NoError(t, <-done)
 
-	body := fmt.Sprintf(`{"message":{"beacon_block_root":%q,"builder_index":"%d"}}`, f.root.Hex(), uint64(clparams.BuilderIndexSelfBuild))
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(body))
+	envelope := validTestSignedExecutionPayloadEnvelope(f.handler.beaconChainCfg)
+	envelope.Message.BeaconBlockRoot = f.root
+	envelope.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 	request.Header.Set("Eth-Blob-Data-Included", "false")
