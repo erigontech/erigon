@@ -258,7 +258,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 // then reads the branch data directly from the DB and verifies the hash.
 // This tests whether hash verification works on DB-level data before snapshot creation.
 func TestVerifyBranchHashesFromDB(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	logger := log.New()
 	ctx := t.Context()

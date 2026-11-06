@@ -34,6 +34,7 @@ import (
 )
 
 func TestNewStateTestSharedDomainsUsesSelectedCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	originalParallel := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() {
 		statecfg.ExperimentalParallelCommitment = originalParallel

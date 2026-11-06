@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -120,6 +121,7 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 }
 
 func TestCommitmentConvertV3DropsTheDBTail(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, countTail := dbWithStateTail(t)
 	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	requireExecutionReset(t, db, countTail)
