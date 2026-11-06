@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"crypto/ecdsa"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -32,7 +35,7 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a test file to share.
-	testData := []byte("hello from the seeder — this is a snapshot manifest")
+	testData := BuildTomlFromMap(map[string]string{"snapshot.seg": "abc123"})
 	testFile := ChainTomlFileName
 	require.NoError(t, os.WriteFile(filepath.Join(seederDir, testFile), testData, 0o644))
 	localData := []byte("existing local manifest")
@@ -68,13 +71,59 @@ func TestBTPeerDiscovery_AddPeersFromENR(t *testing.T) {
 	assert.Equal(t, [20]byte(infoHash), best.ChainToml.InfoHash)
 
 	// Start leecher torrent client.
-	leecher, err := torrent.NewClient(newTestClientConfig(t, leecherDir))
+	leecherCfg := newTestClientConfig(t, leecherDir)
+	leecherCfg.Slogger = slog.Default()
+	store, leecher, err := newTorrentClient(leecherDir, leecherCfg)
 	require.NoError(t, err)
+	defer store.Close()
 	defer leecher.Close()
+	d := &Downloader{
+		cfg:           &downloadercfg.Cfg{Dirs: datadir.Dirs{Snap: leecherDir, Tmp: tmpDir}},
+		torrentClient: leecher,
+	}
 
-	downloaded, err := DownloadChainTomlByInfoHash(ctx, leecher, infoHash, leecherDir, tmpDir, best)
+	downloaded, err := d.downloadChainToml(ctx, best)
 	require.NoError(t, err)
 	assert.Equal(t, testData, downloaded)
+	stats := seederTorrent.Stats()
+	uploaded := stats.BytesWrittenData.Int64()
+	require.Positive(t, uploaded)
+	for range 2 {
+		downloaded, err = d.downloadChainToml(ctx, best)
+		require.NoError(t, err)
+		assert.Equal(t, testData, downloaded)
+		stats = seederTorrent.Stats()
+		assert.Equal(t, uploaded, stats.BytesWrittenData.Int64(), "an unchanged manifest must not be downloaded again")
+	}
+
+	seederTorrent.Drop()
+	updatedData := BuildTomlFromMap(map[string]string{"snapshot.seg": "def456"})
+	require.NoError(t, SaveChainToml(seederDir, updatedData))
+	updatedInfo := buildTestMetainfo(t, seederDir, testFile)
+	updatedTorrent, err := seeder.AddTorrent(&updatedInfo)
+	require.NoError(t, err)
+	require.True(t, updatedTorrent.Complete().Bool())
+	updatedEntry := enr.ChainToml{KnownBlocks: 101, InfoHash: updatedInfo.HashInfoBytes()}
+	updatedPeer := &ChainTomlPeer{
+		ChainToml: updatedEntry,
+		Node:      makeNodeWithBT(t, seederKey, net.IPv4(127, 0, 0, 1), &updatedEntry, enr.BT(uint16(seeder.LocalPort()))),
+	}
+	downloaded, err = d.downloadChainToml(ctx, updatedPeer)
+	require.NoError(t, err)
+	assert.Equal(t, updatedData, downloaded, "a changed hash must fetch the new manifest")
+
+	expiredPeerCtx, stop := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer stop()
+	_, err = d.downloadChainToml(expiredPeerCtx, best)
+	require.ErrorIs(t, err, context.DeadlineExceeded, "the previous cache entry must be evicted")
+	stats = updatedTorrent.Stats()
+	uploaded = stats.BytesWrittenData.Int64()
+	downloaded, err = d.downloadChainToml(ctx, updatedPeer)
+	require.NoError(t, err)
+	assert.Equal(t, updatedData, downloaded)
+	stats = updatedTorrent.Stats()
+	assert.Equal(t, uploaded, stats.BytesWrittenData.Int64(), "a failed download must retain the successful cache entry")
+
 	got, err := os.ReadFile(ChainTomlPath(leecherDir))
 	require.NoError(t, err)
 	assert.Equal(t, localData, got)

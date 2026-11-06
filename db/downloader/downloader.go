@@ -123,6 +123,8 @@ type Downloader struct {
 	// Temporary manifest torrents must be dropped before local seeding can reuse their info hashes.
 	chainTomlTorrentLock sync.Mutex
 	chainTomlSeedPending atomic.Bool
+	chainTomlCache       *cachedChainToml
+	chainTomlVerified    atomic.Pointer[chainTomlVerification]
 
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,9 +19,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -129,12 +132,31 @@ func TestChainTomlDiscoveryPreservesConcurrentSeed(t *testing.T) {
 				return ok
 			}, 5*time.Second, time.Millisecond)
 
-			require.NoError(t, d.seedChainTomlTorrent())
+			seedStarted := make(chan struct{})
+			seedDone := make(chan struct{})
+			var seedErr error
+			go func() {
+				defer close(seedDone)
+				close(seedStarted)
+				seedErr = d.seedChainTomlTorrent()
+			}()
+			defer func() {
+				cancel()
+				<-seedDone
+			}()
+			<-seedStarted
+			select {
+			case <-seedDone:
+				t.Fatalf("seeding returned before discovery cleanup: %v", seedErr)
+			case <-time.After(100 * time.Millisecond):
+			}
+			cancel()
+			<-seedDone
+			require.NoError(t, seedErr)
 			seed, registered := client.Torrent(infoHash)
 			require.True(t, registered)
 			assert.True(t, seed.Complete().Bool(), "the local manifest must be available for seeding")
 
-			cancel()
 			<-done
 			registeredSeed, registered := client.Torrent(infoHash)
 			require.True(t, registered, "download cleanup must preserve the local seed")
@@ -329,6 +351,114 @@ func TestDownloadChainTomlByInfoHashKeepsExistingTorrent(t *testing.T) {
 	entries, err := os.ReadDir(tmpDir)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+func TestDownloadChainTomlByInfoHashRejectsMismatchedMetadata(t *testing.T) {
+	snapDir := t.TempDir()
+	client, err := torrent.NewClient(newTestClientConfig(t, snapDir))
+	require.NoError(t, err)
+	defer client.Close()
+	infoBytes, err := bencode.Marshal(metainfo.Info{Name: ChainTomlFileName, PieceLength: 256 * 1024})
+	require.NoError(t, err)
+	mi := metainfo.MetaInfo{InfoBytes: infoBytes}
+	advertisedHash := mi.HashInfoBytes()
+	advertisedHash[0] ^= 0xff
+	manifest, _ := client.AddTorrentOpt(torrent.AddTorrentOpts{InfoHash: advertisedHash, InfoBytes: infoBytes})
+	require.True(t, manifest.Complete().Bool())
+
+	data, err := DownloadChainTomlByInfoHash(t.Context(), client, advertisedHash, snapDir, t.TempDir(), nil)
+	require.ErrorContains(t, err, "chain.toml metadata does not match advertised info hash")
+	assert.Nil(t, data)
+}
+
+func TestChainTomlCacheRejectsInvalidToml(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	require.NoError(t, SaveChainToml(test.dirs.Snap, []byte("invalid TOML")))
+	mi := buildTestMetainfo(t, test.dirs.Snap, ChainTomlFileName)
+	manifest, err := d.torrentClient.AddTorrent(&mi)
+	require.NoError(t, err)
+	require.True(t, manifest.Complete().Bool())
+	peer := &ChainTomlPeer{ChainToml: enr.ChainToml{InfoHash: mi.HashInfoBytes()}}
+
+	data, err := d.downloadChainToml(t.Context(), peer)
+	require.ErrorContains(t, err, "parsing chain.toml")
+	assert.Nil(t, data)
+
+	require.NoError(t, SaveChainToml(test.dirs.Snap, []byte("different data")))
+	_, err = d.downloadChainToml(t.Context(), peer)
+	require.ErrorContains(t, err, "chain.toml does not match torrent", "a failed parse must not populate the cache")
+}
+
+func TestVerifyChainTomlReportsChangedInputs(t *testing.T) {
+	const network = "sepolia"
+	const name = "domain/v1-accounts.0-64.kv"
+	previous := append([]byte{}, snapcfg.GetToml(network)...)
+	previousCfg, _ := snapcfg.KnownCfg(network)
+	t.Cleanup(func() { snapcfg.SetToml(network, previous, previousCfg.Local) })
+	localHash := strings.Repeat("a", 40)
+	peerHash := strings.Repeat("b", 40)
+	snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: localHash}), true)
+	test := newDownloaderTest(t)
+	d := test.downloader
+	logs := &logBuffer{}
+	d.logger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(logs, log.LogfmtFormat())))
+	require.NoError(t, SaveChainToml(test.dirs.Snap, BuildTomlFromMap(map[string]string{name: peerHash})))
+	mi := buildTestMetainfo(t, test.dirs.Snap, ChainTomlFileName)
+	manifest, err := d.torrentClient.AddTorrent(&mi)
+	require.NoError(t, err)
+	require.True(t, manifest.Complete().Bool())
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	node := makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: mi.HashInfoBytes()})
+	ns := &mockNodeSource{nodes: []*enode.Node{node}}
+
+	d.verifyChainToml(t.Context(), network, ns)
+	require.Equal(t, 1, strings.Count(logs.String(), "hash mismatch"))
+	d.verifyChainToml(t.Context(), network, ns)
+	require.Equal(t, 1, strings.Count(logs.String(), "hash mismatch"), "unchanged comparisons must not repeat warnings")
+
+	snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: strings.Repeat("c", 40)}), true)
+	d.verifyChainToml(t.Context(), network, ns)
+	require.Equal(t, 2, strings.Count(logs.String(), "hash mismatch"), "local changes must be compared with the cached peer manifest")
+
+	d.acquireChainToml(t.Context(), network, ns)
+	d.verifyChainToml(t.Context(), network, ns)
+	require.Equal(t, 3, strings.Count(logs.String(), "hash mismatch"), "returning to verify mode must compare again")
+}
+
+func TestAcquireChainTomlReusesCacheAfterLocalChanges(t *testing.T) {
+	const network = "sepolia"
+	previous := append([]byte{}, snapcfg.GetToml(network)...)
+	previousCfg, _ := snapcfg.KnownCfg(network)
+	t.Cleanup(func() { snapcfg.SetToml(network, previous, previousCfg.Local) })
+	snapcfg.SetToml(network, []byte{}, false)
+	test := newDownloaderTest(t)
+	d := test.downloader
+	data := BuildTomlFromMap(map[string]string{"domain/v1-accounts.0-64.kv": strings.Repeat("a", 40)})
+	require.NoError(t, SaveChainToml(test.dirs.Snap, data))
+	mi := buildTestMetainfo(t, test.dirs.Snap, ChainTomlFileName)
+	manifest, err := d.torrentClient.AddTorrent(&mi)
+	require.NoError(t, err)
+	require.True(t, manifest.Complete().Bool())
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	node := makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: mi.HashInfoBytes()})
+	ns := &mockNodeSource{nodes: []*enode.Node{node}}
+
+	d.acquireChainToml(t.Context(), network, ns)
+	require.Equal(t, data, snapcfg.GetToml(network))
+	manifest.Drop()
+	require.NoError(t, dir.RemoveFile(ChainTomlPath(test.dirs.Snap)))
+	snapcfg.SetToml(network, []byte{}, false)
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	d.acquireChainToml(ctx, network, ns)
+	require.Equal(t, data, snapcfg.GetToml(network), "cached peer entries must be applied to the changed local registry")
+	got, err := LoadChainToml(test.dirs.Snap)
+	require.NoError(t, err)
+	assert.Equal(t, data, got)
 }
 
 func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
