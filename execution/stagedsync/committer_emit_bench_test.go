@@ -17,51 +17,44 @@
 package stagedsync
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// BenchmarkEmitTouched folds a block of 10k txs, each writing a sender, a receiver and one slot.
 func BenchmarkEmitTouched(b *testing.B) {
-	const n = 1024
-	ver := state.Version{TxIndex: 0}
-	slot := accounts.InternKey([32]byte{1})
-	for _, sc := range []struct {
-		name  string
-		write func(w *wsb, a accounts.Address)
-	}{
-		{"balance-nonce", func(w *wsb, a accounts.Address) { w.bal(a, ver, *uint256.NewInt(5)).nonce(a, ver, 1) }},
-		{"storage-only", func(w *wsb, a accounts.Address) { w.stor(a, slot, ver, *uint256.NewInt(1)) }},
-	} {
-		b.Run(sc.name, func(b *testing.B) {
-			w := newWS()
-			base := newMapStateReader()
-			for i := range n {
-				a := accounts.InternAddress([20]byte{0xbe, byte(i >> 8), byte(i)})
-				sc.write(w, a)
-				acc := accounts.NewAccount()
-				acc.Balance = *uint256.NewInt(100)
-				base.accounts[a] = &acc
-			}
-			ws := w.build()
-			vm := state.NewVersionMap(nil)
-			vm.FlushVersionedWrites(ws, true)
-			cc := &commitmentCalculator{updates: newTestUpdates()}
-			cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, 0), nil)
-			u := newTestUpdates()
-			b.ReportAllocs()
-			for b.Loop() {
-				b.StopTimer()
-				u.Reset()
-				b.StartTimer()
-				if err := cc.emitTouched(vm.View(1, base), u); err != nil {
-					b.Fatal(err)
-				}
-			}
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/account")
-		})
+	const txs = 10_000
+	vm := state.NewVersionMap(nil)
+	cc := &commitmentCalculator{updates: newTestUpdates()}
+	addr := func(i int) accounts.Address {
+		var a [20]byte
+		binary.BigEndian.PutUint64(a[12:], uint64(i)+1)
+		return accounts.InternAddress(a)
+	}
+	for tx := range txs {
+		ver := state.Version{TxIndex: tx}
+		var slot [32]byte
+		binary.BigEndian.PutUint64(slot[24:], uint64(tx))
+		ws := newWS().
+			bal(addr(2*tx), ver, *uint256.NewInt(uint64(tx))).nonce(addr(2*tx), ver, 1).
+			bal(addr(2*tx+1), ver, *uint256.NewInt(1)).
+			stor(addr(2*tx+1), accounts.InternKey(slot), ver, *uint256.NewInt(1)).build()
+		vm.FlushVersionedWrites(ws, true)
+		cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, tx), nil)
+	}
+	u := commitment.NewUpdates(commitment.ModeParallel, b.TempDir(), commitment.KeyToHexNibbleHash)
+	defer u.Close()
+	b.ReportAllocs()
+	for b.Loop() {
+		u.Reset()
+		if err := cc.emitTouched(vm.View(txs+1, nil), u); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

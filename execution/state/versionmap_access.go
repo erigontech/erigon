@@ -52,44 +52,6 @@ func (view *VersionMapView) txIdx() int {
 	return int(view.txNum - view.vm.baseTxNum.Load())
 }
 
-type accountFloors struct {
-	fields                                accounts.Account
-	balance, nonce, incarnation, codeHash bool
-	balanceStatus                         valueStatus
-	addressCell                           bool
-	address                               *accounts.Account
-	life                                  AccountLifecycleState
-}
-
-func (vm *VersionMap) accountFloors(addr accounts.Address, txIdx int) (f accountFloors) {
-	e := vm.load(addr)
-	if e == nil {
-		return f
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if _, c := floorCell(e.Balance, txIdx); c != nil {
-		f.fields.Balance, f.balance, f.balanceStatus = c.Value, true, c.valStatus
-	}
-	if _, c := floorCell(e.Nonce, txIdx); c != nil {
-		f.fields.Nonce, f.nonce = c.Value, true
-	}
-	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
-		f.fields.Incarnation, f.incarnation = c.Value, true
-	}
-	if _, c := floorCell(e.CodeHash, txIdx); c != nil {
-		f.fields.CodeHash, f.codeHash = c.Value, true
-	}
-	if _, c := floorCell(e.Address, txIdx); c != nil {
-		f.addressCell = true
-		if c.accSource != AccountFromBAL {
-			f.address = c.Value
-		}
-	}
-	f.life, _, _, _ = accountLifecycleLocked(e, txIdx, false)
-	return f
-}
-
 // GetAccount composes addr's final account at the view's txNum from the version map
 // cells over base and reports whether it belongs in the trie. The add/remove verdict is
 // read straight off the state: a ValueDeleted balance cell is a removal — exec already
@@ -99,43 +61,53 @@ func (vm *VersionMap) accountFloors(addr accounts.Address, txIdx int) (f account
 // accounts removed in an earlier block; the base resolves them as absent). Otherwise the
 // composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
 // the read; it is the why-free add/remove projection.
-func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDestroyed bool) {
-	f := view.vm.accountFloors(addr, view.txIdx())
-	wasDestroyed = f.life != LifecycleLive
-	if f.balance && f.balanceStatus == ValueDeleted {
-		return accounts.Account{}, false, wasDestroyed
+func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDeleted bool) {
+	f := view.vm.accountFloorsAt(addr, view.txIdx())
+	if f.balanceDeleted {
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	base := f.address
-	if !f.addressCell {
-		base, _ = view.vm.LoadOriginAccount(addr)
+	base, err := view.baseAccount(addr, &f)
+	if err != nil {
+		view.err = cmp.Or(view.err, err)
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	if base == nil && view.base != nil {
-		var err error
-		if base, err = view.base.ReadAccountData(addr); err != nil {
-			view.err = cmp.Or(view.err, err)
-			return accounts.Account{}, false, wasDestroyed
-		}
-	}
-	if base == nil && !f.balance && !f.nonce && !f.incarnation && !f.codeHash {
-		return accounts.Account{}, false, wasDestroyed
+	if base == nil && !f.hasBalance && !f.hasNonce && !f.hasIncarnation && !f.hasCodeHash {
+		return accounts.Account{}, false, f.wasDeleted
 	}
 	acc = accounts.NewAccount()
 	if base != nil {
 		acc = *base
 	}
-	if f.balance {
-		acc.Balance = f.fields.Balance
+	if f.hasBalance {
+		acc.Balance = f.balance
 	}
-	if f.nonce {
-		acc.Nonce = f.fields.Nonce
+	if f.hasNonce {
+		acc.Nonce = f.nonce
 	}
-	if f.incarnation {
-		acc.Incarnation = f.fields.Incarnation
+	if f.hasIncarnation {
+		acc.Incarnation = f.incarnation
 	}
-	if f.codeHash {
-		acc.CodeHash = f.fields.CodeHash
+	if f.hasCodeHash {
+		acc.CodeHash = f.codeHash
 	}
-	return acc, true, wasDestroyed
+	return acc, true, f.wasDeleted
+}
+
+// baseAccount is the record the field cells overlay: a non-BAL address cell, else the
+// seeded origin when no address cell exists, else the base reader.
+func (view *VersionMapView) baseAccount(addr accounts.Address, f *accountFloors) (*accounts.Account, error) {
+	switch {
+	case f.hasAddress && !f.addressFromBAL && f.address != nil:
+		return f.address, nil
+	case !f.hasAddress:
+		if oacc, seeded := view.vm.LoadOriginAccount(addr); seeded && oacc != nil {
+			return oacc, nil
+		}
+	}
+	if view.base == nil {
+		return nil, nil
+	}
+	return view.base.ReadAccountData(addr)
 }
 
 // GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok

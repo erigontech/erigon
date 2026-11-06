@@ -203,16 +203,16 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
-		setup     func(vm *VersionMap)
-		base      *accounts.Account
-		noBase    bool
-		baseErr   error
-		err       error
-		acc       accounts.Account
-		ok        bool
-		destroyed bool
-		baseReads int
+		name       string
+		setup      func(vm *VersionMap)
+		base       *accounts.Account
+		noBase     bool
+		baseErr    error
+		err        error
+		acc        accounts.Account
+		ok         bool
+		wasDeleted bool
+		baseReads  int
 	}{
 		{name: "no entry, base present", base: &committed, acc: committed, ok: true, baseReads: 1},
 		{name: "no entry, base absent", baseReads: 1},
@@ -265,15 +265,15 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			name: "balance cell, no base reader", setup: func(vm *VersionMap) { vm.WriteBalance(addr, v(0), *uint256.NewInt(50), true) },
 			noBase: true, acc: with(fresh, bal(50)), ok: true,
 		},
-		{name: "EIP-161 removal", setup: removal(true), base: &committed, destroyed: true},
+		{name: "EIP-161 removal", setup: removal(true), base: &committed, wasDeleted: true},
 		{name: "EIP-161 removal as estimate", setup: removal(false), base: &committed},
 		{name: "revived above an EIP-161 removal", setup: func(vm *VersionMap) {
 			removal(true)(vm)
 			vm.WriteBalance(addr, v(1), *uint256.NewInt(5), true)
-		}, base: &committed, acc: with(committed, bal(5)), ok: true, destroyed: true, baseReads: 1},
+		}, base: &committed, acc: with(committed, bal(5)), ok: true, wasDeleted: true, baseReads: 1},
 		{
 			name: "self-destruct cell only", setup: func(vm *VersionMap) { vm.WriteSelfDestruct(addr, v(0), true, true) },
-			base: &committed, acc: committed, ok: true, destroyed: true, baseReads: 1,
+			base: &committed, acc: committed, ok: true, wasDeleted: true, baseReads: 1,
 		},
 		{name: "EIP-8246 destruct keeps raw floors below it", setup: func(vm *VersionMap) {
 			vm.WriteNonce(addr, v(0), 9, true)
@@ -282,7 +282,7 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			vm.WriteBalance(addr, v(1), *uint256.NewInt(3), true)
 		}, base: &committed, acc: with(committed, func(a *accounts.Account) {
 			a.Balance, a.Nonce, a.CodeHash = *uint256.NewInt(3), 9, cellCode
-		}), ok: true, destroyed: true, baseReads: 1},
+		}), ok: true, wasDeleted: true, baseReads: 1},
 		{name: "BAL marker over base", setup: func(vm *VersionMap) {
 			vm.WriteAddressExists(addr, v(0), &marker)
 			vm.WriteBalance(addr, v(0), *uint256.NewInt(50), true)
@@ -325,7 +325,7 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			name: "base read error under a balance cell", setup: func(vm *VersionMap) { vm.WriteBalance(addr, v(0), *uint256.NewInt(50), true) },
 			baseErr: readErr, err: readErr, baseReads: 1,
 		},
-		{name: "EIP-161 removal skips the failing base", setup: removal(true), baseErr: readErr, destroyed: true},
+		{name: "EIP-161 removal skips the failing base", setup: removal(true), baseErr: readErr, wasDeleted: true},
 	}
 
 	for _, tc := range cases {
@@ -342,10 +342,10 @@ func TestVersionMapView_GetAccountTable(t *testing.T) {
 			}
 			view := vm.View(2, base)
 
-			acc, ok, destroyed := view.GetAccount(addr)
+			acc, ok, wasDeleted := view.GetAccount(addr)
 			require.Equal(t, tc.acc, acc, "account")
 			require.Equal(t, tc.ok, ok, "present")
-			require.Equal(t, tc.destroyed, destroyed, "destroyed")
+			require.Equal(t, tc.wasDeleted, wasDeleted, "wasDeleted")
 			require.Equal(t, tc.baseReads, reader.reads, "base reads")
 			require.Equal(t, tc.err, view.Err(), "error")
 		})

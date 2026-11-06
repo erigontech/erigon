@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/common"
@@ -69,6 +70,9 @@ const (
 	pendingEnvelopeLookupRetryInterval = 5 * time.Second
 	maxPendingEnvelopes                = 1024
 	maxPendingEnvelopeBytes            = 4 * clparams.MaxChunkSize
+	// Bounds the context-aware waits of one import, such as the payload-validation admission and the
+	// EL call. It equals the remote Engine API client's NewPayload timeout, which the embedded EL lacks.
+	executionPayloadImportTimeout = execution_client.DefaultRPCHTTPTimeout
 )
 
 var errEnvelopeBlockUnavailable = errors.New("execution payload envelope block unavailable")
@@ -369,13 +373,15 @@ func (s *executionPayloadService) importEnvelope(
 		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(token, keepSeen)
 		finishPendingEnvelope()
 	}()
+	ctx, cancel := context.WithTimeout(s.ctx, executionPayloadImportTimeout)
+	defer cancel()
 	var err error
 	if store, ok := s.forkchoiceStore.(interface {
 		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
 	}); ok {
-		err = store.OnExecutionPayloadAt(s.ctx, signedEnvelope, true, true, receivedAt)
+		err = store.OnExecutionPayloadAt(ctx, signedEnvelope, true, true, receivedAt)
 	} else {
-		err = s.forkchoiceStore.OnExecutionPayload(s.ctx, signedEnvelope, true, true)
+		err = s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
 	}
 	keepSeen = err == nil ||
 		errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) ||
@@ -530,8 +536,9 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	err = s.processMessage(ctx, job.envelope, job.receivedAt, &admissionToken)
 	if err != nil {
 		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
-		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
-			!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed) ||
+			(!errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
+				!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope)) {
 			job.processing.Store(false)
 			return pendingJobKeep
 		}

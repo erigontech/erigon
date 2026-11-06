@@ -131,6 +131,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -267,6 +268,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
