@@ -2572,3 +2572,61 @@ func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
 		})
 	}
 }
+
+// TestParallelStepEdgeKeepsRevivedStorage revives a CREATE2 address in one tx, writes a slot in its init code,
+// then writes another slot after a mid-block step edge: the fold after the edge must not wipe the first slot.
+func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	// With call value: self-destruct in the creating tx. Without: slot 1 = 1, deploy counter.
+	initCode := append([]byte{
+		byte(vm.CALLVALUE), byte(vm.PUSH1), 21, byte(vm.JUMPI),
+		byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.SSTORE),
+		byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 24, byte(vm.PUSH1), 0, byte(vm.CODECOPY),
+		byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 0, byte(vm.RETURN),
+		byte(vm.JUMPDEST), byte(vm.CALLER), byte(vm.SELFDESTRUCT),
+	}, counter...)
+	factoryCode := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+		byte(vm.PUSH1), 0, byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.CALLVALUE), byte(vm.CREATE2),
+		byte(vm.POP), byte(vm.STOP),
+	}
+	factory := common.HexToAddress("0xfac7")
+	child := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	config := libchain.AllProtocolChanges
+	alloc := types.GenesisAlloc{from: {Balance: big.NewInt(common.Ether)}, factory: {Code: factoryCode, Balance: big.NewInt(0)}}
+	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	m := execmoduletester.New(t, execmoduletester.WithKey(key),
+		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
+		execmoduletester.WithExperimentalBAL(), execmoduletester.WithStepSize(8))
+	signer := types.LatestSignerForChainID(config.ChainID)
+	gasPrice := uint256.NewInt(10_000_000_000)
+	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		var nonce uint64
+		add := func(to common.Address, value uint64, data []byte) {
+			signed, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(value), 1_000_000, gasPrice, data), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(signed)
+			nonce++
+		}
+		add(factory, 1, initCode)
+		add(factory, 0, initCode)
+		for i := range 10 {
+			add(common.BytesToAddress([]byte{byte(i) + 1, 0xee}), 1, nil)
+		}
+		add(child, 0, nil)
+	})
+	require.NoError(t, err)
+	for _, r := range chainPack.Receipts[0] {
+		require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
+	}
+	dbg.Exec3Parallel = true
+	require.NoError(t, m.InsertChain(chainPack))
+}
