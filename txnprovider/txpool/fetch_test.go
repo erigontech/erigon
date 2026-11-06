@@ -916,6 +916,7 @@ type announceFetchTest struct {
 	discarded     map[[32]byte]bool // hashes whose body the pool rejected
 	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
+	onSend        func()
 	sendErr       error
 	failSendAt    int               // when > 0, only that send (1-based) fails with sendErr
 	gone          map[[64]byte]bool // peers sentry no longer knows: a send reaches no one
@@ -963,6 +964,10 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
 			a.sends++
+			if onSend := a.onSend; onSend != nil {
+				a.onSend = nil
+				onSend()
+			}
 			sent := &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}
 			if a.gone[gointerfaces.ConvertH512ToHash(r.PeerId)] {
 				sent = &sentryproto.SentPeers{}
@@ -1305,7 +1310,7 @@ func TestRetryRequestsPerPeerArePaced(t *testing.T) {
 	a.requestedFrom = nil
 	a.timeoutSweep()
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a sweep must not overflow the peer's outbound queue")
-	*a.now = a.now.Add(txFetchTimeout)
+	*a.now = a.now.Add(retryBudgetWindow)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes in the next budget window")
 }
@@ -1390,9 +1395,41 @@ func TestRetryBudgetHoldsAcrossSweeps(t *testing.T) {
 	*a.now = a.now.Add(time.Second)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "the peer may still be draining the last sweep's requests")
-	*a.now = a.now.Add(txFetchTimeout)
+	*a.now = a.now.Add(retryBudgetWindow)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Len(t, a.requestedFrom, 2*maxRetryRequestsPerPeer)
+}
+
+func TestRetryBudgetSpansTheSentryWriteTimeout(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, 4*maxRetryRequestsPerPeer)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.requestedFrom = nil
+	for range 4 {
+		a.timeoutSweep()
+	}
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a stalled peer holds its queued retries until sentry's write timeout")
+}
+
+func TestStaleRetryBatchIsNotSent(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, peerB, peerC := [32]byte{0xd1}, [32]byte{0xd2}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	const blobTxnSize = 131 * 1024
+	for _, peer := range [][64]byte{peerA, peerB, peerC} {
+		a.announceSized(t, peer, blobTxnSize, h1, h2)
+	}
+	a.requestedFrom = nil
+	a.onSend = a.timeoutSweep // the first send to B stalls past the timeout, so another sweep asks C
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerB, peerC, peerC}, a.requestedFrom, "B's second batch now belongs to C")
 }
 
 func TestRetryBudgetCountsTheSizeSlack(t *testing.T) {

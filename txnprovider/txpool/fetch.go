@@ -62,6 +62,9 @@ const disconnectedPeerMemory = time.Minute
 // maxRetryRequestsPerPeer keeps one sweep well under sentry's 32-message outbound queue, which drops the oldest when full.
 const maxRetryRequestsPerPeer = 8
 
+// retryBudgetWindow spans p2p's frameWriteTimeout: a stalled peer is dropped before a third window's retries reach its queue.
+const retryBudgetWindow = 20 * time.Second
+
 type fetchPeer struct {
 	sentry sentryproto.SentryClient
 	peerID [64]byte
@@ -73,7 +76,7 @@ type fetchRequest struct {
 	alternates []fetchPeer
 }
 
-// retryBudget counts a peer's retry requests in the current txFetchTimeout window.
+// retryBudget counts a peer's retry requests in the current retryBudgetWindow.
 type retryBudget struct {
 	used  int
 	since time.Time
@@ -331,7 +334,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			plan := plans[alt]
 			if plan == nil {
 				b := f.retryBudgets[alt]
-				if b == nil || sent.Sub(b.since) >= txFetchTimeout {
+				if b == nil || sent.Sub(b.since) >= retryBudgetWindow {
 					b = &retryBudget{since: sent}
 					f.retryBudgets[alt] = b
 				}
@@ -354,7 +357,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		f.retryBudgets[peer].used += len(plan.reqs)
 	}
 	for peer, b := range f.retryBudgets {
-		if sent.Sub(b.since) >= txFetchTimeout {
+		if sent.Sub(b.since) >= retryBudgetWindow {
 			delete(f.retryBudgets, peer)
 		}
 	}
@@ -362,16 +365,41 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 
 	for peer, plan := range plans {
 		for _, hashes := range plan.reqs {
+			hashes, at := f.claimRetry(peer, hashes, sent)
+			if len(hashes) == 0 {
+				continue
+			}
 			if unsent, err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), hashes); err != nil {
 				f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
 				if errors.Is(err, errPeerGone) {
 					f.dropAlternate(peer) // its Disconnect event may have been lost
 				} else {
-					f.keepAlternate(peer, unsent, sent)
+					f.keepAlternate(peer, unsent, at)
 				}
 			}
 		}
 	}
+}
+
+// claimRetry keeps the hashes still reserved for peer at sent, as an earlier send may have stalled past the timeout
+// and another sweep moved them on, and restamps them so their timeout runs from this send.
+func (f *Fetch) claimRetry(peer fetchPeer, hashes Hashes, sent time.Time) (Hashes, time.Time) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	now := f.now()
+	var claimed Hashes
+	for i := 0; i < len(hashes); i += 32 {
+		r, ok := f.requested.Get(hashes[i : i+32])
+		if !ok || r.peer != peer || !r.at.Equal(sent) {
+			continue
+		}
+		if !now.Equal(sent) {
+			r.at = now
+			f.pending = append(f.pending, pendingFetch{[32]byte(hashes[i : i+32]), now})
+		}
+		claimed = append(claimed, hashes[i:i+32]...)
+	}
+	return claimed, now
 }
 
 // releaseRequested forgets hashes whose request was not sent and that have no alternate to retry, so the
