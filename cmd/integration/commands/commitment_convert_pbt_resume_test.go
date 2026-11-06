@@ -193,6 +193,26 @@ func TestPBTResumeRecoversInterruptedSwap(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestPBTResumePublishKeepsSwapWhenBackupCleanupFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes read-only directories")
+	}
+	published := datadir.New(filepath.Join(t.TempDir(), "published"))
+	staged := datadir.New(filepath.Join(t.TempDir(), "staged"))
+	require.NoError(t, os.WriteFile(filepath.Join(staged.Snap, "staged.seg"), nil, 0o644))
+	locked := filepath.Join(published.Snap, "locked")
+	require.NoError(t, os.MkdirAll(locked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(locked, "old.seg"), nil, 0o644))
+	require.NoError(t, os.Chmod(locked, 0o555))
+	backupLocked := filepath.Join(pbtResumePublishedPath(published), "locked")
+	t.Cleanup(func() {
+		_ = os.Chmod(locked, 0o755)
+		_ = os.Chmod(backupLocked, 0o755)
+	})
+	require.NoError(t, publishPBTResumeOutput(published, staged, log.New()))
+	require.FileExists(t, filepath.Join(published.Snap, "staged.seg"))
+}
+
 func TestPBTEmptyOutputRefusalPreservesDirectory(t *testing.T) {
 	selectPBTCommandSuite(t)
 	source, _ := newPBTConversionSource(t)

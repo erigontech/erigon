@@ -98,7 +98,7 @@ func PBinResumeLeaves(ctx context.Context, at *AggregatorRoTx, opts PBinResumeOp
 	}
 	var reported uint64
 	var done uint64
-	err := pbinLoadSortedLeafCollectors(collectors, func(leaf PBinLeaf) error {
+	err := pbinLoadSortedLeafCollectors(ctx, collectors, func(leaf PBinLeaf) error {
 		done++
 		if opts.GapKeys != nil {
 			opts.GapKeys.Store(done)

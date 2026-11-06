@@ -20,12 +20,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -186,7 +188,7 @@ func pbinForEachLeafSerial(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, 
 		return err
 	}
 	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: collector.Collected(), TempDir: at.Dirs().Tmp})
-	return pbinLoadSortedLeafCollectors([]*etl.Collector{collector}, emit, leafProgress)
+	return pbinLoadSortedLeafCollectors(ctx, []*etl.Collector{collector}, emit, leafProgress)
 }
 
 type pbinLeafAddressRange struct {
@@ -332,7 +334,7 @@ func pbinForEachLeafParallel(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx
 		total += collector.Collected()
 	}
 	leafProgress := NewPBTProgress(PBTProgressConfig{Message: "PBT leaf stream progress", Phase: "leaf load", Total: total, TempDir: at.Dirs().Tmp})
-	return pbinLoadSortedLeafCollectors(collectors, emit, leafProgress)
+	return pbinLoadSortedLeafCollectors(ctx, collectors, emit, leafProgress)
 }
 
 func pbinLeafAddressRanges(workers int) []pbinLeafAddressRange {
@@ -518,7 +520,7 @@ func pbinCollectOp(collector *etl.Collector, scratch *[8 + eip8297.ValueLength]b
 	return collector.Collect(op.Key, scratch[:])
 }
 
-func pbinLoadSortedLeafCollectors(collectors []*etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
+func pbinLoadSortedLeafCollectors(ctx context.Context, collectors []*etl.Collector, emit func(PBinLeaf) error, progress etl.Progress) error {
 	var previousKey, previousValue []byte
 	var previousStamp uint64
 	flush := func() error {
@@ -542,7 +544,10 @@ func pbinLoadSortedLeafCollectors(collectors []*etl.Collector, emit func(PBinLea
 		previousValue = bytes.Clone(value[8:])
 		previousStamp = binary.BigEndian.Uint64(value)
 		return nil
-	}, etl.TransformArgs{Progress: progress})
+	}, etl.TransformArgs{Progress: progress, Quit: ctx.Done()})
+	if errors.Is(err, common.ErrStopped) {
+		return ctx.Err()
+	}
 	if err != nil {
 		return err
 	}

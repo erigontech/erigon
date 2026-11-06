@@ -596,7 +596,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	if resume {
-		if err := publishPBTResumeOutput(publishedOutputDirs, outputDirs); err != nil {
+		if err := publishPBTResumeOutput(publishedOutputDirs, outputDirs, logger); err != nil {
 			return err
 		}
 	}
@@ -703,7 +703,7 @@ func linkPBTResumeSnapshotTree(source, destination string) error {
 	return nil
 }
 
-func publishPBTResumeOutput(published, staged datadir.Dirs) error {
+func publishPBTResumeOutput(published, staged datadir.Dirs, logger log.Logger) error {
 	backup := pbtResumePublishedPath(published)
 	if _, err := os.Stat(published.Snap); err == nil {
 		if err := os.Rename(published.Snap, backup); err != nil {
@@ -719,7 +719,7 @@ func publishPBTResumeOutput(published, staged datadir.Dirs) error {
 		return fmt.Errorf("commitment convert-pbt: publish staged snapshots: %w", err)
 	}
 	if err := dir.RemoveAll(backup); err != nil {
-		return fmt.Errorf("commitment convert-pbt: remove published snapshot backup: %w", err)
+		logger.Warn("PBT resume published snapshot backup not removed", "path", backup, "err", err)
 	}
 	return nil
 }
