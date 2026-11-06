@@ -427,6 +427,9 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	// Call NewPayload to validate execution payload with EL
 	parentBlockRoot := block.Block.ParentRoot
 	payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
+	if errors.Is(err, misc.ErrMismatchBlobHashes) {
+		f.rejectEnvelopeLocked(beaconBlockRoot)
+	}
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 	return payloadStatus, err
 }

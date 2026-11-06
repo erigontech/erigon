@@ -255,6 +255,7 @@ type persistingEnvelopeForkGraph struct {
 	invalid  atomic.Bool
 	accepted atomic.Bool
 	verified atomic.Bool
+	rejected sync.Map
 }
 
 type currentEnvelopeForkGraph struct {
@@ -474,6 +475,16 @@ func (g *persistingEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.envelope != nil
+}
+
+func (g *persistingEnvelopeForkGraph) RejectEnvelope(root common.Hash) bool {
+	g.rejected.Store(root, struct{}{})
+	return true
+}
+
+func (g *persistingEnvelopeForkGraph) IsEnvelopeRejected(root common.Hash) bool {
+	_, rejected := g.rejected.Load(root)
+	return rejected
 }
 
 func (g *persistingEnvelopeForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -4304,6 +4315,9 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 			err = f.OnExecutionPayload(t.Context(), envelope, false, true)
 
 			require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+			require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
+			require.True(t, f.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot))
+			require.False(t, f.IsEnvelopeRejected(verifiedRoot))
 			require.True(t, verifiedExecutionPayload.Contains(verifiedRoot))
 			require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 			require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))

@@ -1090,6 +1090,10 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 func (f *ForkChoiceStore) RejectEnvelope(blockRoot common.Hash) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.rejectEnvelopeLocked(blockRoot)
+}
+
+func (f *ForkChoiceStore) rejectEnvelopeLocked(blockRoot common.Hash) {
 	if !f.forkGraph.RejectEnvelope(blockRoot) {
 		return
 	}
