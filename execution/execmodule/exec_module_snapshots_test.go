@@ -20,6 +20,9 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -140,10 +143,20 @@ func TestExecModuleLeavesNoDeletedFileOpen(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 		require.NoError(t, emt.WaitForBlockRetirement(ctx))
+		require.NoError(t, emt.WaitForStateRetirement(ctx))
 	}
 	merged, err := dir.FileExist(snaptype2.Headers.FileInfo(emt.Dirs.Snap, 0, 2*retireStep).Path)
 	require.NoError(t, err)
 	require.True(t, merged, "no block merge happened")
+	stateFiles, err := filepath.Glob(filepath.Join(emt.Dirs.SnapDomain, "*-accounts.*.kv"))
+	require.NoError(t, err)
+	stepRange := regexp.MustCompile(`accounts\.(\d+)-(\d+)\.kv$`)
+	require.True(t, slices.ContainsFunc(stateFiles, func(f string) bool {
+		m := stepRange.FindStringSubmatch(f)
+		from, _ := strconv.Atoi(m[1])
+		to, _ := strconv.Atoi(m[2])
+		return to-from > 1
+	}), "no state merge happened: %v", stateFiles)
 
 	status, err = emt.InsertBlocks(ctx, cp2.Blocks[reorgFrom-1:])
 	require.NoError(t, err)
