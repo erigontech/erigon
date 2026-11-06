@@ -295,3 +295,38 @@ func checkGroupEndRPCReplay(t *testing.T, m *execmoduletester.ExecModuleTester, 
 		require.Equal(t, want, *code.Code)
 	})
 }
+
+// TestOverlayGetLogsFailedNative checks that overlay_getLogs, skipping a failed
+// native transaction, leaves its sender's nonce alone and burns at the group
+// end it makes, as block execution does: the contract created next logs the
+// code hash of the funded native system address, zero once it is empty.
+func TestOverlayGetLogsFailedNative(t *testing.T) {
+	native := protocol.NativeSystemAddress
+	initCode := append(append([]byte{byte(vm.PUSH20)}, native[:]...),
+		byte(vm.EXTCODEHASH), byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.LOG0))
+	c := newGroupEndChain(t, types.GenesisAlloc{derivertest.UserAddress(): groupEndRich, native: {Balance: big.NewInt(common.GWei)}})
+	creation, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{GasLimit: 200_000, Data: initCode},
+		ChainID:  *c.spec.Config.ChainID,
+		TipCap:   *uint256.NewInt(groupEndTipCap),
+		FeeCap:   *uint256.NewInt(groupEndFeeCap),
+	}, *types.LatestSignerForChainID(c.spec.Config.ChainID), derivertest.UserKey)
+	require.NoError(t, err)
+	m, _, built := c.build(protocol.RollupXEEZL2Address, []types.Transaction{
+		c.nativeTx(protocol.ExecuteIncomingCrossChainCallSelector, 0),
+		creation,
+	})
+	require.Equal(t, types.ReceiptStatusFailed, built.Receipts[0].Status, "delivery")
+	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[1].Status, "creation")
+	require.Len(t, built.Receipts[1].Logs, 1)
+	want := built.Receipts[1].Logs[0].Data
+	require.Equal(t, hexutil.Bytes(make([]byte, 32)), want, "native system address empty")
+
+	base := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
+	hash := built.Block.Hash()
+	logs, err := api.GetLogs(t.Context(), filters.FilterCriteria{BlockHash: &hash}, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, want, logs[0].Data)
+}

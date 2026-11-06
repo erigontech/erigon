@@ -501,17 +501,19 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 			contractCreation := msg.To().IsNil()
 			if !contractCreation {
-				// bump the nonce of the sender
-				sender := vm.AccountRef(msg.From())
-				nonce, err := statedb.GetNonce(sender.Address())
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
+				if !types.TxTypeNonceless(txn.Type()) {
+					// bump the nonce of the sender
+					sender := vm.AccountRef(msg.From())
+					nonce, err := statedb.GetNonce(sender.Address())
+					if err != nil {
+						log.Error(err.Error())
+						return nil, err
+					}
+					err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
+					if err != nil {
+						log.Error(err.Error())
+						return nil, err
+					}
 				}
 				// Block execution post-processed the failed transaction too.
 				if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, replayTransactions, idx); err != nil {
