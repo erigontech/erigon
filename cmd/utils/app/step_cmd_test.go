@@ -476,6 +476,9 @@ func TestStepRebaseKeepBlocksKeepsStoppedCommitmentMarker(t *testing.T) {
 	hexStopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.False(t, hexStopped)
+	stopFile, err := os.ReadFile(filepath.Join(dirs.Snap, state.COMMITMENT_STOP_FILE))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"commitment-bin":true}`, string(stopFile))
 }
 
 func TestStepRebaseDecreaseRefusesStoppedCommitmentWithoutKeepBlocks(t *testing.T) {

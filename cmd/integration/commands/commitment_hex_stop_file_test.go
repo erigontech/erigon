@@ -204,6 +204,16 @@ func TestHexStopFileDroppedWhenDomainsInLockstep(t *testing.T) {
 	require.NoFileExists(t, f.stopFilePath())
 }
 
+func TestHexStopFileDroppedWhenBinEndsBelowHex(t *testing.T) {
+	f := newHexStopFixture(t, kv.CommitmentBinDomain)
+	f.writeStopFile(t)
+	_, agg := f.openAgg(t, f.freshChaindata(t))
+
+	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
+	require.Equal(t, kv.CommitmentDomain, agg.CanonicalCommitmentDomain())
+	require.NoFileExists(t, f.stopFilePath())
+}
+
 func TestHexStopFileKeptWhenDBKeyLandsAfterFirstOpen(t *testing.T) {
 	f := newHexStopFixture(t)
 	rawDB := f.freshChaindata(t)
