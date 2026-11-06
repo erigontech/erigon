@@ -217,12 +217,12 @@ func (b *Beacon) mustGet(ctx context.Context, path string, v any) error {
 func (b *Beacon) get(ctx context.Context, path string, v any) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.url+path, nil)
 	if err != nil {
-		return false, shortTransport(err)
+		return false, RedactTransport(err)
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return false, shortTransport(err)
+		return false, RedactTransport(err)
 	}
 	defer resp.Body.Close()
 	switch {

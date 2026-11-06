@@ -44,7 +44,7 @@ var _ ChainReader = (*RPC)(nil)
 func DialRPC(ctx context.Context, url string, logger log.Logger) (*RPC, error) {
 	client, err := rpc.DialContext(ctx, url, logger)
 	if err != nil {
-		return nil, shortTransport(err)
+		return nil, RedactTransport(err)
 	}
 	return &RPC{client: client}, nil
 }
@@ -178,7 +178,7 @@ var rangeTooWide = []string{
 var notFound = []string{"not found", "unknown block", "finalized block"}
 
 func mapError(err error, what string) error {
-	err = shortTransport(err)
+	err = RedactTransport(err)
 	msg := strings.ToLower(err.Error())
 	for _, s := range rangeTooWide {
 		if strings.Contains(msg, s) {
@@ -216,7 +216,10 @@ func (e *urlError) Error() string { return e.text }
 
 func (e *urlError) Unwrap() error { return e.err }
 
-func shortTransport(err error) error {
+// RedactTransport returns err printed without what a failed request's error
+// text carries of its endpoint beyond scheme and host, and without a failed
+// connection's local address; err stays reachable through Unwrap.
+func RedactTransport(err error) error {
 	if op, ok := errors.AsType[*net.OpError](err); ok {
 		short := *op
 		short.Source = nil
