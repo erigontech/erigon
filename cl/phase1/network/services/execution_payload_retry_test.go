@@ -100,7 +100,7 @@ func TestExecutionPayloadServicePendingParksEnvelopeOnlyWhenGossipStateIsUnavail
 		parked     bool
 	}{
 		{name: "state unavailable", validation: forkchoice.ErrExecutionPayloadEnvelopeStateUnavailable, parked: true},
-		{name: "replay failed", validation: fmt.Errorf("%w: state replay failed", forkchoice.ErrIgnore)},
+		{name: "other ignore", validation: fmt.Errorf("%w: envelope is not importable", forkchoice.ErrIgnore)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, fcu := newPendingEnvelopeTestService(t)
@@ -133,6 +133,45 @@ func TestExecutionPayloadServicePendingParksEnvelopeOnlyWhenGossipStateIsUnavail
 			require.Zero(t, imports.Load())
 		})
 	}
+}
+
+func TestExecutionPayloadServicePendingKeepsJobAndImportsOnNextPassAfterStateReplayFailure(t *testing.T) {
+	service, fcu := newPendingEnvelopeTestService(t)
+	root := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, root, 1)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	fcu.Blocks[root] = newTestGloasBlock(100, 1)
+	var validations atomic.Int32
+	fcu.ValidateExecutionPayloadEnvelopeForGossipFunc = func(*cltypes.SignedExecutionPayloadEnvelope) error {
+		if validations.Add(1) == 1 {
+			return fmt.Errorf("%w: state replay failed", forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed)
+		}
+		return nil
+	}
+	var imports atomic.Int32
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		imports.Add(1)
+		return nil
+	}
+
+	service.pending.processPending(t.Context())
+	require.Equal(t, int32(1), validations.Load())
+	require.Zero(t, imports.Load())
+	require.False(t, fcu.HasPendingExecutionPayloadEnvelope(root))
+	require.Equal(t, int32(1), service.pending.count.Load())
+	require.Equal(t, uint64(envelope.EncodingSizeSSZ()), service.pendingBytes.Load())
+
+	service.pending.processPending(t.Context())
+	require.Equal(t, int32(2), validations.Load())
+	require.Equal(t, int32(1), imports.Load())
+	require.Zero(t, service.pending.count.Load())
+	require.Zero(t, service.pendingBytes.Load())
+
+	for range 3 {
+		service.pending.processPending(t.Context())
+	}
+	require.Equal(t, int32(2), validations.Load())
+	require.Equal(t, int32(1), imports.Load())
 }
 
 func TestExecutionPayloadServicePendingDropsTerminalResults(t *testing.T) {
