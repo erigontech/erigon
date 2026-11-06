@@ -127,8 +127,6 @@ type ReadSet struct {
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
 	access AccessSet
-	// False entries remember zero rewards so internal reads can be excluded again.
-	zeroRewardOnly map[accounts.Address]bool
 }
 
 func (s *ReadSet) entries() int {
@@ -180,7 +178,6 @@ func (s *ReadSet) clearForReuse() {
 		s.storage, s.slotMapPeak = nil, nil
 	}
 	s.access = nil
-	s.zeroRewardOnly = nil
 }
 
 // maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
@@ -501,20 +498,6 @@ func (s ReadSet) Len() int {
 
 // mergeFrom copies every entry of src into s, overwriting on collision.
 func (s *ReadSet) mergeFrom(src ReadSet) {
-	for addr := range s.zeroRewardOnly {
-		if src.hasBALAccess(addr) {
-			delete(s.zeroRewardOnly, addr)
-		}
-	}
-	for addr, onlyReward := range src.zeroRewardOnly {
-		if !onlyReward || s.hasBALAccess(addr) {
-			continue
-		}
-		if s.zeroRewardOnly == nil {
-			s.zeroRewardOnly = make(map[accounts.Address]bool)
-		}
-		s.zeroRewardOnly[addr] = true
-	}
 	for a, tr := range src.address {
 		readSetPut(&s.address, a, tr)
 	}
@@ -553,35 +536,6 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 		}
 		maps.Copy(s.access, src.access)
 	}
-}
-
-func (s *ReadSet) recordBALRead(addr accounts.Address) {
-	if s.zeroRewardOnly != nil && s.zeroRewardOnly[addr] {
-		s.zeroRewardOnly[addr] = false
-	}
-}
-
-func (s *ReadSet) hasBALAccess(addr accounts.Address) bool {
-	if s.zeroRewardOnly[addr] {
-		return false
-	}
-	if _, ok := s.access[addr]; ok {
-		return true
-	}
-	if r, ok := s.address[addr]; ok && !r.internal && r.Val != nil && !r.Val.IsNil() {
-		return true
-	}
-	for _, path := range []AccountPath{BalancePath, NoncePath, IncarnationPath, SelfDestructPath, CreateContractPath, CodePath, CodeHashPath, CodeSizePath} {
-		if r, ok := s.getHeader(addr, path, accounts.NilKey); ok && !r.internal {
-			return true
-		}
-	}
-	for _, r := range s.storage[addr] {
-		if !r.internal {
-			return true
-		}
-	}
-	return false
 }
 
 // Merge returns a new read set containing every entry of s then o.  On a
@@ -2810,18 +2764,15 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	}
 	b.next++
 	ac := b.ac
-	skipAddress := func(addr accounts.Address) bool {
-		return addr.IsNil() || rs.zeroRewardOnly[addr]
-	}
 	// EIP-7928 requires every accessed address to appear in the BAL, so each per-path read map must register its address.
 	for addr, tr := range rs.balance {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr).updateReadBalance(tr.Val)
 	}
 	for addr, inner := range rs.storage {
-		if skipAddress(addr) {
+		if addr.IsNil() {
 			continue
 		}
 		for key, tr := range inner {
@@ -2832,7 +2783,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		}
 	}
 	for addr, tr := range rs.address {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		// Skip validation-only reads for non-existent accounts.
@@ -2845,37 +2796,37 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.nonce {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.incarnation {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.selfDestruct {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.createContract {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.code {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
 	}
 	for addr, tr := range rs.codeHash {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		account := ensureAccountState(ac, addr)
@@ -2887,7 +2838,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		}
 	}
 	for addr, tr := range rs.codeSize {
-		if skipAddress(addr) || tr.internal {
+		if addr.IsNil() || tr.internal {
 			continue
 		}
 		ensureAccountState(ac, addr)
@@ -2897,31 +2848,31 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		// Self-destruct is applied before the balance writes so the EIP-7928
 		// burn (zeroing a non-zero balance written by the destroying tx) fires.
 		for addr, w := range writes.SelfDestructs() {
-			if skipAddress(addr) || !w.Val {
+			if addr.IsNil() || !w.Val {
 				continue
 			}
 			ensureAccountState(ac, addr)
 		}
 		for addr, w := range writes.Balances() {
-			if skipAddress(addr) {
+			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteBalance(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Nonces() {
-			if skipAddress(addr) {
+			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteNonce(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, w := range writes.Codes() {
-			if skipAddress(addr) {
+			if addr.IsNil() {
 				continue
 			}
 			ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, byKey := range writes.Storages() {
-			if skipAddress(addr) {
+			if addr.IsNil() {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
@@ -2933,7 +2884,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 		// full address union covers the paths the value-carrying loops above
 		// didn't already register.
 		for addr := range writes.addrs() {
-			if skipAddress(addr) {
+			if addr.IsNil() {
 				continue
 			}
 			account := ensureAccountState(ac, addr)
@@ -2946,7 +2897,7 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 	}
 
 	for addr := range rs.access {
-		if skipAddress(addr) {
+		if addr.IsNil() {
 			continue
 		}
 		ensureAccountState(ac, addr)

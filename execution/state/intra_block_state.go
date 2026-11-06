@@ -1152,21 +1152,6 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	return nil
 }
 
-// AddZeroReward preserves EIP-161 state clearing without adding a reward-only BAL entry.
-func (ibs *IntraBlockState) AddZeroReward(addr accounts.Address, reason tracing.BalanceChangeReason) error {
-	accessed := ibs.versionedReads.hasBALAccess(addr)
-	if err := ibs.AddBalance(addr, uint256.Int{}, reason); err != nil {
-		return err
-	}
-	if !accessed {
-		if ibs.versionedReads.zeroRewardOnly == nil {
-			ibs.versionedReads.zeroRewardOnly = make(map[accounts.Address]bool)
-		}
-		ibs.versionedReads.zeroRewardOnly[addr] = true
-	}
-	return nil
-}
-
 func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 	ibs.journal.touchAccount(addr, false, uint256.Int{})
 	if addr == ripemd {
@@ -1179,9 +1164,6 @@ func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
-	if ibs.versionedReads.zeroRewardOnly != nil {
-		delete(ibs.versionedReads.zeroRewardOnly, addr)
-	}
 	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
 	if ibs.versionMap != nil && addr != ripemd {
 		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
@@ -3160,9 +3142,6 @@ func (ibs *IntraBlockState) SlotKnownWarm(addr accounts.Address, slot accounts.S
 }
 
 func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
-	if ibs.versionedReads.zeroRewardOnly != nil {
-		delete(ibs.versionedReads.zeroRewardOnly, addr)
-	}
 	if !ibs.recordAccess {
 		return
 	}
@@ -3204,9 +3183,6 @@ func (ibs *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	ibs.versionedReads.ScanAddr(addr, func(_ AccountPath, _ accounts.StorageKey, hdr *ReadHeader) {
 		hdr.internal = true
 	})
-	if _, rewarded := ibs.versionedReads.zeroRewardOnly[addr]; rewarded {
-		ibs.versionedReads.zeroRewardOnly[addr] = true
-	}
 }
 
 func (ibs *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
