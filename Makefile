@@ -5,7 +5,7 @@ else
 endif
 
 GO ?= go # if using docker, should not need to be installed/linked
-GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
+GOAMD64_VERSION ?= v3 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
 export GOBIN := $(CURDIR)/$(GOBINREL)
 export GOEXPERIMENT ?= jsonv2
