@@ -266,6 +266,10 @@ func (t *testingImpl) assembleTestingBlock(
 	extraData *hexutil.Bytes,
 	deadline time.Time,
 ) (*execmodule.AssembledBlockResult, clparams.StateVersion, error) {
+	// The polling timeout cannot interrupt a blocking execution call.
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
 	timestamp := uint64(payloadAttributes.Timestamp)
 
 	// Timestamp must be strictly greater than parent.
@@ -397,6 +401,10 @@ func (t *testingImpl) assembleTestingBlock(
 	}
 	if execBusy {
 		return nil, 0, errors.New("execution service is busy retrieving assembled block")
+	}
+	// Discarding an expired build may make retrieval report an unknown payload.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, 0, ctxErr
 	}
 	if assembled.Block == nil {
 		return nil, 0, errors.New("no assembled block data available for payload ID")

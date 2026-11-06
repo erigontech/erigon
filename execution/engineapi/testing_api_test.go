@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -393,6 +394,49 @@ func makeSignedRawTx(t *testing.T, key *ecdsa.PrivateKey, cfg *chain.Config, non
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+func TestAssembleTestingBlockRetrievalDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		discarded bool
+	}{
+		{"context error", false},
+		{"discarded build", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const parentTimestamp = 1000
+				parent := makeParentHeader(parentTimestamp)
+				stub := &stubExecutionModule{
+					assembleBlockFunc: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+						return execmodule.AssembleBlockResult{PayloadID: 1}, nil
+					},
+					getAssembledBlockFunc: func(ctx context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+						<-ctx.Done()
+						if tc.discarded {
+							return execmodule.AssembledBlockResult{Unknown: true}, nil
+						}
+						return execmodule.AssembledBlockResult{}, ctx.Err()
+					},
+				}
+				api := newTestingAPI(allForksChainConfig(), stub).(*testingImpl)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				fallback := time.AfterFunc(2*time.Second, cancel)
+				defer fallback.Stop()
+				deadline := time.Now().Add(time.Second)
+				txns := []hexutil.Bytes{}
+
+				_, _, err := api.assembleTestingBlock(ctx, parent.Hash(), parent, validPayloadAttrs(parentTimestamp), &txns, nil, deadline)
+
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.Equal(t, deadline, time.Now())
+				require.True(t, api.server.lock.TryLock(), "retrieval must release the engine lock at the deadline")
+				api.server.lock.Unlock()
+			})
+		})
+	}
+}
 
 func TestBuildBlockV1(t *testing.T) {
 	t.Parallel()

@@ -208,6 +208,9 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
 		params: ownedParams,
 	}
+	if ownedParams.RequireAllTransactions {
+		context.AfterFunc(ctx, e.builders[e.nextPayloadId].builder.Discard)
+	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
