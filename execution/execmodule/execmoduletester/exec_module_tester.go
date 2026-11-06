@@ -916,6 +916,14 @@ func mockDownloader(ctrl *gomock.Controller, snapRoot string) dbservices.Downloa
 		Download(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
+	snapDownloader.EXPECT().
+		Seed(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		Delete(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
 
 	return downloader.NewRpcClient(snapDownloader, snapRoot)
 }

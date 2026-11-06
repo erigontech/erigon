@@ -30,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -83,21 +85,24 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 	require.Equal(t, uint64(9), emt.BlockSnapshots.BlocksAvailable())
 }
 
-// Block retire, state files, a reorg and reads over all of them must not keep a deleted file of the datadir
-// open or mapped: its disk space would stay used until restart.
+// Block retire with a block merge, state files, a reorg and reads over all of them must not keep a deleted file
+// of the datadir open or mapped: its disk space would stay used until restart.
 func TestExecModuleLeavesNoDeletedFileOpen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	const (
-		retireStep = 10
-		chainLen   = 3*retireStep + 2
+		retireStep = 1000
+		chainLen   = 2*retireStep + 10
 		reorgFrom  = chainLen - 2
 	)
+	prevMergeSteps := snaptype.MergeSteps
+	snaptype.MergeSteps = []uint64{2 * retireStep} // two retired files merge into one
+	t.Cleanup(func() { snaptype.MergeSteps = prevMergeSteps })
 	emt := execmoduletester.New(
 		t,
 		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
 		execmoduletester.WithE2RetireStep(retireStep),
-		execmoduletester.WithStepSize(3),
+		execmoduletester.WithStepSize(100),
 		execmoduletester.WithMaxReorgDepth(4),
 	)
 	datadir, err := filepath.EvalSymlinks(emt.Dirs.DataDir)
@@ -127,9 +132,20 @@ func TestExecModuleLeavesNoDeletedFileOpen(t *testing.T) {
 		}
 		return common.Address{2}
 	})
-	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, cp1.Blocks, execmoduletester.WithWaitForBlockRetirement(), execmoduletester.WithWaitForStateFiles()))
+	status, err := emt.InsertBlocks(ctx, cp1.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	for range 2 { // the first retire builds the files, the next one merges them
+		result, err := emt.UpdateForkChoice(ctx, cp1.TopBlock.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+		require.NoError(t, emt.WaitForBlockRetirement(ctx))
+	}
+	merged, err := dir.FileExist(snaptype2.Headers.FileInfo(emt.Dirs.Snap, 0, 2*retireStep).Path)
+	require.NoError(t, err)
+	require.True(t, merged, "no block merge happened")
 
-	status, err := emt.InsertBlocks(ctx, cp2.Blocks[reorgFrom-1:])
+	status, err = emt.InsertBlocks(ctx, cp2.Blocks[reorgFrom-1:])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	result, err := emt.UpdateForkChoice(ctx, cp2.TopBlock.Header())

@@ -1894,3 +1894,25 @@ func TestMergeCyclesLeaveNoDeletedFileMapped(t *testing.T) {
 	require.NoError(err)
 	require.Empty(paths, "deleted files are still mapped")
 }
+
+// Opening the indexes of a segment again must keep the open ones: replacing them leaks their fds and mappings.
+func TestOpenIdxKeepsTheOpenIndexes(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	createTestSegmentFile(t, 0, 10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+	var seg *DirtySegment
+	s.dirty[snaptype2.Enums.Headers].Scan(func(sn *DirtySegment) bool {
+		seg = sn
+		return false
+	})
+	require.NotNil(t, seg)
+	require.NotEmpty(t, seg.indexes)
+	open := seg.indexes[0]
+	require.NotNil(t, open)
+
+	require.NoError(t, seg.openIdx(dir, nil))
+	require.Same(t, open, seg.indexes[0])
+}
