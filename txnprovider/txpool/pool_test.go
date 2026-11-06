@@ -1700,7 +1700,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason, err := pool.validateTx(txn, false, view, batchUsage{})
+			reason, err := pool.validateTx(txn, false, view)
 			asrt.NoError(err)
 
 			if reason != test.expected {
@@ -1810,7 +1810,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result, err := pool.validateTx(txn, false /* isLocal */, view, batchUsage{})
+	result, err := pool.validateTx(txn, false /* isLocal */, view)
 	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
 }
@@ -1846,7 +1846,7 @@ func TestValidateTxReturnsSenderInfoError(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	reason, err := pool.validateTx(txn, true, view, batchUsage{})
+	reason, err := pool.validateTx(txn, true, view)
 	require.Error(t, err)
 	require.Equal(t, txpoolcfg.ErrGetSenderInfo, reason)
 	require.ErrorContains(t, err, "validateTx: sender info")
@@ -3722,5 +3722,29 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 			require.Zero(t, baseFee)
 			require.Zero(t, queued)
 		})
+	}
+}
+
+// Unwound txns were already in a block: they must not count as one batch against the sender's slots.
+func TestUnwoundTxnsDoNotCountAgainstSenderSlots(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.AccountSlots = 2
+	var unwind TxnSlots
+	for n := range uint64(5) {
+		txn := newTestTxnSlot(n, 0, 10, 10, 100_000)
+		txn.IDHash[0] = byte(n + 1)
+		unwind.Append(txn, sender[:], false)
+	}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 1,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+	for _, txn := range unwind.Txns {
+		require.Contains(t, pool.byHash, string(txn.IDHash[:]), "unwound nonce %d dropped", txn.Nonce)
 	}
 }
