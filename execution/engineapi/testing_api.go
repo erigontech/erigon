@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -479,23 +480,23 @@ func (t *testingImpl) assembleTestingBlock(
 	return &assembled, version, nil
 }
 
-// staticTxnProvider keeps a fixed transaction list for the testing_ namespace.
-// Keep the supplied list intact for the final check against the assembled block.
+// staticTxnProvider serves each list entry once, including duplicates, so execution
+// can report the first invalid entry. The original list is kept for the final
+// check against the assembled block.
 type staticTxnProvider struct {
 	txns []types.Transaction
+	mu   sync.Mutex
+	next int
 }
 
 func (s *staticTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	o := txnprovider.ApplyProvideOptions(opts...)
-	var txns []types.Transaction
-	for _, tx := range s.txns {
-		if len(txns) == o.Amount {
-			break
-		}
-		if o.TxnIdsFilter != nil && !o.TxnIdsFilter.Add(tx.Hash()) {
-			continue
-		}
-		txns = append(txns, tx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.next == len(s.txns) || o.Amount <= 0 {
+		return nil, nil
 	}
-	return txns, nil
+	start := s.next
+	s.next += min(o.Amount, len(s.txns)-s.next)
+	return s.txns[start:s.next], nil
 }

@@ -897,48 +897,49 @@ func TestStaticTxnProvider(t *testing.T) {
 	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	stubTx := types.NewTransaction(0, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
 
-	t.Run("returns transactions without a filter", func(t *testing.T) {
+	t.Run("returns transactions once without a filter", func(t *testing.T) {
 		t.Parallel()
 		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
-		for range 2 {
-			txns, err := p.ProvideTxns(t.Context())
-			require.NoError(t, err)
-			require.Equal(t, []types.Transaction{stubTx}, txns)
-		}
-	})
-
-	t.Run("retries transactions removed from the filter", func(t *testing.T) {
-		t.Parallel()
-		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
-		filter := mapset.NewSet[[32]byte]()
-		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+		txns, err := p.ProvideTxns(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, []types.Transaction{stubTx}, txns)
-		require.True(t, filter.Contains(stubTx.Hash()))
-		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+		txns, err = p.ProvideTxns(t.Context())
 		require.NoError(t, err)
 		require.Nil(t, txns)
-		filter.Remove(stubTx.Hash())
-		txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
-		require.NoError(t, err)
-		require.Equal(t, []types.Transaction{stubTx}, txns)
 	})
 
-	t.Run("honors batch size and filter", func(t *testing.T) {
-		t.Parallel()
-		second := types.NewTransaction(1, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
-		p := &staticTxnProvider{txns: []types.Transaction{stubTx, second}}
-		filter := mapset.NewSet[[32]byte]()
-		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(0), txnprovider.WithTxnIdsFilter(filter))
-		require.NoError(t, err)
-		require.Empty(t, txns)
-		require.True(t, filter.IsEmpty())
-		for _, want := range p.txns {
-			txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(1), txnprovider.WithTxnIdsFilter(filter))
+	for _, tc := range []struct {
+		name   string
+		amount int
+	}{
+		{name: "duplicates across batches", amount: 1},
+		{name: "duplicates within a batch", amount: 2},
+		{name: "whole list", amount: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			second := types.NewTransaction(1, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
+			requested := []types.Transaction{stubTx, stubTx, second}
+			p := &staticTxnProvider{txns: requested}
+			filter := mapset.NewSet[[32]byte]()
+			txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(0), txnprovider.WithTxnIdsFilter(filter))
 			require.NoError(t, err)
-			require.Equal(t, []types.Transaction{want}, txns)
-		}
-	})
+			require.Empty(t, txns)
+			for offset := 0; offset < len(requested); offset += tc.amount {
+				txns, err = p.ProvideTxns(t.Context(), txnprovider.WithAmount(tc.amount), txnprovider.WithTxnIdsFilter(filter))
+				require.NoError(t, err)
+				require.Equal(t, requested[offset:min(offset+tc.amount, len(requested))], txns)
+				for _, tx := range txns {
+					filter.Add(tx.Hash())
+				}
+			}
+			filter.Clear()
+			txns, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+			require.NoError(t, err)
+			require.Nil(t, txns)
+			require.Equal(t, requested, p.txns)
+		})
+	}
 
 	t.Run("empty provider returns no transactions", func(t *testing.T) {
 		t.Parallel()
@@ -952,9 +953,9 @@ func TestStaticTxnProvider(t *testing.T) {
 		require.Nil(t, txns)
 	})
 
-	t.Run("concurrent callers sharing a filter yield each transaction once", func(t *testing.T) {
+	t.Run("concurrent callers yield each list entry once", func(t *testing.T) {
 		t.Parallel()
-		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx, stubTx}}
 		filter := mapset.NewSet[[32]byte]()
 		const goroutines = 32
 		var nonEmpty atomic.Int32
@@ -965,16 +966,17 @@ func TestStaticTxnProvider(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				txns, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(filter))
+				txns, err := p.ProvideTxns(t.Context(), txnprovider.WithAmount(1), txnprovider.WithTxnIdsFilter(filter))
 				assert.NoError(t, err)
 				if len(txns) > 0 {
+					assert.Equal(t, []types.Transaction{stubTx}, txns)
 					nonEmpty.Add(1)
 				}
 			}()
 		}
 		close(start)
 		wg.Wait()
-		assert.Equal(t, int32(1), nonEmpty.Load(), "exactly one concurrent caller must yield the transaction")
+		assert.Equal(t, int32(len(p.txns)), nonEmpty.Load(), "each list entry must be yielded once")
 	})
 }
 
@@ -1175,6 +1177,7 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 		nonceOffset  int64
 		commit       bool
 		independent  bool
+		duplicate    bool
 	}{
 		{name: "legacy"},
 		{name: "legacy with independent successor", independent: true},
@@ -1185,6 +1188,7 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 		{name: "nonce gap", key: 5, nonceOffset: 1},
 		{name: "consumed nonce", key: 5, nonceOffset: -1},
 		{name: "commit nonce gap", key: 5, nonceOffset: 1, commit: true},
+		{name: "duplicate before nonce gap", key: 5, nonceOffset: 1, duplicate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := chain.AllProtocolChanges.Copy()
@@ -1235,6 +1239,9 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: []types.Frame{approval},
 			}
 			frames := []*types.FrameTransaction{first, second}
+			if tc.duplicate {
+				frames = []*types.FrameTransaction{first, first, second}
+			}
 			if tc.independent {
 				frames = append(frames, &types.FrameTransaction{
 					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: independent,
@@ -1265,7 +1272,10 @@ func TestBuildBlockV1FrameNonceAfterCreate(t *testing.T) {
 			response, err := api.BuildBlockV1(t.Context(), parent.Hash(), attrs, &txs, nil)
 			if tc.nonceOffset != 0 {
 				require.ErrorContains(t, err, "transaction 1")
-				require.ErrorContains(t, err, second.Hash().String())
+				require.ErrorContains(t, err, frames[1].Hash().String())
+				if tc.duplicate {
+					require.ErrorContains(t, err, "nonce too low")
+				}
 				require.Nil(t, response)
 				return
 			}
