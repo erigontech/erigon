@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -57,7 +58,6 @@ import (
 var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false, rawdbv3.TxNums)
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -110,12 +110,17 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
-			trieState, err := hph.EncodeCurrentState(nil)
-			require.NoError(t, err)
-			cs := commitmentdb.NewCommitmentState(txNum, 0, trieState)
-			encodedState, err := cs.Encode()
-			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil)
+			var encodedState []byte
+			if statecfg.ExperimentalCommitmentV3 {
+				encodedState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, txNum, nil)
+				require.NoError(t, err)
+			} else {
+				trieState, err := hph.EncodeCurrentState(nil)
+				require.NoError(t, err)
+				encodedState, err = commitmentdb.NewCommitmentState(txNum, 0, trieState).Encode()
+				require.NoError(t, err)
+			}
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.StateKey(), encodedState, txNum, nil)
 			require.NoError(t, err)
 		}
 	}

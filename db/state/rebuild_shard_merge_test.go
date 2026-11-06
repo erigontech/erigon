@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -33,7 +32,6 @@ import (
 // before the next starts, with commitment merges running between them. The root
 // must come out where the forward run left it regardless of that reshuffling.
 func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -60,9 +58,9 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		defer tx.Rollback()
 		ac := state.AggTx(tx)
 
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.StateKey(), math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
+		_, _, rootInFiles, err = commitmentdb.DecodeState(stateVal)
 		require.NoError(t, err)
 
 		var widest uint64

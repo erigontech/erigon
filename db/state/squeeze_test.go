@@ -354,7 +354,6 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -379,9 +378,9 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.StateKey(), math.MaxUint64)
 		require.True(t, ok)
-		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
+		_, _, rootInFiles, err = commitmentdb.DecodeState(stateVal)
 		require.NoError(t, err)
 
 		for _, f := range ac.Files(kv.CommitmentDomain) {
