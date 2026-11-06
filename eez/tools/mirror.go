@@ -91,6 +91,24 @@ type MirrorStats struct {
 // reasons than the source not holding them, such as rate limits.
 const mirrorAttempts = 6
 
+// MirrorTarget returns the last L1 block a Mirror run indexes: to when
+// explicit, the finalized block reader serves otherwise. An explicit to past
+// the finalized block is refused: Mirror resumes after the last indexed
+// block, so it never rescans one a reorg replaced.
+func MirrorTarget(ctx context.Context, reader l1.ChainReader, to uint64, explicit bool) (uint64, error) {
+	f, err := reader.Finalized(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("L1 finalized block: %w", err)
+	}
+	if !explicit {
+		return f.Number, nil
+	}
+	if to > f.Number {
+		return 0, fmt.Errorf("L1 block %d is past the finalized block %d", to, f.Number)
+	}
+	return to, nil
+}
+
 // Mirror appends to the index at path the batches scanner finds after the
 // last indexed one, or from from when the index is empty, through to. It
 // then checks every indexed blob dir holds against its versioned hash, and

@@ -82,7 +82,7 @@ func main() {
 					&cli.StringFlag{Name: "l1.rpc", Usage: "JSON-RPC endpoint of the L1 node", Required: true},
 					&cli.StringFlag{Name: "beacon", Usage: "REST endpoint of the L1 beacon node; without it, stored blobs are only checked"},
 					&cli.StringFlag{Name: "dir", Usage: "Mirror directory: <chain id>.jsonl indexes, blobs/<versioned hash>.blob", Required: true},
-					&cli.Uint64Flag{Name: "to", Usage: "Last L1 block indexed (default: the finalized block)"},
+					&cli.Uint64Flag{Name: "to", Usage: "Last L1 block indexed, at most the finalized block (default: the finalized block)"},
 				},
 				Action: mirror,
 			},
@@ -191,13 +191,9 @@ func mirror(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	defer reader.Close()
-	to := cmd.Uint64("to")
-	if !cmd.IsSet("to") {
-		f, err := reader.Finalized(ctx)
-		if err != nil {
-			return fmt.Errorf("L1 finalized block: %w", err)
-		}
-		to = f.Number
+	to, err := tools.MirrorTarget(ctx, reader, cmd.Uint64("to"), cmd.IsSet("to"))
+	if err != nil {
+		return err
 	}
 	scanner := l1.NewScanner(reader, l2.Registry, l2.RollupID)
 	if l2.RollupX != nil {

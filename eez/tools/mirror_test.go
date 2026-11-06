@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/internal/testfixtures"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/recording"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/eez/tools"
 )
@@ -114,4 +115,32 @@ func TestMirror(t *testing.T) {
 	blob, err := l1.NewBlobDir(blobs, nil).Load(gone)
 	require.NoError(t, err)
 	require.Len(t, blob, l1.BlobSize)
+}
+
+// TestMirrorTarget indexes through the finalized block by default and
+// refuses an explicit target past it: Mirror resumes after the last indexed
+// block, so it would never rescan one a reorg replaced.
+func TestMirrorTarget(t *testing.T) {
+	c, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Hash: common.Hash{0, 1}}})
+	require.NoError(t, err)
+	for n := byte(1); n <= 9; n++ {
+		require.NoError(t, c.Append(&recording.Block{Header: l1.Header{Number: uint64(n), Hash: common.Hash{n, 1}, ParentHash: common.Hash{n - 1, 1}}}))
+	}
+	ctx := t.Context()
+	_, err = tools.MirrorTarget(ctx, c, 0, false)
+	require.ErrorIs(t, err, l1.ErrNotFound)
+	_, err = tools.MirrorTarget(ctx, c, 3, true)
+	require.ErrorIs(t, err, l1.ErrNotFound, "nothing finalized yet")
+
+	require.NoError(t, c.Finalize(6))
+	to, err := tools.MirrorTarget(ctx, c, 0, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(6), to)
+	for _, explicit := range []uint64{4, 6} {
+		to, err = tools.MirrorTarget(ctx, c, explicit, true)
+		require.NoError(t, err)
+		require.Equal(t, explicit, to)
+	}
+	_, err = tools.MirrorTarget(ctx, c, 7, true)
+	require.ErrorContains(t, err, "L1 block 7 is past the finalized block 6")
 }
