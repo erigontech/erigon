@@ -18,16 +18,21 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
 )
 
 const maxReplayWorkers = 32
+
+var errBlockNotCanonical = errors.New("block is no longer canonical")
 
 var replayCPUs = func() int { return runtime.GOMAXPROCS(0) }
 
@@ -40,7 +45,7 @@ func replayWorkerCount(txnCount int) int {
 // replayTxnsParallel runs, for every txn index of a block, the job newWorker builds. The
 // history keeps the exact state before every txNum, so the txns replay independently. Each
 // worker owns a read tx, because an MDBX tx must not be used by two goroutines.
-func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, blockNum, baseTxNum uint64, txnCount int,
+func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, canonical dbservices.CanonicalReader, blockNum uint64, blockHash common.Hash, baseTxNum uint64, txnCount int,
 	newWorker func(ctx context.Context, tx kv.TemporalTx) (func(txnIndex int) error, error),
 ) (*errgroup.Group, context.Context) {
 	jobs := make(chan int, txnCount)
@@ -64,6 +69,14 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, blockNum, baseT
 			}
 			if baseTxNum < startTxNum {
 				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, blockNum, startTxNum)
+			}
+			// After a reorg the block's txNums belong to the new fork.
+			isCanonical, err := canonical.IsCanonical(gctx, tx, blockHash, blockNum)
+			if err != nil {
+				return err
+			}
+			if !isCanonical {
+				return fmt.Errorf("%w: block %d %x", errBlockNotCanonical, blockNum, blockHash)
 			}
 			job, err := newWorker(gctx, tx)
 			if err != nil {

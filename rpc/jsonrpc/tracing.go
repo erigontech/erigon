@@ -132,7 +132,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
-	if hsr, ok := stateReader.(state.HistoricalStateReader); ok && config.Tracer != nil && config.StateOverrides == nil && replayWorkerCount(block.Transactions().Len()) > 1 {
+	if hsr, ok := stateReader.(state.HistoricalStateReader); ok && canTraceTxnsInParallel(config) && replayWorkerCount(block.Transactions().Len()) > 1 {
 		return api.traceBlockParallel(ctx, block, hsr.GetTxNum(), config, chainConfig, rules, signer, stream)
 	}
 	transactions.VersionedCallState(ibs)
@@ -209,6 +209,14 @@ func (api *DebugAPIImpl) writeTxnTrace(ctx context.Context, s *jsonstream.Stream
 	})
 	s.WriteObjectEnd()
 	return usage
+}
+
+// canTraceTxnsInParallel reports whether config lets every txn be traced on the canonical
+// history state before it: the options that change the state one txn leaves to the next
+// need a replay on one state.
+func canTraceTxnsInParallel(config *tracersConfig.TraceConfig) bool {
+	return config.Tracer != nil && config.StateOverrides == nil && config.BlockOverrides == nil &&
+		(config.NoRefunds == nil || !*config.NoRefunds)
 }
 
 func assertTracedBlockGas(block *types.Block, config *tracersConfig.TraceConfig, gasUsed *protocol.GasUsed) {

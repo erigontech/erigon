@@ -906,7 +906,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 	results := make([]*TraceCallResult, len(txns))
 
-	g, _ := replayTxnsParallel(ctx, api.kv, header.Number.Uint64(), baseTxNum, len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+	g, _ := replayTxnsParallel(ctx, api.kv, api._blockReader, header.Number.Uint64(), header.Hash(), baseTxNum, len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		// blockCtx captures workerTx in its GetHash closure, so it cannot
 		// be shared across workers (each needs its own copy).
 		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)

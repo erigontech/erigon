@@ -52,16 +52,11 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, block *types.Bl
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	g, gctx := replayTxnsParallel(ctx, api.db, header.Number.Uint64(), baseTxNum, len(txns), func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+	g, gctx := replayTxnsParallel(ctx, api.db, api._blockReader, header.Number.Uint64(), block.Hash(), baseTxNum, len(txns), func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 			return api._blockReader.HeaderByNumber(ctx, workerTx, n)
 		}
 		blockCtx := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
-		if config.BlockOverrides != nil {
-			if err := config.BlockOverrides.Override(&blockCtx); err != nil {
-				return nil, err
-			}
-		}
 		return func(txnIndex int) error {
 			txNum := baseTxNum + uint64(txnIndex)
 			firstLogIndex, err := rawtemporaldb.FirstLogIndex(workerTx, txNum, txnIndex)
