@@ -2889,6 +2889,12 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 				continue
 			}
 		}
+		// With no version-map cell the account is absent before and after the tx, so dropping the
+		// writes is exact; a removal stamp would make every later toucher depend on this tx.
+		if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
+			writes.deleteAddr(addr)
+			continue
+		}
 		// Stamp the uniform removal rather than silently dropping the writes: the
 		// during-tx exec cells already live in the version map, so a bare deleteAddr
 		// here leaves the commitment reading the created-empty account as present. A
