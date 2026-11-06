@@ -3488,7 +3488,35 @@ func TestRemoteBatchRespectsAccountSlots(t *testing.T) {
 
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
-	require.LessOrEqual(t, uint64(pool.all.count(pool.senders.senderIDs[sender])), pool.cfg.AccountSlots+1)
+	require.LessOrEqual(t, uint64(pool.all.count(pool.senders.senderIDs[sender])), pool.cfg.AccountSlots)
+}
+
+// A sender at its slot limit can still bump the fee of a pooled txn: a replacement takes no new slot.
+func TestReplacementAtAccountSlotsLimitIsNotSpam(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+	pool.cfg.AccountSlots = 2
+	add := func(nonce, tip uint64, tag byte) {
+		var txns TxnSlots
+		txn := newTestTxnSlot(nonce, 0, tip, 2*tip, 21_000)
+		txn.IDHash[0], txn.IDHash[1] = byte(nonce+1), tag
+		txns.Append(txn, sender[:], false)
+		pool.AddRemoteTxns(ctx, txns, nil, nil)
+		require.NoError(t, pool.processRemoteTxns(ctx))
+	}
+	add(0, 1, 1)
+	add(1, 1, 1)
+	add(2, 1, 1)  // a third new nonce is over the limit
+	add(1, 10, 2) // a fee bump of nonce 1 at the limit
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	id := pool.senders.senderIDs[sender]
+	require.Equal(t, 2, pool.all.count(id))
+	require.Nil(t, pool.all.get(id, 2), "a new nonce over the limit is rejected")
+	bumped := pool.all.get(id, 1)
+	require.NotNil(t, bumped)
+	require.Equal(t, byte(2), bumped.TxnSlot.IDHash[1], "the replacement at the limit is accepted")
 }
 
 func TestRemoteBatchOfReplacementsIsNotSpam(t *testing.T) {
@@ -3671,7 +3699,7 @@ func TestRemoteSpammerKeepsLocalTransactions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 			require.NoError(t, pool.start(ctx))
-			pool.cfg.AccountSlots = 16
+			pool.cfg.AccountSlots = 17 // the 17 txns below fill it; one more remote txn is spam
 			pool.cfg.MaxNonceGap = 64
 
 			for i := range 17 {

@@ -1176,9 +1176,13 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 
-	if !isLocal && uint64(p.all.count(txn.SenderID)+batch.senderTxns) > p.cfg.AccountSlots {
+	slots := p.all.count(txn.SenderID) + batch.senderTxns
+	if p.all.get(txn.SenderID, txn.Nonce) == nil {
+		slots++ // a new nonce takes a slot; a replacement keeps the pooled txn's
+	}
+	if !isLocal && uint64(slots) > p.cfg.AccountSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID)+batch.senderTxns, p.cfg.AccountSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, slots, p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer, nil
 	}
