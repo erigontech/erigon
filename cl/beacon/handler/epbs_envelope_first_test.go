@@ -1074,7 +1074,7 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 		})
 	}
 
-	t.Run("consensus mode publishes the columns after the client leaves", func(t *testing.T) {
+	t.Run("consensus mode when the client leaves before consensus validation", func(t *testing.T) {
 		f := newEnvelopeContentsFixture(t, 0, 2)
 		requestCtx, cancel := context.WithCancel(t.Context())
 		defer cancel()
@@ -1083,9 +1083,72 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 			return nil
 		}
 
-		f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+	})
+
+	t.Run("consensus mode when the client leaves during consensus validation", func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 2)
+		requestCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		f.duringConsensusValidation = cancel
+
+		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+	})
+
+	t.Run("consensus mode when the client leaves during column writes", func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 2)
+		requestCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		f.failWrite = func(uint64) error {
+			cancel()
+			return nil
+		}
+		imports := 0
+		f.wrapImport(func(ctx context.Context, next func() error) error {
+			imports++
+			if ctx.Err() != nil {
+				return forkchoice.ErrPayloadValidationInterrupted
+			}
+			return next()
+		})
+
+		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
 
 		f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
+		require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+		require.Equal(t, 1, imports)
+		require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
+	})
+
+	t.Run("consensus mode when the payload is invalidated and the client leaves during column writes", func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 2)
+		requestCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		f.failWrite = func(uint64) error {
+			f.payloadInvalidated = true
+			cancel()
+			return nil
+		}
+		imports := 0
+		f.wrapImport(func(ctx context.Context, next func() error) error {
+			imports++
+			if ctx.Err() != nil {
+				return forkchoice.ErrPayloadValidationInterrupted
+			}
+			return next()
+		})
+
+		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		require.Equal(t, 1, imports)
+		require.Empty(t, f.eventsOf(eventEnvelopePublish))
 	})
 }
 
@@ -1164,20 +1227,366 @@ func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
 				require.False(t, ok, "a published envelope must clear its retry record")
 			})
 		}
+
+		t.Run(mode+"/the payload is invalidated during the retry's writes", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failEnvelope = errors.New("injected envelope publish failure")
+			body := f.contents(f.blobs...)
+			query := "?broadcast_validation=" + mode
+			require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, query).Code)
+			f.failEnvelope = nil
+			f.failWrite = func(uint64) error {
+				f.payloadInvalidated = true
+				return nil
+			}
+
+			retry := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusBadRequest, retry.Code, retry.Body.String())
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
+		})
 	}
 }
 
 func TestPostEnvelopeContentsConsensusModesPublishEnvelopeLast(t *testing.T) {
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		for _, tc := range []struct {
+			name              string
+			blobCount         int
+			bare              bool
+			wantPhases        []contentsEventKind
+			blobDataAvailable bool
+		}{
+			{
+				name: "contents with blobs", blobCount: 2, blobDataAvailable: true,
+				wantPhases: []contentsEventKind{eventConsensusValidation, eventColumnPublish, eventColumnWrite, eventImport, eventEnvelopePublish},
+			},
+			{
+				name: "contents without blobs", blobDataAvailable: true,
+				wantPhases: []contentsEventKind{eventConsensusValidation, eventImport, eventEnvelopePublish},
+			},
+			{
+				name: "bare envelope without blobs", bare: true,
+				wantPhases: []contentsEventKind{eventConsensusValidation, eventImport, eventEnvelopePublish},
+			},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, tc.blobCount)
+				if tc.bare {
+					f.expirePendingLocal()
+				}
+
+				recorder := f.postAllBlobs(tc.bare, "?broadcast_validation="+mode)
+
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				require.Equal(t, tc.wantPhases, f.phases())
+				require.Equal(t, tc.blobDataAvailable, f.consensusBlobDataAvailable)
+			})
+		}
+	}
+}
+
+func TestPostEnvelopeContentsConsensusFailurePublishesNothing(t *testing.T) {
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		for _, pendingLocal := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/pendingLocal=%t", mode, pendingLocal), func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
+				f.forkchoice.ValidateExecutionPayloadEnvelopeForConsensusErr = errors.New("consensus validation failed")
+
+				recorder := f.postAllBlobs(pendingLocal, "?broadcast_validation="+mode)
+
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+				requireNotCached(t, f.handler, f.blobs...)
+				f.requireClaimReleased()
+				f.requireContentsRequiredRecord(false)
+			})
+		}
+	}
+}
+
+func TestPostEnvelopeContentsConsensusModesWriteFailureAnswersAccepted(t *testing.T) {
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		query := "?broadcast_validation=" + mode
+		t.Run(mode+"/DA missing", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failFirstCustodyWrite()
+			body := f.contents(f.blobs...)
+
+			first := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
+			require.Equal(t, eventEnvelopePublish, f.events[len(f.events)-1].kind)
+			f.requireContentsRequiredRecord(true)
+			f.requireClaimReleased()
+
+			f.failWrite = nil
+			second := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+			f.requireContentsRequiredRecord(false)
+		})
+
+		t.Run(mode+"/the pending retry imports during the repair", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failFirstCustodyWrite()
+			body := f.contents(f.blobs...)
+			require.Equal(t, http.StatusAccepted, f.postContents(t.Context(), body, query).Code)
+			f.requireContentsRequiredRecord(true)
+			f.requireClaimReleased()
+			f.failWrite = nil
+			f.wrapImport(func(context.Context, func() error) error {
+				f.forkchoice.SetEnvelope(f.root, f.signedEnvelope)
+				return forkchoice.ErrIgnore
+			})
+
+			repair := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusOK, repair.Code, repair.Body.String())
+			f.requireContentsRequiredRecord(false)
+		})
+
+		t.Run(mode+"/the pending retry imports a payload invalidated during the repair writes", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failFirstCustodyWrite()
+			body := f.contents(f.blobs...)
+			require.Equal(t, http.StatusAccepted, f.postContents(t.Context(), body, query).Code)
+			f.requireContentsRequiredRecord(true)
+			f.requireClaimReleased()
+			envelopes := len(f.eventsOf(eventEnvelopePublish))
+			f.failWrite = func(uint64) error {
+				f.forkchoice.SetEnvelope(f.root, f.signedEnvelope)
+				f.payloadInvalidated = true
+				return nil
+			}
+
+			repair := f.postContents(t.Context(), body, query)
+
+			require.Equal(t, http.StatusBadRequest, repair.Code, repair.Body.String())
+			require.Len(t, f.eventsOf(eventEnvelopePublish), envelopes)
+			require.Equal(t, f.root, f.invalidatedBlockRoot)
+			require.Equal(t, f.signedEnvelope.Message.Payload.BlockHash, f.invalidatedExecutionHash)
+			f.requireClaimReleased()
+		})
+
+		t.Run(mode+"/a column publish fails too", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failPublish = failPublishOf(5)
+			f.failFirstCustodyWrite()
+
+			recorder := f.postContents(t.Context(), f.contents(f.blobs...), query)
+
+			require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
+			f.requireContentsRequiredRecord(true)
+			f.requireClaimReleased()
+		})
+
+		for _, tc := range []struct {
+			name             string
+			persistDifferent bool
+		}{
+			{name: "the repair's import is ignored and a different envelope is persisted", persistDifferent: true},
+			{name: "the repair's import is ignored and no envelope is persisted"},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
+				f.failFirstCustodyWrite()
+				body := f.contents(f.blobs...)
+				require.Equal(t, http.StatusAccepted, f.postContents(t.Context(), body, query).Code)
+				f.requireContentsRequiredRecord(true)
+				f.requireClaimReleased()
+				envelopes := len(f.eventsOf(eventEnvelopePublish))
+				f.failWrite = nil
+				var persisted *cltypes.SignedExecutionPayloadEnvelope
+				if tc.persistDifferent {
+					persisted = f.differentEnvelope()
+				}
+				f.wrapImport(func(context.Context, func() error) error {
+					if persisted != nil {
+						f.forkchoice.SetEnvelope(f.root, persisted)
+					}
+					return forkchoice.ErrIgnore
+				})
+
+				repair := f.postContents(t.Context(), body, query)
+
+				require.Equal(t, http.StatusServiceUnavailable, repair.Code, repair.Body.String())
+				require.Len(t, f.eventsOf(eventEnvelopePublish), envelopes)
+				f.requireContentsRequiredRecord(true)
+			})
+		}
+
+		t.Run(mode+"/the payload was invalidated during the writes", func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failFirstCustodyWrite()
+			failWrite := f.failWrite
+			f.failWrite = func(index uint64) error {
+				err := failWrite(index)
+				if err != nil {
+					f.payloadInvalidated = true
+				}
+				return err
+			}
+
+			recorder := f.postContents(t.Context(), f.contents(f.blobs...), query)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Empty(t, f.eventsOf(eventEnvelopePublish))
+			require.Len(t, f.eventsOf(eventImport), 1)
+			require.Equal(t, f.root, f.invalidatedBlockRoot)
+			require.Equal(t, f.signedEnvelope.Message.Payload.BlockHash, f.invalidatedExecutionHash)
+			require.True(t, f.consensusBlobDataAvailable)
+			f.requireClaimReleased()
+			f.requireContentsRequiredRecord(false)
+		})
+	}
+}
+
+func TestPostEnvelopeContentsConsensusRepairUsesAdmissionContentsRequired(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	f.failFirstCustodyWrite()
+	body := f.contents(f.blobs...)
+	query := "?broadcast_validation=consensus"
+	recorder := f.postContents(t.Context(), body, query)
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	f.requireContentsRequiredRecord(true)
+	f.requireClaimReleased()
+
+	f.failWrite = func(uint64) error {
+		f.handler.clearExecutionPayloadEnvelopeRetry(executionPayloadEnvelopeGossipKey{
+			BeaconBlockRoot: f.root,
+			BuilderIndex:    f.signedEnvelope.Message.BuilderIndex,
+		})
+		return nil
+	}
+	f.wrapImport(func(context.Context, func() error) error {
+		f.forkchoice.SetEnvelope(f.root, f.signedEnvelope)
+		return forkchoice.ErrIgnore
+	})
+
+	repair := f.postContents(t.Context(), body, query)
+
+	require.Equal(t, http.StatusOK, repair.Code, repair.Body.String())
+}
+
+func TestPostEnvelopeContentsConsensusAndEquivocationRechecksBeforeColumns(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	block := f.forkchoice.Blocks[f.root].Block
+	f.duringConsensusValidation = func() {
+		f.forkchoice.Headers[common.Hash{0xff}] = &cltypes.BeaconBlockHeader{Slot: block.Slot, ProposerIndex: block.ProposerIndex}
+	}
+
+	recorder := f.postAllBlobs(false, "?broadcast_validation=consensus_and_equivocation")
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "equivocation")
+	require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+}
+
+func TestPostEnvelopeContentsConsensusModesRecheckFinalityAfterTheWrites(t *testing.T) {
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.failWrite = func(uint64) error {
+				f.forkchoice.FinalizedCheckpointVal.Epoch = f.slot/f.handler.beaconChainCfg.SlotsPerEpoch + 1
+				return nil
+			}
 
 			recorder := f.postAllBlobs(false, "?broadcast_validation="+mode)
 
-			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-			require.Equal(t, []contentsEventKind{eventColumnPublish, eventColumnWrite, eventConsensusValidation, eventImport, eventEnvelopePublish}, f.phases())
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), "before finalized slot")
+			f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
+			f.requireAllColumns("written", f.succeededIndices(eventColumnWrite))
+			require.Empty(t, f.eventsOf(eventImport))
+			require.Empty(t, f.eventsOf(eventEnvelopePublish))
+			f.requireClaimReleased()
+			f.requireContentsRequiredRecord(false)
 		})
 	}
+}
+
+func TestPostEnvelopeConsensusModeWithoutBlobDataReadsStoredColumns(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	f.expirePendingLocal()
+
+	first := f.postAllBlobs(true, "?broadcast_validation=consensus")
+
+	require.Equal(t, http.StatusBadRequest, first.Code, first.Body.String())
+	require.False(t, f.consensusBlobDataAvailable)
+	require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+
+	f.storeCustodyColumns()
+	second := f.postAllBlobs(true, "?broadcast_validation=consensus")
+
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	require.False(t, f.consensusBlobDataAvailable)
+}
+
+func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRequest(t *testing.T) {
+	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
+		for _, tc := range []struct {
+			name        string
+			err         error
+			invalidated bool
+			status      int
+			envelopes   int
+		}{
+			{name: "invalid execution payload", err: forkchoice.ErrInvalidExecutionPayloadEnvelope, status: http.StatusBadRequest},
+			{name: "DA missing after successful writes", err: forkchoice.ErrEIP7594ColumnDataNotAvailable, status: http.StatusBadRequest},
+			{
+				name:      "persistence failure",
+				err:       fmt.Errorf("disk unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed),
+				status:    http.StatusInternalServerError,
+				envelopes: 1,
+			},
+			{
+				name:        "persistence failure for a payload invalidated during the writes",
+				err:         fmt.Errorf("disk unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed),
+				invalidated: true,
+				status:      http.StatusBadRequest,
+			},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
+				f.failImport(tc.err)
+				if tc.invalidated {
+					f.failWrite = func(uint64) error {
+						f.payloadInvalidated = true
+						return nil
+					}
+				}
+
+				recorder := f.postAllBlobs(false, "?broadcast_validation="+mode)
+
+				require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+				f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
+				f.requireAllColumns("written", f.succeededIndices(eventColumnWrite))
+				require.Len(t, f.eventsOf(eventEnvelopePublish), tc.envelopes)
+				f.requireClaimReleased()
+			})
+		}
+	}
+}
+
+func TestPostEnvelopeContentsConsensusAndEquivocationChecksBeforeTheEnvelope(t *testing.T) {
+	f := newEnvelopeContentsFixture(t, 0, 2)
+	block := f.forkchoice.Blocks[f.root].Block
+	f.wrapImport(func(_ context.Context, next func() error) error {
+		f.forkchoice.Headers[common.Hash{0xff}] = &cltypes.BeaconBlockHeader{Slot: block.Slot, ProposerIndex: block.ProposerIndex}
+		return next()
+	})
+
+	recorder := f.postAllBlobs(false, "?broadcast_validation=consensus_and_equivocation")
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "equivocation")
+	f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
+	f.requireAllColumns("written", f.succeededIndices(eventColumnWrite))
+	require.Len(t, f.eventsOf(eventImport), 1)
+	require.Empty(t, f.eventsOf(eventEnvelopePublish))
 }
 
 func TestPostEnvelopeContentsLegacyRoutePublishesEnvelopeLast(t *testing.T) {

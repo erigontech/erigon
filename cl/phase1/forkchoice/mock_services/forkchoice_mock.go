@@ -656,9 +656,13 @@ func (f *ForkChoiceStorageMock) ForgetExecutionPayloadEnvelopeForGossip(beaconBl
 	f.EnvelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
-func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope, _ bool) error {
 	f.ValidateExecutionPayloadEnvelopeForConsensusCalled = true
 	return f.ValidateExecutionPayloadEnvelopeForConsensusErr
+}
+
+func (f *ForkChoiceStorageMock) ExecutionPayloadInvalidated(common.Hash, common.Hash) bool {
+	return false
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
