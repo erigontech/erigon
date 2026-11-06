@@ -63,6 +63,7 @@ type contentsEvent struct {
 	kind       contentsEventKind
 	index      uint64
 	err        error
+	ctxErr     error
 	forkDigest common.Bytes4
 	deadline   time.Time
 	data       []byte
@@ -86,6 +87,7 @@ type envelopeContentsFixture struct {
 	failWrite    func(index uint64) error
 	failPublish  func(index uint64) error
 	failEnvelope error
+	onClaim      func()
 }
 
 type loggingColumnStorage struct {
@@ -101,7 +103,8 @@ func (s *loggingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoo
 	if err == nil {
 		err = s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
 	}
-	s.f.record(contentsEvent{kind: eventColumnWrite, index: uint64(columnIndex), err: err})
+	deadline, _ := ctx.Deadline()
+	s.f.record(contentsEvent{kind: eventColumnWrite, index: uint64(columnIndex), err: err, ctxErr: ctx.Err(), deadline: deadline})
 	return err
 }
 
@@ -118,6 +121,13 @@ func (d *dataAvailabilityForkchoice) ValidateExecutionPayloadEnvelopeForConsensu
 		return forkchoice.ErrEIP7594ColumnDataNotAvailable
 	}
 	return d.ForkChoiceStorageMock.ValidateExecutionPayloadEnvelopeForConsensus(ctx, envelope)
+}
+
+func (d *dataAvailabilityForkchoice) ClaimExecutionPayloadEnvelopeForGossip(ctx context.Context, root common.Hash, builderIndex uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if d.f.onClaim != nil {
+		d.f.onClaim()
+	}
+	return d.ForkChoiceStorageMock.ClaimExecutionPayloadEnvelopeForGossip(ctx, root, builderIndex)
 }
 
 var wallClockForkDigest = common.Bytes4{0xff, 0xff, 0xff, 0xff}
@@ -335,12 +345,17 @@ func (f *envelopeContentsFixture) postContents(ctx context.Context, contents *cl
 // so the handler attaches the contents it holds for the bid.
 func (f *envelopeContentsFixture) postAllBlobs(pendingLocal bool, query string) *httptest.ResponseRecorder {
 	f.t.Helper()
+	return f.postAllBlobsWithContext(f.t.Context(), pendingLocal, query)
+}
+
+func (f *envelopeContentsFixture) postAllBlobsWithContext(ctx context.Context, pendingLocal bool, query string) *httptest.ResponseRecorder {
+	f.t.Helper()
 	if !pendingLocal {
-		return f.postContents(f.t.Context(), f.contents(f.blobs...), query)
+		return f.postContents(ctx, f.contents(f.blobs...), query)
 	}
 	body, err := json.Marshal(f.signedEnvelope)
 	require.NoError(f.t, err)
-	return f.post(f.t.Context(), body, "application/json", "false", query)
+	return f.post(ctx, body, "application/json", "false", query)
 }
 
 func (f *envelopeContentsFixture) post(ctx context.Context, body []byte, contentType, blobDataIncluded, query string) *httptest.ResponseRecorder {
@@ -532,9 +547,15 @@ func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testin
 			f.requireAllColumns("published after the re-POST", slices.Compact(f.succeededIndices(eventColumnPublish)))
 			require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "the re-POST must not publish the envelope again")
 
+			events := len(f.events)
 			third := f.postContents(t.Context(), body, tc.query)
 
-			require.Equal(t, http.StatusBadRequest, third.Code, "a repaired re-POST must clear the retry record")
+			if tc.envelopeFirst {
+				require.Equal(t, http.StatusOK, third.Code, third.Body.String())
+			} else {
+				require.Equal(t, http.StatusBadRequest, third.Code, "a repaired re-POST must clear the retry record")
+			}
+			require.Len(t, f.events, events, "a repaired re-POST must clear the retry record, so nothing is published again")
 		})
 	}
 }
