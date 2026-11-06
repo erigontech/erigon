@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
@@ -38,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -422,19 +420,7 @@ func executionPayloadVersionedHashes(block *cltypes.SignedBeaconBlock) ([]common
 	if committedBid == nil || committedBid.Message == nil {
 		return nil, errors.New("block missing execution payload bid")
 	}
-	blobCommitments := &committedBid.Message.BlobKzgCommitments
-	versionedHashes := make([]common.Hash, 0, blobCommitments.Len())
-	if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-		if err != nil {
-			return err
-		}
-		versionedHashes = append(versionedHashes, versionedHash)
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
-	}
-	return versionedHashes, nil
+	return committedBid.Message.VersionedHashes(), nil
 }
 
 func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(

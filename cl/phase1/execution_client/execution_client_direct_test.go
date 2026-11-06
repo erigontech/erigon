@@ -86,9 +86,7 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 		{name: "malformed set code", transactions: [][]byte{{types.SetCodeTxType, 0xc0}}, invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			module := &newPayloadModuleStub{}
-			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-			require.NoError(t, err)
+			client, module := newDirectClientForNewPayload(t)
 
 			payload := cltypes.NewEth1Block(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 			payload.BlockNumber = 1
@@ -96,8 +94,9 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 			payload.Transactions = solid.NewTransactionsSSZFromTransactions(tc.transactions)
 			parentRoot := common.Hash{}
-			payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+			payloadHash, err := payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
 			require.NoError(t, err)
+			payload.BlockHash = payloadHash
 
 			status, err := client.NewPayload(t.Context(), payload, &parentRoot, []common.Hash{}, nil)
 			if tc.invalid {

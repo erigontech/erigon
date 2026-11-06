@@ -10,13 +10,11 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -35,24 +33,6 @@ const (
 	chainTipNoPeersRetryInterval = 2 * time.Second
 	chainTipPollInterval         = time.Second
 )
-
-func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
-	if blobCommitments == nil || blobCommitments.Len() == 0 {
-		return []common.Hash{}, nil
-	}
-	versionedHashes := make([]common.Hash, 0, blobCommitments.Len())
-	if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-		if err != nil {
-			return err
-		}
-		versionedHashes = append(versionedHashes, versionedHash)
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
-	}
-	return versionedHashes, nil
-}
 
 func gloasExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, requests *cltypes.ExecutionRequests) []hexutil.Bytes {
 	if requests == nil {
@@ -1324,11 +1304,7 @@ func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelo
 		return nil, nil, errors.New("missing execution payload bid")
 	}
 
-	versionedHashes, err := gloasVersionedHashes(&committedBid.Message.BlobKzgCommitments)
-	if err != nil {
-		return nil, nil, err
-	}
-	return versionedHashes, gloasExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests), nil
+	return committedBid.Message.VersionedHashes(), gloasExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests), nil
 }
 
 func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {

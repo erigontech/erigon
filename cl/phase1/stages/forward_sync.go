@@ -575,17 +575,10 @@ func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchor
 }
 
 func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-	versionedHashes, executionRequestsList, err := buildAnchorNewPayloadArgs(cfg.beaconCfg, bid, env)
-	if err != nil {
-		return execution_client.PayloadStatusNone, err
-	}
+	versionedHashes, executionRequestsList := buildAnchorNewPayloadArgs(cfg.beaconCfg, bid, env)
 	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
 }
 
-func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
-	versionedHashes, err := gloasVersionedHashes(&bid.BlobKzgCommitments)
-	if err != nil {
-		return nil, nil, err
-	}
-	return versionedHashes, gloasExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests), nil
+func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes) {
+	return bid.VersionedHashes(), gloasExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests)
 }

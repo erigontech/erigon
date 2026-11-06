@@ -23,12 +23,15 @@ import (
 	"fmt"
 	"strings"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
@@ -298,6 +301,15 @@ type ExecutionPayloadBid struct {
 	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
 	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
+}
+
+func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
+	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
+	for i := range hashes {
+		commitment := goethkzg.KZGCommitment(*e.BlobKzgCommitments.Get(i))
+		hashes[i] = common.Hash(kzg.KZGToVersionedHash(commitment))
+	}
+	return hashes
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {

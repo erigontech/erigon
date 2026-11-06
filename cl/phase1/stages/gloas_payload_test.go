@@ -836,8 +836,7 @@ func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
 func TestGloasNewPayloadArgsUseEmptyVersionedHashes(t *testing.T) {
 	cfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
 
-	anchorHashes, _, err := buildAnchorNewPayloadArgs(cfg, bid, env)
-	require.NoError(t, err)
+	anchorHashes, _ := buildAnchorNewPayloadArgs(cfg, bid, env)
 	require.NotNil(t, anchorHashes)
 	require.Empty(t, anchorHashes)
 

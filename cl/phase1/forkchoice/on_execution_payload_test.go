@@ -4287,12 +4287,8 @@ func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testi
 			require.NotEqual(t, verifiedRoot, envelope.Message.BeaconBlockRoot)
 			resignAdmissionEnvelope(t, cfg, blockState, envelope)
 
-			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
-			f := newPayloadVoteTestStore(t, envelope.Message.BeaconBlockRoot, false, false)
-			f.beaconCfg = cfg
+			f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
 			f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
-			f.forkGraph = graph
-			f.finalizedCheckpoint.Store(solid.Checkpoint{})
 			f.MarkPayloadVerified(verifiedRoot, executionHash)
 
 			err := f.OnExecutionPayload(t.Context(), envelope, false, validatePayload)
