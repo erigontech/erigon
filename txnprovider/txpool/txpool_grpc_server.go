@@ -46,7 +46,8 @@ type txPool interface {
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
-	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
+	HasTxn(hash []byte) bool
+	RejectFramePrefix(hash common.Hash)
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
@@ -176,15 +177,10 @@ func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpoolproto.TxHashes) 
 }
 
 func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpoolproto.AddReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	var slots TxnSlots
 	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired().WithPoolRules()
 	parseCtx.ValidateRLP(ValidateSerializedTxn)
+	parseCtx.rejectPrefix = s.txPool.RejectFramePrefix
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
@@ -193,8 +189,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		slots.Resize(uint(j + 1))
 		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
-		if _, err = parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
-			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
+			if s.txPool.HasTxn(hash) {
 				return ErrAlreadyKnown
 			}
 			return nil
@@ -228,8 +224,15 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 			continue
 		}
 
-		reply.Imported[i] = mapDiscardReasonToProto(discardReasons[j])
-		reply.Errors[i] = discardReasons[j].String()
+		reason := discardReasons[j]
+		// Another request may admit the transaction while this one validates.
+		// Failed simulations bypass admission's duplicate check, so recheck membership.
+		// A confirmed DuplicateHash remains valid even if the transaction has since left the pool.
+		if reason == txpoolcfg.DuplicateHash || (reason != txpoolcfg.Success && s.txPool.HasTxn(slots.Txns[j].IDHash[:])) {
+			reason = txpoolcfg.AlreadyKnown
+		}
+		reply.Imported[i] = mapDiscardReasonToProto(reason)
+		reply.Errors[i] = reason.String()
 		j++
 	}
 	return reply, nil
@@ -261,13 +264,17 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_SUCCESS
 	case txpoolcfg.AlreadyKnown:
 		return txpoolproto.ImportResult_ALREADY_EXISTS
+	case txpoolcfg.NonceTooLow:
+		return txpoolproto.ImportResult_STALE
 	case txpoolcfg.UnderPriced, txpoolcfg.ReplaceUnderpriced, txpoolcfg.FeeTooLow:
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
-		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
-		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
+		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
+		txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
+		// INVALID includes rejections under current fork rules or pool policy;
+		// it does not imply that the transaction can never be accepted.
 		return txpoolproto.ImportResult_INVALID
 	default:
 		return txpoolproto.ImportResult_INTERNAL_ERROR
