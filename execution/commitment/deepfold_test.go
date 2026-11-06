@@ -876,25 +876,25 @@ func TestDeepConcurrent_WhaleParity(t *testing.T) {
 	require.Equal(t, seqRoot, conRoot, "concurrent storage-fold root != sequential")
 }
 
-// A storage fold must not overwrite the account cell's hashedExtension with the storage
-// extension: only a plain-key-less cell navigates by its extension.
-func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
+// An account cell at depth 64 navigates its storage by the extension of the branch that
+// folds into it, like a cell without a plain key.
+func TestFillFromLowerCell_StorageBranchSyncsAccountNavPath(t *testing.T) {
 	t.Parallel()
 
 	accountCell := &cell{accountAddrLen: length.Addr, hashLen: 32}
-	navPath := []byte{0x3, 0xc, 0x1, 0x9, 0xe}
-	copy(accountCell.hashedExtension[:], navPath)
-	accountCell.hashedExtLen = int16(len(navPath))
+	accountCell.hashedExtension[0] = 0xa
+	accountCell.hashedExtension[1] = 0xb
+	accountCell.hashedExtLen = 2
 
-	storageBranch := &cell{hashLen: 32}
+	storageBranch := &cell{hashLen: 32, extLen: 1}
+	storageBranch.extension[0] = 0xc
 
-	accountCell.fillFromLowerCell(storageBranch, 65, nil, 0x7)
+	accountCell.fillFromLowerCell(storageBranch, 66, []byte{0xa}, 0xb)
 
-	require.Equalf(t, navPath, accountCell.hashedExtension[:accountCell.hashedExtLen],
-		"account cell must keep its account navigation path across a storage propagate fold; "+
-			"got hashedExtLen=%d", accountCell.hashedExtLen)
+	want := []byte{0xa, 0xb, 0xc}
+	require.Equal(t, want, accountCell.extension[:accountCell.extLen])
+	require.Equal(t, want, accountCell.hashedExtension[:accountCell.hashedExtLen])
 	require.EqualValues(t, length.Addr, accountCell.accountAddrLen, "fold must not drop the account plain key")
-	require.EqualValues(t, 1, accountCell.extLen, "storage extension still travels up in extension space")
 }
 
 func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
@@ -940,7 +940,6 @@ func TestFillFromLowerCell_KeyedCellKeepsForeignPlaneExtension(t *testing.T) {
 	}
 }
 
-// The sync skip is keyed on the plain key, not on depth.
 func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 	t.Parallel()
 
@@ -952,4 +951,20 @@ func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 
 	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
 		"a keyless cell deep in storage still navigates by its extension")
+}
+
+// Deleting an account leaf while two new accounts land below its old position leaves a
+// branch as the only survivor of the row unfolded from the leaf. The cell the leaf occupied
+// must drop the deleted account's plain key when that branch folds into it.
+func TestDeepFold_BranchSurvivorDropsDeletedAccountLeafKey(t *testing.T) {
+	t.Parallel()
+	x := addrHex(findAddressForHexPrefix([]byte{0}, 1))
+	y := addrHex(findAddressForHexPrefix([]byte{9}, 2))
+	a := addrHex(findAddressForHexPrefix([]byte{2, 5}, 3))
+	b := addrHex(findAddressForHexPrefix([]byte{2, 3, 1}, 4))
+	c := addrHex(findAddressForHexPrefix([]byte{2, 3, 7}, 5))
+	k0, u0 := NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(a, 3).Build()
+	k1, u1 := NewUpdateBuilder().Delete(a).Balance(b, 4).Balance(c, 5).Build()
+	kf, uf := NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(b, 4).Balance(c, 5).Build()
+	requireRestartParity(t, []engineBatch{{k0, u0}, {k1, u1}}, kf, uf)
 }
