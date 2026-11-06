@@ -660,7 +660,7 @@ func modexpU256(dst, base, exp, mod []byte) {
 		w = 5
 	case n > 80:
 		w = 4
-	case n > 16:
+	case n > 32:
 		w = 3
 	}
 	var odd [16]uint256.Int // odd[k] = b^(2k+1)
