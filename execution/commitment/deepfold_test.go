@@ -292,6 +292,30 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 	})
 }
 
+// Deleting the siblings of an account with one storage slot folds the root into that account.
+// The fold drops the account's memoized hash, so the root hash must load its slot.
+func TestSoleAccount_DeleteCollapseToAccountWithOneSlot(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(0xd, 1))
+	slot := storageLocsForNibble(0x7, 1, 1)[0]
+	ub0 := NewUpdateBuilder().Balance(a, 1).Storage(a, slot, "05")
+	ub1 := NewUpdateBuilder()
+	for i, nibble := range []int{0x3, 0xb} {
+		sibling := addrHex(findAddressForNibble(nibble, 2+i))
+		ub0.Balance(sibling, 2)
+		ub1.Delete(sibling)
+	}
+
+	kf, uf := NewUpdateBuilder().Balance(a, 1).Storage(a, slot, "05").Build()
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub0, ub1)
+	require.Equal(t, want, carried, "carried trie")
+	require.Equal(t, want, restored, "state-restored trie")
+	k0, u0 := ub0.Build()
+	k1, u1 := ub1.Build()
+	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
+}
+
 // The same shape re-expanding: a sole account whose storage collapses to one slot and then grows
 // back must re-insert the survivor under its own first storage nibble. The root cell's derived
 // navigation path has to hash the slot alone, not the whole account-plus-slot plain key.
