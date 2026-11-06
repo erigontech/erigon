@@ -91,3 +91,43 @@ func TestFrameRPCReceiptLogTimestamps(t *testing.T) {
 		})
 	}
 }
+
+// Receipts in the RPC cache carry logs already stamped with the block time: they are rendered as
+// they are when the timestamp is wanted, and without it otherwise.
+func TestMarshalReceiptWithStampedLogs(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		stamp    bool
+		time     uint64
+		wantSame bool
+	}{
+		{"stamped with the block time", true, 42, true},
+		{"unstamped", false, 42, false},
+		{"stamped with another time", true, 43, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := types.Logs{{Index: 1, Topics: []common.Hash{}}, {Index: 2, Topics: []common.Hash{}}, {Index: 3, Topics: []common.Hash{}}}
+			logs.SetBlockTimestamp(42)
+			receipt := &types.Receipt{
+				Type: types.FrameTxType, BlockNumber: uint256.NewInt(1), Logs: logs,
+				FrameReceipts: []types.FrameReceipt{{Status: 1, Logs: logs[:2:2]}, {Status: 1, Logs: logs[2:]}},
+			}
+			header := &types.Header{Number: *uint256.NewInt(1), Time: tc.time, BaseFee: uint256.NewInt(0)}
+			result := MarshalReceipt(receipt, &types.FrameTransaction{}, chain.AllProtocolChanges, header, false, tc.stamp)
+			require.Len(t, result.Logs, len(logs))
+			for i, l := range result.Logs {
+				if tc.stamp {
+					require.Equal(t, stampedAt(tc.time), l.BlockTimestamp)
+				} else {
+					require.Nil(t, l.BlockTimestamp)
+				}
+				require.Equal(t, tc.wantSame, l == logs[i])
+				require.Equal(t, stampedAt(42), logs[i].BlockTimestamp, "the cached log keeps its timestamp")
+			}
+			require.Same(t, result.Logs[0], result.FrameReceipts[0].Logs[0])
+			require.Same(t, result.Logs[2], result.FrameReceipts[1].Logs[0])
+			requireFastJSONMatches(t, result)
+		})
+	}
+}
