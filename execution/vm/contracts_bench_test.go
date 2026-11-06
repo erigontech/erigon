@@ -290,3 +290,55 @@ func BenchmarkModExpClasses(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkModExpCrossover reports Mgas/s of the MODEXP precompile and of evmone direct around the routing bounds:
+// a 256-bit modulus with a growing exponent, and a 1-byte exponent with a growing modulus.
+func BenchmarkModExpCrossover(b *testing.B) {
+	rnd := func(n int, seed byte) []byte {
+		out := make([]byte, n)
+		x := uint32(seed)*2654435761 + 1
+		for i := range out {
+			x = x*1103515245 + 12345
+			out[i] = byte(x >> 16)
+		}
+		out[0] |= 0x80
+		return out
+	}
+	p := &bigModExp{eip2565: true, osaka: true}
+	run := func(name string, base, exp, mod []byte) {
+		input := make([]byte, 96)
+		binary.BigEndian.PutUint64(input[24:32], uint64(len(base)))
+		binary.BigEndian.PutUint64(input[56:64], uint64(len(exp)))
+		binary.BigEndian.PutUint64(input[88:96], uint64(len(mod)))
+		input = append(append(append(input, base...), exp...), mod...)
+		gas := p.RequiredGas(input)
+		mgas := func(b *testing.B) {
+			b.ReportMetric(float64(gas)*float64(b.N)/float64(b.Elapsed().Nanoseconds())*1e3, "Mgas/s")
+		}
+		b.Run(name+"/erigon", func(b *testing.B) {
+			for b.Loop() {
+				if _, err := p.Run(input); err != nil {
+					b.Fatal(err)
+				}
+			}
+			mgas(b)
+		})
+		b.Run(name+"/evmone", func(b *testing.B) {
+			out := make([]byte, len(mod))
+			for b.Loop() {
+				evmone.ModExp(out, base, exp, mod)
+			}
+			mgas(b)
+		})
+	}
+	for _, e := range []int{1, 2, 3, 4, 6, 8, 12, 16, 24, 32} {
+		mod := rnd(32, 2)
+		mod[31] |= 1
+		run(fmt.Sprintf("mod=32/exp=%d", e), rnd(32, 1), rnd(e, 3), mod)
+	}
+	for _, n := range []int{33, 40, 48, 56, 64, 80, 96, 112, 128} {
+		mod := rnd(n, 2)
+		mod[n-1] |= 1
+		run(fmt.Sprintf("mod=%d/exp3", n), rnd(n, 1), []byte{0x03}, mod)
+	}
+}
