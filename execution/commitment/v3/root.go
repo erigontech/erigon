@@ -49,9 +49,6 @@ func insertRoot(n *node, path, value []byte) error {
 			return insert(child, path, value)
 		}
 	}
-	if n.leafMask == n.childMask && bits.OnesCount16(n.childMask) == 1 {
-		return insertLeafRoot(n, path, value)
-	}
 	return insert(n, path, value)
 }
 
@@ -79,33 +76,6 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 		*n = *branch
 		return nil
 	}
-	root := fork(oldPath[:common])
-	root.plane = n.plane
-	root.dead = n.dead
-	root.setChild(int(oldPath[0]), branch)
-	*n = *root
-	return nil
-}
-
-func insertLeafRoot(n *node, path, value []byte) error {
-	oldNib := bits.TrailingZeros16(n.childMask)
-	oldSuffix, oldValue := n.leafAt(oldNib)
-	var pathScratch [64]byte
-	pathScratch[0] = byte(oldNib)
-	unpackPath(oldSuffix, 63, pathScratch[1:1:64])
-	oldPath := pathScratch[:]
-	var packScratch [32]byte
-	if bytes.Equal(oldPath, path) {
-		n.setLeaf(oldNib, packPath(path[1:], packScratch[:0]), value)
-		return nil
-	}
-	if oldNib != int(path[0]) {
-		n.setLeaf(int(path[0]), packPath(path[1:], packScratch[:0]), value)
-		return nil
-	}
-	common := nibbles.CommonPrefixLen(oldPath, path)
-	branch := newBranch(path, common, value)
-	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], packScratch[:0]), oldValue)
 	root := fork(oldPath[:common])
 	root.plane = n.plane
 	root.dead = n.dead

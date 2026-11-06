@@ -516,6 +516,7 @@ func TestTrieMutations(t *testing.T) {
 				require.NoError(t, insertRoot(viaCollapse, c, []byte{3}))
 				require.NoError(t, insertRoot(viaCollapse, b, []byte{2}))
 				require.NoError(t, removeRoot(viaCollapse, c))
+				require.NoError(t, promoteRootExtension(viaLeafRoot))
 
 				require.Equal(t, []byte{5, 5}, viaCollapse.path)
 				require.Equal(t, viaCollapse.path, viaLeafRoot.path)
