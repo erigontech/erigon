@@ -231,6 +231,17 @@ func (m *Merger) Merge(
 		outputs := make([]snaptype.FileInfo, 0, len(snapTypes))
 		builtFileNames := make([]string, 0, len(snapTypes))
 		samePathTypes := make(map[snaptype.Enum]struct{})
+		abort := func() { // a later OpenFolder must not adopt the outputs of an unfinished range
+			for _, sn := range built {
+				sn.close()
+			}
+			if onDelete != nil {
+				_ = onDelete(ctx, slices.Clone(builtFileNames))
+			}
+			for i := range outputs {
+				removeMergedFiles(outputs[i])
+			}
+		}
 		for _, t := range snapTypes {
 			output := t.FileInfo(snapDir, r.From(), r.To())
 			if len(toMerge[t.Enum()]) == 1 && toMerge[t.Enum()][0].FilePath() == output.Path {
@@ -248,6 +259,7 @@ func (m *Merger) Merge(
 				snapshots.IndexBuilder(t),
 			)
 			if err != nil {
+				abort()
 				return err
 			}
 			if in[t.Enum()] == nil {
@@ -265,15 +277,7 @@ func (m *Merger) Merge(
 
 		if onMerge != nil {
 			if err := onMerge(slices.Clone(mergedFileNames)); err != nil {
-				for _, sn := range built {
-					sn.close()
-				}
-				if onDelete != nil {
-					_ = onDelete(ctx, slices.Clone(builtFileNames))
-				}
-				for i := range outputs {
-					removeMergedFiles(outputs[i])
-				}
+				abort()
 				return err
 			}
 		}

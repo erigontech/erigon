@@ -1862,3 +1862,45 @@ func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 		require.False(ok)
 	})
 }
+
+// When the last type of a merge range fails, the outputs already built for the range must be closed and removed
+// (a later OpenFolder must not adopt them), while the inputs stay open and on disk.
+func TestMergeRemovesBuiltOutputsWhenALaterTypeFails(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for i := range uint64(2) {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	inputs := map[snaptype.Enum][]*DirtySegment{}
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		s.dirty[snT.Enum()].Scan(func(seg *DirtySegment) bool {
+			inputs[snT.Enum()] = append(inputs[snT.Enum()], seg)
+			return true
+		})
+	}
+	lastType := snaptype2.BlockSnapshotTypes[len(snaptype2.BlockSnapshotTypes)-1]
+	inputs[lastType.Enum()][0].closeSeg() // its merge fails after the earlier types are built
+
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	require.Error(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, []Range{NewRange(0, 20_000)}, s.Dir(), false, nil, nil))
+
+	for _, snT := range snaptype2.BlockSnapshotTypes[:len(snaptype2.BlockSnapshotTypes)-1] {
+		out := snT.FileInfo(dir, 0, 20_000).Path
+		exists, err := dir2.FileExist(out)
+		require.NoError(err)
+		require.False(exists, "%s: an output of the failed range stays on disk", filepath.Base(out))
+		for _, in := range inputs[snT.Enum()] {
+			require.NotNil(in.Decompressor, "%s: an input must stay open", in.FileName())
+			exists, err := dir2.FileExist(in.FilePath())
+			require.NoError(err)
+			require.True(exists, "%s: an input must stay on disk", in.FileName())
+		}
+	}
+}
