@@ -325,17 +325,15 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 
 var ErrStateStepHasMoreWork = errors.New("state step has more work")
 
-func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint *uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	shouldUnwind := unwindPoint > 0
-	// Construct side fork if we have one
-	if shouldUnwind {
-		// Run it through the unwind
-		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
+	// A nil unwind point leaves the current chain in place; zero unwinds to genesis.
+	if unwindPoint != nil {
+		if err := stateSync.UnwindTo(*unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
 		}
 		if err := stateSync.RunUnwind(sd, tx); err != nil {
