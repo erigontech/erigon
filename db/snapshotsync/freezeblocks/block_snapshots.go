@@ -723,6 +723,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		collected := -1
 		collectorLock := sync.Mutex{}
 		collections := sync.NewCond(&collectorLock)
+		failed := false
 		var j int
 
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
@@ -731,26 +732,26 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 			parsers.Go(func() error {
 				valueBuf, err := parse(tv, valueBufs[tx%workers], senders, tx)
-				if err != nil {
-					collectorLock.Lock()
-					defer collectorLock.Unlock()
-					collected = tx
-					collections.Broadcast() // to fail fast on it.
-					return fmt.Errorf("%w, block: %d", err, blockNum)
-				}
 				collectorLock.Lock()
 				defer collectorLock.Unlock()
 				for collected < tx-1 {
 					collections.Wait()
 				}
+				collected = tx
+				defer collections.Broadcast()
+				if failed {
+					return nil
+				}
+				if err != nil {
+					failed = true
+					return fmt.Errorf("%w, block: %d", err, blockNum)
+				}
 
 				// first tx byte => sender address => tx rlp
 				if err := collect(valueBuf); err != nil {
+					failed = true
 					return err
 				}
-				collected = tx
-				collections.Broadcast()
-
 				return nil
 			})
 

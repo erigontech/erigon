@@ -628,3 +628,29 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
 	}
 }
+
+func TestJsonStreamLogger_HaltedStorageStepIsNotRecorded(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(nil, t.Context(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	haltedSstore := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(7), *uint256.NewInt(1)}}
+	haltedSload := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(3)}}
+	sstore := &mockOpContext{stack: []uint256.Int{*uint256.NewInt(9), *uint256.NewInt(2)}}
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSstore, nil, 1, vm.ErrWriteProtection)
+	l.OnOpcodeV2(1, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, haltedSload, nil, 1, vm.ErrOutOfGas)
+	l.OnOpcodeV2(2, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{}, sstore, nil, 1, nil)
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var result struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result.StructLogs, 3)
+	require.NotContains(t, result.StructLogs[0], "storage")
+	require.NotContains(t, result.StructLogs[1], "storage")
+	require.JSONEq(t, `{"0x0000000000000000000000000000000000000000000000000000000000000002":"0x0000000000000000000000000000000000000000000000000000000000000009"}`,
+		string(result.StructLogs[2]["storage"]))
+}

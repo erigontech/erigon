@@ -150,7 +150,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 	l.writePrologueOnce()
 	l.opcodeSteps++
 	var outputStorage bool
-	if !l.cfg.DisableStorage {
+	if !l.cfg.DisableStorage && err == nil {
 		// initialise new changed values storage container for this contract
 		// if not present.
 		if l.storage[contractAddr] == nil {
