@@ -212,11 +212,12 @@ func (panicCreateFs) Create(string) (afero.File, error) { panic("create") }
 func TestColumnWritePanicReleasesLocks(t *testing.T) {
 	storage := NewDataColumnStore(panicCreateFs{afero.NewMemMapFs()}, globalBeaconConfig, beaconevents.NewEventEmitter())
 	const slot = 1000
+	root := common.HexToHash("0x1234567890abcdef")
 	require.Panics(t, func() {
-		_ = storage.WriteColumnSidecars(t.Context(), common.HexToHash("0x1234567890abcdef"), 1, createTestDataColumnSidecar(slot, 1))
+		_ = storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
 	})
 	impl := storage.(*dataColumnStorageImpl)
-	require.True(t, impl.forSlot(slot).TryLock())
+	require.True(t, impl.forRoot(root).TryLock())
 	require.True(t, impl.pruneMutex.TryLock())
 }
 
