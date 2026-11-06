@@ -365,8 +365,8 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	f.requestedLock.Unlock()
 
 	for peer, plan := range plans {
-		for _, hashes := range plan.reqs {
-			hashes, at := f.claimRetry(peer, hashes, sent)
+		for _, planned := range plan.reqs {
+			hashes, at := f.claimRetry(peer, planned, sent)
 			if len(hashes) == 0 {
 				continue
 			}
