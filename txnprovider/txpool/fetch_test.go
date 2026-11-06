@@ -1282,6 +1282,30 @@ func TestFullPendingDoesNotEvictAnotherPendingRequest(t *testing.T) {
 	require.Equal(t, []fetchPeer{{a.sentryClient, peerB}}, r.alternates)
 }
 
+func TestRestampedRetryKeepsTheQueueWithinTheCache(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, peerB := [32]byte{0xb1}, [32]byte{0xb2}, [64]byte{0xa}, [64]byte{0xb}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, h1, h2)
+	a.announceSized(t, peerB, blobTxnSize, h1, h2)
+	*a.now = a.now.Add(2 * time.Second)
+	hashes := make([][32]byte, 0, 1000)
+	for i := range maxFetchRequests - 2 {
+		var h [32]byte
+		binary.BigEndian.PutUint64(h[:], uint64(i)+1)
+		if hashes = append(hashes, h); len(hashes) == cap(hashes) || i == maxFetchRequests-3 {
+			a.announce(t, [64]byte{0xc}, hashes...)
+			hashes = hashes[:0]
+		}
+	}
+	a.onSend = func() { *a.now = a.now.Add(time.Second) } // the second batch is claimed later and restamped
+	*a.now = a.now.Add(txFetchTimeout - 2*time.Second)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	a.announce(t, [64]byte{0xc}, [32]byte{0xfe})
+	require.LessOrEqual(t, len(a.fetch.pending), maxFetchRequests, "a trimmed stale entry frees no cache slot, so the next insert would evict a live request")
+}
+
 func TestRetryRequestsFitTheResponseLimit(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
