@@ -239,11 +239,11 @@ func getMinimumBlocksToDownload(
 		if blockNum == receiptsHistoryPruneTo {
 			minReceiptsStep = stepAtTxNum(baseTxNum, stepSize)
 		}
-		if baseTxNum < stateTxNum && stateTxNum < baseTxNum+txAmount {
-			resumedBlockStep = kv.Step(baseTxNum / stepSize)
-		}
 		if stateTxNum <= baseTxNum { // only consider the block if it
 			return nil
+		}
+		if stateTxNum < baseTxNum+txAmount {
+			resumedBlockStep = stepAtTxNum(baseTxNum, stepSize)
 		}
 		newMinToDownload := uint64(0)
 		if frozenBlocks > blockNum {

@@ -480,7 +480,7 @@ func TestGetMinimumBlocksToDownload_KeepsHistoryOfTheResumedBlock(t *testing.T) 
 		historyPruneTo  uint64
 		wantHistoryStep kv.Step
 	}{
-		{"state ends inside a block that starts a step earlier", 14_850, 200, 300, 148},
+		{"state ends inside a block that starts a step earlier", 14_850, 200, 300, 147},
 		{"state ends between blocks", 14_950, 50, 300, 299},
 		{"cutoff below the resumed block", 14_850, 200, 100, 99},
 		{"cutoff below the frozen bodies", 14_850, 200, 50, 0},
