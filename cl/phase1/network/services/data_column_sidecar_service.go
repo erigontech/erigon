@@ -406,7 +406,6 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
-		// Queued sidecars are not relayed, so a column outside custody is not queued.
 		if !inCustody {
 			return ErrIgnore
 		}
@@ -441,18 +440,18 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
-	if seen, _ := s.seenGloasSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
-		return ErrIgnore
-	}
 	if !inCustody {
+		if seen, _ := s.seenGloasSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
+			return ErrIgnore
+		}
 		msg.BlockRoot = blockRoot
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
 		return nil
 	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
-		s.seenGloasSidecar.Remove(seenKey)
 		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
+	s.seenGloasSidecar.Add(seenKey, struct{}{})
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot.String())

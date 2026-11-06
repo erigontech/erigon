@@ -1303,7 +1303,6 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecarO
 	t.Empty(events)
 }
 
-// A sidecar outside custody is not queued for an unknown block: queued sidecars are not relayed later.
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSidecarOutsideCustodyAndBlockMissing_DoesNotQueue() {
 	t.expectGloasSidecarOutsideCustody(true)
 
@@ -1326,4 +1325,26 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSidecarOutsideC
 
 	t.Equal(ErrIgnore, err)
 	t.Len(events, 1)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveMode_StoresSidecar() {
+	t.activateGloas()
+	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
+	t.mockForkChoice.MockPeerDas = peerDas
+	peerDas.EXPECT().IsArchivedMode().Return(true).AnyTimes()
+	peerDas.EXPECT().IsColumnOverHalf(testSlot, testBlockRoot).Return(false).AnyTimes()
+	peerDas.EXPECT().IsBlobAlreadyRecovered(testBlockRoot).Return(false).AnyTimes()
+	peerDas.EXPECT().TryScheduleRecover(testSlot, testBlockRoot).Return(nil).Times(1)
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(1), gomock.Any()).Return(nil).Times(1)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
+
+	t.NoError(err)
 }
