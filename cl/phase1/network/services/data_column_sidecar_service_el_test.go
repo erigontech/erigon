@@ -100,3 +100,18 @@ func TestPublishColumnsReleasesTheClaimOfAFailedPublish(t *testing.T) {
 	_, ok := service.seenSidecar.Get(seenSidecarKey{slot: 100, proposerIndex: 7, index: 3})
 	require.False(t, ok)
 }
+
+func TestPublishColumnsReleasesTheClaimOfAFailedGloasPublish(t *testing.T) {
+	service, publisher, clock, _ := newELPublishTestService(t)
+	defer func(f func(uint64) uint64) { computeSubnetForDataColumnSidecar = f }(computeSubnetForDataColumnSidecar)
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1, 2, 3, 4}, nil).AnyTimes()
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("topic not found")).Times(1)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar.Slot, sidecar.Index, sidecar.BeaconBlockRoot = 100, 3, common.Hash{0x22}
+
+	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{sidecar})
+
+	_, ok := service.seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: 3})
+	require.False(t, ok)
+}
