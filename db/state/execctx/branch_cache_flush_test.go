@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -87,11 +88,18 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 	stepOneValue := []byte{0, 0, 0, 0, 2}
 	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: stepZeroValue})
 	writeCommitmentRows(t, db, key, stepZeroValue, commitmentWrite{txNum: 20, value: stepOneValue})
-	trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
-	require.NoError(t, err)
-	commitmentState, err := commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
-	require.NoError(t, err)
-	writeCommitmentRows(t, db, commitmentdb.KeyCommitmentState, nil, commitmentWrite{txNum: 20, value: commitmentState})
+	var commitmentState []byte
+	if statecfg.ExperimentalCommitmentV3 {
+		var err error
+		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20, nil)
+		require.NoError(t, err)
+	} else {
+		trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
+		require.NoError(t, err)
+		commitmentState, err = commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
+		require.NoError(t, err)
+	}
+	writeCommitmentRows(t, db, commitmentdb.StateKey(), nil, commitmentWrite{txNum: 20, value: commitmentState})
 	writeAggregationGuard(t, db, 40)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
@@ -130,7 +138,6 @@ func TestGetLatestHonorsStagedUnwindBound(t *testing.T) {
 }
 
 func TestLegalStagedUnwindReadsMergedCommitmentFile(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	db, key, frozenValue := mergedCommitmentFileFixture(t, stepSize)
 	deadForkValue := []byte{0, 0, 0, 0, 3}
