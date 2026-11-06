@@ -227,6 +227,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 		reason := discardReasons[j]
 		// Another request may admit the transaction while this one validates.
 		// Failed simulations bypass admission's duplicate check, so recheck membership.
+		// A confirmed DuplicateHash remains valid even if the transaction has since left the pool.
 		if reason == txpoolcfg.DuplicateHash || (reason != txpoolcfg.Success && s.txPool.HasTxn(slots.Txns[j].IDHash[:])) {
 			reason = txpoolcfg.AlreadyKnown
 		}

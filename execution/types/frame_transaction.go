@@ -275,8 +275,9 @@ func (tx *FrameTransaction) validateSignatures() error {
 			break
 		}
 	}
-	// Copied claims and a fresh digest for transaction-bound signatures prevent
-	// changed verification inputs from reusing an earlier result.
+	// Successful cryptographic checks are cached; Validate still checks structure and gas.
+	// Copied signer, message and signature bytes, plus a fresh digest for signatures over
+	// the transaction, prevent changed inputs from reusing an earlier result.
 	var verified, updated []FrameSignature
 	if cached := tx.verifiedSignatures.Load(); cached != nil && cached.sender == tx.SenderAddress && cached.hash == hash {
 		verified = cached.signatures

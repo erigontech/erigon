@@ -238,9 +238,9 @@ func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64)
 }
 
 // applyFrameValidation requires the pool lock. Stale batches are retried while time
-// remains. After the deadline, current precheck failures keep their reason and frames
-// requiring simulation receive a retryable rejection. Results for the current state
-// generation remain usable after the deadline.
+// remains. After the deadline, stale results are discarded and stateless checks are
+// rerun: failures keep their reason, while frames needing simulation receive a retryable
+// rejection. Results for the current state generation remain usable after the deadline.
 func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch frameValidationBatch, precheckReasons []txpoolcfg.DiscardReason) ([]txpoolcfg.DiscardReason, error) {
 	if len(batch.results) == 0 {
 		return precheckReasons, nil
