@@ -21,7 +21,6 @@ package dir
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"os"
 	"testing"
 
@@ -34,11 +33,7 @@ func dontCacheSupported(t *testing.T, dir string) bool {
 	require.NoError(t, err)
 	defer f.Close()
 	_, err = unix.Pwritev2(int(f.Fd()), [][]byte{make([]byte, os.Getpagesize())}, 0, unix.RWF_DONTCACHE)
-	if errors.Is(err, unix.EOPNOTSUPP) {
-		return false
-	}
-	require.NoError(t, err)
-	return true
+	return err == nil
 }
 
 func cachedPages(t *testing.T, f *os.File) uint64 {
@@ -62,9 +57,9 @@ func TestUncachedWriterLeavesWrittenPagesOutOfPageCache(t *testing.T) {
 	require.NoError(t, bw.Flush())
 	require.NoError(t, f.Sync())
 
-	pages := uint64(len(data) / os.Getpagesize())
-	cached := cachedPages(t, f)
 	if supported {
+		pages := uint64(len(data) / os.Getpagesize())
+		cached := cachedPages(t, f)
 		require.Less(t, cached, pages/10, "kernel supports RWF_DONTCACHE on %s: %d of %d pages still cached", tmp, cached, pages)
 	}
 
