@@ -256,7 +256,7 @@ test-all: test-filtered
 ## test-unwind:                       reorg, snapshot and crash recovery integration tests
 .PHONY: test-unwind
 test-unwind:
-	$(GO) test ./execution/engineapi ./execution/execmodule ./execution/stagedsync -run '(Churn|Reorg|Unwind|Forkchoice|CrashRecovery)' -count=1 -timeout=20m $(GO_FLAGS)
+	$(GO) test ./execution/engineapi ./execution/execmodule ./execution/stagedsync -run '(Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery)' -count=1 -timeout=20m $(GO_FLAGS)
 	$(GO) test ./db/state ./db/rawdb/rawtemporaldb -run '(TestDomain_.*(DeletedKeyNotResurrectedByFiles|Unwind)|TestAggregatorBuildResumesIncompleteStep|TestMinimumUnwindKeepsImmutableTransactions)' -count=1 -timeout=10m $(GO_FLAGS)
 
 KURTOSIS ?= kurtosis

@@ -19,7 +19,6 @@ package engineapi_test
 import (
 	"context"
 	"math/big"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,8 +69,8 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 		status, err := eat.MockCl.InsertNewPayload(ctx, b3Faulty)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
-		t.Log(status.ValidationError.Error().Error())
-		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "invalid block hash"))
+		require.NotNil(t, status.ValidationError)
+		require.Equal(t, &b2Canon.ExecutionPayload.BlockHash, status.LatestValidHash, "the payload must reach execution validation")
 		// build b4 on the canonical chain
 		txn, err = changer.Change(transactOpts)
 		require.NoError(t, err)
