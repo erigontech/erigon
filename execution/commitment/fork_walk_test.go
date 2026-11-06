@@ -604,6 +604,43 @@ func TestForkWalk_AbsentDeletesBesideSingleSurvivor(t *testing.T) {
 	require.Equal(t, seqRoot, parRoot)
 }
 
+// A fork in an empty trie whose only survivor is an account with storage hands the root its
+// navigation path. A trie kept for the next batch, as a running node keeps it, must reach
+// that account's storage through it.
+func TestForkWalk_SingleSurvivorRootNavPathCarriesToNextBatch(t *testing.T) {
+	a := addrHex(findAddressForHexPrefix([]byte{2, 2, 0}, 7))
+	const slot1 = "0000000000000000000000000000000000000000000000000000000000000001"
+	const slot2 = "0000000000000000000000000000000000000000000000000000000000000002"
+	k0, u0 := NewUpdateBuilder().Balance(a, 1).Storage(a, slot1, "01").Storage(a, slot2, "01").
+		Delete(addrHex(findAddressForHexPrefix([]byte{2, 2, 2}, 8))).
+		Delete(addrHex(findAddressForHexPrefix([]byte{2, 2, 3}, 9))).
+		Build()
+	k1, u1 := NewUpdateBuilder().Storage(a, slot1, "02").Build()
+
+	seqMs := NewMockState(t)
+	seq := newSeqTrie(t, seqMs)
+	defer seq.Release()
+	processBatch(t, seqMs, seq, k0, u0)
+	want := processBatch(t, seqMs, seq, k1, u1)
+
+	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
+	par := newParTrie(t, parMs, 1)
+	defer par.Release()
+	par.SetForkGrain(1)
+	var got []byte
+	for _, b := range []engineBatch{{k0, u0}, {k1, u1}} {
+		require.NoError(t, parMs.applyPlainUpdates(b.keys, b.upds))
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		for _, k := range b.keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		got = processRoot(t, par, ut)
+		ut.Close()
+	}
+	require.Equal(t, want, got)
+}
+
 func TestForkWalk_LeafDeleteUnderSplitRowKeepsBranchParity(t *testing.T) {
 	x := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
 	k0, u0 := NewUpdateBuilder().Balance(x, 1).
@@ -707,4 +744,41 @@ func TestForkWalk_UpdatedAccountDropsItsDeletedSlotsTouchBit(t *testing.T) {
 		Storage(a, slotLocsForHexPrefix([]byte{0xc}, 1, 3)[0], "03").
 		Build()
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
+}
+
+// A fork inside the storage of an account with no stored storage opens its row directly
+// under the account row. When that row folds into the account cell, through its one
+// surviving branch or as a branch itself, the next key of the account must not read a
+// storage root branch that was never written.
+func TestForkWalk_StorageRowFoldsIntoAccountWithoutStorage(t *testing.T) {
+	a := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
+	k0, u0 := NewUpdateBuilder().
+		Balance(addrHex(findAddressForHexPrefix([]byte{0, 0}, 2)), 2).
+		Balance(addrHex(findAddressForHexPrefix([]byte{0, 1}, 3)), 3).
+		Balance(a, 1).
+		Build()
+	for _, tc := range []struct {
+		name         string
+		writeSibling bool
+	}{
+		{"one_branch_survives", false},
+		{"row_folds_as_branch", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ub := NewUpdateBuilder()
+			for i, loc := range slotLocsForHexPrefix([]byte{0xa, 0}, 3, 1) {
+				ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 1}))
+			}
+			for i, loc := range slotLocsForHexPrefix([]byte{0xa, 1}, 3, 1) {
+				if tc.writeSibling {
+					ub.Storage(a, loc, hex.EncodeToString([]byte{byte(i) + 0x11}))
+				} else {
+					ub.DeleteStorage(a, loc)
+				}
+			}
+			ub.Storage(a, slotLocsForHexPrefix([]byte{0xb}, 1, 1)[0], "0b")
+			k1, u1 := ub.Build()
+			requireForkParityAcrossGrains(t, k0, u0, k1, u1)
+		})
+	}
 }
