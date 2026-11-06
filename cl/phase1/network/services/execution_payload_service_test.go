@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -1651,10 +1652,11 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 
 	// Use a stopped queue so pending jobs are processed explicitly.
 	impl := &executionPayloadService{
-		ctx:             t.Context(),
-		forkchoiceStore: forkchoiceMock,
-		beaconCfg:       cfg,
-		emitters:        beaconevents.NewEventEmitter(),
+		ctx:                   t.Context(),
+		forkchoiceStore:       forkchoiceMock,
+		beaconCfg:             cfg,
+		emitters:              beaconevents.NewEventEmitter(),
+		backgroundImportBytes: semaphore.NewWeighted(int64(maxBackgroundImportBytes)),
 	}
 	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 	impl.pending.stopAndWait()
@@ -1700,10 +1702,11 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	ctx := t.Context()
 
 	impl := &executionPayloadService{
-		ctx:             t.Context(),
-		forkchoiceStore: forkchoiceMock,
-		beaconCfg:       cfg,
-		emitters:        beaconevents.NewEventEmitter(),
+		ctx:                   t.Context(),
+		forkchoiceStore:       forkchoiceMock,
+		beaconCfg:             cfg,
+		emitters:              beaconevents.NewEventEmitter(),
+		backgroundImportBytes: semaphore.NewWeighted(int64(maxBackgroundImportBytes)),
 	}
 	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 	impl.pending.stopAndWait()

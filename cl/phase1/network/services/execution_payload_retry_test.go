@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -44,7 +45,7 @@ func newPendingEnvelopeTestService(t *testing.T) (*executionPayloadService, *moc
 	cache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	fcu := mock_services.NewForkChoiceStorageMock(t)
-	service := &executionPayloadService{ctx: t.Context(), forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig, emitters: beaconevents.NewEventEmitter(), seenEnvelopesCache: cache}
+	service := &executionPayloadService{ctx: t.Context(), forkchoiceStore: fcu, beaconCfg: &clparams.MainnetBeaconConfig, emitters: beaconevents.NewEventEmitter(), seenEnvelopesCache: cache, backgroundImportBytes: semaphore.NewWeighted(int64(maxBackgroundImportBytes))}
 	service.pending = service.newPendingQueue(t.Context())
 	service.pending.stopAndWait()
 	return service, fcu

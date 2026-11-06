@@ -341,13 +341,10 @@ func (s *executionPayloadService) processMessage(
 			return fmt.Errorf("%w: background import byte capacity reached", ErrIgnore)
 		}
 	}
-	finishPendingEnvelope := s.forkchoiceStore.BeginPendingPayloadEnvelope(beaconBlockRoot)
-	if preclaimedAdmission == nil {
-		finishHold := finishPendingEnvelope
-		finishPendingEnvelope = func() {
-			s.backgroundImportBytes.Release(importBytes)
-			finishHold()
-		}
+	finishHold := s.forkchoiceStore.BeginPendingPayloadEnvelope(beaconBlockRoot)
+	finishPendingEnvelope := func() {
+		s.backgroundImportBytes.Release(importBytes)
+		finishHold()
 	}
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 	handedOff := false
