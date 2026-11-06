@@ -146,7 +146,11 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 
 	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
 	for {
-		msgs, batch, err := readBatch(codec, s.logger)
+		msgs, batch, err := readBatch(codec, s.batchLimit, s.logger)
+		if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
+			h.handleBatchTooLarge(tooLarge)
+			continue
+		}
 		if err != nil {
 			h.close(err, nil)
 			return
@@ -179,7 +183,11 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
 
-	reqs, batch, err := codec.ReadBatch()
+	reqs, batch, err := codec.ReadBatch(s.batchLimit)
+	if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
+		h.handleBatchTooLarge(tooLarge)
+		return nil
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, io.EOF):

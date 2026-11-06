@@ -339,12 +339,12 @@ func (c *jsonCodec) peerInfo() PeerInfo {
 	return PeerInfo{Transport: "ipc", RemoteAddr: c.remote}
 }
 
-func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err error) {
+func (c *jsonCodec) ReadBatch(batchLimit int) (messages []*jsonrpcMessage, batch bool, err error) {
 	rawmsg, err := c.readMessage()
 	if err != nil {
 		return nil, false, err
 	}
-	messages, batch, err = parseMessage(rawmsg)
+	messages, batch, err = parseMessage(rawmsg, batchLimit)
 	if err != nil {
 		c.releaseFrame()
 		return nil, false, err
@@ -452,7 +452,7 @@ func (c *jsonCodec) closed() <-chan any {
 // checks in this function because the raw message has already been syntax-checked when it
 // is called. Any non-JSON-RPC messages in the input return the zero value of
 // jsonrpcMessage.
-func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
+func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool, error) {
 	if !isBatch(raw) {
 		// ReadBatch turns a nil message into a zero one, which is how null is rejected.
 		if isJSONNull(raw) {
@@ -461,6 +461,16 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		msg := new(jsonrpcMessage)
 		fillMessage(raw, msg)
 		return []*jsonrpcMessage{msg}, false, nil
+	}
+	if batchLimit > 0 {
+		size := 0
+		forEachJSONElement(raw, func([]byte) bool {
+			size++
+			return true
+		})
+		if size > batchLimit {
+			return nil, true, &batchTooLargeError{size: size, id: firstCallID(raw)}
+		}
 	}
 	var msgs []*jsonrpcMessage
 	forEachJSONElement(raw, func(elem []byte) bool {
@@ -474,6 +484,51 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		return true
 	})
 	return msgs, true, nil
+}
+
+// batchTooLargeError rejects a batch with more elements than the server's limit.
+type batchTooLargeError struct {
+	size int
+	id   json.RawMessage // of the first call, nil when the batch has none
+}
+
+func (e *batchTooLargeError) Error() string {
+	return fmt.Sprintf("batch of %d requests is too large", e.size)
+}
+
+// firstCallID returns a copy of the id of the first call in the batch raw, nil when there is
+// none. It reads only the id and method fields, so it allocates nothing per element.
+func firstCallID(raw []byte) json.RawMessage {
+	var id json.RawMessage
+	var msg jsonrpcMessage // one for all elements: fillMessage makes it escape
+	forEachJSONElement(raw, func(elem []byte) bool {
+		msg = jsonrpcMessage{}
+		var method []byte
+		escaped := false
+		forEachJSONField(elem, func(key, value []byte) {
+			switch {
+			case bytes.IndexByte(key, '\\') >= 0:
+				escaped = true
+			case string(key) == "id":
+				msg.ID = value
+			case string(key) == "method":
+				method = value
+			}
+		})
+		var isCall bool
+		if escaped {
+			fillMessage(elem, &msg)
+			isCall = msg.isCall()
+		} else {
+			// A non-empty JSON string decodes to a non-empty method name.
+			isCall = msg.hasValidID() && len(method) > 2 && method[0] == '"'
+		}
+		if isCall {
+			id = bytes.Clone(msg.ID)
+		}
+		return !isCall
+	})
+	return id
 }
 
 // fillMessage picks a message apart into msg. Input that does not hold an object
