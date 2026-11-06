@@ -186,9 +186,8 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := evm.ChainRules()
 
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
-	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	// A message taking its gas from the block gets what the transactions before it left.
+	gp := protocol.NewGasPool(header.GasLimit, chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	for idx, txn := range replayTransactions {
 		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -230,7 +229,8 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
-	// Execute the transaction message
+	// The replacement constructor runs unmetered.
+	gp.Reset(math.MaxUint64, math.MaxUint64)
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
 		return nil, ct.err

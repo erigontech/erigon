@@ -420,3 +420,89 @@ func TestExecutionWitnessGasFromBlock(t *testing.T) {
 	_, err = stateless.Verify(m.ChainConfig, m.Engine, built.Block, w)
 	require.NoError(t, err)
 }
+
+// TestOverlayCallConstructorGasFromBlock checks that overlay_callConstructor
+// replays a type-0x76 transaction before the creation with the gas its block
+// left, below its limit, and the replaced constructor with the gas cap, above
+// what the block left: EEZL2 stores one of two values by the gas it gets, and
+// the constructor deploys what EEZL2 returns of it.
+func TestOverlayCallConstructorGasFromBlock(t *testing.T) {
+	eezl2 := protocol.RollupXEEZL2Address
+	burner := common.HexToAddress("0x00000000000000000000000000000000000b0123")
+	threshold := uint64(16_000_000)
+	// Without input, stores in slot 0 2 when GAS exceeds threshold, else 1;
+	// with input, returns slot 0.
+	code := []byte{
+		byte(vm.CALLDATASIZE), byte(vm.PUSH1), 0, byte(vm.JUMPI),
+		byte(vm.GAS), byte(vm.PUSH3), byte(threshold >> 16), byte(threshold >> 8), byte(threshold), byte(vm.LT), byte(vm.PUSH1), 0, byte(vm.JUMPI),
+		byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
+	}
+	code[11] = byte(len(code))
+	code = append(code, byte(vm.JUMPDEST), byte(vm.PUSH1), 2, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP))
+	code[2] = byte(len(code))
+	code = append(code, byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 0, byte(vm.MSTORE),
+		byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+	// Calls EEZL2 with one byte of input and deploys the word it returns.
+	initCode := []byte{byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH20)}
+	initCode = append(append(initCode, eezl2[:]...), byte(vm.GAS), byte(vm.CALL), byte(vm.POP),
+		byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+
+	spec := networks.Chiado699069
+	genesis := *spec.Genesis
+	genesis.Alloc = maps.Clone(genesis.Alloc)
+	genesis.Alloc[derivertest.UserAddress()] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)}
+	genesis.Alloc[eezl2] = types.GenesisAccount{Code: code}
+	// JUMPDEST PUSH1 0 JUMP: burns all the gas it gets.
+	genesis.Alloc[burner] = types.GenesisAccount{Code: []byte{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}}
+	spec.Genesis = &genesis
+	l2 := genesis.Config.L2.(*config.L2Config)
+	require.Equal(t, config.RollupX, l2.RuleSet())
+	m, execChain := derivertest.NewL2Of(t, spec)
+
+	parent, err := execChain.HeaderByNumber(t.Context(), 0)
+	require.NoError(t, err)
+	nonce, err := execChain.Nonce(t.Context(), 0, protocol.SystemAddress)
+	require.NoError(t, err)
+	sys, err := systemtx.New(protocol.SystemTx{ChainID: genesis.Config.ChainID.Uint64(), Nonce: nonce, To: eezl2})
+	require.NoError(t, err)
+	left := sys.GetGasLimit() - 1_000_000
+	require.Less(t, left, threshold)
+	require.Greater(t, sys.GetGasLimit()-params.TxGas, threshold)
+	signer := types.LatestSignerForChainID(genesis.Config.ChainID)
+	user, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{GasLimit: l2.BlockGasLimit - left, To: &burner},
+		ChainID:  *genesis.Config.ChainID,
+		FeeCap:   *uint256.NewInt(100 * common.GWei),
+	}, *signer, derivertest.UserKey)
+	require.NoError(t, err)
+	creation, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, Data: initCode},
+		ChainID:  *genesis.Config.ChainID,
+		FeeCap:   *uint256.NewInt(100 * common.GWei),
+	}, *signer, derivertest.UserKey)
+	require.NoError(t, err)
+	built, err := execChain.Extend(t.Context(), parent, deriver.HeaderInputs{
+		Number:     1,
+		ParentHash: parent.Hash(),
+		Time:       parent.Time + l2.BlockInterval,
+		Extra:      []byte{},
+		GasLimit:   l2.BlockGasLimit,
+	}, []types.Transaction{user, sys, creation}, common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, l2.BlockGasLimit-left, built.Receipts[0].GasUsed)
+	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[1].Status)
+	require.Equal(t, types.ReceiptStatusSuccessful, built.Receipts[2].Status)
+	want := common.BigToHash(big.NewInt(1))
+	stored, err := execChain.Storage(t.Context(), 1, eezl2, common.Hash{})
+	require.NoError(t, err)
+	require.Equal(t, want, stored, "block execution stores 1")
+
+	base := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	require.Greater(t, left, l2.BlockGasLimit-built.Receipts[1].CumulativeGasUsed)
+	api := jsonrpc.NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: left}, jsonrpc.NewOtterscanAPI(base, m.DB, 25))
+	got, err := api.CallConstructor(t.Context(), types.CreateAddress(derivertest.UserAddress(), 1), initCode)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.NotNil(t, got.Code)
+	require.Equal(t, hexutil.Bytes(want[:]), *got.Code)
+}
