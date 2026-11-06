@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
@@ -129,6 +130,7 @@ func TestGetLatestHonorsStagedUnwindBound(t *testing.T) {
 }
 
 func TestLegalStagedUnwindReadsMergedCommitmentFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	db, key, frozenValue := mergedCommitmentFileFixture(t, stepSize)
 	deadForkValue := []byte{0, 0, 0, 0, 3}
@@ -177,6 +179,7 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 }
 
 func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
 	roTx, err := db.BeginTemporalRo(t.Context())

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -937,7 +938,7 @@ func TestValidationUnwindPreservesCanonicalBranches(t *testing.T) {
 }
 
 func TestValidationUnwindAdoptionInvalidatesSharedCache(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -1021,7 +1022,7 @@ func TestValidationUnwindDoesNotRevokeCanonicalFills(t *testing.T) {
 }
 
 func TestValidationCachePublicationRequiresCommit(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, fail := range []bool{false, true} {
 		name := "commit"
 		if fail {
@@ -1195,7 +1196,7 @@ func TestCanonicalUnwindStillFillsSharedStateCache(t *testing.T) {
 }
 
 func TestValidationCommitAppliesDeferredBranchUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

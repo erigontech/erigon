@@ -514,10 +514,11 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
-	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	_, postBlock, _, err := commitmentdb.DecodeState(stateVal)
+	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
 		postBlock, unwindTarget)
@@ -670,10 +671,11 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	// unwind step — but the value carried by the retained entry is the
 	// pre-step-1-write value (block 9's state), not the unwindTarget's
 	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
-	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	_, postBlock, _, err := commitmentdb.DecodeState(stateVal)
+	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after Merge+Flush; "+
 			"raw changeset merge lost the step-0 restoration value",
@@ -780,11 +782,11 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16)
-	commitTxNum := binary.BigEndian.Uint64(stateVal[:8])
-	commitBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	commitTxNum, commitBlock, _, err := commitmentdb.DecodeState(stateVal)
+	require.NoError(err)
 	require.Equal(lastBlock, commitBlock, "pre-unwind: commitment state should be at last block")
 	require.Equal(lastBlock, commitTxNum, "pre-unwind: commitment state txNum")
 
@@ -805,11 +807,11 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
 
 	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
-	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
-	postTxNum := binary.BigEndian.Uint64(stateVal[:8])
-	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	postTxNum, postBlock, _, err := commitmentdb.DecodeState(stateVal)
+	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
 		postBlock, unwindTarget, postTxNum)
@@ -1863,12 +1865,7 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
 	for _, v3 := range []bool{false, true} {
 		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
-			previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-			t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
-			if v3 {
-				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-				statecfg.ExperimentalCommitmentV3 = true
-			}
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
 			statecfg.EnableHistoricalCommitment()
 
 			ctx := t.Context()
@@ -1981,20 +1978,16 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	state1, _, err := rwTx2.GetLatest(
 		kv.CommitmentDomain,
-		commitmentdb.KeyCommitmentState,
+		commitmentdb.StateKey(),
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(state1), 16)
 
-	storedTx1, storedBlock1 := commitmentdb.DecodeTxBlockNums(state1)
+	storedTx1, storedBlock1, trieState1 := decodeStoredState(t, state1)
 
 	require.Equal(t, block1, storedBlock1)
 	require.Equal(t, txNum1, storedTx1)
-
-	// GetLatest may return transaction-backed memory. Preserve the serialized
-	// trie payload before committing and reopening the database transaction.
-	trieState1 := bytes.Clone(state1[16:])
 
 	domains2, err := execctx.NewSharedDomains(
 		ctx,
@@ -2028,17 +2021,27 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	state2, _, err := rwTx3.GetLatest(
 		kv.CommitmentDomain,
-		commitmentdb.KeyCommitmentState,
+		commitmentdb.StateKey(),
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(state2), 16)
 
-	storedTx2, storedBlock2 := commitmentdb.DecodeTxBlockNums(state2)
+	storedTx2, storedBlock2, trieState2 := decodeStoredState(t, state2)
 
 	require.Equal(t, block2, storedBlock2)
 	require.Equal(t, txNum2, storedTx2)
-	require.Equal(t, trieState1, state2[16:])
+	require.Equal(t, trieState1, trieState2)
+}
+
+func decodeStoredState(t *testing.T, state []byte) (txNum, blockNum uint64, payload []byte) {
+	t.Helper()
+	txNum, blockNum, root, err := commitmentdb.DecodeState(state)
+	require.NoError(t, err)
+	if statecfg.ExperimentalCommitmentV3 {
+		return txNum, blockNum, root
+	}
+	return txNum, blockNum, bytes.Clone(state[16:])
 }
 
 func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
