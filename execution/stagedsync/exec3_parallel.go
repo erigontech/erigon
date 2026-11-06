@@ -1128,6 +1128,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if wall > 0 && pe.workerCount > 0 {
 						occ = float64(busy) / (float64(pe.workerCount) * float64(wall))
 					}
+					ah, am, sh, sm := pe.rs.Domains().CacheHitsMisses()
+					pe.logger.Info("[np-phase] cache", "blk", blockResult.BlockNum, "npCacheAccHit", ah, "npCacheAccMiss", am, "npCacheStHit", sh, "npCacheStMiss", sm)
 					pe.logger.Info("[np-phase] execloop", "blk", blockResult.BlockNum,
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),

@@ -2098,3 +2098,8 @@ func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain,
 	}
 	return sd.getLatest(domain, tx, k, wm, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
 }
+
+// CacheHitsMisses returns the state cache's account and storage hits and misses since the last call (probe).
+func (sd *SharedDomains) CacheHitsMisses() (accHits, accMisses, stHits, stMisses uint64) {
+	return sd.stateCache.HitsMisses()
+}

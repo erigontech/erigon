@@ -599,3 +599,17 @@ func (c *StateCache) PrintStatsAndReset() {
 		code.PrintStatsAndReset()
 	}
 }
+
+// HitsMisses returns the account and storage hit and miss counters since the last call and resets them (probe).
+func (c *StateCache) HitsMisses() (accHits, accMisses, stHits, stMisses uint64) {
+	if c == nil {
+		return
+	}
+	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
+		accHits, accMisses = acc.hits.Swap(0), acc.misses.Swap(0)
+	}
+	if st, ok := c.caches[kv.StorageDomain].(*DomainCache); ok {
+		stHits, stMisses = st.hits.Swap(0), st.misses.Swap(0)
+	}
+	return
+}

@@ -491,6 +491,9 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
 			}
 		}
+		if warmupStateOff {
+			return nil
+		}
 		return bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
 	})
 	return group.Wait()
@@ -793,3 +796,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 
 	return nil
 }
+
+// warmupStateOff is a probe: BAL_WARMUP_STATE_OFF skips the per-key BAL warmup; only the batch prefetch runs.
+var warmupStateOff = dbg.EnvBool("BAL_WARMUP_STATE_OFF", false)
