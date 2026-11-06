@@ -244,15 +244,12 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
+		// Once the hash matches, invalid BAL contents are a block fault.
 		bal, err := types.DecodeBlockAccessListSidecarForHeader(entry, reqs[i].GasLimit)
 		if err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
 			continue
 		}
 		if err = bal.ValidateForHeader(reqs[i].GasLimit); err != nil {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d returned invalid BAL: %w", ErrBadBALResponse, i, err)
 			continue
 		}
 		out[reqs[i].Hash] = bal

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
@@ -49,8 +50,8 @@ func TestValidateBALResponseBoundsStorageReadAllocations(t *testing.T) {
 	runtime.ReadMemStats(&before)
 	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
-	require.ErrorContains(t, err, "block access list too large")
-	require.True(t, bad)
+	require.NoError(t, err)
+	require.False(t, bad)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -69,8 +70,8 @@ func TestValidateBALResponseBoundsEmptySlotAllocations(t *testing.T) {
 	runtime.ReadMemStats(&before)
 	out, bad, err := validateBALResponse(reqs, []rlp.RawValue{raw})
 	runtime.ReadMemStats(&after)
-	require.ErrorContains(t, err, "empty slot changes")
-	require.True(t, bad)
+	require.NoError(t, err)
+	require.False(t, bad)
 	require.Empty(t, out)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
@@ -118,20 +119,20 @@ func TestValidateBALResponse(t *testing.T) {
 		require.Equal(t, bal, gotRaw)
 	})
 
-	t.Run("BAL exceeding the block gas bound penalises the peer", func(t *testing.T) {
+	t.Run("hash-matching BAL exceeding the block gas bound is discarded without a penalty", func(t *testing.T) {
 		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: types.BalItemCost - 1, ExpectedHash: balHash}}
 		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
-		require.ErrorContains(t, err, "block access list too large")
-		require.True(t, bad)
+		require.NoError(t, err)
+		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
-	t.Run("hash-matching malformed BAL penalises the peer", func(t *testing.T) {
+	t.Run("hash-matching malformed BAL is discarded without a penalty", func(t *testing.T) {
 		malformed := []byte{0xc2, 0x01, 0x02}
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: crypto.Keccak256Hash(malformed)}}
+		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: crypto.Keccak256Hash(malformed)}}
 		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{malformed})
-		require.Error(t, err)
-		require.True(t, bad)
+		require.NoError(t, err)
+		require.False(t, bad)
 		require.NotContains(t, out, h0)
 	})
 
@@ -141,6 +142,31 @@ func TestValidateBALResponse(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, bad)
 		require.NotContains(t, out, h0)
+	})
+
+	t.Run("hash-matching invalid BAL is discarded while valid entries are kept", func(t *testing.T) {
+		invalid, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+			Address: common.Address{1},
+			StorageChanges: []types.SlotChanges{{
+				Slot:    accounts.InternKey(common.Hash{1}),
+				Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
+			}},
+			StorageReads: []common.Hash{{1}},
+		}})
+		require.NoError(t, err)
+		gasLimit := uint64(3 * types.BalItemCost)
+		decoded, err := types.DecodeBlockAccessListSidecarForHeader(invalid, gasLimit)
+		require.NoError(t, err)
+		require.ErrorContains(t, decoded.ValidateForHeader(gasLimit), "in both changes and reads")
+		reqs := []BALRequest{
+			{Hash: h0, Number: 1, GasLimit: gasLimit, ExpectedHash: crypto.Keccak256Hash(invalid)},
+			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
+		}
+		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{invalid, bal})
+		require.NoError(t, err)
+		require.False(t, bad)
+		require.NotContains(t, out, h0)
+		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
 
 	t.Run("empty entry is a miss", func(t *testing.T) {
