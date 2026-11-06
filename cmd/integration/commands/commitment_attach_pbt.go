@@ -215,9 +215,6 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return fmt.Errorf("commitment attach-pbt: read pbt-manifest.toml: %w", manifestErr)
 	}
 	if manifestAvailable {
-		if manifest.SkipVerify {
-			return errors.New("commitment attach-pbt: output was built with --skip-verify and must be converted without it")
-		}
 		sources, sourceErr := pbtAttachManifestSources(publishedDirs)
 		if sourceErr != nil {
 			return fmt.Errorf("commitment attach-pbt: manifest files: %w", sourceErr)

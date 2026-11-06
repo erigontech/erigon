@@ -369,18 +369,23 @@ func TestAttachPBTSkipVerifyAdoptsWithoutLeafPass(t *testing.T) {
 	require.Equal(t, wantRoot[:], root)
 }
 
-func TestAttachPBTRejectsSkipVerifyManifest(t *testing.T) {
-	commitmentflags.Restore(t)
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	statecfg.BinCommitmentHash = ""
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-	source, _ := newPBTConversionSource(t)
-	published := filepath.Join(t.TempDir(), "published")
-	require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, published, true, "", log.New(), pbtConvertHooks{skipVerify: true}))
-	setExecutionProgress(t, source.Chaindata, 1)
-	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: true})
-	require.ErrorContains(t, err, "built with --skip-verify")
+func TestAttachPBTAcceptsSkipVerifyManifest(t *testing.T) {
+	for _, skipVerify := range []bool{false, true} {
+		t.Run(fmt.Sprintf("skip-verify=%t", skipVerify), func(t *testing.T) {
+			commitmentflags.Restore(t)
+			statecfg.ExperimentalCommitmentV3 = true
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			statecfg.BinCommitmentHash = ""
+			require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+			source, wantRoot := newPBTConversionSource(t)
+			published := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBTWithOptions(t.Context(), source.DataDir, published, true, "", log.New(), pbtConvertHooks{skipVerify: true}))
+			setExecutionProgress(t, source.Chaindata, 1)
+			require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, skipVerify: skipVerify}))
+			root, _ := reopenBinSource(t, source.DataDir, source.Chaindata)
+			require.Equal(t, wantRoot[:], root)
+		})
+	}
 }
 
 func TestAttachPBTAcceptsEmptyConversion(t *testing.T) {
