@@ -150,7 +150,7 @@ func (f balFetcherFunc) Fetch(ctx context.Context, reqs []BALRequest, _ *PeerId,
 	return f(ctx, reqs)
 }
 
-func TestBackwardBlockDownloaderDiscardsBALWithInvalidBlockAccessIndex(t *testing.T) {
+func TestBackwardBlockDownloader_DiscardsBALWithInvalidBlockAccessIndex(t *testing.T) {
 	bal := types.NewBlockAccessListSidecar(types.BlockAccessList{{
 		Address:      common.Address{1},
 		NonceChanges: []*types.NonceChange{{Index: 2, Value: 1}},
