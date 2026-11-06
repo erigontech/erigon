@@ -434,8 +434,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	// The transaction bound uses at most the gas limit the parent allows. The header checks assume a
-	// valid parent, so they run here only against a validated one. An L2 rules engine has its own
-	// header rules.
+	// valid parent, so they run here only against a validated one. A header error only skips the
+	// sender recovery and is left to the block validation, which also removes the block if it is
+	// stored. An L2 rules engine has its own header rules.
 	gasLimit := header.GasLimit
 	var headerErr error
 	parent := e.chainRW.GetHeaderByHash(ctx, req.ParentHash)
@@ -566,21 +567,6 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	// Answered after the block hash check and the other payload checks, so that their answers come
-	// first and only a verified block hash is reported as bad. A block that is stored, or may be,
-	// takes the normal path, where a block validation that rejects it also removes it.
-	if headerErr != nil && !e.parentBeforeTTD(ctx, req) && !e.mayBeStored(ctx, blockHash, header.Number.Uint64()) {
-		e.logger.Warn("[NewPayload] header verification failed", "number", header.Number.Uint64(), "hash", blockHash, "err", headerErr)
-		err := fmt.Errorf("%w: %w", rules.ErrInvalidBlock, headerErr)
-		e.blockDownloader.ReportBadHeader(blockHash, req.ParentHash, err.Error())
-		parentHash := req.ParentHash
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedError(err),
-			LatestValidHash: &parentHash,
-		}, nil
-	}
-
 	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
@@ -619,25 +605,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
-// storedHeader looks up a stored header, and reports whether the answer is known. It is not when
-// the lookup fails or the execution module is busy: a forkchoice update can hide the blocks that it
-// commits.
-func (e *EngineServer) storedHeader(ctx context.Context, hash common.Hash, number uint64) (header *types.Header, known bool) {
-	header, idle, err := e.executionService.GetHeaderIfIdle(ctx, &hash, &number)
-	return header, idle && err == nil
-}
-
-func (e *EngineServer) mayBeStored(ctx context.Context, hash common.Hash, number uint64) bool {
-	stored, known := e.storedHeader(ctx, hash, number)
-	return !known || stored != nil
-}
-
 // mayBeStoredWithInvalidGasLimit reports whether the payload's hash names, or may name, a stored
 // block on the payload's parent with a gas limit that is invalid for that parent. Only the stored
-// header decides, as the payload's block hash is not verified yet.
+// header decides, as the payload's block hash is not verified yet. A failed lookup, or one while the
+// execution module is busy, may miss a stored block.
 func (e *EngineServer) mayBeStoredWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) bool {
-	stored, known := e.storedHeader(ctx, req.BlockHash, req.BlockNumber.Uint64())
-	return !known || (stored != nil && stored.ParentHash == req.ParentHash && misc.VerifyParentGasLimit(e.config, parent, stored) != nil)
+	number := req.BlockNumber.Uint64()
+	stored, idle, err := e.executionService.GetHeaderIfIdle(ctx, &req.BlockHash, &number)
+	if !idle || err != nil {
+		return true
+	}
+	return stored != nil && stored.ParentHash == req.ParentHash && misc.VerifyParentGasLimit(e.config, parent, stored) != nil
 }
 
 func gasLimitReached(txCount int, minTxBlockGas uint64) *engine_types.PayloadStatus {
@@ -673,7 +651,7 @@ func (e *EngineServer) beforeTTD(td *uint256.Int) bool {
 }
 
 // parentBeforeTTD reports whether the payload's parent precedes the terminal total difficulty, as
-// the quick status decides it. The early answers leave such a payload to the quick status.
+// the quick status decides it. The capped bound leaves such a payload to the quick status.
 func (e *EngineServer) parentBeforeTTD(ctx context.Context, req *engine_types.ExecutionPayload) bool {
 	return e.beforeTTD(e.chainRW.GetTd(ctx, req.ParentHash, uint64(req.BlockNumber)-1))
 }

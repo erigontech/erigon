@@ -234,9 +234,7 @@ type ExecutionModule interface {
 	// --- Module state -----------------------------------------------------
 
 	// Ready reports whether the execution module has finished its startup
-	// sequence and is ready to serve requests. It is false while another
-	// operation holds the module, for example a forkchoice update until its
-	// commit and prune end, a block insertion or a validation.
+	// sequence and is ready to serve requests.
 	Ready(ctx context.Context) (bool, error)
 
 	// FrozenBlocks returns the number of blocks stored in read-only snapshots
