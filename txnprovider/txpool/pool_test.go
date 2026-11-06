@@ -199,6 +199,24 @@ func TestIdHashKnownDiscardReasons(t *testing.T) {
 	}
 }
 
+func TestHeldOrQueuedIdHashesSeparatesHeldQueuedAndRejected(t *testing.T) {
+	ctx, pool, poolDB, _, _ := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	held, queued, rejected, unknown := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	pool.byHash[string(held[:])] = &metaTxn{TxnSlot: &TxnSlot{IDHash: held}}
+	pool.unprocessedRemoteByHash[string(queued[:])] = &TxnSlot{IDHash: queued}
+	pool.discardReasonsLRU.Add(string(rejected[:]), txpoolcfg.UnmatchedBlobTxExt)
+	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error { // its pool row is not removed yet
+		return tx.Put(kv.PoolTransaction, rejected[:], []byte{1})
+	}))
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		gotHeld, gotQueued, err := pool.HeldOrQueuedIdHashes(tx, slices.Concat(held[:], queued[:], rejected[:], unknown[:]))
+		require.NoError(t, err)
+		require.Equal(t, Hashes(held[:]), gotHeld)
+		require.Equal(t, Hashes(queued[:]), gotQueued, "a rejected or unknown txn is neither held nor queued")
+		return nil
+	}))
+}
+
 func TestRejectedTransactionsCleanSenderActivity(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	pool.cfg.MaxNonceGap = 64
