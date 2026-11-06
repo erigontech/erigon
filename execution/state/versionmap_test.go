@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -2329,4 +2330,10 @@ func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
 		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash},
 	})
 	require.NotPanics(t, func() { vm.MarkWritesComplete(zeroRoot) })
+}
+
+// TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
+// registers only up to that size, and every version-map read returns one.
+func TestReadResultFitsInRegisters(t *testing.T) {
+	require.LessOrEqual(t, reflect.TypeOf(ReadResult{}).NumField(), 4)
 }
