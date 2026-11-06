@@ -256,6 +256,10 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 	beaconCfg.FuluForkEpoch = 0
 	beaconCfg.InitializeForkSchedule()
 	require.NoError(t, anchorState.SetSlot(63))
+	anchorBid := anchorState.GetLatestExecutionPayloadBid().Copy()
+	anchorBid.ParentBlockHash = parentBid.ParentBlockHash
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	anchorState.SetLatestBlockHash(parentBid.ParentBlockHash)
 	anchorRoot, err := anchorState.BlockRoot()
 	require.NoError(t, err)
 

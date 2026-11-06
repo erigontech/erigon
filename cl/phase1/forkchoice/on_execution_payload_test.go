@@ -4254,7 +4254,7 @@ func TestValidatePayloadBlobHashes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(tc.transactions)
-			err := validatePayloadBlobHashes(payload, tc.expected)
+			err := ValidatePayloadBlobHashes(payload, tc.expected)
 			if tc.mismatch {
 				require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
 			} else {
@@ -4269,7 +4269,7 @@ func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
 		t.Run(fmt.Sprintf("%x", raw), func(t *testing.T) {
 			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{raw})
-			err := validatePayloadBlobHashes(payload, []common.Hash{})
+			err := ValidatePayloadBlobHashes(payload, []common.Hash{})
 			require.Error(t, err)
 			require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
 		})

@@ -628,7 +628,7 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		// Detect blob mismatches locally because remote Engine API responses lose Go error identity.
 		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
-			blobErr := validatePayloadBlobHashes(payload, versionedHashes)
+			blobErr := ValidatePayloadBlobHashes(payload, versionedHashes)
 			if errors.Is(blobErr, misc.ErrMismatchBlobHashes) {
 				// Callers may reject the beacon root only after the payload matches its claimed block hash.
 				requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
@@ -644,7 +644,8 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 	})
 }
 
-func validatePayloadBlobHashes(payload *cltypes.Eth1Block, versionedHashes []common.Hash) error {
+// A mismatch is terminal only after the payload's block hash has been authenticated.
+func ValidatePayloadBlobHashes(payload *cltypes.Eth1Block, versionedHashes []common.Hash) error {
 	actualHashes := make([]common.Hash, 0, len(versionedHashes))
 	for _, raw := range payload.Transactions.UnderlyngReference() {
 		// The EL validates non-blob transactions; only their type matters here.
@@ -1018,7 +1019,7 @@ func (f *ForkChoiceStore) envelopeValidationSemaphore() chan struct{} {
 }
 
 func (f *ForkChoiceStore) queuePendingEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode, receivedAt time.Time) {
-	if missingMode != queueMissingEnvelope || f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+	if missingMode != queueMissingEnvelope || f.IsEnvelopeRejected(signedEnvelope.Message.BeaconBlockRoot) || f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
 		return
 	}
 	f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
@@ -1157,7 +1158,7 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	if err != nil {
 		return err
 	}
-	err = validatePayloadBlobHashes(signedEnvelope.Message.Payload, versionedHashes)
+	err = ValidatePayloadBlobHashes(signedEnvelope.Message.Payload, versionedHashes)
 	if errors.Is(err, misc.ErrMismatchBlobHashes) {
 		f.RejectEnvelope(signedEnvelope.Message.BeaconBlockRoot)
 	}

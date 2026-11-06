@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -328,6 +329,41 @@ func newHeadSnapshotTestStore() (*ForkChoiceStore, *headSnapshotForkGraph) {
 	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
 	store.timeMs.Store(12 * cfg.SecondsPerSlot * 1000)
 	return store, graph
+}
+
+func TestGloasWeightTreeUsesAnchorBid(t *testing.T) {
+	for _, status := range []cltypes.PayloadStatus{cltypes.PayloadStatusEmpty, cltypes.PayloadStatusFull} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+			graph.anchorRoot = checkpoint.Root
+			delete(graph.blocks, checkpoint.Root)
+			store.anchorExecutionPayloadBid = &cltypes.ExecutionPayloadBid{BlockHash: common.Hash{1}, ParentBlockHash: common.Hash{2}}
+			childRoot := common.Hash{3}
+			child := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+			child.Block.Slot = 12
+			child.Block.ParentRoot = checkpoint.Root
+			child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = store.anchorExecutionPayloadBid.ParentBlockHash
+			if status == cltypes.PayloadStatusFull {
+				child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = store.anchorExecutionPayloadBid.BlockHash
+			}
+			graph.blocks[childRoot] = child
+			graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+			store.updateChildren(11, checkpoint.Root, childRoot)
+			store.setLatestMessage(0, LatestMessage{Slot: 12, Root: childRoot})
+			cs := &checkpointState{
+				beaconConfig:     store.beaconCfg,
+				validatorSetSize: 1,
+				balances:         []uint64{32},
+				actives:          []byte{1},
+				slasheds:         []byte{0},
+			}
+
+			tree := store.gloasWeightTree.prepare(checkpoint, cs)
+
+			require.Equal(t, uint64(32), tree.GetAttestationScore(ForkChoiceNode{Root: checkpoint.Root, PayloadStatus: status}))
+		})
+	}
 }
 
 func TestGloasHeadUsesOneSlotForPayloadDecisions(t *testing.T) {

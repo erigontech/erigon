@@ -849,6 +849,9 @@ func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, n
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return false
+	}
 	return f.pendingEnvelopes != nil && f.pendingEnvelopes.Contains(blockRoot) ||
 		f.pendingLocalSelfBuildEnvelopes != nil && f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot)
 }

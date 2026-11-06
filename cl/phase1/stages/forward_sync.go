@@ -438,6 +438,16 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if bid == nil {
 		return nil
 	}
+	ctx, cancelValidation := context.WithCancelCause(ctx)
+	defer cancelValidation(nil)
+	validate := func(env *cltypes.SignedExecutionPayloadEnvelope) error {
+		err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, env)
+		if errors.Is(err, misc.ErrMismatchBlobHashes) {
+			cfg.forkChoice.RejectEnvelope(anchorRoot)
+			cancelValidation(err)
+		}
+		return err
+	}
 
 	log.Info("[Caplin] Proactively fetching anchor envelope for GLOAS checkpoint sync",
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot),
@@ -462,10 +472,11 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		} else {
 			// Fall back to P2P (root-specific request)
 			log.Info("[Caplin] HTTP anchor envelope unavailable or ahead of local anchor, trying P2P...", "anchorSlot", anchorSlot)
-			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot}, func(env *cltypes.SignedExecutionPayloadEnvelope) error {
-				return validateAnchorEnvelope(cfg.beaconCfg, anchorState, common.Hash(anchorRoot), bid, env)
-			}, nil)
+			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot}, validate, nil)
 			if err != nil {
+				if cause := context.Cause(ctx); cause != nil {
+					err = cause
+				}
 				return fmt.Errorf("failed to request anchor envelope: %w", err)
 			}
 			env = envMap[common.Hash(anchorRoot)]
@@ -475,7 +486,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		log.Info("[Caplin] Anchor envelope not received (block may be EMPTY)", "anchorSlot", anchorSlot)
 		return nil // Not fatal — if EMPTY, envelope doesn't exist
 	}
-	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, env); err != nil {
+	if err := validate(env); err != nil {
 		return fmt.Errorf("invalid anchor envelope: %w", err)
 	}
 
@@ -529,7 +540,10 @@ func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *
 	if err := cltypes.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
 		return err
 	}
-	return verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot)
+	if err := verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot); err != nil {
+		return err
+	}
+	return forkchoice.ValidatePayloadBlobHashes(env.Message.Payload, bid.VersionedHashes())
 }
 
 func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, env *cltypes.SignedExecutionPayloadEnvelope, slot uint64) error {

@@ -1590,6 +1590,9 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 		return
 	}
 	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, envelope); err != nil {
+		if errors.Is(err, misc.ErrMismatchBlobHashes) {
+			cfg.forkChoice.RejectEnvelope(anchorRoot)
+		}
 		log.Warn("[chainTipSync] invalid anchor envelope during payload retry", "anchorRoot", anchorRoot, "err", err)
 		return
 	}
