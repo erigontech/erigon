@@ -904,7 +904,8 @@ func TestRunPeer_BlockRangeUpdateBurstIsDroppedWithoutDisconnect(t *testing.T) {
 		rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
 		func(sentryproto.MessageId) bool { return true }, log.Root())
 	require.NotNil(t, peerErr)
-	require.NotEqual(t, p2p.PeerErrorInvalidMessage, peerErr.Code, "the peer stays until its stream ends")
+	require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code, "the peer stays until its stream ends")
+	require.ErrorIs(t, peerErr.Err, io.EOF)
 	require.GreaterOrEqual(t, forwarded, blockAnnouncementsBurst)
 	require.Less(t, forwarded, 40)
 }
