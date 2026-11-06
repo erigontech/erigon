@@ -82,6 +82,68 @@ func TestChainTomlDiscoveryUsesTempDir(t *testing.T) {
 	}
 }
 
+func TestChainTomlDiscoveryPreservesConcurrentSeed(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		discover func(*Downloader, context.Context, string, NodeSource)
+	}{
+		{name: "acquire", discover: (*Downloader).acquireChainToml},
+		{name: "verify", discover: (*Downloader).verifyChainToml},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.Dirs{Snap: t.TempDir(), Tmp: t.TempDir()}
+			require.NoError(t, SaveChainToml(dirs.Snap, BuildTomlFromMap(map[string]string{"snapshot.seg": "abc123"})))
+			torrentFS := &AtomicTorrentFS{dir: dirs.Snap}
+			infoHash, err := BuildChainTomlTorrent(dirs.Snap, torrentFS)
+			require.NoError(t, err)
+			cfg := newTestClientConfig(t, dirs.Snap)
+			cfg.Slogger = slog.Default()
+			store, client, err := newTorrentClient(dirs.Snap, cfg)
+			require.NoError(t, err)
+			defer store.Close()
+			defer client.Close()
+			d := &Downloader{
+				cfg:           &downloadercfg.Cfg{Dirs: dirs},
+				torrentClient: client,
+				torrentFS:     torrentFS,
+				logger:        log.New(),
+			}
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			node := makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: infoHash})
+			ns := &mockNodeSource{nodes: []*enode.Node{node}}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				tc.discover(d, ctx, "testnet", ns)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+			require.Eventually(t, func() bool {
+				_, ok := client.Torrent(infoHash)
+				return ok
+			}, 5*time.Second, time.Millisecond)
+
+			require.NoError(t, d.seedChainTomlTorrent())
+			seed, registered := client.Torrent(infoHash)
+			require.True(t, registered)
+			assert.True(t, seed.Complete().Bool(), "the local manifest must be available for seeding")
+
+			cancel()
+			<-done
+			registeredSeed, registered := client.Torrent(infoHash)
+			require.True(t, registered, "download cleanup must preserve the local seed")
+			assert.Same(t, seed, registeredSeed)
+			entries, err := os.ReadDir(dirs.Tmp)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
 func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
 	for _, hashMatches := range []bool{true, false} {
 		name := "matching_hash"
@@ -360,7 +422,7 @@ func TestChainTomlStorageRejectsInvalidMetadataBeforeOpeningFiles(t *testing.T) 
 func TestReadChainTomlLimitsSize(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		size int
+		size int64
 	}{
 		{name: "empty", size: 0},
 		{name: "below_limit", size: maxChainTomlSize - 1},
@@ -372,7 +434,7 @@ func TestReadChainTomlLimitsSize(t *testing.T) {
 			data, err := readChainToml(r)
 			if tc.size <= maxChainTomlSize {
 				require.NoError(t, err)
-				assert.Len(t, data, tc.size)
+				assert.Len(t, data, int(tc.size))
 			} else {
 				assert.ErrorContains(t, err, "chain.toml exceeds size limit")
 				assert.Zero(t, len(data))

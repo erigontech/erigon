@@ -17,6 +17,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/c2h5oh/datasize"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -87,7 +88,7 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 	return
 }
 
-const maxChainTomlSize = 16 << 20
+const maxChainTomlSize = int64(16 * datasize.MB)
 
 type chainTomlStorage struct {
 	storage.ClientImplCloser
@@ -139,10 +140,16 @@ func readChainToml(r io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > maxChainTomlSize {
+	if int64(len(data)) > maxChainTomlSize {
 		return nil, fmt.Errorf("chain.toml exceeds size limit of %d bytes", maxChainTomlSize)
 	}
 	return data, nil
+}
+
+func (d *Downloader) downloadChainToml(ctx context.Context, peer *ChainTomlPeer) ([]byte, error) {
+	d.chainTomlTorrentLock.Lock()
+	defer d.chainTomlTorrentLock.Unlock()
+	return DownloadChainTomlByInfoHash(ctx, d.torrentClient, peer.ChainToml.InfoHash, d.snapDir(), d.cfg.Dirs.Tmp, peer)
 }
 
 // DownloadChainTomlByInfoHash downloads chain.toml into temporary storage or verifies a completed local copy.
@@ -378,7 +385,7 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		"knownTx", best.ChainToml.KnownBlocks,
 		"infoHash", hex.EncodeToString(best.ChainToml.InfoHash[:]))
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), d.cfg.Dirs.Tmp, best)
+	tomlBytes, err := d.downloadChainToml(ctx, best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to download chain.toml", "err", err)
 		return
@@ -420,7 +427,7 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 		return
 	}
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), d.cfg.Dirs.Tmp, best)
+	tomlBytes, err := d.downloadChainToml(ctx, best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] verify: failed to download chain.toml", "err", err)
 		return

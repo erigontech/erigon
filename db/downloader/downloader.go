@@ -120,6 +120,9 @@ type Downloader struct {
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
 
+	// Temporary manifest torrents must be dropped before local seeding can reuse their info hashes.
+	chainTomlTorrentLock sync.Mutex
+
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.
 	enrUpdater func(enr.ChainToml)
@@ -473,6 +476,9 @@ func (d *Downloader) PublishLocalChainToml() error {
 
 // seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.
 func (d *Downloader) seedChainTomlTorrent() error {
+	d.chainTomlTorrentLock.Lock()
+	defer d.chainTomlTorrentLock.Unlock()
+
 	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
 	if err != nil {
 		return fmt.Errorf("loading chain.toml torrent: %w", err)
