@@ -85,6 +85,7 @@ type Aggregator struct {
 	stoppedCommitment           [kv.DomainLen]atomic.Bool
 	commitmentStopFileMu        sync.Mutex
 	commitmentStopFileWritten   [kv.DomainLen]bool
+	ownCommitmentStopFile       bool
 	commitmentLifecycleRestored atomic.Bool
 	trieVariant                 string
 	frozenMu                    sync.RWMutex

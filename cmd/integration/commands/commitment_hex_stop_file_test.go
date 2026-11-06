@@ -120,7 +120,7 @@ func (f hexStopFixture) freshChaindata(t *testing.T) kv.RwDB {
 
 func (f hexStopFixture) openAgg(t *testing.T, rawDB kv.RwDB) (kv.TemporalRwDB, *dbstate.Aggregator) {
 	t.Helper()
-	agg := dbstate.New(f.dirs).WithErigonDBSettings(f.settings).Logger(log.New()).MustOpen(t.Context())
+	agg := dbstate.New(f.dirs).WithErigonDBSettings(f.settings).Logger(log.New()).OwnCommitmentStopFile().MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder(rawDB))
 	db, err := dbtemporal.New(rawDB, agg, nil)

@@ -47,6 +47,7 @@ func (db *afterFirstViewDB) View(ctx context.Context, f func(tx kv.Tx) error) er
 // read lands just before that commit must not drop the file the node writes after it.
 func TestCommitmentStopFileKeptWhenNodeStopsDuringOpenFolder(t *testing.T) {
 	rawDB, agg := pbinDualAggregator(t)
+	agg.ownCommitmentStopFile = true
 	db := &afterFirstViewDB{RwDB: rawDB, after: func() error {
 		if err := rawDB.Update(t.Context(), func(tx kv.RwTx) error {
 			return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
@@ -58,4 +59,27 @@ func TestCommitmentStopFileKeptWhenNodeStopsDuringOpenFolder(t *testing.T) {
 
 	require.NoError(t, agg.OpenFolder(db))
 	require.FileExists(t, commitmentStopFilePath(agg.Dirs()))
+}
+
+func TestCommitmentStopFileNotOwnedNeverDropped(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	require.NoError(t, writeCommitmentStopFile(agg.Dirs(), map[string]bool{kv.CommitmentDomain.String(): true}))
+
+	require.NoError(t, agg.OpenFolder(db))
+	require.FileExists(t, commitmentStopFilePath(agg.Dirs()))
+	require.False(t, agg.CommitmentDomainStopped(kv.CommitmentDomain))
+}
+
+func TestCommitmentStopFileOwnerDropRearmsWrite(t *testing.T) {
+	db, agg := pbinDualAggregator(t)
+	agg.ownCommitmentStopFile = true
+	require.NoError(t, agg.WriteCommitmentStopFile(kv.CommitmentDomain))
+
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoFileExists(t, commitmentStopFilePath(agg.Dirs()))
+
+	require.NoError(t, agg.WriteCommitmentStopFile(kv.CommitmentDomain))
+	points, err := readCommitmentStopFile(agg.Dirs())
+	require.NoError(t, err)
+	require.True(t, points[kv.CommitmentDomain.String()])
 }

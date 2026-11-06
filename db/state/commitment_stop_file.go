@@ -99,7 +99,8 @@ func (a *Aggregator) restoreCommitmentStopFile(points map[string]bool, stoppedIn
 	if len(points) == 0 {
 		return nil
 	}
-	var applied, dropped bool
+	var applied bool
+	var dropped []kv.Domain
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		if !points[domain.String()] || a.CommitmentDomainStopped(domain) {
 			continue
@@ -112,8 +113,7 @@ func (a *Aggregator) restoreCommitmentStopFile(points map[string]bool, stoppedIn
 			if stoppedInDB[domain] {
 				continue
 			}
-			delete(points, domain.String())
-			dropped = true
+			dropped = append(dropped, domain)
 			continue
 		}
 		a.StopCommitmentDomain(domain)
@@ -125,8 +125,18 @@ func (a *Aggregator) restoreCommitmentStopFile(points map[string]bool, stoppedIn
 	if applied {
 		a.recalcVisibleFiles(nil)
 	}
-	if dropped {
-		return writeCommitmentStopFile(a.dirs, points)
+	if len(dropped) == 0 || !a.ownCommitmentStopFile {
+		return nil
 	}
-	return nil
+	a.commitmentStopFileMu.Lock()
+	defer a.commitmentStopFileMu.Unlock()
+	current, err := readCommitmentStopFile(a.dirs)
+	if err != nil {
+		return err
+	}
+	for _, domain := range dropped {
+		delete(current, domain.String())
+		a.commitmentStopFileWritten[domain] = false
+	}
+	return writeCommitmentStopFile(a.dirs, current)
 }

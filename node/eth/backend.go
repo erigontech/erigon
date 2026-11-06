@@ -1322,6 +1322,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		aggOpts := state.New(dirs).
 			Logger(logger).
 			SanityOldNaming().
+			OwnCommitmentStopFile().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
 			WithErigonDBSettings(erigonDBSettings)
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
