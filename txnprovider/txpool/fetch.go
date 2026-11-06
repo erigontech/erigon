@@ -670,6 +670,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		// to both because a peer can ship a blob-tx wrapper with mismatched
 		// commitments via either message and must be kicked either way.
 		for i := range txns.Txns {
+			if req.Id == sentryproto.MessageId_TRANSACTIONS_66 && txns.Txns[i].TxType() == BlobTxnType {
+				f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
+				return nil
+			}
 			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
 					f.logger.Debug("[txpool] penalizing peer for mismatched tx announcement", "peer", req.PeerId, "err", err)
