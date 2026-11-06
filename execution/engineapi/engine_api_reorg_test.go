@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
-	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -492,7 +491,7 @@ func TestNewPayloadResentHeadKeepsExecutedState(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		forkValidator := eat.ExecutionModule.(*execmodule.ExecModule).ForkValidator()
+		forkValidator := eat.ExecutionModule.ForkValidator()
 		payload, err := eat.MockCl.BuildNewPayload(ctx)
 		require.NoError(t, err)
 		hash := payload.ExecutionPayload.BlockHash

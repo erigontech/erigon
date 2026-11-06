@@ -173,6 +173,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if simulateContext.TransactionIndex != nil {
 		transactionIndex = *simulateContext.TransactionIndex
 	}
+	if err := checkTxIndex(blockNum, transactionIndex, len(block.Transactions())); err != nil {
+		return nil, err
+	}
 
 	if transactionIndex == -1 {
 		transactionIndex = len(block.Transactions())
@@ -247,10 +250,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	st.SetTxContext(blockNum, len(replayTransactions))
-	var activePrecompiles vm.PrecompiledContracts
 	if stateOverride != nil {
-		activePrecompiles = vm.ActivePrecompiledContracts(rules)
-		err = stateOverride.Override(evm.IntraBlockState(), activePrecompiles, rules)
+		err = stateOverride.Override(evm.IntraBlockState(), vm.ActivePrecompiledContracts(rules), rules)
 		if err != nil {
 			return nil, err
 		}
@@ -263,6 +264,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	for _, bundle := range bundles {
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
+		activePrecompiles, err := stateOverride.ActivePrecompiles(blockCtx.Rules(chainConfig))
+		if err != nil {
+			return nil, err
+		}
 		results := []map[string]any{}
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]

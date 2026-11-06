@@ -66,7 +66,7 @@ func destroyThenRecreate(t *testing.T, reader *accountStateReader, addr accounts
 	require.NoError(t, destroyer.FinalizeTx(amsterdamRules, NewNoopWriter()))
 	destroyWrites := finalizedWrites(t, destroyer, amsterdamRules)
 	t.Cleanup(destroyWrites.ReleaseAndReset)
-	vm.FlushVersionedWrites(destroyWrites, true, "")
+	vm.FlushVersionedWrites(destroyWrites, true)
 
 	recreator := newAmsterdamIBS(reader, vm, 1)
 	t.Cleanup(recreator.Close)
@@ -114,7 +114,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	destroyWrites, recreateWrites, changes := destroyThenRecreate(t, reader, addr, code)
 
 	vm := NewVersionMap(changes)
-	vm.FlushVersionedWrites(destroyWrites, true, "")
+	vm.FlushVersionedWrites(destroyWrites, true)
 	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
@@ -136,7 +136,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
 
-	vm.FlushVersionedWrites(recreateWrites, true, "")
+	vm.FlushVersionedWrites(recreateWrites, true)
 	rerun := newAmsterdamIBS(reader, vm, 2)
 	defer rerun.Close()
 	exists, err = rerun.Exist(addr)
@@ -160,7 +160,7 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	destroyWrites, recreateWrites, _ := destroyThenRecreate(t, reader, addr, []byte{0x60, 0x01})
 
 	vm := NewVersionMap(nil)
-	vm.FlushVersionedWrites(destroyWrites, true, "")
+	vm.FlushVersionedWrites(destroyWrites, true)
 	ibs := newAmsterdamIBS(reader, vm, 2)
 	defer ibs.Close()
 
@@ -168,7 +168,7 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, empty)
 
-	vm.FlushVersionedWrites(recreateWrites, true, "")
+	vm.FlushVersionedWrites(recreateWrites, true)
 
 	exists, err := ibs.Exist(addr)
 	require.NoError(t, err)
@@ -177,4 +177,34 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, so)
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// A reverted EIP-8246 balance-preserving self-destruct projects the original contract.
+func TestEIP8246PreserveSelfDestructRevert(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246c0de"))
+	codeHash := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3}).Hash
+	base := accounts.NewAccount()
+	base.Nonce = 5
+	base.Balance = *uint256.NewInt(100)
+	base.CodeHash = codeHash
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{addr: &base}}
+
+	vm := NewVersionMap(nil)
+	ibs := newAmsterdamIBS(reader, vm, 0)
+	t.Cleanup(ibs.Close)
+
+	snap := ibs.PushSnapshot()
+	destroyed, err := ibs.Selfdestruct(addr, true) // preserveBalance = EIP-8246 no-burn
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	ibs.RevertToSnapshot(snap, nil)
+
+	require.NoError(t, ibs.FinalizeTx(amsterdamRules, NewNoopWriter()))
+	vm.FlushVersionedWrites(finalizedWrites(t, ibs, amsterdamRules), true)
+
+	acc, ok := vm.View(1, reader).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(5), acc.Nonce, "revert leaves the original contract nonce")
+	require.Equal(t, codeHash, acc.CodeHash, "revert leaves the original contract code")
 }

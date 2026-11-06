@@ -25,7 +25,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	commonerrors "github.com/erigontech/erigon/common/errors"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -437,6 +442,63 @@ func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
 	}
 }
 
+// After a non-clean apply-loop exit, the exec loop is blocked publishing into
+// commitResults while the calculator, its consumer, is blocked on a full
+// rootResults. Only a concurrent drain of applyResults and rootResults releases both.
+func TestApplyLoopDrainsBlockedProducerOnNonCleanExit(t *testing.T) {
+	applyResults := make(chan applyResult, 4)
+	commitResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult, 1)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+	consumers.register("commitResults", commitResults)
+
+	execDone, calcDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(execDone)
+		for i := range 16 {
+			_ = consumers.publish(context.Background(), i, true)
+		}
+		consumers.close()
+	}()
+	go func() {
+		defer close(calcDone)
+		for range commitResults {
+			rootResults <- commitmentResult{}
+		}
+		close(rootResults)
+	}()
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, rootResults)
+	}()
+	for name, done := range map[string]chan struct{}{"exec loop": execDone, "calculator": calcDone, "drain": drained} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s stranded: drainToClose did not empty both channels to close", name)
+		}
+	}
+}
+
+func TestApplyLoopDrainToCloseWithoutCalculator(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	applyResults <- 0
+	close(applyResults)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, nil)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drainToClose blocked on a nil rootResults")
+	}
+}
+
 // TestExecLoopExitCheckConcurrentReads verifies execLoopExitCheck is
 // safe to call concurrently with map mutations under the lock — guards
 // against future regression if someone removes the RLock.
@@ -724,7 +786,7 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 // single-block fork-validation step runs, so the exec loop executes nothing
 // and produces no blockResult. Treating that as pending work returns a
 // spurious ErrLoopExhausted, which the stage loop reports as
-// "unexpected state step has more work".
+// "state step has more work".
 func TestApplyLoopCloseIsClean(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -941,7 +1003,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 	// The dep-order path flushes an invalidated tx with complete = its validity,
 	// i.e. false (writes stored as Estimate, not Done).
 	const complete = false
-	vm.FlushVersionedWrites(invalidTxWrites, complete, "")
+	vm.FlushVersionedWrites(invalidTxWrites, complete)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.
@@ -1094,5 +1156,40 @@ func TestStopCausePropagation(t *testing.T) {
 		cancel(errors.New("shutdown"))
 		_, ok := stopCauseOf(ctx)
 		require.False(t, ok, "a plain cancel cause must not read as a stopCause")
+	})
+}
+
+// custom_trace commits on the same commitment trie the rest of the process selects.
+func TestCustomTraceSharedDomainsUseTheSelectedTrie(t *testing.T) {
+	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
+			statecfg.ExperimentalParallelCommitment = parallel
+
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+			require.NoError(t, err)
+			defer doms.Close()
+
+			require.Equal(t, execctx.PickTrieVariant(), doms.GetCommitmentCtx().Trie().Variant())
+		})
+	}
+}
+
+// A send on a closed result channel is a channel-ownership bug: it must panic
+// loudly instead of being classified as routine cancellation, which the group
+// join would filter into silent result loss.
+func TestSendResultOnClosedChannelPanics(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	close(applyResults)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+	be := &blockExecutor{consumers: consumers}
+	require.Panics(t, func() {
+		_ = be.sendResult(context.Background(), &blockResult{}, true)
 	})
 }

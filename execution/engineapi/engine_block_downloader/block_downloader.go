@@ -27,6 +27,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -139,7 +140,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownlo
 		if errors.Is(err, p2p.ErrChainLengthExceedsLimit) {
 			// Expected: gap is unbridgeable by a chain-length-limited download; the EL relies on FCU or staged sync.
 			e.logger.Info("[EngineBlockDownloader] backward download skipped — gap exceeds limit, awaiting FCU/staged sync", args...)
-		} else {
+		} else if !commonerrors.IsOnlyCanceled(err) {
 			e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
 		}
 		e.status.Store(Idle)
@@ -297,9 +298,24 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 			lastValidHash,
 		)
 	}
-	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	fcuStatus, validationErr, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
 	if err != nil {
 		return err
+	}
+	if fcuStatus == execmodule.ExecutionStatusTooFarAway {
+		e.logger.Debug(
+			"[EngineBlockDownloader] continuing block batch download after fork choice answered too far away",
+			"tip", block.Hash(),
+			"latestValidHash", lastValidHash,
+			"err", common.Deref(validationErr),
+		)
+		return nil
+	}
+	if fcuStatus == execmodule.ExecutionStatusBadBlock {
+		ve := common.Deref(validationErr)
+		e.ReportBadHeader(block.Hash(), common.Hash{}, ve)
+		e.ReportBadHeader(requested, common.Hash{}, ve)
+		return fmt.Errorf("bad block when updating fork choice for batch download: tip=%s, err=%s", block.Hash(), ve)
 	}
 	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(

@@ -24,8 +24,92 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
+
+type newPayloadModuleStub struct {
+	execmodule.ExecutionModule
+	inserted        []*types.Block
+	validationCalls int
+}
+
+func (s *newPayloadModuleStub) InsertBlocks(_ context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+	s.inserted = append(s.inserted, blocks...)
+	return execmodule.ExecutionStatusSuccess, nil
+}
+
+func (s *newPayloadModuleStub) CurrentHeader(context.Context) (*types.Header, error) {
+	return &types.Header{}, nil
+}
+
+func (s *newPayloadModuleStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
+	s.validationCalls++
+	return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusSuccess}, nil
+}
+
+func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
+	transactions, err := types.MarshalTransactionsBinary(types.Transactions{
+		&types.LegacyTx{},
+		&types.DynamicFeeTransaction{},
+		&types.DynamicFeeTransaction{CommonTx: types.CommonTx{Data: make([]byte, 64)}},
+	})
+	require.NoError(t, err)
+	wrappedShort, err := rlp.EncodeToBytes(transactions[1])
+	require.NoError(t, err)
+	wrappedLong, err := rlp.EncodeToBytes(transactions[2])
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name         string
+		transactions [][]byte
+		wrapped      bool
+	}{
+		{name: "empty"},
+		{name: "legacy", transactions: transactions[:1]},
+		{name: "typed", transactions: transactions[1:]},
+		{name: "mixed", transactions: transactions},
+		{name: "wrapped short", transactions: [][]byte{wrappedShort}, wrapped: true},
+		{name: "wrapped long", transactions: [][]byte{wrappedLong}, wrapped: true},
+		{name: "wrapped after canonical", transactions: [][]byte{transactions[0], transactions[1], wrappedLong}, wrapped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &newPayloadModuleStub{}
+			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+			require.NoError(t, err)
+
+			payload := cltypes.NewEth1Block(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
+			payload.BlockNumber = 1
+			payload.Extra = solid.NewExtraData()
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+			payload.Transactions = solid.NewTransactionsSSZFromTransactions(tc.transactions)
+			parentRoot := common.Hash{}
+			payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+			require.NoError(t, err)
+
+			status, err := client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
+			if tc.wrapped {
+				require.EqualValues(t, PayloadStatusInvalidated, status)
+				require.Error(t, err)
+				require.Empty(t, module.inserted)
+				require.Zero(t, module.validationCalls)
+				return
+			}
+			require.NoError(t, err)
+			require.EqualValues(t, PayloadStatusValidated, status)
+			require.Len(t, module.inserted, 1)
+			require.Len(t, module.inserted[0].Transactions(), len(tc.transactions))
+			require.Equal(t, 1, module.validationCalls)
+		})
+	}
+}
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
 	calls := 0

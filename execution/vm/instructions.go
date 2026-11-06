@@ -373,7 +373,18 @@ func stAddmod(_ uint64, scope *CallContext) string {
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y, z := scope.Stack.pop2Peek1()
-	z.MulMod(x, y, z)
+	if z[3] == 0 {
+		z.MulMod(x, y, z)
+		return pc, nil, nil
+	}
+	if *z != scope.mulmodModulus {
+		if x.IsZero() || y.IsZero() {
+			z.Clear()
+			return pc, nil, nil
+		}
+		scope.mulmodModulus, scope.mulmodReciprocal = *z, uint256.Reciprocal(z)
+	}
+	z.MulModWithReciprocal(x, y, z, &scope.mulmodReciprocal)
 	return pc, nil, nil
 }
 
@@ -1188,7 +1199,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1249,7 +1260,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1288,7 +1299,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1333,7 +1344,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1353,6 +1364,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
+	}
+	if evm.FrameContext != nil {
+		// APPROVE can debit the payer even inside a static call.
+		scope.Contract.selfBalanceCached = false
 	}
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1435,8 +1450,9 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1502,8 +1518,9 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
