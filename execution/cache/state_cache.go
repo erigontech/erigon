@@ -71,8 +71,7 @@ type StateCache struct {
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
-	// fillDoor admits a read fill only on the key's second miss: a key read once, the common case on a cold
-	// block, never pays the insert.
+	// fillDoor backs ReadView.FillOnSecondMiss.
 	fillDoor atomic.Pointer[fillDoorkeeper]
 }
 
@@ -277,7 +276,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	viewEpoch uint64,
 ) {
 	cache := c.caches[domain]
-	if cache == nil || !c.fillSeenBefore(key) {
+	if cache == nil {
 		return
 	}
 	if len(value) == 0 {

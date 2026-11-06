@@ -994,7 +994,6 @@ func TestStateCache_ReaderAheadOfApplyWindowCanFill(t *testing.T) {
 	sc.apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 100)
 
 	key := makeAddr(2)
-	sc.fillSeenBefore(key)
 	sc.View(frontierAt(201)).Fill(kv.AccountsDomain, key, makeValue(2), 200)
 
 	_, ok := sc.get(kv.AccountsDomain, key)
@@ -1037,7 +1036,6 @@ func TestStateCache_InitializeDoesNotMoveStateVersionBackward(t *testing.T) {
 	require.False(t, ok, "an older initializer must not reactivate stale fills")
 
 	currentKey := makeAddr(2)
-	sc.fillSeenBefore(currentKey)
 	sc.View(frontierAtVersion(11, 3)).Fill(kv.AccountsDomain, currentKey, makeValue(2), 10)
 	_, ok = sc.View(nil).Get(kv.AccountsDomain, currentKey)
 	require.True(t, ok, "the accepted state version must remain active")
@@ -1205,7 +1203,6 @@ func TestStateCache_BoundViewCanFillAcrossContinuousPublication(t *testing.T) {
 	sc.Applier().Initialize(1)
 	view := sc.View(frontierAtVersion(11, 1))
 	sc.Applier().Publish(1, 2, nil)
-	sc.fillSeenBefore(key)
 	view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
 
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
@@ -1259,7 +1256,6 @@ func TestStateCache_RejectedPublishUnwindStillInvalidates(t *testing.T) {
 	require.False(t, ok)
 
 	inWindow := sc.View(frontierAtVersion(101, 11))
-	sc.fillSeenBefore(key)
 	inWindow.Fill(kv.AccountsDomain, key, deadForkValue, 100)
 	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
@@ -1716,18 +1712,18 @@ func TestAccountCodeHashes(t *testing.T) {
 	require.Equal(t, hash[:], prepareStateUpdate(codeUpd, nil).codeHash, "no account hash falls back to hashing")
 }
 
-func TestStateCache_FillAdmitsOnSecondMiss(t *testing.T) {
+func TestStateCache_FillOnSecondMiss(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
 
 	key := makeAddr(1)
 	view := sc.View(frontierAt(11))
-	view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+	view.FillOnSecondMiss(kv.AccountsDomain, key, makeValue(1), 10)
 	_, ok := sc.get(kv.AccountsDomain, key)
 	require.False(t, ok, "a key missed once is not inserted")
 
-	view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+	view.FillOnSecondMiss(kv.AccountsDomain, key, makeValue(1), 10)
 	_, ok = sc.get(kv.AccountsDomain, key)
 	require.True(t, ok, "a key missed twice is inserted")
 }
