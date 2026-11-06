@@ -24,8 +24,8 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 		TxHash                common.Hash     `json:"transactionsRoot" gencodec:"required"`
 		ReceiptHash           common.Hash     `json:"receiptsRoot"     gencodec:"required"`
 		Bloom                 Bloom           `json:"logsBloom"        gencodec:"required"`
-		Difficulty            *hexutil.Big    `json:"difficulty"       gencodec:"required"`
-		Number                *hexutil.Big    `json:"number"           gencodec:"required"`
+		Difficulty            *hexutil.U256   `json:"difficulty"       gencodec:"required"`
+		Number                *hexutil.U256   `json:"number"           gencodec:"required"`
 		GasLimit              hexutil.Uint64  `json:"gasLimit"         gencodec:"required"`
 		GasUsed               hexutil.Uint64  `json:"gasUsed"          gencodec:"required"`
 		Time                  hexutil.Uint64  `json:"timestamp"        gencodec:"required"`
@@ -34,7 +34,7 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 		Nonce                 BlockNonce      `json:"nonce"`
 		AuRaStep              hexutil.Uint64  `json:"auraStep,omitempty"`
 		AuRaSeal              hexutil.Bytes   `json:"auraSeal,omitempty"`
-		BaseFee               *hexutil.Big    `json:"baseFeePerGas"`
+		BaseFee               *hexutil.U256   `json:"baseFeePerGas"`
 		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
 		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
 		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
@@ -53,8 +53,8 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 	enc.TxHash = h.TxHash
 	enc.ReceiptHash = h.ReceiptHash
 	enc.Bloom = h.Bloom
-	enc.Difficulty = (*hexutil.Big)(h.Difficulty.ToBig())
-	enc.Number = (*hexutil.Big)(h.Number.ToBig())
+	enc.Difficulty = (*hexutil.U256)(&h.Difficulty)
+	enc.Number = (*hexutil.U256)(&h.Number)
 	enc.GasLimit = hexutil.Uint64(h.GasLimit)
 	enc.GasUsed = hexutil.Uint64(h.GasUsed)
 	enc.Time = hexutil.Uint64(h.Time)
@@ -63,9 +63,7 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 	enc.Nonce = h.Nonce
 	enc.AuRaSeal = h.AuRaSeal
 	enc.AuRaStep = hexutil.Uint64(h.AuRaStep)
-	if h.BaseFee != nil {
-		enc.BaseFee = (*hexutil.Big)(h.BaseFee.ToBig())
-	}
+	enc.BaseFee = (*hexutil.U256)(h.BaseFee)
 	enc.WithdrawalsHash = h.WithdrawalsHash
 	enc.BlobGasUsed = (*hexutil.Uint64)(h.BlobGasUsed)
 	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)

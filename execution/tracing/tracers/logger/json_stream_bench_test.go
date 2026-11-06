@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -47,13 +48,13 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 		i++
 	}
 }
 
-// BenchmarkOnOpcodeStackDepth shows the scaling: the saved allocation is per
-// stack slot per step, and a real trace is not two slots deep.
+// BenchmarkOnOpcodeStackDepth shows the scaling with stack depth. As in a real
+// trace, only the top slot changes between steps.
 func BenchmarkOnOpcodeStackDepth(b *testing.B) {
 	for _, depth := range []int{2, 8, 16, 32} {
 		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
@@ -68,7 +69,8 @@ func BenchmarkOnOpcodeStackDepth(b *testing.B) {
 			b.ReportAllocs()
 			i := 0
 			for b.Loop() {
-				l.OnOpcode(uint64(i), byte(vm.ADD), 100, 3, scope, nil, 1, nil)
+				stack[depth-1].SetUint64(uint64(i) * 0xfedcba9876543211)
+				l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 				i++
 				// Nothing else drains this stream, and every iteration appends to it.
 				_ = l.stream.Flush()
@@ -93,14 +95,14 @@ func BenchmarkStackValueWrite(b *testing.B) {
 			_ = s.Flush()
 		}
 	})
-	b.Run("WriteRaw_hexQuoted", func(b *testing.B) {
-		l := &JsonStreamLogger{stream: jsonstream.New(io.Discard)}
+	b.Run("WriteRawBytes_stackJSON", func(b *testing.B) {
+		s := jsonstream.New(io.Discard)
+		var enc stackJSON
 		b.ReportAllocs()
 		for b.Loop() {
-			for i := range vals {
-				l.stream.WriteRaw(l.hexQuoted(&vals[i]))
-			}
-			_ = l.stream.Flush()
+			enc.vals = enc.vals[:0]
+			s.WriteRawBytes(enc.encode(vals))
+			_ = s.Flush()
 		}
 	})
 }
@@ -117,12 +119,12 @@ func BenchmarkOnOpcodeStorage(b *testing.B) {
 				key := common.BigToHash(big.NewInt(int64(i + 1)))
 				val := common.BigToHash(big.NewInt(int64(1000 + i)))
 				scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
-				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 			}
 			b.ReportAllocs()
 			i := 0
 			for b.Loop() {
-				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 				i++
 				// Nothing else drains this stream, and every iteration appends to it.
 				_ = l.stream.Flush()

@@ -19,7 +19,10 @@ package forkchoice
 import (
 	"encoding/binary"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -57,7 +61,7 @@ func TestPreGloasDoesNotDirtyGloasWeightTree(t *testing.T) {
 	msg, has := f.getLatestMessage(2)
 	require.True(t, has)
 	require.Equal(t, att.Data.BeaconBlockRoot, msg.Root)
-	require.Empty(t, f.gloasWeightTree.dirty)
+	require.Empty(t, f.gloasWeightTree.applied)
 }
 
 func TestPreGloasEquivocationDoesNotDirtyGloasWeightTree(t *testing.T) {
@@ -66,17 +70,7 @@ func TestPreGloasEquivocationDoesNotDirtyGloasWeightTree(t *testing.T) {
 	f.setUnequivocating(4)
 
 	require.True(t, f.isUnequivocating(4))
-	require.Empty(t, f.gloasWeightTree.dirty)
-}
-
-func TestEquivocationAfterBaselineDirtiesWeightTree(t *testing.T) {
-	f := newGloasWeightTreeTestStore()
-	f.gloasWeightTree.state = &checkpointState{}
-
-	f.setUnequivocating(4)
-
-	require.True(t, f.isUnequivocating(4))
-	require.Contains(t, f.gloasWeightTree.dirty, uint64(4))
+	require.Empty(t, f.gloasWeightTree.applied)
 }
 
 func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
@@ -88,6 +82,61 @@ func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
 
 	require.Equal(t, common.Hash{}, f.headHash)
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
+func TestProcessAttestingIndiciesInvalidatesGloasHeadCacheOnlyForNewMessages(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	cachedHead := common.HexToHash("0xbeef")
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.Hash{}, f.headHash, "a new latest message must invalidate the cached head")
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, cachedHead, f.headHash, "an unchanged latest message must preserve the cached head")
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+}
+
+func TestProcessAttestingIndiciesKeepsPreGloasHeadCache(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	f.headHash = common.HexToHash("0xbeef")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.HexToHash("0xbeef"), f.headHash)
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+	latestMessage, found := f.getLatestMessage(1)
+	require.True(t, found)
+	require.Equal(t, attestation.Data.BeaconBlockRoot, latestMessage.Root)
 }
 
 func TestGetHeadPublishesCachedSelection(t *testing.T) {
@@ -129,7 +178,7 @@ func TestGetHeadPublishesAnchorFallback(t *testing.T) {
 	require.Equal(t, slot, selectedSlot)
 }
 
-func TestGetHeadPublishesGloasSelection(t *testing.T) {
+func TestGetHeadNodeRefreshesGloasSelection(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -165,6 +214,308 @@ func TestGetHeadPublishesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+
+	store.mu.Lock()
+	store.headHash = common.Hash{}
+	store.headPayloadStatus = cltypes.PayloadStatusPending
+	store.mu.Unlock()
+
+	head, _, err = store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+
+	// A recomputation may select a different root. The old root must not inherit
+	// the new head's status, and the published selection must advance with it.
+	childRoot := common.Hash{0xbb}
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = 11
+	child.Block.ParentRoot = root
+	graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+	graph.blocks[childRoot] = child
+	store.updateChildren(10, root, childRoot)
+	store.OnTick(12 * cfg.SecondsPerSlot * 1000)
+
+	head, selectedSlot, err = store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+	require.Equal(t, uint64(11), selectedSlot)
+	publishedRoot, publishedSlot, ok = manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, childRoot, publishedRoot)
+	require.Equal(t, uint64(11), publishedSlot)
+}
+
+type countingHeadForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	leafVisits atomic.Int32
+}
+
+func (g *countingHeadForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
+	g.leafVisits.Add(1)
+	return g.getFinalizedExecutionHashForkGraph.GetCurrentJustifiedCheckpoint(root)
+}
+
+type headSnapshotForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	onGetBlock func()
+	invalid    map[common.Hash]bool
+	noEnvelope map[common.Hash]bool
+}
+
+func (g *headSnapshotForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalid[root]
+}
+
+func (g *headSnapshotForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if g.onGetBlock != nil {
+		g.onGetBlock()
+	}
+	return g.getFinalizedExecutionHashForkGraph.GetBlock(root)
+}
+
+func (g *headSnapshotForkGraph) HasEnvelope(root common.Hash) bool {
+	return g.blocks[root] != nil && !g.noEnvelope[root]
+}
+
+func (g *headSnapshotForkGraph) PayloadAccepted(root common.Hash) (bool, bool) {
+	return true, g.blocks[root] != nil
+}
+
+func newHeadSnapshotTestStore() (*ForkChoiceStore, *headSnapshotForkGraph) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = 11
+	graph := &headSnapshotForkGraph{getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
+		headers:          map[common.Hash]*cltypes.BeaconBlockHeader{root: block.SignedBeaconBlockHeader().Header},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{root: block},
+		currentJustified: checkpoint,
+	}}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+	store.timeMs.Store(12 * cfg.SecondsPerSlot * 1000)
+	return store, graph
+}
+
+func TestGloasHeadUsesOneSlotForPayloadDecisions(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		advanceAtRead int
+		weightOnEmpty bool
+	}{
+		{name: "clock advances during EMPTY tiebreaker", advanceAtRead: 3},
+		{name: "clock advances before weights", advanceAtRead: 1, weightOnEmpty: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+			if test.weightOnEmpty {
+				store.checkpointStates.Store(checkpoint, &checkpointState{
+					beaconConfig: store.beaconCfg, validatorSetSize: 1,
+					balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
+				})
+				store.setLatestMessage(0, LatestMessage{Slot: 12, Root: checkpoint.Root})
+			}
+			reads := 0
+			graph.onGetBlock = func() {
+				reads++
+				if reads == test.advanceAtRead {
+					// OnTick can advance time while the head walk holds f.mu. Both
+					// variants must use the slot captured before that clock update.
+					store.timeMs.Store(13 * store.beaconCfg.SecondsPerSlot * 1000)
+				}
+			}
+
+			head, slot, err := store.GetHeadNode()
+
+			require.NoError(t, err)
+			require.Equal(t, uint64(13), store.Slot(), "the clock must advance during the head walk")
+			require.Equal(t, uint64(11), slot)
+			require.Equal(t, ForkChoiceNode{Root: checkpoint.Root, PayloadStatus: cltypes.PayloadStatusFull}, head)
+		})
+	}
+}
+
+func TestPreGloasHeadClearsPayloadStatus(t *testing.T) {
+	store, _ := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = 1
+	store.beaconCfg.InitializeForkSchedule()
+	store.headPayloadStatus = cltypes.PayloadStatusFull
+
+	head, _, err := store.GetHeadNode()
+
+	require.NoError(t, err)
+	require.Equal(t, cltypes.PayloadStatusPending, head.PayloadStatus)
+	require.Equal(t, cltypes.PayloadStatusPending, store.headPayloadStatus)
+}
+
+func TestPreGloasHeadReadCrossesGloasBoundary(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		name := "without another head reader"
+		if refresh {
+			name = "with a newer cached Gloas head"
+		}
+		t.Run(name, func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			store.beaconCfg.GloasForkEpoch = 1
+			store.beaconCfg.InitializeForkSchedule()
+			store.publicKeysRegistry = public_keys_registry.NewInMemoryPublicKeysRegistry()
+			checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+			cs, _ := store.checkpointStates.LoadAndDelete(checkpoint)
+			store.unrealizedJustifiedCheckpoint.Store(checkpoint)
+			store.unrealizedFinalizedCheckpoint.Store(solid.Checkpoint{})
+			store.unrealizedJustifications.Store(checkpoint.Root, checkpoint)
+			graph.states = map[common.Hash]*state2.CachingBeaconState{checkpoint.Root: state2.New(store.beaconCfg)}
+			graph.getStateStarted = make(chan common.Hash, 1)
+			graph.getStateRelease = make(chan struct{})
+			release := sync.OnceFunc(func() { close(graph.getStateRelease) })
+			type result struct {
+				head ForkChoiceNode
+				err  error
+			}
+			results := make(chan result, 1)
+			var wg sync.WaitGroup
+			t.Cleanup(func() {
+				release()
+				wg.Wait()
+			})
+			wg.Go(func() {
+				head, _, err := store.GetHeadNode()
+				results <- result{head: head, err: err}
+			})
+			select {
+			case <-graph.getStateStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("pre-Gloas head read did not reach checkpoint lookup")
+			}
+
+			// Cross the fork while the pre-fork reader is outside f.mu for disk I/O.
+			store.checkpointStates.Store(checkpoint, cs)
+			store.OnTick(store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot * 1000)
+			want := ForkChoiceNode{Root: checkpoint.Root, PayloadStatus: cltypes.PayloadStatusFull}
+			if refresh {
+				head, _, err := store.GetHeadNode()
+				require.NoError(t, err)
+				require.Equal(t, want, head)
+			}
+			release()
+			select {
+			case got := <-results:
+				require.NoError(t, got.err)
+				require.Equal(t, want, got.head)
+			case <-time.After(5 * time.Second):
+				t.Fatal("head read did not finish")
+			}
+			wg.Wait()
+			require.Equal(t, want.Root, store.headHash)
+			require.Equal(t, want.PayloadStatus, store.headPayloadStatus)
+		})
+	}
+}
+
+func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
+	const readers = 8
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &countingHeadForkGraph{getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
+		headers:          map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: 10}},
+		states:           map[common.Hash]*state2.CachingBeaconState{root: state2.New(&cfg)},
+		currentJustified: checkpoint,
+		getStateStarted:  make(chan common.Hash, readers),
+		getStateRelease:  make(chan struct{}),
+	}}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.publicKeysRegistry = public_keys_registry.NewInMemoryPublicKeysRegistry()
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+
+	var wg sync.WaitGroup
+	release := sync.OnceFunc(func() { close(graph.getStateRelease) })
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+	})
+	results := make(chan ForkChoiceNode, readers)
+	for range readers {
+		wg.Go(func() {
+			head, _, _ := store.GetHeadNode()
+			results <- head
+		})
+	}
+	// Park every reader after its cache miss. Once released, only the first
+	// reader needs to walk the tree; the others must reuse that result.
+	select {
+	case <-graph.getStateStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("head readers did not reach checkpoint lookup")
+	}
+	require.Never(t, func() bool { return len(graph.getStateStarted) > 0 }, 300*time.Millisecond, 5*time.Millisecond)
+	release()
+	wg.Wait()
+	for range readers {
+		require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, <-results)
+	}
+	require.Equal(t, int32(1), graph.leafVisits.Load(), "one cache invalidation must cause only one tree walk")
+}
+
+func TestGetHeadNodeUsesPreGloasForkChoice(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	manager := synced_data.NewSyncedDataManager(&cfg, true)
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: 10},
+		},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{},
+		currentJustified: checkpoint,
+	}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.syncedDataManager = manager
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+
+	head, slot, err := store.GetHeadNode()
+
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, head)
+	require.Equal(t, uint64(10), slot)
+	publishedRoot, publishedSlot, selected := manager.SelectedHead()
+	require.True(t, selected)
+	require.Equal(t, head.Root, publishedRoot)
+	require.Equal(t, slot, publishedSlot)
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
@@ -245,27 +596,9 @@ func TestGrowGloasContributionsNoGrowth(t *testing.T) {
 	require.Equal(t, applied, notShrunk)
 }
 
-func TestGloasMarksDirtyWeightTree(t *testing.T) {
-	f := newGloasWeightTreeTestStore()
-	f.gloasWeightTree.state = &checkpointState{}
-
-	att := &solid.Attestation{
-		Data: &solid.AttestationData{
-			Slot:            64,
-			BeaconBlockRoot: common.HexToHash("0xbeef"),
-			Target:          solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xaaaa")},
-		},
-	}
-	f.updateLatestMessagesGloas(att, []uint64{1, 2, 3})
-
-	require.Contains(t, f.gloasWeightTree.dirty, uint64(1))
-	require.Contains(t, f.gloasWeightTree.dirty, uint64(2))
-	require.Contains(t, f.gloasWeightTree.dirty, uint64(3))
-}
-
 // Before the first prepare there is no applied baseline to delta against, so
-// marks are dropped; the first prepare's full rebuild covers every validator.
-func TestGloasMarksBeforeBaselineAreDropped(t *testing.T) {
+// updates are dropped; the first prepare's full rebuild covers every validator.
+func TestGloasUpdatesBeforeBaselineAreDropped(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 
 	att := &solid.Attestation{
@@ -277,7 +610,7 @@ func TestGloasMarksBeforeBaselineAreDropped(t *testing.T) {
 	}
 	f.updateLatestMessagesGloas(att, []uint64{1, 2, 3})
 
-	require.Empty(t, f.gloasWeightTree.dirty)
+	require.Empty(t, f.gloasWeightTree.applied)
 }
 
 // Latest messages can outgrow the justified checkpoint's validator registry;
@@ -302,16 +635,138 @@ func TestComputeVotesSkipsMessagesBeyondJustifiedRegistry(t *testing.T) {
 // out-of-bounds indices, so vote counting must not walk past the registry.
 func TestComputeVotesAuxStateSkipsMessagesBeyondValidatorSet(t *testing.T) {
 	f := buildExAnteStore(t)
-	s, err := f.GetStateAtBlockRoot(f.ProposerBoostRoot(), true)
+	s, err := f.GetStateAtBlockRoot(f.ProposerBoostRoot())
 	require.NoError(t, err)
 	require.NotNil(t, s)
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
 
 	f.latestMessages.set(s.ValidatorLength(), LatestMessage{Root: common.HexToHash("0x01"), Slot: 5})
 
-	votes := f.computeVotes(justified, nil, s)
+	votes := f.computeVotes(justified, cs, s)
 
 	require.NotNil(t, votes)
+}
+
+func TestPreGloasHeadWithAuxiliaryStateDoesNotRequireCheckpointState(t *testing.T) {
+	store, _ := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = 100
+	store.beaconCfg.InitializeForkSchedule()
+	checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+	store.checkpointStates.Delete(checkpoint)
+
+	head, slot, err := store.GetHead(state2.New(store.beaconCfg))
+
+	require.NoError(t, err)
+	require.Equal(t, checkpoint.Root, head)
+	require.Equal(t, uint64(11), slot)
+}
+
+func TestPreGloasHeadWithAuxiliaryStateDoesNotDependOnCheckpointStateCache(t *testing.T) {
+	store, graph := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = 100
+	store.beaconCfg.InitializeForkSchedule()
+	store.publicKeysRegistry = public_keys_registry.NewInMemoryPublicKeysRegistry()
+	checkpoint := solid.Checkpoint{Epoch: 1, Root: common.Hash{0xaa}}
+	store.justifiedCheckpoint.Store(checkpoint)
+	graph.currentJustified = checkpoint
+
+	checkpointState := state2.New(store.beaconCfg)
+	require.NoError(t, checkpointState.SetSlot(store.beaconCfg.SlotsPerEpoch))
+	auxiliaryState := state2.New(store.beaconCfg)
+	require.NoError(t, auxiliaryState.SetSlot(2*store.beaconCfg.SlotsPerEpoch))
+	const effectiveBalance = uint64(32_000_000_000)
+	for i := range 80 {
+		validator := solid.NewValidator()
+		validator.SetPublicKey([48]byte{byte(i + 1)})
+		validator.SetActivationEpoch(0)
+		validator.SetExitEpoch(store.beaconCfg.FarFutureEpoch)
+		validator.SetEffectiveBalance(effectiveBalance)
+		require.NoError(t, checkpointState.AddValidator(validator, effectiveBalance))
+		require.NoError(t, auxiliaryState.AddValidator(validator, effectiveBalance))
+	}
+	newlyActive := solid.NewValidator()
+	newlyActive.SetPublicKey([48]byte{81})
+	newlyActive.SetActivationEpoch(2)
+	newlyActive.SetExitEpoch(store.beaconCfg.FarFutureEpoch)
+	newlyActive.SetEffectiveBalance(effectiveBalance)
+	require.NoError(t, auxiliaryState.AddValidator(newlyActive, effectiveBalance))
+	graph.states = map[common.Hash]*state2.CachingBeaconState{checkpoint.Root: checkpointState}
+
+	boostedRoot := common.Hash{0x01}
+	nonBoostedRoot := common.Hash{0x02}
+	for _, root := range []common.Hash{boostedRoot, nonBoostedRoot} {
+		block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.DenebVersion)
+		block.Block.Slot = 2 * store.beaconCfg.SlotsPerEpoch
+		block.Block.ParentRoot = checkpoint.Root
+		graph.headers[root] = block.SignedBeaconBlockHeader().Header
+		graph.blocks[root] = block
+		store.updateChildren(11, checkpoint.Root, root)
+	}
+	store.headSet = map[common.Hash]struct{}{boostedRoot: {}, nonBoostedRoot: {}}
+	store.proposerBoostRoot.Store(boostedRoot)
+	store.setLatestMessage(0, LatestMessage{Slot: 2 * store.beaconCfg.SlotsPerEpoch, Root: nonBoostedRoot})
+	store.timeMs.Store(2 * store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot * 1000)
+	store.checkpointStates.Delete(checkpoint)
+
+	coldHead, _, err := store.GetHead(auxiliaryState)
+	require.NoError(t, err)
+	store.headHash = common.Hash{}
+	_, err = store.getCheckpointState(checkpoint)
+	require.NoError(t, err)
+	warmHead, _, err := store.GetHead(auxiliaryState)
+	require.NoError(t, err)
+
+	require.Equal(t, nonBoostedRoot, warmHead)
+	require.Equal(t, warmHead, coldHead)
+}
+
+func TestComputeVotesAuxStateUsesCachedJustifiedBalanceForProposerBoost(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	root := common.HexToHash("0x01")
+	checkpoint := solid.Checkpoint{Epoch: 1, Root: common.HexToHash("0x02")}
+	f.proposerBoostRoot.Store(root)
+	f.checkpointStates.Store(checkpoint, &checkpointState{
+		unslashedActiveBalance: 64_000_000_000,
+		beaconConfig:           &clparams.MainnetBeaconConfig,
+	})
+	auxiliaryState := state2.New(&clparams.MainnetBeaconConfig)
+	active := solid.NewValidator()
+	active.SetActivationEpoch(0)
+	active.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	active.SetEffectiveBalance(32_000_000_000)
+	require.NoError(t, auxiliaryState.AddValidator(active, 32_000_000_000))
+
+	votes := f.computeVotes(checkpoint, nil, auxiliaryState)
+
+	require.Equal(t, uint64(800_000_000), votes[root])
+}
+
+func TestComputeVotesAuxStateExcludesSlashedBalanceFromProposerBoost(t *testing.T) {
+	f := newGloasWeightTreeTestStore()
+	root := common.HexToHash("0x01")
+	f.proposerBoostRoot.Store(root)
+	checkpointState := &checkpointState{
+		unslashedActiveBalance: 96_000_000_000,
+		beaconConfig:           &clparams.MainnetBeaconConfig,
+	}
+	auxiliaryState := state2.New(&clparams.MainnetBeaconConfig)
+	active := solid.NewValidator()
+	active.SetActivationEpoch(0)
+	active.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	active.SetEffectiveBalance(32_000_000_000)
+	require.NoError(t, auxiliaryState.AddValidator(active, 32_000_000_000))
+	slashed := solid.NewValidator()
+	slashed.SetActivationEpoch(0)
+	slashed.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
+	slashed.SetEffectiveBalance(64_000_000_000)
+	slashed.SetSlashed(true)
+	require.NoError(t, auxiliaryState.AddValidator(slashed, 64_000_000_000))
+
+	votes := f.computeVotes(solid.Checkpoint{}, checkpointState, auxiliaryState)
+
+	require.Equal(t, uint64(400_000_000), votes[root])
 }
 
 func TestVoteSampleBoundsUsesClampedCount(t *testing.T) {
@@ -350,7 +805,7 @@ func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {
 	v.SetEffectiveBalance(32_000_000_000)
 	require.NoError(t, s.AddValidator(v, 32_000_000_000))
 
-	votes := f.computeVotes(solid.Checkpoint{}, nil, s)
+	votes := f.computeVotes(solid.Checkpoint{}, &checkpointState{}, s)
 
 	require.Equal(t, uint64(32_000_000_000), votes[root])
 }
@@ -382,7 +837,6 @@ func TestGloasWeightTreePrepareIsIdempotent(t *testing.T) {
 
 	require.Equal(t, first, second)
 	require.NotZero(t, first)
-	require.Empty(t, f.gloasWeightTree.dirty)
 }
 
 func TestGloasWeightTreePayloadStatusChangeSkipsDirectRebuild(t *testing.T) {
@@ -423,7 +877,7 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 
 	tree := f.gloasWeightTree.prepare(justified, cs)
 	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
-	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+	require.Equal(t, newWeightStoreFromCheckpointState(f, cs).GetAttestationScore(node), tree.GetAttestationScore(node))
 
 	var validatorIndex uint64
 	found := false
@@ -437,10 +891,128 @@ func TestGloasWeightTreeEquivocationDeltaMatchesFullScan(t *testing.T) {
 	require.True(t, found)
 
 	f.setUnequivocating(validatorIndex)
-	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
 	tree = f.gloasWeightTree.prepare(justified, cs)
 
-	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
+	require.Equal(t, newWeightStoreFromCheckpointState(f, cs).GetAttestationScore(node), tree.GetAttestationScore(node))
+}
+
+func gloasDirectWeights(t *gloasWeightTree) map[common.Hash][3]uint64 {
+	weights := make(map[common.Hash][3]uint64, len(t.nodes))
+	for root, node := range t.nodes {
+		weights[root] = [3]uint64{node.directPending, node.directEmpty, node.directFull}
+	}
+	return weights
+}
+
+// Once the tree has a baseline, every recorded vote or equivocation must already be counted,
+// matching a full rebuild, so get_head has no per-validator work left.
+func TestGloasWeightTreeAppliesVotesWhenRecorded(t *testing.T) {
+	f := buildExAnteStore(t)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.gloasWeightTree.prepare(justified, cs)
+	roots := []common.Hash{common.HexToHash("0xdeadbeef")}
+	for root := range f.gloasWeightTree.nodes {
+		roots = append(roots, root)
+	}
+	require.Greater(t, len(roots), 2)
+	rng := rand.New(rand.NewSource(1))
+	for step := range 500 {
+		vi := uint64(rng.Intn(cs.validatorSetSize + 8))
+		if rng.Intn(10) == 0 {
+			f.setUnequivocating(vi)
+		} else {
+			f.setLatestMessage(vi, LatestMessage{
+				Slot:           uint64(rng.Intn(64)),
+				Root:           roots[rng.Intn(len(roots))],
+				PayloadPresent: rng.Intn(2) == 0,
+			})
+		}
+		want := newGloasWeightTree(f)
+		want.prepare(justified, cs)
+		require.Equal(t, gloasDirectWeights(want), gloasDirectWeights(f.gloasWeightTree), "step %d", step)
+	}
+
+	tree := f.gloasWeightTree.prepare(justified, cs)
+	fullScan := newWeightStoreFromCheckpointState(f, cs)
+	for root := range f.gloasWeightTree.topologySeen {
+		for _, status := range []cltypes.PayloadStatus{cltypes.PayloadStatusPending, cltypes.PayloadStatusEmpty, cltypes.PayloadStatusFull} {
+			node := ForkChoiceNode{Root: root, PayloadStatus: status}
+			require.Equal(t, fullScan.GetAttestationScore(node), tree.GetAttestationScore(node), "%v", node)
+		}
+	}
+}
+
+// Votes recorded between prepares must match a full rebuild across finalization pruning,
+// checkpoint-state switches and a voted block that joins the tree later.
+func TestGloasWeightTreeMatchesRebuildAcrossPrepares(t *testing.T) {
+	f, pending := buildExAnteStorePendingLast(t, nil)
+	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	cs, err := f.getCheckpointState(justified)
+	require.NoError(t, err)
+	require.NotNil(t, cs)
+	pendingRoot, err := pending.Block.HashSSZ()
+	require.NoError(t, err)
+	next := *cs
+	next.balances = append([]uint64(nil), cs.balances...)
+	for i := range next.balances {
+		next.balances[i] += uint64(i%3) * 1_000_000_000
+	}
+	states := []*checkpointState{cs, &next}
+	current := cs
+
+	f.mu.Lock()
+	f.gloasWeightTree.prepare(justified, current)
+	roots := []common.Hash{pendingRoot}
+	for root := range f.gloasWeightTree.nodes {
+		roots = append(roots, root)
+	}
+	require.NotContains(t, f.gloasWeightTree.nodes, common.Hash(pendingRoot))
+	check := func(step int) {
+		f.gloasWeightTree.prepare(justified, current)
+		want := newGloasWeightTree(f)
+		want.prepare(justified, current)
+		require.Equal(t, gloasDirectWeights(want), gloasDirectWeights(f.gloasWeightTree), "step %d", step)
+	}
+	rng := rand.New(rand.NewSource(3))
+	for step := range 400 {
+		if step == 200 {
+			check(step)
+			for range 20 {
+				f.setLatestMessage(uint64(rng.Intn(cs.validatorSetSize)), LatestMessage{Slot: 60, Root: pendingRoot})
+			}
+			f.mu.Unlock()
+			require.NoError(t, f.OnBlock(t.Context(), pending, false, true, false))
+			f.mu.Lock()
+			check(step)
+		}
+		vi := uint64(rng.Intn(cs.validatorSetSize + 8))
+		switch r := rng.Intn(20); {
+		case r == 0:
+			f.gloasWeightTree.pruneFinalized(1)
+		case r == 1:
+			current = states[rng.Intn(len(states))]
+		case r < 5:
+			check(step)
+		case r < 7:
+			f.setUnequivocating(vi)
+		default:
+			f.setLatestMessage(vi, LatestMessage{
+				Slot:           uint64(rng.Intn(64)),
+				Root:           roots[rng.Intn(len(roots))],
+				PayloadPresent: rng.Intn(2) == 0,
+			})
+		}
+	}
+	check(400)
+	require.Contains(t, f.gloasWeightTree.nodes, common.Hash(pendingRoot))
+	f.mu.Unlock()
 }
 
 func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
@@ -467,12 +1039,11 @@ func TestGloasWeightTreeFirstPrepareIncludesPreReadyEquivocation(t *testing.T) {
 	require.True(t, found)
 
 	f.setUnequivocating(validatorIndex)
-	require.Empty(t, f.gloasWeightTree.dirty)
+	require.Empty(t, f.gloasWeightTree.applied)
 
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
-	require.Equal(t, NewWeightStore(f).GetAttestationScore(node), tree.GetAttestationScore(node))
-	require.Empty(t, f.gloasWeightTree.dirty)
+	require.Equal(t, newWeightStoreFromCheckpointState(f, cs).GetAttestationScore(node), tree.GetAttestationScore(node))
 }
 
 func TestGloasWeightTreeRebuildsOnCheckpointStateChange(t *testing.T) {
@@ -520,7 +1091,7 @@ func TestGloasWeightTreeNilCheckpointStateReturnsZero(t *testing.T) {
 	tree = f.gloasWeightTree.prepare(justified, nil)
 
 	require.Zero(t, tree.GetAttestationScore(node))
-	require.Zero(t, tree.GetWeight(node))
+	require.Zero(t, tree.GetWeight(node, f.Slot()))
 }
 
 func TestGloasWeightTreeRecomputeDeepChain(t *testing.T) {
@@ -600,23 +1171,18 @@ func TestGloasWeightTreeTracksVotesForMissingRoots(t *testing.T) {
 	}
 	require.True(t, found)
 
-	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot})
-	f.gloasWeightTree.applied = growGloasContributions(f.gloasWeightTree.applied, int(validatorIndex)+1)
+	f.gloasWeightTree.state = cs
 	f.gloasWeightTree.allDirty = false
 	delete(f.gloasWeightTree.nodes, missingRoot)
-	f.gloasWeightTree.addValidatorContribution(validatorIndex, cs)
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot})
 	require.Contains(t, f.gloasWeightTree.missingRootVotes[missingRoot], validatorIndex)
 	require.False(t, f.gloasWeightTree.applied[validatorIndex].direct)
 
 	f.gloasWeightTree.ensureTopology(justified.Root)
-	require.Contains(t, f.gloasWeightTree.dirty, validatorIndex)
 	require.NotContains(t, f.gloasWeightTree.missingRootVotes, missingRoot)
 	require.Contains(t, f.gloasWeightTree.nodes, missingRoot)
-
-	f.gloasWeightTree.applyDirtyValidators(cs)
 	require.True(t, f.gloasWeightTree.applied[validatorIndex].direct)
 	require.Equal(t, cs.balances[validatorIndex], f.gloasWeightTree.nodes[missingRoot].directPending)
-	require.Empty(t, f.gloasWeightTree.dirty)
 	require.False(t, f.gloasWeightTree.allDirty)
 }
 
@@ -644,23 +1210,19 @@ func TestGloasWeightTreeClearsMissingRootVoteWhenValidatorMovesAway(t *testing.T
 	require.True(t, found)
 
 	f.gloasWeightTree.state = cs
-	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot})
-	f.gloasWeightTree.applied = growGloasContributions(f.gloasWeightTree.applied, int(validatorIndex)+1)
 	f.gloasWeightTree.allDirty = false
-	f.gloasWeightTree.dirty = make(map[uint64]struct{})
-	f.gloasWeightTree.addValidatorContribution(validatorIndex, cs)
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: missingRoot})
 	require.Contains(t, f.gloasWeightTree.missingRootVotes[missingRoot], validatorIndex)
 
-	f.setLatestMessage(validatorIndex, LatestMessage{Root: liveRoot})
 	f.gloasWeightTree.nodes[liveRoot] = &gloasWeightNode{}
-	f.gloasWeightTree.applyDirtyValidators(cs)
+	f.setLatestMessage(validatorIndex, LatestMessage{Root: liveRoot})
 
 	require.NotContains(t, f.gloasWeightTree.missingRootVotes, missingRoot)
 	require.True(t, f.gloasWeightTree.applied[validatorIndex].direct)
 	require.Equal(t, cs.balances[validatorIndex], f.gloasWeightTree.nodes[liveRoot].directPending)
 
-	f.gloasWeightTree.markMissingRootDirty(missingRoot)
-	require.Empty(t, f.gloasWeightTree.dirty)
+	f.gloasWeightTree.updateMissingRootVotes(missingRoot)
+	require.Equal(t, cs.balances[validatorIndex], f.gloasWeightTree.nodes[liveRoot].directPending)
 }
 
 func TestOnNewFinalizedPrunesGloasWeightTree(t *testing.T) {
@@ -718,4 +1280,16 @@ func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
 	require.Equal(t, uint64(13), applyWeightDelta(10, 3, true))
 	require.Equal(t, uint64(7), applyWeightDelta(10, 3, false))
 	require.Zero(t, applyWeightDelta(3, 10, false))
+}
+
+func TestGetHeadNodeReturnsCachedSnapshot(t *testing.T) {
+	headRoot := common.Hash{0x41}
+	store := &ForkChoiceStore{
+		headHash:          headRoot,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
 }

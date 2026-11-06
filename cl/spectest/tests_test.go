@@ -39,8 +39,10 @@ func Test(t *testing.T) {
 		t.Skip("ERIGON_SKIP_CL_SPECTEST=true; consensus spec tests are covered by test-integration-caplin")
 	}
 	if clparams.GetBeaconConfig() == nil {
-		caplinConfig := clparams.CaplinConfig{}
-		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig)
 	}
+	t.Run("mainnet_config", testMainnetConfig)
+	t.Run("mainnet_gloas_gossip_time_rewind", testGloasGossipTimeRewind)
+	t.Run("mainnet_gloas_gossip_failed_block_floor", testGloasGossipFailedBlockFloor)
 	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS(mainnetDir))
 }

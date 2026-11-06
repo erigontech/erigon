@@ -83,7 +83,6 @@ func checkDeriveSha(t *testing.T, list DerivableList) {
 	deriveSha := DeriveSha(list)
 	if !hashesEqual(legacySha, deriveSha) {
 		t.Errorf("unexpected hash: %v (expected: %v)\n", deriveSha.Hex(), legacySha.Hex())
-
 	}
 }
 

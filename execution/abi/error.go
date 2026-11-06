@@ -87,9 +87,7 @@ func (e *Error) Unpack(data []byte) (any, error) {
 	return e.Inputs.Unpack(data[4:])
 }
 
-var (
-	errBadBool = errors.New("abi: improperly encoded boolean value")
-)
+var errBadBool = errors.New("abi: improperly encoded boolean value")
 
 // formatSliceString formats the reflection kind with the given slice size
 // and returns a formatted string representation.
@@ -139,7 +137,6 @@ func typeCheck(t Type, value reflect.Value) error {
 	default:
 		return nil
 	}
-
 }
 
 // typeErr returns a formatted type casting error.

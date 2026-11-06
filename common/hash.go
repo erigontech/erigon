@@ -30,9 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var (
-	hashT = reflect.TypeFor[Hash]()
-)
+var hashT = reflect.TypeFor[Hash]()
 
 // Hash represents the 32 byte Keccak256 hash of arbitrary data.
 type Hash [length.Hash]byte

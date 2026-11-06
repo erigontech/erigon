@@ -106,7 +106,7 @@ func Mul(x, y uint256.Int) (z uint256.Int) {
 
 // MulOverflow sets z to the product x*y, and returns z and  whether overflow occurred
 func MulOverflow(x, y uint256.Int) (z uint256.Int, _ bool) {
-	var p = umul(x, y)
+	p := umul(x, y)
 	copy(z[:], p[:4])
 	return z, (p[4] | p[5] | p[6] | p[7]) != 0
 }

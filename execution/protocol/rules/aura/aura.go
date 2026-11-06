@@ -96,7 +96,7 @@ func (s *Step) optCalibrate() bool {
 	return true
 }
 
-type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
+type ReceivedStepHashes map[uint64]map[common.Address]common.Hash // BTreeMap<(u64, Address), H256>
 
 // nolint
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
@@ -211,7 +211,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 // / The block corresponding the parent hash must be stored already.
 // nolint
 func epochTransitionFor(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
-	//TODO: probably this version of func doesn't support non-canonical epoch transitions
+	// TODO: probably this version of func doesn't support non-canonical epoch transitions
 	h := chain.GetHeaderByHash(parentHash)
 	if h == nil {
 		return transition, false
@@ -241,9 +241,8 @@ type AuRa struct {
 	EmptyStepsSet *EmptyStepSet
 	EpochManager  *EpochManager // Mutex<EpochManager>,
 
-	certifier     *common.Address // certifies service transactions
-	certifierLock sync.Mutex
-	db            kv.RwDB
+	certifier atomic.Pointer[common.Address] // certifies service transactions
+	db        kv.RwDB
 }
 
 func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
@@ -576,17 +575,6 @@ func (c *AuRa) VerifyUncles(chain rules.ChainReader, header *types.Header, uncle
 	//return nil
 }
 
-// VerifySeal implements rules.Engine, checking whether the signature contained
-// in the header satisfies the consensus protocol requirements.
-func (c *AuRa) VerifySeal(chain rules.ChainHeaderReader, header *types.Header) error {
-	return nil
-	//snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
-	//if err != nil {
-	//	return err
-	//}
-	//return c.verifySeal(chain, header, snap)
-}
-
 // Prepare implements rules.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
@@ -656,11 +644,14 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 	//return nil
 }
 
-func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
+func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) error {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified)
+		if err := state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
@@ -668,29 +659,29 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 ) error {
 	blockNum := header.Number.Uint64()
 
-	//Check block gas limit from smart contract, if applicable
+	// Check block gas limit from smart contract, if applicable
 	err := c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 	if err != nil {
 		return err
 	}
 
-	c.rewriteBytecode(blockNum, state)
+	if err := c.rewriteBytecode(blockNum, state); err != nil {
+		return err
+	}
 
 	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
 	}
-	c.certifierLock.Lock()
-	if c.cfg.Registrar != nil && c.certifier == nil && config.IsLondon(blockNum) {
-		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	if c.cfg.Registrar != nil && c.certifier.Load() == nil && config.IsLondon(blockNum) {
+		c.certifier.CompareAndSwap(nil, getCertifier(*c.cfg.Registrar, syscall))
 	}
-	c.certifierLock.Unlock()
 
 	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
 		if err != nil {
 			panic(err)
 		}
-		err = c.e.PutEpoch(header.ParentHash, 0, proof) //TODO: block 0 hardcoded - need fix it inside validators
+		err = c.e.PutEpoch(header.ParentHash, 0, proof) // TODO: block 0 hardcoded - need fix it inside validators
 		if err != nil {
 			panic(err)
 		}
@@ -857,7 +848,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 // to construct transition proof. author == ec_recover(sig) known
 // since the blocks are in the DB.
 func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to common.Hash) (out []*types.Header) {
-	var header = from
+	header := from
 	for {
 		header = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if header == nil {
@@ -886,15 +877,6 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 
 	// Assemble and return the final block for sealing
 	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), nil, nil
-}
-
-// SignerFn hashes and signs the data to be signed by a backing account.
-type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
-
-// Authorize injects a private key into the rules engine to mint new blocks with.
-func (c *AuRa) Authorize(signer common.Address, signFn SignerFn) {
-	c.signerMutex.Lock()
-	defer c.signerMutex.Unlock() //nolint:gocritic // empty stub requires defer to prevent badLock
 }
 
 func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) ([]byte, error) {
@@ -1056,26 +1038,25 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 }
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
-// This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
+// It holds no lock across the syscall: under parallel execution the syscall can wait on another tx that also checks.
 func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
-	c.certifierLock.Lock()
-	defer c.certifierLock.Unlock()
-	if c.certifier == nil && c.cfg.Registrar != nil {
-		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
+	if c.certifier.Load() == nil && c.cfg.Registrar != nil {
+		c.certifier.CompareAndSwap(nil, getCertifier(*c.cfg.Registrar, syscall))
 	}
-	if c.certifier == nil {
+	certifier := c.certifier.Load()
+	if certifier == nil {
 		return false
 	}
 	packed, err := certifierAbi().Pack("certified", sender.Value())
 	if err != nil {
 		panic(err)
 	}
-	out, err := syscall(accounts.InternAddress(*c.certifier), packed)
+	out, err := syscall(accounts.InternAddress(*certifier), packed)
 	if err != nil {
 		// Failing closed (treat as non-service tx) is safer than crashing the RPC handler.
 		// One way to hit this: an eth_call against a block whose chain rules don't include
 		// opcodes used by the certifier contract bytecode (e.g. SHR pre-Constantinople).
-		log.Warn("[aura] failed to call certifier", "certifier", *c.certifier, "err", err)
+		log.Warn("[aura] failed to call certifier", "certifier", *certifier, "err", err)
 		return false
 	}
 	res, err := certifierAbi().Unpack("certified", out)
@@ -1163,7 +1144,7 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 		reward = c.cfg.BlockReward[i]
 	}
 	if !found {
-		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+		return nil, errors.New("current block's reward is not found; this indicates a chain config error")
 	}
 
 	r := rules.Reward{Beneficiary: accounts.InternAddress(header.Coinbase), Kind: rules.RewardAuthor, Amount: *reward.amount}
@@ -1180,7 +1161,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]common.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
-		amounts = append(amounts, w.Amount)
+		amounts = append(amounts, uint64(w.Amount))
 		addresses = append(addresses, w.Address)
 	}
 
@@ -1206,8 +1187,9 @@ func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 
 func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
-	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
+	return rules.DefaultBlockPostValidation(header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 /*

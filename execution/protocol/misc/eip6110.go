@@ -41,12 +41,14 @@ var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
 	DepositABI   = abi.ABI{Events: map[string]abi.Event{"DepositEvent": depositEvent}}
 	bytesT, _    = abi.NewType("bytes", "", nil)
-	depositEvent = abi.NewEvent("DepositEvent", "DepositEvent", false, abi.Arguments{
-		{Name: "pubkey", Type: bytesT, Indexed: false},
-		{Name: "withdrawal_credentials", Type: bytesT, Indexed: false},
-		{Name: "amount", Type: bytesT, Indexed: false},
-		{Name: "signature", Type: bytesT, Indexed: false},
-		{Name: "index", Type: bytesT, Indexed: false}},
+	depositEvent = abi.NewEvent(
+		"DepositEvent", "DepositEvent", false, abi.Arguments{
+			{Name: "pubkey", Type: bytesT, Indexed: false},
+			{Name: "withdrawal_credentials", Type: bytesT, Indexed: false},
+			{Name: "amount", Type: bytesT, Indexed: false},
+			{Name: "signature", Type: bytesT, Indexed: false},
+			{Name: "index", Type: bytesT, Indexed: false},
+		},
 	)
 )
 
@@ -59,11 +61,11 @@ type depositUnpacking struct {
 	Index                 []byte
 }
 
-var InvalidDepositLogErr = errors.New("invalid deposit log: unsupported data layout")
+var ErrInvalidDepositLog = errors.New("invalid deposit log: unsupported data layout")
 
 func validateDepositLog(data []byte) error {
 	if len(data) != DepositLogLen {
-		return InvalidDepositLogErr
+		return ErrInvalidDepositLog
 	}
 	pubkeyOffset := uint256.NewInt(0).SetBytes(data[0:32])
 	withdrawalCredentialsOffset := uint256.NewInt(0).SetBytes(data[32:64])
@@ -76,7 +78,7 @@ func validateDepositLog(data []byte) error {
 		amountOffset.CmpUint64(320) != 0 ||
 		signatureOffset.CmpUint64(384) != 0 ||
 		indexOffset.CmpUint64(512) != 0 {
-		return InvalidDepositLogErr
+		return ErrInvalidDepositLog
 	}
 
 	pubkeySize := uint256.NewInt(0).SetBytes(data[160:192])
@@ -90,7 +92,7 @@ func validateDepositLog(data []byte) error {
 		amountSize.CmpUint64(8) != 0 ||
 		signatureSize.CmpUint64(BLSSigLen) != 0 ||
 		indexSize.CmpUint64(8) != 0 {
-		return InvalidDepositLogErr
+		return ErrInvalidDepositLog
 	}
 	return nil
 }

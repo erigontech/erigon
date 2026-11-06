@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -40,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -154,7 +155,6 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 	})
-
 }
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
@@ -175,7 +175,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
+	// var maxWrite, otherMaxWrite uint64
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()

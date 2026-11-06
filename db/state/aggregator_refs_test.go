@@ -39,7 +39,7 @@ func writeRefsToml(t *testing.T, dirs datadir.Dirs, refs bool) {
 	t.Helper()
 	content := fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\nreferences_in_commitment_branches = %v\n",
 		config3.DefaultStepSize, config3.DefaultStepsInFrozenFile, refs)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0o644))
 }
 
 func openTestAggForRefs(t *testing.T, dirs datadir.Dirs, settings *ErigonDBSettings) *Aggregator {
@@ -103,7 +103,7 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		content := fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\n",
 			config3.DefaultStepSize, config3.DefaultStepsInFrozenFile)
-		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0o644))
 
 		settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 		require.NoError(t, err)

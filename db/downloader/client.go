@@ -19,7 +19,7 @@ type RpcClient struct {
 
 func (me *RpcClient) fixPath(path string) (string, error) {
 	if !filepath.IsAbs(path) {
-		return path, nil
+		return filepath.ToSlash(path), nil
 	}
 	rel, err := filepath.Rel(me.rootDir, path)
 	if err != nil {
@@ -28,7 +28,8 @@ func (me *RpcClient) fixPath(path string) (string, error) {
 	if !filepath.IsLocal(rel) {
 		return "", errRpcSnapName{fmt.Errorf("relative path %q is not local to %q", rel, me.rootDir)}
 	}
-	return rel, nil
+	// Torrent names are slash-separated everywhere; filepath.Rel yields backslashes on Windows.
+	return filepath.ToSlash(rel), nil
 }
 
 func (me *RpcClient) fixPaths(paths iter.Seq[*string]) (err error) {

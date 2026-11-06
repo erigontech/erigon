@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -39,14 +40,23 @@ import (
 )
 
 const (
-	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	minimumPeersPerSubnet            = 4 // Minimum peers needed per subnet before proactive search stops
-	subnetSearchTimeout              = 30 * time.Second
-	subnetSearchInterval             = 12 * time.Second // Check every slot
-	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
+	// Subscribers wanted per attestation subnet before the proactive search stops: the mesh low watermark, so
+	// gossipsub can fill a subnet's mesh.
+	minimumPeersPerSubnet = gossip.GossipSubDlo
+	subnetSearchTimeout   = 30 * time.Second
+	subnetSearchInterval  = 12 * time.Second // Check every slot
+	peerPruneInterval     = 60 * time.Second // How often to check for excess peers
 )
+
+func filterNonPrivatePeerAddresses(info *peer.AddrInfo) bool {
+	info.Addrs = slices.DeleteFunc(info.Addrs, func(addr multiaddr.Multiaddr) bool {
+		ip, err := manet.ToIP(addr)
+		return err != nil || ip.IsPrivate()
+	})
+	return len(info.Addrs) > 0
+}
 
 // getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
 func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
@@ -122,13 +132,11 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		checked++
 		node := filteredIterator.Node()
 
-		// Skip private IPs unless local discovery is enabled
-		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
-			continue
-		}
-
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
+			continue
+		}
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterNonPrivatePeerAddresses(peerInfo) {
 			continue
 		}
 
@@ -137,8 +145,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			continue
 		}
 
-		// Skip banned peers
-		if s.peers.BanStatus(peerInfo.ID) {
+		if !s.peers.Dialable(peerInfo.ID) {
 			continue
 		}
 
@@ -209,28 +216,11 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			s.pruneExcessPeers()
 		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
-
-			// Collect underserved subnets with their peer counts
-			var underserved []subnetSearchState
-			for i, count := range &coverage {
-				if count < minimumPeersPerSubnet {
-					underserved = append(underserved, subnetSearchState{
-						idx:    i,
-						wanted: minimumPeersPerSubnet - count,
-						found:  0,
-					})
-				}
-			}
-
+			underserved := underservedSubnets(&coverage)
 			if len(underserved) == 0 {
 				log.Trace("[Sentinel] All subnets have sufficient peers")
 				continue
 			}
-
-			// Sort by wanted count descending (subnets needing most peers first, i.e., 0-peer subnets)
-			slices.SortFunc(underserved, func(a, b subnetSearchState) int {
-				return cmp.Compare(b.wanted, a.wanted)
-			})
 
 			// Extract just the subnet indices for logging
 			underservedIdxs := make([]int, len(underserved))
@@ -269,6 +259,31 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				"stillUnderserved", stillUnderserved)
 		}
 	}
+}
+
+// underservedSubnets returns the subnets with fewer than minimumPeersPerSubnet subscribers, the emptiest first.
+func underservedSubnets(coverage *[attestationSubnetCount]int) []subnetSearchState {
+	var underserved []subnetSearchState
+	for i, count := range coverage {
+		if count < minimumPeersPerSubnet {
+			underserved = append(underserved, subnetSearchState{idx: i, wanted: minimumPeersPerSubnet - count})
+		}
+	}
+	slices.SortFunc(underserved, func(a, b subnetSearchState) int {
+		return cmp.Compare(b.wanted, a.wanted)
+	})
+	return underserved
+}
+
+// coversUnderservedSubnet reports whether a peer advertising peerSubnets would add a subscriber to a subnet
+// below minimumPeersPerSubnet.
+func coversUnderservedSubnet(peerSubnets bitfield.Bitvector64, coverage *[attestationSubnetCount]int) bool {
+	for i := range attestationSubnetCount {
+		if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
+			return true
+		}
+	}
+	return false
 }
 
 // peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions
@@ -416,7 +431,6 @@ func (s *Sentinel) pruneExcessPeers() {
 		// Disconnect the peer
 		s.closePeer(info.pid)
 		s.p2p.Host().Peerstore().RemovePeer(info.pid)
-		s.peers.RemovePeer(info.pid)
 		removed++
 
 		log.Trace("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
@@ -435,8 +449,8 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	if info.ID == s.p2p.Host().ID() {
 		return nil
 	}
-	if s.peers.BanStatus(info.ID) {
-		return errors.New("refused to connect to bad peer")
+	if !s.peers.Dialable(info.ID) {
+		return errors.New("peer is not dialable")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -489,12 +503,12 @@ func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
 func (s *Sentinel) listenForPeers() {
 	multiAddresses := make([]multiaddr.Multiaddr, 0, len(s.cfg.NetworkConfig.StaticPeers))
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
-		addr, err := p2p.ParseStaticPeer(node)
+		addrs, err := p2p.ParseStaticPeerAddrs(node)
 		if err != nil {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 			continue
 		}
-		multiAddresses = append(multiAddresses, addr)
+		multiAddresses = append(multiAddresses, addrs...)
 	}
 	log.Info("CL Sentinel static peers", "len", len(multiAddresses))
 	if len(multiAddresses) > 0 {
@@ -529,12 +543,11 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
-		s.pidToEnr.Store(peerInfo.ID, node)
-		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
-		// Skip Peer if IP was private, unless local discovery is enabled.
-		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterNonPrivatePeerAddresses(peerInfo) {
 			continue
 		}
+		s.pidToEnr.Store(peerInfo.ID, node)
+		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
 
 		if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -554,9 +567,32 @@ func (s *Sentinel) listenForPeers() {
 }
 
 func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
-	go func() {
-		peerId := conn.RemotePeer()
+	peerId := conn.RemotePeer()
+	addr := conn.RemoteMultiaddr()
+	transport := conn.ConnState().Transport
+	if transport == "quic-v1" {
+		transport = "quic"
+	}
+	s.logger.Trace("[Sentinel] Peer connected",
+		"peer", peerId,
+		"direction", conn.Stat().Direction,
+		"addr", addr,
+		"transport", transport)
+	go s.handleNewConnection(peerId, conn.Stat().Direction, addr, func() (bool, error) {
+		return s.handshaker.ValidatePeer(s.ctx, peerId)
+	})
+}
 
+// handleNewConnection admits or rejects a peer that has just connected, then runs its status
+// handshake. Reports whether the peer was kept.
+func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Direction, addr multiaddr.Multiaddr, validate func() (bool, error)) bool {
+	if s.peers.RefuseConnections(peerId) {
+		s.logger.Debug("[Sentinel] Closing refused peer connection", "peer", peerId, "direction", direction, "addr", addr)
+		s.closePeer(peerId)
+		return false
+	}
+
+	{
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
 		peerHelpsSubnets := false
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
@@ -564,12 +600,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 				var peerSubnets bitfield.Bitvector64
 				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil && len(peerSubnets) == 8 {
 					coverage := s.getSubnetCoverage()
-					for i := range attestationSubnetCount {
-						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
-							peerHelpsSubnets = true
-							break
-						}
-					}
+					peerHelpsSubnets = coversUnderservedSubnet(peerSubnets, &coverage)
 				}
 			}
 		}
@@ -579,35 +610,35 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.closePeer(peerId)
-			s.peers.RemovePeer(peerId)
-			return
+			return false
 		}
+	}
 
-		valid, err := s.handshaker.ValidatePeer(s.ctx, peerId)
-		if err != nil {
-			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
-			// The peer may still work for gossip even if status exchange failed.
-			log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+	valid, err := validate()
+	if !valid && err != nil {
+		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
+		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
+		if becameUndialable {
+			s.logger.Debug("[Sentinel] Peer became undialable", "peer", peerId)
 		}
-
-		if !valid && err == nil {
-			// Handshake succeeded but fork digest mismatched — peer is on a different fork.
-			// Must disconnect to avoid receiving incompatible blocks.
-			log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
-			s.p2p.Host().Peerstore().RemovePeer(peerId)
+		if s.peers.RefuseConnections(peerId) {
+			s.logger.Debug("[Sentinel] Refusing peer connections", "peer", peerId, "count", failureCount)
 			s.closePeer(peerId)
-			s.peers.RemovePeer(peerId)
-			return
+			return false
 		}
+		return true
+	}
 
-		if !valid {
-			// Handshake had a transport error AND returned invalid — keep anyway.
-			s.peers.RecordHandshakeFailure(peerId)
-		} else {
-			// we were able to successfully connect, so add this peer to our pool
-			s.peers.AddPeer(peerId)
+	if !valid {
+		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+		// Must disconnect to avoid receiving incompatible blocks.
+		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
+		s.p2p.Host().Peerstore().RemovePeer(peerId)
+		s.closePeer(peerId)
+		return false
+	}
 
-			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
-		}
-	}()
+	s.peers.RecordHandshakeSuccess(peerId)
+	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
+	return true
 }

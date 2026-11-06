@@ -28,9 +28,9 @@ import (
 
 type (
 	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
-	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error)
-	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error)
-	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error)
+	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error)
+	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error)
+	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
 	stringer       func(pc uint64, callContext *CallContext) string
@@ -69,6 +69,7 @@ var (
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
 	amsterdamInstructionSet        = newAmsterdamInstructionSet()
+	bogotaInstructionSet           = newBogotaInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -77,6 +78,11 @@ var (
 // selected operation per executed opcode, and a pointer table would make each
 // of those a dependent load off a separately-allocated struct.
 type JumpTable [256]operation
+
+func (op *operation) NumPush() int { return op.numPush }
+
+// UsesMemory reports whether the operation reads or writes memory.
+func (op *operation) UsesMemory() bool { return op.memorySize != nil }
 
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
@@ -95,6 +101,19 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
+}
+
+func newBogotaInstructionSet() JumpTable {
+	instructionSet := newAmsterdamInstructionSet()
+	instructionSet[APPROVE] = operation{execute: opApprove, dynamicGas: gasReturn, memorySize: memoryReturn, numPop: 3}
+	instructionSet[TXPARAM] = operation{execute: opTxParam, constantGas: 2, numPop: 1, numPush: 1}
+	instructionSet[FRAMEDATALOAD] = operation{execute: opFrameDataLoad, constantGas: 3, numPop: 2, numPush: 1}
+	instructionSet[FRAMEDATACOPY] = operation{execute: opFrameDataCopy, constantGas: 3, dynamicGas: gasCallDataCopy, memorySize: memoryCallDataCopy, numPop: 4}
+	instructionSet[FRAMEPARAM] = operation{execute: opFrameParam, constantGas: 2, numPop: 2, numPush: 1}
+	instructionSet[SIGPARAM] = operation{execute: opSigParam, constantGas: 2, numPop: 2, numPush: 1}
+	instructionSet[SIGDATACOPY] = operation{execute: opSigDataCopy, constantGas: 3, dynamicGas: gasCallDataCopy, memorySize: memoryCallDataCopy, numPop: 4}
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
 }
 
 func newAmsterdamInstructionSet() JumpTable {
@@ -266,7 +285,6 @@ func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet[EXP].dynamicGas = gasExpEIP160
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
-
 }
 
 // EIP 150 a.k.a Tangerine Whistle

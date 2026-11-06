@@ -82,7 +82,8 @@ func VerifyBranchHashes(
 				var acc accounts.Account
 				if err := accounts.DeserialiseV3(&acc, accVal); err != nil {
 					mismatches = append(mismatches, fmt.Sprintf(
-						"nibble %x: failed to deserialise account %x: %v", nibble, accKeyBytes, err))
+						"nibble %x: failed to deserialise account %x: %v", nibble, accKeyBytes, err,
+					))
 					continue
 				}
 				c.Nonce = acc.Nonce
@@ -108,7 +109,8 @@ func VerifyBranchHashes(
 		computed, err := hph.computeCellHash(c, depth, nil)
 		if err != nil {
 			mismatches = append(mismatches, fmt.Sprintf(
-				"nibble %x: computeCellHash error: %v", nibble, err))
+				"nibble %x: computeCellHash error: %v", nibble, err,
+			))
 			continue
 		}
 
@@ -121,7 +123,8 @@ func VerifyBranchHashes(
 		if origLen != int16(len(computed)) || common.Hash(computed[:origLen]) != origHash {
 			mismatches = append(mismatches, fmt.Sprintf(
 				"nibble %x: stateHash mismatch: stored=%x computed=%x (branchKey=%x)",
-				nibble, origHash[:origLen], computed[:min(int(origLen), len(computed))], branchKey))
+				nibble, origHash[:origLen], computed[:min(int(origLen), len(computed))], branchKey,
+			))
 		}
 	}
 

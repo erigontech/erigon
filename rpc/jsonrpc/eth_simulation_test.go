@@ -2,9 +2,12 @@ package jsonrpc
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -13,24 +16,56 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	tx, err := apis.eth.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	wantErr := errors.New("commitment history unavailable")
+	view := historyFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.CommitmentDomain: wantErr}}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("commitment_history_%t", enabled), func(t *testing.T) {
+			sim := simulator{txNumReader: apis.eth._txNumReader, commitmentHistory: enabled}
+			reader, _, _, err := sim.newStateReaderForBlock(t.Context(), view, nil, chainInfo.old.num, nil, false)
+			if enabled {
+				require.ErrorIs(t, err, wantErr)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, reader)
+			}
+		})
+	}
+}
 
 type simulateV1TestService struct{}
 
 func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.BlockNumberOrHash) (SimulationResult, error) {
 	return SimulationResult{
 		{
-			"calls": []CallResult{
+			Calls: []ethapi.CallResult{
 				{
 					ReturnData: "0x",
 					GasUsed:    hexutil.Uint64(0x5208),
@@ -43,7 +78,7 @@ func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.
 }
 
 type simulateV1ClientBlockResult struct {
-	Calls []CallResult `json:"calls"`
+	Calls []ethapi.CallResult `json:"calls"`
 }
 
 // ─── sanitizeSimulatedBlocks tests ────────────────────────────────────────────
@@ -139,6 +174,92 @@ func TestSimulateSanitizeBlockOrder(t *testing.T) {
 	}
 }
 
+func TestMakeHeadersSlotNumber(t *testing.T) {
+	slot := func(v uint64) *uint64 { return &v }
+	for _, tc := range []struct {
+		name     string
+		baseSlot *uint64
+		want     []*uint64
+	}{
+		{name: "parent slot plus one", baseSlot: slot(41), want: []*uint64{slot(42), slot(43)}},
+		{name: "omitted when the parent has none", baseSlot: nil, want: []*uint64{nil, nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sim := &simulator{
+				base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, SlotNumber: tc.baseSlot},
+				chainConfig: chain.AllProtocolChanges,
+			}
+			blocks, err := sim.sanitizeSimulatedBlocks([]SimulatedBlock{{}, {}})
+			require.NoError(t, err)
+			headers, err := sim.makeHeaders(blocks)
+			require.NoError(t, err)
+			require.Len(t, headers, len(tc.want))
+			for i, header := range headers {
+				assert.Equal(t, tc.want[i], header.SlotNumber, "block %d", i)
+			}
+		})
+	}
+}
+
+func TestMakeHeadersDifficultyAtMergeHeight(t *testing.T) {
+	config := chain.TestChainBerlinConfig.Copy()
+	config.TerminalTotalDifficulty = uint256.NewInt(1)
+	config.MergeHeight = common.NewUint64(12)
+	sim := &simulator{
+		base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, Difficulty: *uint256.NewInt(5)},
+		chainConfig: config,
+	}
+	blocks, err := sim.sanitizeSimulatedBlocks([]SimulatedBlock{{}, {}})
+	require.NoError(t, err)
+	headers, err := sim.makeHeaders(blocks)
+	require.NoError(t, err)
+	require.Len(t, headers, 2)
+	assert.Equal(t, *uint256.NewInt(5), headers[0].Difficulty, "block before MergeHeight")
+	assert.Equal(t, uint256.Int{}, headers[1].Difficulty, "block at MergeHeight")
+}
+
+func TestMakeHeadersDifficultyOverride(t *testing.T) {
+	mergeAt12 := chain.TestChainBerlinConfig.Copy()
+	mergeAt12.TerminalTotalDifficulty = uint256.NewInt(1)
+	mergeAt12.MergeHeight = common.NewUint64(12)
+	noMergeHeight := chain.TestChainBerlinConfig.Copy()
+	noMergeHeight.TerminalTotalDifficulty = uint256.NewInt(1)
+
+	override := func() SimulatedBlock {
+		return SimulatedBlock{BlockOverrides: &ethapi.BlockOverrides{Difficulty: (*hexutil.U256)(uint256.NewInt(1))}}
+	}
+	makeHeaders := func(config *chain.Config, baseDifficulty uint64, blocks []SimulatedBlock) ([]*types.Header, error) {
+		sim := &simulator{
+			base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, Difficulty: *uint256.NewInt(baseDifficulty)},
+			chainConfig: config,
+		}
+		sanitized, err := sim.sanitizeSimulatedBlocks(blocks)
+		require.NoError(t, err)
+		return sim.makeHeaders(sanitized)
+	}
+	requireInvalidParams := func(t *testing.T, err error, message string) {
+		t.Helper()
+		var rpcErr *rpc.CustomError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.Code)
+		assert.Equal(t, message, rpcErr.Message)
+	}
+
+	t.Run("applied before the merge", func(t *testing.T) {
+		headers, err := makeHeaders(mergeAt12, 5, []SimulatedBlock{override()})
+		require.NoError(t, err)
+		assert.Equal(t, *uint256.NewInt(1), headers[0].Difficulty)
+	})
+	t.Run("rejected after the merge", func(t *testing.T) {
+		_, err := makeHeaders(mergeAt12, 5, []SimulatedBlock{{}, override()})
+		requireInvalidParams(t, err, "block 12: difficulty override is not allowed after the merge")
+	})
+	t.Run("rejected on a zero-difficulty parent", func(t *testing.T) {
+		_, err := makeHeaders(noMergeHeight, 0, []SimulatedBlock{override()})
+		requireInvalidParams(t, err, "block 11: difficulty override is not allowed after the merge")
+	})
+}
+
 // TestSanitizeBlocksTooMany verifies the maxSimulateBlocks limit.
 func TestSanitizeBlocksTooMany(t *testing.T) {
 	sim := &simulator{base: &types.Header{Number: *uint256.NewInt(0), Time: 0}}
@@ -204,7 +325,7 @@ func TestSanitizeCallGasDefaultsToRemainingBlock(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 10_000_000, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 10_000_000}, 50_000_000)
 	require.NoError(t, err)
 	// remaining = 30M - 10M = 20M, which is < globalGasCap of 50M, so gas = 20M
 	assert.Equal(t, uint64(20_000_000), uint64(*args.Gas))
@@ -217,7 +338,7 @@ func TestSanitizeCallGasDefaultsCappedByGasCap(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(100_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 25_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 25_000_000)
 	require.NoError(t, err)
 	// remaining = 100M, globalGasCap = 25M → capped to 25M
 	assert.Equal(t, uint64(25_000_000), uint64(*args.Gas))
@@ -230,7 +351,7 @@ func TestSanitizeCallGasDefaultsNoCap(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 0)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 0)
 	require.NoError(t, err)
 	// remaining = 30M, effectiveCap = MaxUint64/2 → gas = 30M (remaining is less)
 	assert.Equal(t, uint64(30_000_000), uint64(*args.Gas))
@@ -244,7 +365,7 @@ func TestSanitizeCallUserGasRespected(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(5_000_000), uint64(*args.Gas))
 }
@@ -258,7 +379,7 @@ func TestSanitizeCallUserGasCappedByGlobalCap(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(200_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(50_000_000), uint64(*args.Gas))
 }
@@ -271,7 +392,7 @@ func TestSanitizeCallUserGasNoCap(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(200_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 0)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 0)
 	require.NoError(t, err)
 	// No globalGasCap, so user gas is not capped
 	assert.Equal(t, uint64(100_000_000), uint64(*args.Gas))
@@ -285,7 +406,7 @@ func TestSanitizeCallBlockGasLimitExceeded(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 10_000_000, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 10_000_000}, 50_000_000)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "block gas limit reached")
 	var customErr *rpc.CustomError
@@ -301,7 +422,7 @@ func TestSanitizeCallBlockGasLimitExact(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 10_000_000, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 10_000_000}, 50_000_000)
 	require.NoError(t, err)
 }
 
@@ -313,7 +434,7 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	require.NotNil(t, args.ChainID)
 	// The returned chain ID should equal the original.
@@ -330,7 +451,7 @@ func TestSanitizeCallChainIDMismatch(t *testing.T) {
 	args.ChainID = (*hexutil.U256)(uint256.NewInt(999))
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "chainId does not match")
 }
@@ -342,7 +463,7 @@ func TestSanitizeCallChainIDMatch(t *testing.T) {
 	args.ChainID = (*hexutil.U256)(uint256.NewInt(42))
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 }
 
@@ -353,7 +474,7 @@ func TestSanitizeCallBaseFeeNil(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.NotNil(t, args.GasPrice, "GasPrice should be set when baseFee is nil")
 	assert.Nil(t, args.MaxFeePerGas, "MaxFeePerGas should not be set when baseFee is nil")
@@ -367,7 +488,7 @@ func TestSanitizeCallBaseFeeSet(t *testing.T) {
 	bc := blockCtx(30_000_000)
 	baseFee := uint256.NewInt(1_000_000_000) // 1 gwei
 
-	err := sim.sanitizeCall(&args, nil, &bc, baseFee, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, baseFee, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.NotNil(t, args.MaxFeePerGas, "MaxFeePerGas should be set when baseFee is provided")
 	assert.NotNil(t, args.MaxPriorityFeePerGas, "MaxPriorityFeePerGas should be set when baseFee is provided")
@@ -381,7 +502,7 @@ func TestSanitizeCallBlobGas(t *testing.T) {
 	args.BlobVersionedHashes = []common.Hash{{1}}
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.NotNil(t, args.MaxFeePerBlobGas, "MaxFeePerBlobGas should be set when BlobVersionedHashes is present")
 }
@@ -393,7 +514,7 @@ func TestSanitizeCallBlobGasNotSetWithoutHashes(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.Nil(t, args.MaxFeePerBlobGas, "MaxFeePerBlobGas should not be set without BlobVersionedHashes")
 }
@@ -407,7 +528,7 @@ func TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap(t *testing.T)
 	hugeGasLimit := uint64(math.MaxUint64/2) + 1000
 	bc := blockCtx(hugeGasLimit)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 0)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 0)
 	require.NoError(t, err)
 	// Gas should be capped to MaxUint64/2, not the full block remaining.
 	assert.Equal(t, uint64(math.MaxUint64/2), uint64(*args.Gas))
@@ -466,9 +587,9 @@ func TestErrorHelpers(t *testing.T) {
 
 func TestRepairLogs(t *testing.T) {
 	hash := common.HexToHash("0xdeadbeef")
-	calls := []CallResult{
-		{Logs: []*types.RPCLog{{}, {}}},
-		{Logs: []*types.RPCLog{{}}},
+	calls := []ethapi.CallResult{
+		{Logs: []*types.Log{{}, {}}},
+		{Logs: []*types.Log{{}}},
 		{Logs: nil},
 	}
 	repairLogs(calls, hash)
@@ -480,7 +601,7 @@ func TestRepairLogs(t *testing.T) {
 func TestRepairLogsEmpty(t *testing.T) {
 	// Should not panic with empty input.
 	repairLogs(nil, common.Hash{})
-	repairLogs([]CallResult{}, common.Hash{})
+	repairLogs([]ethapi.CallResult{}, common.Hash{})
 }
 
 // ─── newSimulator tests ──────────────────────────────────────────────────────
@@ -491,7 +612,7 @@ func TestNewSimulatorGasPool(t *testing.T) {
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 50_000_000, 1024, 0, false)
-	assert.Equal(t, uint64(50_000_000), sim.gasPool.Gas())
+	assert.Equal(t, uint64(50_000_000), sim.gasBudget)
 	assert.True(t, sim.traceTransfers)
 	assert.True(t, sim.validation)
 	assert.True(t, sim.fullTransactions)
@@ -503,7 +624,7 @@ func TestNewSimulatorZeroGasCap(t *testing.T) {
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 0, 1024, 0, false)
-	assert.Equal(t, uint64(0), sim.gasPool.Gas())
+	assert.Equal(t, uint64(0), sim.gasBudget)
 }
 
 // ─── SimulationRequest validation tests ──────────────────────────────────────
@@ -549,8 +670,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 
-	calls, ok := result[0]["calls"].([]CallResult)
-	require.True(t, ok, "expected typed call results")
+	calls := result[0].Calls
 	require.Len(t, calls, 1)
 
 	call := calls[0]
@@ -558,6 +678,183 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	assert.Nil(t, call.Error)
 	assert.NotZero(t, uint64(call.MaxUsedGas))
 	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
+}
+
+func TestSimulateV1IgnoresLoneBlobFeeCap(t *testing.T) {
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validation %v", validation), func(t *testing.T) {
+			m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			to := common.HexToAddress("0x3333333333333333333333333333333333333333")
+			gas := hexutil.Uint64(21_000)
+			feeCap := (*hexutil.U256)(uint256.NewInt(1_000_000_000))
+
+			result, err := api.SimulateV1(context.Background(), SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{Calls: []ethapi.CallArgs{{
+					From:                 &bankAddr,
+					To:                   &to,
+					Gas:                  &gas,
+					MaxFeePerGas:         feeCap,
+					MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(0)),
+					MaxFeePerBlobGas:     (*hexutil.U256)(uint256.NewInt(0)),
+				}}}},
+				Validation: validation,
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			require.NoError(t, err)
+			require.Len(t, result, 1)
+			require.Len(t, result[0].Calls, 1)
+			require.Nil(t, result[0].Calls[0].Error)
+			require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(result[0].Calls[0].Status))
+		})
+	}
+}
+
+// A base fee override must reach the BASEFEE opcode in non-validation mode too,
+// where the call carries no gas price of its own.
+func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+			},
+			Calls: []ethapi.CallArgs{{From: &bankAddr, To: &contractAddr, Gas: &gas}},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls := result[0].Calls
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000007", calls[0].ReturnData)
+}
+
+// A non-validating call pays no fee, so an overridden base fee must not credit
+// the burnt contract of a chain that has one (AuRa/Gnosis).
+func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
+	burntAddr := common.HexToAddress("0x00000000000000000000000000000000b0b0b0b0")
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BurntContract = map[string]common.Address{"0": burntAddr}
+
+	m, _, bankAddr := fundedBankGenesis(t, chainConfig)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	balanceCode := hexutil.Bytes(runtimeReturningOpcode(byte(vm.SELFBALANCE)))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+				accounts.InternAddress(burntAddr):    {Code: &balanceCode},
+			},
+			Calls: []ethapi.CallArgs{
+				{From: &bankAddr, To: &contractAddr, Gas: &gas},
+				{From: &bankAddr, To: &burntAddr, Gas: &gas},
+			},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls := result[0].Calls
+	require.Len(t, calls, 2)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[1].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", calls[1].ReturnData)
+}
+
+func TestSimulateV1TraceTransfersWithEIP7708(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	to := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	value := (*hexutil.U256)(uint256.NewInt(1000))
+	gas := hexutil.Uint64(300_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			Calls: []ethapi.CallArgs{{From: &bankAddr, To: &to, Value: value, Gas: &gas}},
+		}},
+		TraceTransfers: true,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls := result[0].Calls
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	require.Len(t, calls[0].Logs, 1)
+	assert.Equal(t, common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"), calls[0].Logs[0].Address)
+}
+
+func TestSimulateV1WithdrawalsOverrideCreditsBalance(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	recipient := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+	balanceCode := hexutil.Bytes(runtimeReturningOpcode(byte(vm.SELFBALANCE)))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{
+				BlockOverrides: &ethapi.BlockOverrides{
+					Withdrawals: &types.Withdrawals{{Index: 0, Validator: 1, Address: recipient, Amount: 7}},
+				},
+				StateOverrides: &ethapi.StateOverrides{
+					accounts.InternAddress(recipient): {Code: &balanceCode},
+				},
+			},
+			{Calls: []ethapi.CallArgs{{From: &bankAddr, To: &recipient, Gas: &gas}}},
+		},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	calls := result[1].Calls
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	assert.Equal(t, "0x00000000000000000000000000000000000000000000000000000001a13b8600", calls[0].ReturnData)
+}
+
+func TestSimulateV1MaxNonceSender(t *testing.T) {
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("validation=%v", validation), func(t *testing.T) {
+			m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+			to := common.HexToAddress("0x00000000000000000000000000000000c0ffee03")
+			maxNonce := hexutil.Uint64(math.MaxUint64)
+			gas := hexutil.Uint64(100_000)
+
+			_, err := api.SimulateV1(context.Background(), SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{
+					StateOverrides: &ethapi.StateOverrides{
+						accounts.InternAddress(bankAddr): {Nonce: &maxNonce},
+					},
+					Calls: []ethapi.CallArgs{{From: &bankAddr, To: &to, Gas: &gas}},
+				}},
+				Validation: validation,
+			}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+			var customErr *rpc.CustomError
+			require.ErrorAs(t, err, &customErr)
+			assert.Equal(t, rpc.ErrCodeInternalError, customErr.Code)
+			assert.ErrorContains(t, err, protocol.ErrNonceMax.Error())
+		})
+	}
 }
 
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
@@ -626,6 +923,14 @@ func TestValidateSimulationRequest(t *testing.T) {
 			wantCode:  rpc.ErrCodeClientLimitExceeded,
 			wantError: fmt.Sprintf("too many calls: %d > %d", maxSimulateTotalCalls+1, maxSimulateTotalCalls),
 		},
+		{
+			name: "null withdrawal",
+			blocks: []SimulatedBlock{
+				{BlockOverrides: &ethapi.BlockOverrides{Withdrawals: &types.Withdrawals{nil}}},
+			},
+			wantCode:  rpc.ErrCodeInvalidParams,
+			wantError: "withdrawal 0 of block 0 is null",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateSimulationRequest(tc.blocks)
@@ -647,6 +952,110 @@ func TestValidateSimulationRequest(t *testing.T) {
 	}
 }
 
+// ─── computeSimulatedStateRoot tests ─────────────────────────────
+
+// observedFrozenBlocks answers the frozen-blocks sentinel and nothing else: the embedded
+// interface is nil, so any further reader call panics the test.
+type observedFrozenBlocks struct {
+	dbservices.FullBlockReader
+	frozen   uint64
+	observed bool
+}
+
+func (r observedFrozenBlocks) FrozenBlocksObserved() (uint64, bool) { return r.frozen, r.observed }
+
+func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		frozen   uint64
+		observed bool
+	}{
+		{name: "blocks are frozen", frozen: 1000, observed: true},
+		{name: "frozen count not observed yet", frozen: 0, observed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("state-history commitment was computed on a frozen chain: %v", r)
+				}
+			}()
+			sim := &simulator{blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
+			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+
+			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block, 0, 0, nil, nil, false)
+
+			require.NoError(t, err)
+			require.Equal(t, common.Hash{}, block.Root())
+		})
+	}
+}
+
+func TestSimulateV1HistoricalRootsFollowSimulatedChain(t *testing.T) {
+	generate := func(t *testing.T, m *execmoduletester.ExecModuleTester, key *ecdsa.PrivateKey, recipients []*common.Address) *blockgen.ChainPack {
+		t.Helper()
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		chainPack, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
+			if recipients[i] == nil {
+				return
+			}
+			txn, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(m.Address), To: recipients[i], Value: *uint256.NewInt(7), GasLimit: 21_000},
+				ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+				FeeCap:   *uint256.NewInt(1_000_000_000_000),
+			}, *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return chainPack
+	}
+	canonical := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	simulated := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+
+	m, key, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	require.NoError(t, m.InsertChain(generate(t, m, key, []*common.Address{&canonical, &canonical, &canonical, &canonical})))
+
+	oracle, oracleKey, _ := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	wants := generate(t, oracle, oracleKey, []*common.Address{&canonical, &simulated, nil, &simulated}).Blocks[1:]
+
+	blocks := make([]SimulatedBlock, 0, len(wants))
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		calls := make([]ethapi.CallArgs, 0, len(want.Transactions()))
+		for _, txn := range want.Transactions() {
+			gas := hexutil.Uint64(txn.GetGasLimit())
+			nonce := hexutil.Uint64(txn.GetNonce())
+			calls = append(calls, ethapi.CallArgs{
+				From:                 &bankAddr,
+				To:                   txn.GetTo(),
+				Gas:                  &gas,
+				Nonce:                &nonce,
+				MaxFeePerGas:         (*hexutil.U256)(txn.GetFeeCap()),
+				MaxPriorityFeePerGas: (*hexutil.U256)(txn.GetTipCap()),
+				Value:                (*hexutil.U256)(txn.GetValue()),
+			})
+		}
+		blocks = append(blocks, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{
+				Time:         (*hexutil.Uint64)(&header.Time),
+				GasLimit:     &gasLimit,
+				FeeRecipient: &header.Coinbase,
+				PrevRandao:   &header.MixDigest,
+			},
+			Calls: calls,
+		})
+	}
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: blocks, Validation: true}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, len(wants))
+	for i, want := range wants {
+		require.Equal(t, want.Root(), result[i].StateRoot, "block %d", want.NumberU64())
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func newUint64(n uint64) *hexutil.Uint64 {
@@ -656,4 +1065,487 @@ func newUint64(n uint64) *hexutil.Uint64 {
 
 func newBig(n uint64) *hexutil.U256 {
 	return (*hexutil.U256)(uint256.NewInt(n))
+}
+
+// ─── EIP-8037 two-dimensional block gas ─────────────────────────────────────
+
+// amsterdamSimulator returns a simulator on a chain with Amsterdam active.
+func amsterdamSimulator() *simulator {
+	return &simulator{chainConfig: chain.AllProtocolChanges}
+}
+
+// TestSanitizeCallEIP8037Inclusion covers what the pre-Amsterdam gate tests
+// cannot: the state dimension, and only the execution side being capped at
+// MaxTxnGasLimit (TestSanitizeCallBlockGasLimitExceeded is the uncapped side).
+func TestSanitizeCallEIP8037Inclusion(t *testing.T) {
+	overCap := params.MaxTxnGasLimit + 5_000_000
+
+	tests := []struct {
+		name       string
+		validation bool
+		gasLimit   uint64
+		gasUsed    protocol.GasUsed
+		gas        uint64
+		wantErr    bool
+	}{
+		{"state exceeded by one", false, 30_000_000, protocol.GasUsed{BlockState: 28_000_000}, 2_000_001, true},
+		{"over tx cap, execution side capped", true, 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, false},
+		// Without validation the execution gas is not capped, so the whole gas must fit.
+		{"over tx cap, validation off", false, 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, true},
+		// Execution already past the limit must leave nothing, not wrap around.
+		{"execution overshoot leaves nothing", false, 30_000_000, protocol.GasUsed{BlockExecution: 31_000_000}, 1, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			args := callArgs()
+			gas := hexutil.Uint64(tc.gas)
+			args.Gas = &gas
+			bc := blockCtx(tc.gasLimit)
+
+			sim := amsterdamSimulator()
+			sim.validation = tc.validation
+			err := sim.sanitizeCall(&args, nil, &bc, nil, tc.gasUsed, 0)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			var customErr *rpc.CustomError
+			require.ErrorAs(t, err, &customErr)
+			assert.Equal(t, rpc.ErrCodeBlockGasLimitReached, customErr.Code)
+		})
+	}
+}
+
+// The default gas limit is blockGasLimit - soFarUsedGasInBlock, and after
+// Amsterdam the gas used so far is the larger dimension, here state.
+func TestSanitizeCallDefaultGasBoundedByState(t *testing.T) {
+	args := callArgs()
+	bc := blockCtx(30_000_000)
+	gasUsed := protocol.GasUsed{BlockExecution: 5_000_000, BlockState: 28_000_000}
+
+	require.NoError(t, amsterdamSimulator().sanitizeCall(&args, nil, &bc, nil, gasUsed, 0))
+	assert.Equal(t, uint64(2_000_000), uint64(*args.Gas))
+}
+
+// With validation the execution side of a call is capped at MaxTxnGasLimit, so the
+// default gas is the remaining state gas while a full cap of execution gas remains.
+func TestSanitizeCallDefaultGasPerValidationMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		validation bool
+		gasUsed    protocol.GasUsed
+		want       uint64
+	}{
+		{"validation, execution holds a cap", true, protocol.GasUsed{BlockExecution: 12_000}, 30_000_000},
+		{"no validation, smaller remainder", false, protocol.GasUsed{BlockExecution: 12_000}, 29_988_000},
+		{"validation, execution below a cap", true, protocol.GasUsed{BlockExecution: 20_000_000}, 10_000_000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			args := callArgs()
+			bc := blockCtx(30_000_000)
+			sim := amsterdamSimulator()
+			sim.validation = tc.validation
+			require.NoError(t, sim.sanitizeCall(&args, nil, &bc, nil, tc.gasUsed, 0))
+			assert.Equal(t, tc.want, uint64(*args.Gas))
+		})
+	}
+}
+
+func newAmsterdamSimulateAPI(t *testing.T) *APIImpl {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+	return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+}
+
+// Calls run through stateOverrides: sender is funded, refunder clears a
+// non-zero slot (PUSH1 0 PUSH1 0 SSTORE STOP), newAccount does not exist yet.
+var (
+	simSender     = common.HexToAddress("0xc000000000000000000000000000000000000000")
+	simRefunder   = common.HexToAddress("0xc200000000000000000000000000000000000000")
+	simNewAccount = common.HexToAddress("0xc300000000000000000000000000000000000000")
+)
+
+func amsterdamSimulateOverrides() *ethapi.StateOverrides {
+	balance := (*hexutil.U256)(uint256.NewInt(1_000_000_000_000_000_000))
+	code := hexutil.Bytes{0x60, 0x00, 0x60, 0x00, 0x55, 0x00}
+	storage := map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(42))}
+	return &ethapi.StateOverrides{
+		accounts.InternAddress(simSender):   {Balance: &balance},
+		accounts.InternAddress(simRefunder): {Code: &code, State: &storage},
+	}
+}
+
+func receiptGasSum(t *testing.T, block SimulatedBlockResult) (sum uint64) {
+	for _, c := range block.Calls {
+		require.Nil(t, c.Error)
+		sum += uint64(c.GasUsed)
+	}
+	return sum
+}
+
+// TestSimulateV1AmsterdamBlockGasUsed pins a simulated block's gasUsed to
+// max(execution, state) with both counted before refunds. Each block pulls the
+// receipt sum away from that figure in a different direction.
+func TestSimulateV1AmsterdamBlockGasUsed(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{StateOverrides: amsterdamSimulateOverrides(), Calls: []ethapi.CallArgs{{From: &simSender, To: &simRefunder}}},
+			{Calls: []ethapi.CallArgs{{From: &simSender, To: &simNewAccount, Value: value}}},
+		},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	// A refund lowers the receipt but not the block's execution gas.
+	require.Greater(t, uint64(result[0].GasUsed), receiptGasSum(t, result[0]))
+
+	// A new account's receipt is execution + state, the block only the larger:
+	// above half the receipt sum, below all of it.
+	receipts := receiptGasSum(t, result[1])
+	require.Greater(t, uint64(result[1].GasUsed), receipts/2)
+	require.Less(t, uint64(result[1].GasUsed), receipts)
+}
+
+// TestSimulateV1AmsterdamGlobalGasBudget checks that a call left to the default
+// gas fits what earlier calls left of the request-wide gas cap: after a call that
+// creates an account takes its receipt gas off the cap, the next call still runs.
+func TestSimulateV1AmsterdamGlobalGasBudget(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	api.GasCap = 300_000
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			StateOverrides: amsterdamSimulateOverrides(),
+			Calls: []ethapi.CallArgs{
+				{From: &simSender, To: &simNewAccount, Value: value},
+				{From: &simSender, To: &simNewAccount, Value: value},
+			},
+		}},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err, "the second call must fit what the first left of the budget")
+	require.Len(t, result, 1)
+	require.Len(t, result[0].Calls, 2)
+}
+
+// TestSimulateV1GasCapBudgetTakesReceiptGas checks that each call takes its
+// receipt gas off the request-wide gas cap, so the next call's default gas is
+// the cap minus the receipt gas so far.
+func TestSimulateV1GasCapBudgetTakesReceiptGas(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	api.GasCap = 1_000_000
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			StateOverrides: amsterdamSimulateOverrides(),
+			Calls: []ethapi.CallArgs{
+				{From: &simSender, To: &simNewAccount, Value: value},
+				{From: &simSender, To: &simNewAccount, Value: value},
+			},
+		}},
+		ReturnFullTransactions: true,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	txs, ok := result[0].Transactions.([]*ethapi.RPCTransaction)
+	require.True(t, ok)
+	require.Len(t, txs, 2)
+	assert.Equal(t, api.GasCap, uint64(txs[0].Gas))
+	assert.Equal(t, api.GasCap-uint64(result[0].Calls[0].GasUsed), uint64(txs[1].Gas))
+}
+
+func TestSimulatedBlockUnmarshalOverrideKeys(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		err   string
+	}{
+		{input: `{"blockOverrides":{"number":"0x1","beaconRoot":"0x0000000000000000000000000000000000000000000000000000000000000001"},"stateOverrides":{"0xc000000000000000000000000000000000000000":{"balance":"0x1","movePrecompileToAddress":"0xc100000000000000000000000000000000000000"}}}`},
+		{input: `{"blockOverrides":null,"stateOverrides":null}`},
+		{input: `{"blockOverrides":{"bogusField":"0x1"}}`, err: `unknown field "bogusField" in block override`},
+		{input: `{"blockOverrides":{"Number":"0x1"}}`},
+		{input: `{"blockOverrides":{"number":"0x1","Number":"0x2"}}`, err: `keys "Number" and "number" in block override name the same field`},
+		{input: `{"stateOverrides":{"0xc100000000000000000000000000000000000000":{"balance":"0x1","bogusField":"0x1"}}}`, err: `unknown field "bogusField" in state override for 0xc100000000000000000000000000000000000000`},
+		{input: `{"stateOverrides":{"0xc000000000000000000000000000000000000000":{"Code":"0x00"}}}`},
+		{input: `{"stateOverrides":{"0xc000000000000000000000000000000000000000":{"code":"0x00","Code":"0x01"}}}`, err: `keys "Code" and "code" in state override for 0xC000000000000000000000000000000000000000 name the same field`},
+	} {
+		var b SimulatedBlock
+		err := json.Unmarshal([]byte(tc.input), &b)
+		if tc.err == "" {
+			assert.NoError(t, err, tc.input)
+		} else {
+			assert.EqualError(t, err, tc.err, tc.input)
+		}
+	}
+}
+
+func TestSimulatedBlockUnmarshalKeepsOverrides(t *testing.T) {
+	var b SimulatedBlock
+	require.NoError(t, json.Unmarshal([]byte(`{"blockOverrides":{"number":"0x7"},"stateOverrides":{"0xc000000000000000000000000000000000000000":{"Code":"0x00","balance":"0x1"}},"calls":[{"to":"0xc000000000000000000000000000000000000000"}]}`), &b))
+	require.NotNil(t, b.BlockOverrides)
+	assert.Equal(t, uint64(7), b.BlockOverrides.Number.Uint64())
+	require.NotNil(t, b.StateOverrides)
+	account, ok := (*b.StateOverrides)[accounts.InternAddress(common.HexToAddress("0xc000000000000000000000000000000000000000"))]
+	require.True(t, ok)
+	require.NotNil(t, account.Code)
+	assert.Equal(t, hexutil.Bytes{0x00}, *account.Code)
+	require.NotNil(t, account.Balance)
+	assert.Equal(t, uint64(1), (*account.Balance).ToInt().Uint64())
+	require.Len(t, b.Calls, 1)
+}
+
+// A simulation on a historical base must not store head-state fields for an account it
+// changes only partly: the next simulated block reads the account back from the overlay.
+func TestSimulateV1HistoricalBasePartialAccountWriteKeepsNonce(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	aliceKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	bank, alice := crypto.PubkeyToAddress(bankKey.PublicKey), crypto.PubkeyToAddress(aliceKey.PublicKey)
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{Config: chain.TestChainOsakaConfig.Copy(), Alloc: types.GenesisAlloc{bank: {Balance: funds}, alice: {Balance: funds}}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	sink := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	cp, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: b.TxNonce(alice), To: &sink, Value: *uint256.NewInt(7), GasLimit: 21_000},
+			ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+			FeeCap:   *uint256.NewInt(1_000_000_000_000),
+		}, *signer, aliceKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(cp))
+
+	gas := hexutil.Uint64(21_000)
+	fee := hexutil.U256(*uint256.NewInt(1_000_000_000_000))
+	tip := hexutil.U256(*uint256.NewInt(0))
+	val := hexutil.U256(*uint256.NewInt(7))
+	bankNonce, aliceNonce := hexutil.Uint64(0), hexutil.Uint64(1)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	_, err = api.SimulateV1(context.Background(), SimulationRequest{Validation: true, BlockStateCalls: []SimulatedBlock{
+		{Calls: []ethapi.CallArgs{{From: &bank, To: &alice, Gas: &gas, Nonce: &bankNonce, MaxFeePerGas: &fee, MaxPriorityFeePerGas: &tip, Value: &val}}},
+		{Calls: []ethapi.CallArgs{{From: &alice, To: &sink, Gas: &gas, Nonce: &aliceNonce, MaxFeePerGas: &fee, MaxPriorityFeePerGas: &tip, Value: &val}}},
+	}}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+}
+
+// An account the simulation deletes stays deleted in later simulated blocks, also when the
+// canonical chain deleted it after the base block, so it is absent at head: no code, no storage
+// from the base for a contract later created at the same address, and the same state roots as
+// a chain that ran the simulated calls, also for an account the simulation leaves unchanged
+// while the canonical chain changed it after the base.
+func TestSimulateV1HistoricalBaseDeleteOfAccountGoneAtHead(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	factory := common.HexToAddress("0x00000000000000000000000000000000000000fa")
+	probe := common.HexToAddress("0x00000000000000000000000000000000000000ee")
+	store := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	// runtime returns storage slot 0; initCode deploys it; factory runs CREATE2(salt 0) of initCode
+	runtime := []byte{0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	initCode := append(append([]byte{0x6a}, runtime...), 0x60, 0x00, 0x52, 0x60, 0x0b, 0x60, 0x15, 0xf3)
+	factoryCode := append(append([]byte{0x73}, initCode...), 0x60, 0x00, 0x52, 0x60, 0x00, 0x60, 0x14, 0x60, 0x0c, 0x60, 0x00, 0xf5, 0x00)
+	doomed := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(initCode))))
+	selfdestruct := append(append([]byte{0x73}, beneficiary[:]...), 0xff)
+	codeSize := append(append([]byte{0x73}, doomed[:]...), 0x3b, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3)
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	type send struct {
+		to    common.Address
+		value uint64
+	}
+	newChain := func(sends ...send) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+			bank:    {Balance: funds},
+			doomed:  {Code: selfdestruct, Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+			probe:   {Code: codeSize, Balance: big.NewInt(0)},
+			factory: {Code: factoryCode, Balance: big.NewInt(0)},
+			store:   {Code: []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00}, Balance: big.NewInt(0)}, // SSTORE(0, 1)
+		}}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		cp, err := m.GenerateChain(len(sends), func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), sends[i].to, uint256.NewInt(sends[i].value), 200_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return m, cp
+	}
+	m, cp := newChain(send{to: beneficiary}, send{to: doomed}, send{to: store, value: 1})
+	require.NoError(t, m.InsertChain(cp))
+	_, oracle := newChain(send{to: beneficiary}, send{to: doomed}, send{to: probe}, send{to: factory}, send{to: doomed}, send{to: store})
+	wants := oracle.Blocks[1:]
+
+	blocks := make([]SimulatedBlock, 0, len(wants))
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		txn := want.Transactions()[0]
+		gas := hexutil.Uint64(txn.GetGasLimit())
+		nonce := hexutil.Uint64(txn.GetNonce())
+		blocks = append(blocks, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{Time: (*hexutil.Uint64)(&header.Time), GasLimit: &gasLimit, FeeRecipient: &header.Coinbase, PrevRandao: &header.MixDigest},
+			Calls:          []ethapi.CallArgs{{From: &bank, To: txn.GetTo(), Gas: &gas, Nonce: &nonce, GasPrice: (*hexutil.U256)(txn.GetFeeCap())}},
+		})
+	}
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: blocks, Validation: true}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, len(wants))
+	word := func(block int) *big.Int {
+		require.Len(t, result[block].Calls, 1)
+		require.Nil(t, result[block].Calls[0].Error)
+		ret := common.FromHex(result[block].Calls[0].ReturnData)
+		require.Len(t, ret, 32, "block %d ran the called code", block)
+		return new(big.Int).SetBytes(ret)
+	}
+	require.Zero(t, word(1).Sign(), "the destroyed account has no code")
+	require.Zero(t, word(3).Sign(), "the contract created at its address sees none of its storage")
+	for i, want := range wants {
+		require.Equal(t, want.Root(), result[i].StateRoot, "block %d", want.NumberU64())
+	}
+}
+
+// A state override on a historical base replaces the account's whole storage, including the
+// base block's slots of an account the canonical chain deleted after the base.
+func TestSimulateV1HistoricalBaseStateOverrideClearsBaseStorage(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	doomed := common.HexToAddress("0x00000000000000000000000000000000000000dd")
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+		bank:   {Balance: funds},
+		doomed: {Code: append(append([]byte{0x73}, beneficiary[:]...), 0xff), Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	cp, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		to := beneficiary
+		if i == 1 {
+			to = doomed
+		}
+		txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), to, uint256.NewInt(0), 100_000, uint256.NewInt(1_000_000_000), nil), *signer, bankKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(cp))
+
+	readSlot0 := hexutil.Bytes{0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(doomed): {Code: &readSlot0, State: &map[common.Hash]common.Hash{}}}
+	gas := hexutil.Uint64(100_000)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: []SimulatedBlock{
+		{StateOverrides: &overrides},
+		{Calls: []ethapi.CallArgs{{From: &bank, To: &doomed, Gas: &gas}}},
+	}}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	require.Len(t, result[1].Calls, 1)
+	ret := common.FromHex(result[1].Calls[0].ReturnData)
+	require.Len(t, ret, 32)
+	require.Zero(t, new(big.Int).SetBytes(ret).Sign(), "the overridden storage has no base slot")
+}
+
+// A storage-replacing override repeated in every block of a historical simulation keeps the
+// touched keys of the overridden account bounded by its base storage, and the state roots
+// follow a chain that clears the same storage.
+func TestSimulateV1HistoricalRepeatedStateOverrideKeepsTouchedKeysBounded(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	beneficiary := common.HexToAddress("0x00000000000000000000000000000000000000be")
+	cleared := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	// With calldata: SSTORE(3, 1). Without: SSTORE(0, 0) SSTORE(1, 0) SSTORE(2, 0) unless slot 0 is zero,
+	// so a call on cleared storage writes nothing.
+	clearCode := []byte{
+		0x36, 0x15, 0x60, 0x0b, 0x57, 0x60, 0x01, 0x60, 0x03, 0x55, 0x00, 0x5b,
+		0x60, 0x00, 0x54, 0x15, 0x60, 0x22, 0x57, 0x60, 0x00, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x01, 0x55, 0x60, 0x00, 0x60, 0x02, 0x55, 0x5b,
+	}
+	funds, _ := new(big.Int).SetString("100000000000000000000", 10)
+	const simulatedBlocks = 8
+	newChain := func(lastData []byte, recipients ...common.Address) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+		gspec := &types.Genesis{Config: chain.TestChainBerlinConfig.Copy(), Alloc: types.GenesisAlloc{
+			bank: {Balance: funds},
+			cleared: {Code: clearCode, Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{
+				common.BigToHash(big.NewInt(0)): common.BigToHash(big.NewInt(7)),
+				common.BigToHash(big.NewInt(1)): common.BigToHash(big.NewInt(8)),
+				common.BigToHash(big.NewInt(2)): common.BigToHash(big.NewInt(9)),
+			}},
+		}}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		cp, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
+			var data []byte
+			if i == len(recipients)-1 {
+				data = lastData
+			}
+			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(bank), recipients[i], uint256.NewInt(0), 100_000, uint256.NewInt(0), data), *signer, bankKey)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return m, cp
+	}
+	m, cp := newChain([]byte{1}, beneficiary, cleared) // the head writes slot 3, absent at the base
+	require.NoError(t, m.InsertChain(cp))
+	oracleRecipients := []common.Address{beneficiary}
+	for range simulatedBlocks {
+		oracleRecipients = append(oracleRecipients, cleared)
+	}
+	_, oracle := newChain(nil, oracleRecipients...)
+	wants := oracle.Blocks[1:]
+
+	overrides := ethapi.StateOverrides{accounts.InternAddress(cleared): {State: &map[common.Hash]common.Hash{}}}
+	req := SimulationRequest{Validation: true}
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		txn := want.Transactions()[0]
+		gas := hexutil.Uint64(txn.GetGasLimit())
+		nonce := hexutil.Uint64(txn.GetNonce())
+		req.BlockStateCalls = append(req.BlockStateCalls, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{Time: (*hexutil.Uint64)(&header.Time), GasLimit: &gasLimit, FeeRecipient: &header.Coinbase, PrevRandao: &header.MixDigest},
+			StateOverrides: &overrides,
+			Calls:          []ethapi.CallArgs{{From: &bank, To: &cleared, Gas: &gas, Nonce: &nonce, GasPrice: (*hexutil.U256)(txn.GetFeeCap())}},
+		})
+	}
+
+	ctx := context.Background()
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sim := newSimulator(&req, cp.Blocks[0].Header(), m.ChainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, false)
+	blocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
+	require.NoError(t, err)
+	headers, err := sim.makeHeaders(blocks)
+	require.NoError(t, err)
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
+	require.NoError(t, err)
+	defer sharedDomains.Close()
+	sharedDomains.SetDeferCommitmentUpdates(false)
+
+	parent := sim.base
+	blockHashOverrides := ethapi.BlockHashOverrides{}
+	for i := range blocks {
+		result, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &blocks[i], headers[i], parent, headers[:i], false, blockHashOverrides)
+		require.NoError(t, err)
+		require.Equal(t, wants[i].Root(), result.StateRoot, "block %d", wants[i].NumberU64())
+		touched := len(sim.touchedKeys[accounts.InternAddress(cleared)])
+		require.Equal(t, 3, touched, "touched keys after block %d: the base slots only", wants[i].NumberU64())
+		blockHashOverrides[current.NumberU64()] = current.Hash()
+		headers[i] = current.Header()
+		parent = current.Header()
+	}
 }

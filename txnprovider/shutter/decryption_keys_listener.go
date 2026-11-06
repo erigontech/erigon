@@ -60,11 +60,8 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	})
 
 	eg.Go(func() error {
-		err := dkl.listenLoop(ctx)
-		if err != nil {
-			return fmt.Errorf("decryption keys listen loop failure: %w", err)
-		}
-		return nil
+		// listenLoop only returns on error, never nil.
+		return fmt.Errorf("decryption keys listen loop failure: %w", dkl.listenLoop(ctx))
 	})
 
 	return eg.Wait()

@@ -24,9 +24,7 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 )
 
-var (
-	txChanSize = 5000
-)
+var txChanSize = 5000
 
 type TxMessage struct {
 	MessageID sentryproto.MessageId
@@ -89,7 +87,8 @@ func (p *p2pClient) Connect(ctx context.Context) (<-chan TxMessage, <-chan error
 		} `json:"result"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+	err = json.NewDecoder(r.Body).Decode(&resp)
+	if err != nil {
 		return nil, nil, err
 	}
 

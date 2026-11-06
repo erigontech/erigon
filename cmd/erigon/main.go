@@ -28,8 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
@@ -61,6 +62,7 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	}
 
 	syscheck.CheckKernelAllocationHints(ctx, logger)
+	go crypto.PrefaultKeccakCache()
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
@@ -77,7 +79,7 @@ func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
 	if err != nil {
 		return err
 	}
-	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, nodeCfg.Dirs, logger); err != nil {
 		return err
 	}
 

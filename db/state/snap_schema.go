@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -129,8 +130,8 @@ func (s *E2SnapSchema) IndexTags() []string {
 	return s.indexFileTags
 }
 
-func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
-	return a.accessors
+func (s *E2SnapSchema) AccessorList() statecfg.Accessors {
+	return s.accessors
 }
 
 // fileName assumes no folderName in it
@@ -583,7 +584,7 @@ func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs)
 
 // fullpath pattern
 func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, supported version.Versions, parseOp func(filename string) (*SnapInfo, bool)) (string, error) {
-	matches, err := filepath.Glob(pattern)
+	matches, err := dir.Glob(pattern)
 	if err != nil {
 		panic(fmt.Sprintf("invalid pattern: %s, err: %v", pattern, err))
 	}

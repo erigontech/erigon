@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -230,9 +231,8 @@ func (ef *EliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -244,13 +244,10 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.minDelta = binary.BigEndian.Uint64(r[16:24])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[24]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[24])), (len(r)-24)/8)
 	ef.deriveFields()
 	return ef, 24 + 8*len(ef.data)
 }
-
-const maxDataSize = 0xFFFFFFFFFFFF
 
 // DoubleEliasFano can be used to encode two monotone sequences
 // it is called "double" because the lower bits array contains two sequences interleaved
@@ -341,9 +338,9 @@ func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
 		//fmt.Printf("i=%d, set pos for %d = %d\n", i, position[i]-bitDelta, (position[i]-bitDelta)>>ef.lPosition+i)
 	}
-	//fmt.Printf("loweBits %b\n", ef.lowerBits)
-	//fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
-	//fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
+	// fmt.Printf("loweBits %b\n", ef.lowerBits)
+	// fmt.Printf("upperBitsCumKeys %b\n", ef.upperBitsCumKeys)
+	// fmt.Printf("upperBitsPosition %b\n", ef.upperBitsPosition)
 	// i iterates over the 64-bit words in the wordCumKeys vector
 	// c iterates over bits in the wordCumKeys
 	// lastSuperQ is the largest multiple of 2^14 (4096) which is no larger than c
@@ -431,7 +428,8 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 }
 
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys, position uint64,
-	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64) {
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
+) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift
@@ -510,6 +508,90 @@ func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64
 	return
 }
 
+// Get3Probe is Get3 with pr touching the first word of each structure it reads; a read that
+// crosses into the next page faults that page in as usual. It and get2Probe are copies of Get3
+// and get2, so the default reads carry no probe check.
+func (ef *DoubleEliasFano) Get3Probe(i uint64, pr *mmap.Probe) (cumKeys, cumKeysNext, position uint64) {
+	var (
+		windowCumKeys, currWordCumKeys, lower, cumDelta uint64
+		selectCumKeys                                   int
+	)
+	cumKeys, position, windowCumKeys, selectCumKeys, currWordCumKeys, lower, cumDelta = ef.get2Probe(i, pr)
+	windowCumKeys &= (uint64(0xffffffffffffffff) << selectCumKeys) << 1
+	for windowCumKeys == 0 {
+		currWordCumKeys++
+		windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys]
+	}
+
+	lower >>= ef.lPosition
+	cumKeysNext = ((currWordCumKeys*64+uint64(bits.TrailingZeros64(windowCumKeys))-i-1)<<ef.lCumKeys | (lower & ef.lowerBitsMaskCumKeys)) + cumDelta + ef.cumKeysMinDelta
+	return
+}
+
+func (ef *DoubleEliasFano) get2Probe(i uint64, pr *mmap.Probe) (cumKeys, position uint64,
+	windowCumKeys uint64, selectCumKeys int, currWordCumKeys, lower, cumDelta uint64,
+) {
+	posLower := i * (ef.lCumKeys + ef.lPosition)
+	idx64, shift := posLower/64, posLower%64
+	pr.Touch(unsafe.Pointer(&ef.lowerBits[idx64]))
+	lower = ef.lowerBits[idx64] >> shift
+	if shift > 0 {
+		lower |= ef.lowerBits[idx64+1] << (64 - shift)
+	}
+	//fmt.Printf("i = %d, posLower = %d, lower = %b\n", i, posLower, lower)
+
+	jumpSuperQ := (i / superQ) * superQSize * 2
+	jumpInsideSuperQ := (i % superQ) / q
+	idx16 := 4*(jumpSuperQ+2) + 2*jumpInsideSuperQ
+	idx64 = idx16 / 4
+	shift = 16 * (idx16 % 4)
+	mask := uint64(0xffff) << shift
+	pr.Touch(unsafe.Pointer(&ef.jump[jumpSuperQ]))
+	pr.Touch(unsafe.Pointer(&ef.jump[idx64]))
+	jumpCumKeys := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
+	idx16++
+	idx64 = idx16 / 4
+	shift = 16 * (idx16 % 4)
+	mask = uint64(0xffff) << shift
+	jumpPosition := ef.jump[jumpSuperQ+1] + (ef.jump[idx64]&mask)>>shift
+	//fmt.Printf("i = %d, jumpCumKeys = %d, jumpPosition = %d\n", i, jumpCumKeys, jumpPosition)
+
+	currWordCumKeys = jumpCumKeys / 64
+	currWordPosition := jumpPosition / 64
+	pr.Touch(unsafe.Pointer(&ef.upperBitsCumKeys[currWordCumKeys]))
+	pr.Touch(unsafe.Pointer(&ef.upperBitsPosition[currWordPosition]))
+	windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys] & (uint64(0xffffffffffffffff) << (jumpCumKeys % 64))
+	windowPosition := ef.upperBitsPosition[currWordPosition] & (uint64(0xffffffffffffffff) << (jumpPosition % 64))
+	deltaCumKeys := int(i & qMask)
+	deltaPosition := int(i & qMask)
+
+	for bitCount := bits.OnesCount64(windowCumKeys); bitCount <= deltaCumKeys; bitCount = bits.OnesCount64(windowCumKeys) {
+		//fmt.Printf("i = %d, bitCount cum = %d\n", i, bitCount)
+		currWordCumKeys++
+		windowCumKeys = ef.upperBitsCumKeys[currWordCumKeys]
+		deltaCumKeys -= bitCount
+	}
+	for bitCount := bits.OnesCount64(windowPosition); bitCount <= deltaPosition; bitCount = bits.OnesCount64(windowPosition) {
+		//fmt.Printf("i = %d, bitCount pos = %d\n", i, bitCount)
+		currWordPosition++
+		windowPosition = ef.upperBitsPosition[currWordPosition]
+		deltaPosition -= bitCount
+	}
+
+	selectCumKeys = bitutil.Select64(windowCumKeys, deltaCumKeys)
+	//fmt.Printf("i = %d, select cum in %b for %d = %d\n", i, windowCumKeys, deltaCumKeys, selectCumKeys)
+	cumDelta = i * ef.cumKeysMinDelta
+	cumKeys = ((currWordCumKeys*64+uint64(selectCumKeys)-i)<<ef.lCumKeys | (lower & ef.lowerBitsMaskCumKeys)) + cumDelta
+
+	lower >>= ef.lCumKeys
+	//fmt.Printf("i = %d, lower = %b\n", i, lower)
+	selectPosition := bitutil.Select64(windowPosition, deltaPosition)
+	//fmt.Printf("i = %d, select pos in %b for %d = %d\n", i, windowPosition, deltaPosition, selectPosition)
+	bitDelta := i * ef.posMinDelta
+	position = ((currWordPosition*64+uint64(selectPosition)-i)<<ef.lPosition | (lower & ef.lowerBitsMaskPosition)) + bitDelta
+	return
+}
+
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
 func (ef *DoubleEliasFano) Write(w io.Writer) error {
 	var numBuf [8]byte
@@ -533,9 +615,8 @@ func (ef *DoubleEliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -548,8 +629,7 @@ func (ef *DoubleEliasFano) Read(r []byte) int {
 	ef.uPosition = binary.BigEndian.Uint64(r[16:24])
 	ef.cumKeysMinDelta = binary.BigEndian.Uint64(r[24:32])
 	ef.posMinDelta = binary.BigEndian.Uint64(r[32:40])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[40]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[40])), (len(r)-40)/8)
 	ef.deriveFields()
 	return 40 + 8*len(ef.data)
 }

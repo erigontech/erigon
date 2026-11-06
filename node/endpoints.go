@@ -28,9 +28,6 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
@@ -38,11 +35,12 @@ import (
 )
 
 type HttpEndpointConfig struct {
-	Timeouts rpccfg.HTTPTimeouts
-	HTTPS    bool
-	CertFile string
-	KeyFile  string
-	Listener net.Listener // optional pre-created listener; if set, StartHTTPEndpoint uses it instead of creating a new one
+	Timeouts              rpccfg.HTTPTimeouts
+	HTTPS                 bool
+	AllowUnencryptedHTTP2 bool
+	CertFile              string
+	KeyFile               string
+	Listener              net.Listener // optional pre-created listener; if set, StartHTTPEndpoint uses it instead of creating a new one
 }
 
 // StartHTTPEndpoint starts the HTTP RPC endpoint.
@@ -66,17 +64,20 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
-	// create the http2 server for handling h2c
-	h2 := &http2.Server{}
-	// enable h2c support
-	handler = h2c.NewHandler(handler, h2)
-	// Bundle the http server
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadTimeout:       cfg.Timeouts.ReadTimeout,
 		WriteTimeout:      cfg.Timeouts.WriteTimeout,
 		IdleTimeout:       cfg.Timeouts.IdleTimeout,
 		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
+	}
+	// Leave Protocols unset for the HTTP/1 and TLS HTTP/2 defaults. Cleartext
+	// HTTP/2 must be enabled explicitly for the Engine API.
+	if cfg.AllowUnencryptedHTTP2 {
+		httpSrv.Protocols = new(http.Protocols)
+		httpSrv.Protocols.SetHTTP1(true)
+		httpSrv.Protocols.SetHTTP2(true)
+		httpSrv.Protocols.SetUnencryptedHTTP2(true)
 	}
 	// start the HTTP server
 	go func() {

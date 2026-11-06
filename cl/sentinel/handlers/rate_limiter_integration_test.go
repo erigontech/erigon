@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
 // TestPingRateLimit verifies end-to-end that the per-peer rate limiter rejects
@@ -54,15 +53,14 @@ func TestPingRateLimit(t *testing.T) {
 	err = client.Connect(ctx, peer.AddrInfo{ID: server.ID(), Addrs: server.Addrs()})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(server)
 	beaconDB, indiciesDB := setupStore(t)
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 
 	c := NewConsensusHandlers(
-		ctx, beaconDB, indiciesDB, server, peersPool,
+		ctx, beaconDB, indiciesDB, server,
 		&clparams.NetworkConfig{}, testLocalNode(t), beaconCfg, ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 
@@ -113,7 +111,6 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 	err = client.Connect(ctx, peer.AddrInfo{ID: server.ID(), Addrs: server.Addrs()})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(server)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -127,9 +124,9 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 
 	c := NewConsensusHandlers(
-		ctx, store, indiciesDB, server, peersPool,
+		ctx, store, indiciesDB, server,
 		&clparams.NetworkConfig{}, nil, beaconCfg, ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true, nil,
 	)
 	c.Start()
 

@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"slices"
@@ -29,6 +30,9 @@ import (
 // Not goroutine-safe (typically closes over a tx). Passed per Run call so
 // callers can supply a fresh tx-scoped resolver each block.
 type BatchBranchResolver func(keys [][]byte) (vals [][]byte, err error)
+
+// 168 = branchCacheEntry (~80B) + maphash slot/hash (~40B) + prefix/value slice headers (~24B each).
+const estimatedEntryOverheadBytes = 168
 
 func estimatedEntryCost(key, value []byte) int {
 	return estimatedEntryOverheadBytes + len(key) + len(value)
@@ -53,7 +57,6 @@ type ContractTrunkPreloadParallel struct {
 	pendingChildren []pathKey
 
 	nextDepth       int
-	pinnedPrefixes  [][]byte
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
@@ -117,6 +120,7 @@ func (p *ContractTrunkPreloadParallel) releaseScratch() {
 }
 
 func (p *ContractTrunkPreloadParallel) Run(
+	ctx context.Context,
 	stepBudgetBytes int,
 	dbBranches map[string][]byte,
 	resolve BatchBranchResolver,
@@ -149,7 +153,6 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, pk.key)
 		p.usedBytes += cost
 		p.pinned++
 		chunkPinned++
@@ -176,6 +179,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 	}
 
 	for !endStep && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
+		if err := ctx.Err(); err != nil {
+			return chunkPinned, false, err
+		}
 		depth := p.nextDepth
 		wavePinnedBefore := chunkPinned
 		dbHits, dbVals, fileMiss, dbHitsBytes := p.sortAndPartitionFrontier(dbBranches)
@@ -270,7 +276,6 @@ func (p *ContractTrunkPreloadParallel) PinnedTotal() int     { return p.pinned }
 func (p *ContractTrunkPreloadParallel) UsedBytes() int       { return p.usedBytes }
 func (p *ContractTrunkPreloadParallel) MaxDepthReached() int { return p.maxDepthReached }
 func (p *ContractTrunkPreloadParallel) DbHitsPinned() int    { return p.dbHitsPinned }
-func (p *ContractTrunkPreloadParallel) ContractHash() []byte { return p.contractHash }
 
 func (p *ContractTrunkPreloadParallel) QueueRemaining() int {
 	return len(p.frontier) + len(p.pendingChildren)
@@ -280,9 +285,8 @@ func (p *ContractTrunkPreloadParallel) queueEmpty() bool {
 	return p.QueueRemaining() == 0 || p.nextDepth > maxStorageTrunkDepth
 }
 
-func (p *ContractTrunkPreloadParallel) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
-
 func PreloadContractTrunkParallel(
+	ctx context.Context,
 	contractHash []byte,
 	ramBudgetBytes int,
 	dbBranches map[string][]byte,
@@ -303,7 +307,7 @@ func PreloadContractTrunkParallel(
 	if err != nil {
 		return 0, err
 	}
-	pinned, queueEmpty, err := p.Run(ramBudgetBytes, dbBranches, resolve, cache, logger)
+	pinned, queueEmpty, err := p.Run(ctx, ramBudgetBytes, dbBranches, resolve, cache, logger)
 	if logger != nil {
 		logger.Info("[trunk-preload-parallel] complete",
 			"contract_hash", fmt.Sprintf("%x", contractHash),

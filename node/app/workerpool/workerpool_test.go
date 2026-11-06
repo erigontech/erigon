@@ -471,9 +471,16 @@ func TestPause(t *testing.T) {
 	case <-time.After(time.Millisecond):
 	}
 
-	// Check that task was enqueued
-	if wp.WaitingQueueSize() != 1 {
-		t.Error("waiting queue size should be 1")
+	// Check that task was enqueued. Submit only sends on the task channel; the
+	// dispatcher moves the task onto the waiting queue, so the size is eventually
+	// consistent and never correct at the moment Submit returns.
+	enqueued := time.After(5 * time.Second)
+	for wp.WaitingQueueSize() != 1 {
+		select {
+		case <-enqueued:
+			t.Fatal("waiting queue size should be 1")
+		case <-time.After(time.Millisecond):
+		}
 	}
 
 	// Cancel context to unpause workers.

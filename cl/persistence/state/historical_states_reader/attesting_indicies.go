@@ -38,7 +38,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		// Deneb and earlier
 		aggregationBits := attestation.AggregationBits.Bytes()
-		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		committeesPerSlot := committeeCount(r.cfg, idxs)
 		committeeIndex := attestation.Data.CommitteeIndex
 		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 		count := committeesPerSlot * r.cfg.SlotsPerEpoch
@@ -75,7 +75,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 	)
 	committeeOffset := 0
 	for _, committeeIndex := range committeeBits.GetOnIndices() {
-		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		committeesPerSlot := committeeCount(r.cfg, idxs)
 		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + uint64(committeeIndex)
 		count := committeesPerSlot * r.cfg.SlotsPerEpoch
 		committee, err := r.ComputeCommittee(mix, idxs, slot, count, index)
@@ -115,31 +115,24 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix common.Hash, indicies []ui
 	return shuffledIndicies[start:end], nil
 }
 
-func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64) uint64 {
+func committeeCount(cfg *clparams.BeaconChainConfig, idxs []uint64) uint64 {
 	committeCount := max(min(cfg.MaxCommitteesPerSlot, uint64(len(idxs))/cfg.SlotsPerEpoch/cfg.TargetCommitteeSize), 1)
 	return committeCount
 }
 
 func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	slotSubIndex := slot % r.cfg.SlotsPerHistoricalRoot
-	needFromGenesis := true
-
-	var slotLookup uint64
+	var distance uint64
 	if index <= slotSubIndex {
-		if slot > (slotSubIndex - index) {
-			slotLookup = slot - (slotSubIndex - index)
-			needFromGenesis = false
-		}
+		distance = slotSubIndex - index
 	} else {
-		if slot > (slotSubIndex + (r.cfg.SlotsPerHistoricalRoot - index)) {
-			slotLookup = slot - (slotSubIndex + (r.cfg.SlotsPerHistoricalRoot - index))
-			needFromGenesis = false
-		}
+		distance = slotSubIndex + r.cfg.SlotsPerHistoricalRoot - index
 	}
 
-	if needFromGenesis {
-		return r.genesisState.GetBlockRootAtSlot(slot)
+	if distance > slot || slot-distance < r.genesisState.Slot() {
+		return r.genesisState.BlockRoots().Get(int(index)), nil
 	}
+	slotLookup := slot - distance
 	br, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
 	if err != nil {
 		return common.Hash{}, err
@@ -150,7 +143,7 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessor
 	return common.BytesToHash(br), nil
 }
 
-func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, getter state_accessors.GetValFn, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(getter state_accessors.GetValFn, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, parentPayloadAvailable bool, skipAssert bool) ([]uint8, error) {
 	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(getter, r.cfg.RoundSlotToEpoch(stateSlot), r.cfg)
 	if err != nil {
 		return nil, err
@@ -170,7 +163,7 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 	}
 	// Matching roots
 	if !data.Source.Equal(justifiedCheckpoint) && !skipAssert {
-		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
+		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
 	targetRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
@@ -185,6 +178,25 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 	}
 	matchingTarget := data.Target.Root == targetRoot
 	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
+	if version >= clparams.GloasVersion {
+		sameSlot := data.Slot == 0
+		if !sameSlot {
+			previousIndex := (data.Slot - 1) % r.cfg.SlotsPerHistoricalRoot
+			previousRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, previousIndex)
+			if err != nil {
+				return nil, err
+			}
+			sameSlot = data.BeaconBlockRoot == headRoot && data.BeaconBlockRoot != previousRoot
+		}
+
+		if sameSlot {
+			if data.CommitteeIndex != 0 {
+				return nil, errors.New("GetAttestationParticipationFlagIndicies: committee index is not zero for indexed payload attestation")
+			}
+		} else {
+			matchingHead = matchingHead && ((data.CommitteeIndex == 1) == parentPayloadAvailable)
+		}
+	}
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(r.cfg.SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelySourceFlagIndex)

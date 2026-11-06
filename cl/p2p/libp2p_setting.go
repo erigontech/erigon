@@ -12,9 +12,8 @@ import (
 
 const (
 	// overlay parameters
-	gossipSubDlo  = 2 // topic stable mesh low watermark
-	gossipSubDhi  = 6 // topic stable mesh high watermark
-	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
+	gossipSubDhi  = 12 // topic stable mesh high watermark
+	gossipSubDout = 1  // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
 
 	// gossip parameters
 	gossipSubMcacheLen    = 6   // number of windows to retain full messages in cache for `IWANT` responses
@@ -32,7 +31,7 @@ func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconC
 	return math.Pow(gossip.DecayToZero, 1/float64(numOfTimes))
 }
 
-func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
+func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
 
@@ -63,10 +62,10 @@ func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageIdFn(s.msgId),
+		pubsub.WithMessageIdFn(p.msgId),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
+		pubsub.WithMaxMessageSize(int(p.cfg.NetworkConfig.MaxGossipMessageSize())),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),
@@ -77,7 +76,7 @@ func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 // creates a custom gossipsub parameter set.
 func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams := pubsub.DefaultGossipSubParams()
-	gParams.Dlo = gossipSubDlo
+	gParams.Dlo = gossip.GossipSubDlo
 	gParams.Dhi = gossipSubDhi
 	gParams.D = gossip.GossipSubD
 	gParams.Dout = gossipSubDout

@@ -26,7 +26,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -40,10 +42,18 @@ type unreachableFrozenBlocks struct {
 	t *testing.T
 }
 
-func (r unreachableFrozenBlocks) FrozenBlocks() uint64 {
+func (r unreachableFrozenBlocks) FrozenBlocksObserved() (uint64, bool) {
 	r.t.Fatal("FrozenBlocks read for a block whose fork answers on its own")
-	return 0
+	return 0, false
 }
+
+// neverObservedFrozenBlocks stands for a remote rpcdaemon whose backend has not answered
+// yet: the count it reports is a default, not an observation.
+type neverObservedFrozenBlocks struct {
+	dbservices.FullBlockReader
+}
+
+func (r neverObservedFrozenBlocks) FrozenBlocksObserved() (uint64, bool) { return 0, false }
 
 func TestPostStateCalculated(t *testing.T) {
 	t.Parallel()
@@ -59,6 +69,11 @@ func TestPostStateCalculated(t *testing.T) {
 	t.Run("below the fork commitment history decides without it", func(t *testing.T) {
 		t.Parallel()
 		require.True(t, PostStateCalculated(cfg, byzantium-1, true, unreachableFrozenBlocks{t: t}))
+	})
+
+	t.Run("a count that was never observed does not stand for an absent snapshot", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, PostStateCalculated(cfg, byzantium-1, false, neverObservedFrozenBlocks{}))
 	})
 }
 
@@ -79,6 +94,7 @@ func TestGetReceiptsAnswersAnEmptyBlockWithoutAnExecSlot(t *testing.T) {
 	const blockNum = uint64(1)
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, blockNum))
 	block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(blockNum)}, nil)
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, block.Hash(), blockNum))
 
 	g := newTestGenerator(t)
 	g.blockExecMutex = &loaderMutex[common.Hash]{}
@@ -95,4 +111,37 @@ func TestGetReceiptsAnswersAnEmptyBlockWithoutAnExecSlot(t *testing.T) {
 	cached, ok := g.GetCachedReceipts(t.Context(), block.Hash())
 	require.True(t, ok, "the next request must be answered by the cache")
 	require.Empty(t, cached)
+}
+
+type countingCanonicalReader struct {
+	dbservices.FullBlockReader
+	hash  common.Hash
+	calls int
+}
+
+func (r *countingCanonicalReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	r.calls++
+	return r.hash, true, nil
+}
+
+func (r *countingCanonicalReader) FrozenBlocks() uint64 { return 10 }
+
+// A frozen height has no canonical marker in the db; its snapshot hash cannot change, so the
+// block reader, which is a backend round trip on a remote rpcdaemon, is asked once.
+func TestCanonicalInViewAsksBlockReaderOncePerFrozenHeight(t *testing.T) {
+	t.Parallel()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	header := &types.Header{Number: *uint256.NewInt(5)}
+	r := &countingCanonicalReader{hash: header.Hash()}
+	g := newTestGenerator(t)
+	g.blockReader = r
+	for range 3 {
+		require.True(t, g.canonicalInView(t.Context(), tx, header))
+	}
+	require.Equal(t, 1, r.calls)
 }

@@ -17,6 +17,7 @@
 package genesiswrite_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math/big"
@@ -26,7 +27,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -156,7 +157,8 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecConfigAlone(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 
 	cfg, _, err := genesiswrite.CommitGenesisBlockWithOverride(
-		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New())
+		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New(),
+	)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1765000000), *cfg.OsakaTime, "the override must reach the returned config")
 	require.Equal(t, orig, chainspec.MainnetGenesisBlock().Config.OsakaTime,
@@ -177,7 +179,8 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecGenesisAlone(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New())
+		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New(),
+	)
 	require.NoError(t, err)
 
 	after, err := chainspec.ChainSpecByName(networkname.Sepolia)
@@ -196,7 +199,8 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	origOsakaTime := chain.AllProtocolChanges.OsakaTime
 
 	logger := log.New()
-	baseCfg := &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}
+	baseCfg := chain.TestChainOsakaConfig.Copy()
+	baseCfg.OsakaTime = common.NewUint64(1)
 	gspec := &types.Genesis{Config: baseCfg}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -207,16 +211,59 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	require.NoError(t, m.InsertChain(chainBlocks))
 
 	overrideOsakaTime := common.NewUint64(500)
-	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
+	for name, genesis := range map[string]*types.Genesis{
+		"stored genesis":   nil,
+		"supplied genesis": gspec,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := genesiswrite.CommitGenesisBlockWithOverride(m.DB, genesis, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
 
-	require.Error(t, err)
+			require.Error(t, err)
+			var compatErr *chain.ConfigCompatError
+			require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
+			require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
+			require.True(t, compatErr.HasTimestampConflict())
+			require.Zero(t, compatErr.RewindToTime)
+			require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
+				"applyOverrides must not write through into the shared config")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsChainIDChange(t *testing.T) {
+	genesis := &types.Genesis{
+		Config: &chain.Config{
+			ChainID:               uint256.NewInt(1337),
+			HomesteadBlock:        common.NewUint64(0),
+			TangerineWhistleBlock: common.NewUint64(0),
+			SpuriousDragonBlock:   common.NewUint64(0),
+		},
+		GasLimit: 30_000_000,
+	}
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	blocks, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(blocks))
+	require.NoError(t, m.DB.View(context.Background(), func(tx kv.Tx) error {
+		head := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
+		require.NotNil(t, head)
+		require.Equal(t, uint64(1), *head)
+		return nil
+	}))
+	storedCfg := readStoredChainConfig(t, m.DB)
+
+	changed := *genesis
+	changed.Config = genesis.Config.Copy()
+	changed.Config.ChainID = uint256.NewInt(1338)
+	_, _, err = genesiswrite.CommitGenesisBlock(m.DB, &changed, "", datadir.New(t.TempDir()), log.New())
+
 	var compatErr *chain.ConfigCompatError
-	require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
-	require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
-	require.True(t, compatErr.HasTimestampConflict())
-	require.Zero(t, compatErr.RewindToTime)
-	require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
-		"applyOverrides must not write through into the shared config")
+	require.ErrorAs(t, err, &compatErr)
+	require.Equal(t, "EIP155 chain ID", compatErr.What)
+	require.Zero(t, compatErr.RewindTo)
+	require.Equal(t, storedCfg, readStoredChainConfig(t, m.DB))
 }
 
 // dropHeadHeader deletes only the kv.Headers row, leaving HeadHeaderKey and the
@@ -259,7 +306,9 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	}
 
 	logger := log.New()
-	gspec := &types.Genesis{Config: &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}}
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.OsakaTime = common.NewUint64(1)
+	gspec := &types.Genesis{Config: cfg}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
@@ -273,7 +322,8 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	// No block snapshots in this datadir either, so the head time is unknowable and the
 	// rescheduled Osaka cannot be cleared.
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger)
+		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger,
+	)
 	require.Error(t, err, "an unresolvable head time must not let a rescheduled fork through")
 
 	storedCfg := readStoredChainConfig(t, m.DB)
@@ -288,7 +338,9 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	}
 
 	logger := log.New()
-	gspec := &types.Genesis{Config: &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}}
+	cfg := chain.TestChainOsakaConfig.Copy()
+	cfg.OsakaTime = common.NewUint64(1)
+	gspec := &types.Genesis{Config: cfg}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
@@ -299,8 +351,416 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	dropHeadHeader(t, m.DB)
 
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger)
+		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger,
+	)
 	require.NoError(t, err)
+}
+
+func posFromGenesisConfig() *chain.Config {
+	return &chain.Config{
+		ChainID:                 uint256.NewInt(1337),
+		HomesteadBlock:          common.NewUint64(0),
+		DAOForkBlock:            common.NewUint64(0),
+		TangerineWhistleBlock:   common.NewUint64(0),
+		SpuriousDragonBlock:     common.NewUint64(0),
+		ByzantiumBlock:          common.NewUint64(0),
+		ConstantinopleBlock:     common.NewUint64(0),
+		PetersburgBlock:         common.NewUint64(0),
+		IstanbulBlock:           common.NewUint64(0),
+		TerminalTotalDifficulty: uint256.NewInt(0),
+	}
+}
+
+func testGenesis(cfg *chain.Config) *types.Genesis {
+	return &types.Genesis{Config: cfg, GasLimit: 30_000_000}
+}
+
+func dbAtHeightOne(t *testing.T, cfg *chain.Config) kv.RwDB {
+	t.Helper()
+	return dbWithGenesisAtHeightOne(t, testGenesis(cfg))
+}
+
+// The compatibility check only runs above block 0.
+func dbWithGenesisAtHeightOne(t *testing.T, genesis *types.Genesis) kv.RwDB {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	_, genesisBlock, err := genesiswrite.CommitGenesisBlock(db, genesis, "", dirs, log.New())
+	require.NoError(t, err)
+
+	head := genesisBlock.Header()
+	head.ParentHash = genesisBlock.Hash()
+	head.Number.SetUint64(1)
+	head.Time = genesisBlock.Time() + 1
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		require.NoError(t, rawdb.WriteHeader(tx, head))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, head.Hash(), 1))
+		return rawdb.WriteHeadHeaderHash(tx, head.Hash())
+	}))
+	return db
+}
+
+func commitGenesis(t *testing.T, db kv.RwDB, genesis *types.Genesis, chainName string) (logs string, err error) {
+	t.Helper()
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	_, _, err = genesiswrite.CommitGenesisBlock(db, genesis, chainName, datadir.New(t.TempDir()), logger)
+	return buf.String(), err
+}
+
+func commitConfig(t *testing.T, db kv.RwDB, cfg *chain.Config) (logs string, err error) {
+	t.Helper()
+	return commitGenesis(t, db, testGenesis(cfg), "")
+}
+
+// requireConfigAccepted also checks that the replacement warns once and a restart with the
+// same config does not warn again.
+func requireConfigAccepted(t *testing.T, db kv.RwDB, cfg *chain.Config) (logs string) {
+	t.Helper()
+	logs, err := commitConfig(t, db, cfg)
+	require.NoError(t, err)
+	require.Contains(t, logs, "toleratedForkChanges=")
+	require.Equal(t, cfg, readStoredChainConfig(t, db))
+
+	restartLogs, err := commitConfig(t, db, cfg)
+	require.NoError(t, err)
+	require.NotContains(t, restartLogs, "toleratedForkChanges=")
+	return logs
+}
+
+func requireConfigRejected(t *testing.T, db kv.RwDB, cfg *chain.Config, what string) chain.ConfigCompatError {
+	t.Helper()
+	storedCfg := readStoredChainConfig(t, db)
+	_, err := commitConfig(t, db, cfg)
+	var compatErr *chain.ConfigCompatError
+	require.ErrorAs(t, err, &compatErr)
+	require.Equal(t, what, compatErr.What)
+	require.Equal(t, storedCfg, readStoredChainConfig(t, db))
+	return *compatErr
+}
+
+func TestCommitGenesisBlockAcceptsDroppedPoWForkOnPoSFromGenesisChain(t *testing.T) {
+	stored := posFromGenesisConfig()
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.DAOForkBlock = nil
+	requireConfigAccepted(t, db, next)
+}
+
+func TestCommitGenesisBlockAcceptsAddedPoWForkOnPoSFromGenesisChain(t *testing.T) {
+	stored := posFromGenesisConfig()
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.MuirGlacierBlock = common.NewUint64(0)
+	requireConfigAccepted(t, db, next)
+}
+
+// ethClientsShaped drops the fields that the eth-clients genesis files omit.
+func ethClientsShaped(bundled *chain.Config) *chain.Config {
+	cfg := bundled.Copy()
+	cfg.ChainName = ""
+	cfg.Rules = ""
+	cfg.Ethash = nil
+	cfg.DefaultBlockGasLimit = nil
+	cfg.MergeHeight = nil
+	return cfg
+}
+
+func TestCommitGenesisBlockAcceptsHoodiShadowForkConfig(t *testing.T) {
+	bundled := chainspec.HoodiGenesisBlock().Config
+	shadowFork := ethClientsShaped(bundled)
+	shadowFork.DAOForkBlock = nil
+	shadowFork.MuirGlacierBlock = nil
+	shadowFork.ArrowGlacierBlock = nil
+	shadowFork.GrayGlacierBlock = nil
+	shadowFork.MergeNetsplitBlock = common.NewUint64(0)
+	shadowFork.AmsterdamTime = common.NewUint64(4_000_000_000)
+	const shadowAmsterdam = `Glamsterdam: 2096-10-02 07:06:40 \+0000 UTC`
+
+	t.Run("init over a bundled datadir", func(t *testing.T) {
+		logs := requireConfigAccepted(t, dbAtHeightOne(t, bundled), shadowFork)
+		require.Contains(t, logs, `toleratedForkChanges="daoForkBlock 0->nil, arrowGlacierBlock 0->nil, grayGlacierBlock 0->nil, mergeNetsplitBlock nil->0, muirGlacierBlock 0->nil"`)
+		require.Regexp(t, `newConfig="[^"]*`+shadowAmsterdam, logs)
+		require.NotRegexp(t, `storedConfig="[^"]*`+shadowAmsterdam, logs)
+	})
+	t.Run("bundled over an init datadir", func(t *testing.T) {
+		requireConfigAccepted(t, dbAtHeightOne(t, shadowFork), bundled)
+	})
+	t.Run("named chain over an init datadir", func(t *testing.T) {
+		genesis := *chainspec.HoodiGenesisBlock()
+		genesis.Config = shadowFork
+		db := dbWithGenesisAtHeightOne(t, &genesis)
+
+		logs, err := commitGenesis(t, db, nil, networkname.Hoodi)
+		require.NoError(t, err)
+		require.Contains(t, logs, "toleratedForkChanges=")
+		require.Regexp(t, `storedConfig="[^"]*`+shadowAmsterdam, logs)
+		require.NotRegexp(t, `newConfig="[^"]*`+shadowAmsterdam, logs)
+		require.Equal(t, bundled, readStoredChainConfig(t, db))
+	})
+}
+
+func TestCommitGenesisBlockAcceptsSepoliaShadowForkConfig(t *testing.T) {
+	bundled := chainspec.SepoliaGenesisBlock().Config
+	shadowFork := ethClientsShaped(bundled)
+	shadowFork.MuirGlacierBlock = nil
+	require.Zero(t, *bundled.LondonBlock)
+
+	t.Run("init over a bundled datadir", func(t *testing.T) {
+		requireConfigAccepted(t, dbAtHeightOne(t, bundled), shadowFork)
+	})
+	t.Run("bundled over an init datadir", func(t *testing.T) {
+		requireConfigAccepted(t, dbAtHeightOne(t, shadowFork), bundled)
+	})
+	t.Run("named chain over an init datadir", func(t *testing.T) {
+		genesis := *chainspec.SepoliaGenesisBlock()
+		genesis.Config = shadowFork
+		db := dbWithGenesisAtHeightOne(t, &genesis)
+
+		logs, err := commitGenesis(t, db, nil, networkname.Sepolia)
+		require.NoError(t, err)
+		require.Contains(t, logs, `toleratedForkChanges="muirGlacierBlock nil->0"`)
+		require.Equal(t, bundled, readStoredChainConfig(t, db))
+	})
+}
+
+func TestCommitGenesisBlockRejectsDroppedPoWForkWithChainIDChange(t *testing.T) {
+	spuriousDragonNotActive := posFromGenesisConfig()
+	spuriousDragonNotActive.SpuriousDragonBlock = nil
+	spuriousDragonNotActive.TangerineWhistleBlock = nil
+	spuriousDragonNotActive.ByzantiumBlock = nil
+	spuriousDragonNotActive.ConstantinopleBlock = nil
+	spuriousDragonNotActive.PetersburgBlock = nil
+	spuriousDragonNotActive.IstanbulBlock = nil
+
+	for name, stored := range map[string]*chain.Config{
+		"EIP-155 active":     posFromGenesisConfig(),
+		"EIP-155 not active": spuriousDragonNotActive,
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := dbAtHeightOne(t, stored)
+
+			next := stored.Copy()
+			next.DAOForkBlock = nil
+			next.ChainID = uint256.NewInt(1338)
+			requireConfigRejected(t, db, next, "DAO fork block")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsHomesteadMove(t *testing.T) {
+	stored := &chain.Config{
+		ChainID:                 uint256.NewInt(1337),
+		HomesteadBlock:          common.NewUint64(0),
+		TangerineWhistleBlock:   common.NewUint64(0),
+		SpuriousDragonBlock:     common.NewUint64(0),
+		TerminalTotalDifficulty: uint256.NewInt(0),
+	}
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.HomesteadBlock = common.NewUint64(5)
+	next.TangerineWhistleBlock = common.NewUint64(5)
+	next.SpuriousDragonBlock = common.NewUint64(5)
+	requireConfigRejected(t, db, next, "Homestead fork block")
+}
+
+func TestCommitGenesisBlockRejectsPoWForkChangeOnUnmergedChain(t *testing.T) {
+	stored := posFromGenesisConfig()
+	stored.TerminalTotalDifficulty = nil
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.DAOForkBlock = nil
+	requireConfigRejected(t, db, next, "DAO fork block")
+}
+
+func TestCommitGenesisBlockRejectsNonZeroPoWForkChange(t *testing.T) {
+	for name, forks := range map[string][2]*uint64{
+		"0 to 5":   {common.NewUint64(0), common.NewUint64(5)},
+		"5 to 0":   {common.NewUint64(5), common.NewUint64(0)},
+		"nil to 1": {nil, common.NewUint64(1)},
+		"1 to nil": {common.NewUint64(1), nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stored := posFromGenesisConfig()
+			stored.MuirGlacierBlock = forks[0]
+			db := dbAtHeightOne(t, stored)
+
+			next := stored.Copy()
+			next.MuirGlacierBlock = forks[1]
+			requireConfigRejected(t, db, next, "Muir Glacier fork block")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsPoWForkChangeWithHistoricalPoW(t *testing.T) {
+	stored := posFromGenesisConfig()
+	stored.TerminalTotalDifficulty = uint256.NewInt(17_000_000_000_000_000)
+	stored.TerminalTotalDifficultyPassed = true
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.DAOForkBlock = nil
+	requireConfigRejected(t, db, next, "DAO fork block")
+}
+
+func TestCommitGenesisBlockRejectsZeroTTDOnlyInNewConfig(t *testing.T) {
+	for name, storedTTD := range map[string]*uint256.Int{
+		"no TTD":       nil,
+		"positive TTD": uint256.NewInt(17_000_000_000_000_000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			stored := posFromGenesisConfig()
+			stored.TerminalTotalDifficulty = storedTTD
+			db := dbAtHeightOne(t, stored)
+
+			next := stored.Copy()
+			next.TerminalTotalDifficulty = uint256.NewInt(0)
+			next.DAOForkBlock = nil
+			requireConfigRejected(t, db, next, "DAO fork block")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsZeroTTDOnlyInStoredConfig(t *testing.T) {
+	for name, nextTTD := range map[string]*uint256.Int{
+		"no TTD":       nil,
+		"positive TTD": uint256.NewInt(17_000_000_000_000_000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			stored := posFromGenesisConfig()
+			db := dbAtHeightOne(t, stored)
+
+			next := stored.Copy()
+			next.TerminalTotalDifficulty = nextTTD
+			next.DAOForkBlock = nil
+			requireConfigRejected(t, db, next, "DAO fork block")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsToleratedForkHidingLaterConflict(t *testing.T) {
+	stored := posFromGenesisConfig()
+	stored.BerlinBlock = common.NewUint64(0)
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.DAOForkBlock = nil
+	next.BerlinBlock = common.NewUint64(5)
+	requireConfigRejected(t, db, next, "Berlin fork block")
+}
+
+func TestCommitGenesisBlockRejectsToleratedForkWithTimestampConflict(t *testing.T) {
+	stored := posFromGenesisConfig()
+	stored.BerlinBlock = common.NewUint64(0)
+	stored.LondonBlock = common.NewUint64(0)
+	stored.ShanghaiTime = common.NewUint64(0)
+	stored.CancunTime = common.NewUint64(0)
+	stored.PragueTime = common.NewUint64(0)
+	stored.OsakaTime = common.NewUint64(1)
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.DAOForkBlock = nil
+	next.OsakaTime = common.NewUint64(500)
+	compatErr := requireConfigRejected(t, db, next, "")
+	require.Equal(t, "Osaka fork timestamp", compatErr.WhatTime)
+}
+
+func TestCommitGenesisBlockRejectsNonPoWForkNilToZeroOnPoSFromGenesisChain(t *testing.T) {
+	stored := posFromGenesisConfig()
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.BerlinBlock = common.NewUint64(0)
+	requireConfigRejected(t, db, next, "Berlin fork block")
+}
+
+func TestCommitGenesisBlockRejectsMuirGlacierDropWithoutLondonAtGenesis(t *testing.T) {
+	stored := posFromGenesisConfig()
+	stored.TerminalTotalDifficulty = uint256.NewInt(17_000_000_000_000_000)
+	stored.MuirGlacierBlock = common.NewUint64(0)
+	db := dbAtHeightOne(t, stored)
+
+	next := stored.Copy()
+	next.MuirGlacierBlock = nil
+	requireConfigRejected(t, db, next, "Muir Glacier fork block")
+}
+
+func TestCommitGenesisBlockRejectsMuirGlacierDropWithTTDChange(t *testing.T) {
+	sepoliaTTD := chainspec.SepoliaGenesisBlock().Config.TerminalTotalDifficulty
+	for name, ttds := range map[string][2]*uint256.Int{
+		"positive to nil":              {sepoliaTTD, nil},
+		"positive to another positive": {sepoliaTTD, uint256.NewInt(1)},
+		"positive to 0":                {sepoliaTTD, uint256.NewInt(0)},
+		"nil to positive":              {nil, sepoliaTTD},
+		"nil to 0":                     {nil, uint256.NewInt(0)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stored := chainspec.SepoliaGenesisBlock().Config.Copy()
+			stored.TerminalTotalDifficulty = ttds[0]
+			db := dbAtHeightOne(t, stored)
+
+			next := stored.Copy()
+			next.MuirGlacierBlock = nil
+			next.TerminalTotalDifficulty = ttds[1]
+			requireConfigRejected(t, db, next, "Muir Glacier fork block")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsToleratedForkWithEngineSetupChange(t *testing.T) {
+	ethashCfg := chainspec.SepoliaGenesisBlock().Config.Copy()
+	auraCfg := ethashCfg.Copy()
+	auraCfg.Ethash = nil
+	auraCfg.Rules = chain.AuRaRules
+	auraCfg.Aura = &chain.AuRaConfig{StepDuration: common.NewUint64(5)}
+	ttdNotPassedCfg := ethashCfg.Copy()
+	ttdNotPassedCfg.TerminalTotalDifficultyPassed = false
+	l2Cfg := ethashCfg.Copy()
+	l2Cfg.L2JSON = json.RawMessage(`{"name":"test"}`)
+	for name, cfgs := range map[string][2]*chain.Config{
+		"ethash to aura":     {ethashCfg, auraCfg},
+		"aura to ethash":     {auraCfg, ethashCfg},
+		"TTD passed set":     {ttdNotPassedCfg, ethashCfg},
+		"TTD passed cleared": {ethashCfg, ttdNotPassedCfg},
+		"L2 added":           {ethashCfg, l2Cfg},
+		"L2 dropped":         {l2Cfg, ethashCfg},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := dbAtHeightOne(t, cfgs[0])
+
+			next := cfgs[1].Copy()
+			next.MuirGlacierBlock = nil
+			requireConfigRejected(t, db, next, "Muir Glacier fork block")
+		})
+	}
+}
+
+func TestCommitGenesisBlockRejectsNonMuirForkDropWithLondonAtGenesis(t *testing.T) {
+	for what, drop := range map[string]func(*chain.Config){
+		"DAO fork block":           func(cfg *chain.Config) { cfg.DAOForkBlock = nil },
+		"Arrow Glacier fork block": func(cfg *chain.Config) { cfg.ArrowGlacierBlock = nil },
+		"Gray Glacier fork block":  func(cfg *chain.Config) { cfg.GrayGlacierBlock = nil },
+		"Merge netsplit block":     func(cfg *chain.Config) { cfg.MergeNetsplitBlock = nil },
+	} {
+		t.Run(what, func(t *testing.T) {
+			stored := chainspec.SepoliaGenesisBlock().Config.Copy()
+			stored.DAOForkBlock = common.NewUint64(0)
+			stored.ArrowGlacierBlock = common.NewUint64(0)
+			stored.GrayGlacierBlock = common.NewUint64(0)
+			stored.MergeNetsplitBlock = common.NewUint64(0)
+			db := dbAtHeightOne(t, stored)
+
+			next := stored.Copy()
+			drop(next)
+			requireConfigRejected(t, db, next, what)
+		})
+	}
 }
 
 func TestAllocConstructor(t *testing.T) {
@@ -332,7 +792,7 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	//TODO: support historyV3
+	// TODO: support historyV3
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
@@ -352,6 +812,26 @@ func TestAllocConstructor(t *testing.T) {
 	storage1, err := state.GetState(address, key1)
 	require.NoError(err)
 	assert.Equal(u256.U64(0x01c9), storage1)
+}
+
+func TestGenesisAllocWithoutBalanceUsesZero(t *testing.T) {
+	t.Parallel()
+
+	address := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000c0ffee00"))
+	genSpec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			address.Value(): {Nonce: 1},
+		},
+	}
+
+	_, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), log.Root())
+	require.NoError(t, err)
+	defer ibs.Close()
+
+	balance, err := ibs.GetBalance(address)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
 }
 
 // A genesis alloc carrying storage but otherwise EIP-161-empty must still be materialized as a present account (so its storage never sits under an absent account).
@@ -412,13 +892,10 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
 	t.Parallel()
 
-	// Deep copy: chain.Config carries a sync.Once and a memoized map, and its own doc
-	// forbids copying it by value.
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg := chain.AllProtocolChanges.Copy()
 	zero := uint64(0)
 	cfg.AmsterdamTime = &zero
-	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: cfg})
 
 	// merge.VerifyHeader rejects an Amsterdam header without one (ErrMissingSlotNumber),
 	// and the genesis hash depends on it.
@@ -426,7 +903,7 @@ func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
 	require.Zero(t, *head.SlotNumber)
 
 	cfg.AmsterdamTime = nil
-	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: cfg})
 	require.Nil(t, head.SlotNumber, "pre-Amsterdam genesis header must not carry slotNumber")
 }
 
@@ -587,7 +1064,6 @@ func TestSetupGenesis(t *testing.T) {
 			}
 
 			if genesis.Hash() != test.wantHash {
-
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
@@ -603,4 +1079,45 @@ func TestSetupGenesis(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestComputeGenesisCommitmentIgnoresStateInSharedDomains(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	logger := log.New()
+	addr := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+	newGenesis := func(balance int64, code []byte, slotVal common.Hash) *types.Genesis {
+		return &types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{addr: {
+				Balance: big.NewInt(balance),
+				Code:    code,
+				Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): slotVal},
+			}},
+		}
+	}
+	stale := newGenesis(100, []byte{0x60, 0x01}, common.HexToHash("0x0a"))
+	genSpec := newGenesis(5, []byte{0x60, 0x02}, common.HexToHash("0x0b"))
+	want, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), logger)
+	require.NoError(t, err)
+	ibs.Close()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(stale)
+	_, ibs, err = genesiswrite.ComputeGenesisCommitment(ctx, stale, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(genSpec)
+	root, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genSpec, tx, sd, head)
+	require.NoError(t, err)
+	ibs.Close()
+	require.Equal(t, want.Root(), common.BytesToHash(root))
 }

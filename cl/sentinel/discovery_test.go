@@ -22,18 +22,59 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/semaphore"
 )
+
+func TestFilterNonPrivatePeerAddressesPreservesExistingLocalDiscoveryBehavior(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip6/fc00::1/tcp/9000"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
+	}}
+
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Equal(t, []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
+	}, info.Addrs)
+}
+
+func TestFilterNonPrivatePeerAddressesPreservesLinkLocalEndpoints(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/169.254.1.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fe80::1/udp/9001/quic-v1"),
+	}}
+
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Len(t, info.Addrs, 2)
+}
+
+func TestFilterNonPrivatePeerAddressesRejectsPrivateOnlyPeer(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fc00::1/udp/9001/quic-v1"),
+	}}
+
+	require.False(t, filterNonPrivatePeerAddresses(info))
+	require.Empty(t, info.Addrs)
+}
 
 func TestListenForPeersDialsDirectPeersWithoutDiscovery(t *testing.T) {
 	local, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -280,4 +321,32 @@ func TestGoRoutinesOpeningPeerConnectionsConst(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 4, goRoutinesOpeningPeerConnections,
 		"goRoutinesOpeningPeerConnections must be 4; changing this affects concurrency bounds")
+}
+
+func TestUnderservedSubnetsBelowMeshLowWatermark(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	coverage[3] = 5
+	coverage[7] = 0
+
+	require.Equal(t, []subnetSearchState{{idx: 7, wanted: 6}, {idx: 3, wanted: 1}}, underservedSubnets(&coverage))
+}
+
+func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	peerSubnets := bitfield.NewBitvector64()
+	peerSubnets.SetBitAt(3, true)
+
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 5
+	require.True(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 0
+	coverage[4] = 0
+	peerSubnets.SetBitAt(3, false)
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
 }

@@ -62,7 +62,11 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
-	if err := c.Machine.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128)); err != nil {
+	var parentSlot uint64
+	if preState.Version() >= clparams.GloasVersion {
+		parentSlot = preState.LatestBlockHeader().Slot
+	}
+	if err := c.Machine.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128), parentSlot); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -616,6 +620,20 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 	return nil
 }
 
+func verifySignatureSet(signature, signingRoot, publicKey []byte, err error) error {
+	if err != nil {
+		return err
+	}
+	valid, err := bls.Verify(signature, signingRoot, publicKey)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return errors.New("verification error")
+	}
+	return nil
+}
+
 func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
 	require.NoError(t, err)
@@ -640,6 +658,15 @@ func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.Te
 			return nil
 		}
 		return err
+	}
+	if signedBid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+		err := verifySignatureSet(state.ExecutionPayloadBidSignatureSet(preState, signedBid))
+		if err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
 	}
 	if expectedError {
 		return errors.New("expected error")
@@ -698,6 +725,16 @@ func operationPayloadAttestationHandler(t *testing.T, root fs.FS, c spectest.Tes
 		return err
 	}
 	if err := c.Machine.ProcessPayloadAttestation(preState, att); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	indexedAttestation, err := preState.GetIndexedPayloadAttestation(att)
+	if err == nil {
+		err = verifySignatureSet(state.IndexedPayloadAttestationSignatureSet(preState, indexedAttestation))
+	}
+	if err != nil {
 		if expectedError {
 			return nil
 		}

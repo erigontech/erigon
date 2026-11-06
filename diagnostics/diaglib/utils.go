@@ -44,7 +44,8 @@ func InitSubStagesFromList(list []string) []SyncSubStage {
 	subStages := make([]SyncSubStage, 0, len(list))
 
 	for _, subStage := range list {
-		subStages = append(subStages,
+		subStages = append(
+			subStages,
 			SyncSubStage{
 				ID:    subStage,
 				State: Queued,

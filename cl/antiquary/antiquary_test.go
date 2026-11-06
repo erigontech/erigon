@@ -218,7 +218,7 @@ func TestAntiquateField(t *testing.T) {
 
 	data := []byte("hello world antiquary field data")
 	slot := uint64(clparams.SlotsPerDump*3 + 42) // not aligned to SlotsPerDump
-	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
+	require.NoError(t, antiquateField(slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
 	// antiquateField rounds the slot down to SlotsPerDump boundary
@@ -241,7 +241,7 @@ func TestAntiquateField_SlotAligned(t *testing.T) {
 
 	data := []byte("aligned slot data")
 	slot := uint64(clparams.SlotsPerDump * 5) // exactly aligned
-	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
+	require.NoError(t, antiquateField(slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
 	_, ok := collected[string(base_encoding.Encode64ToBytes4(slot))]
@@ -270,7 +270,7 @@ func TestAntiquateBytesListDiff(t *testing.T) {
 		return err
 	}
 
-	require.NoError(t, antiquateBytesListDiff(context.Background(), key, old, newData, &bytes.Buffer{}, collector, simpleDiff))
+	require.NoError(t, antiquateBytesListDiff(key, old, newData, &bytes.Buffer{}, collector, simpleDiff))
 
 	collected := collectAll(t, collector)
 	result, ok := collected[string(key)]
@@ -295,7 +295,7 @@ func TestAntiquateBytesListDiff_WithRealDiffFn(t *testing.T) {
 
 	key := base_encoding.Encode64ToBytes4(99)
 	require.NoError(t, antiquateBytesListDiff(
-		context.Background(), key, old, newData, &bytes.Buffer{}, collector,
+		key, old, newData, &bytes.Buffer{}, collector,
 		base_encoding.ComputeCompressedSerializedUint64ListDiff,
 	))
 
@@ -315,7 +315,7 @@ func TestFindNearestSlotBackwards(t *testing.T) {
 	// Write canonical roots at slots 0, 32, 64 (epoch boundaries with SlotsPerEpoch=32)
 	for _, slot := range []uint64{0, 32, 64} {
 		root := common.Hash{byte(slot)}
-		require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 
 	// From slot 64 (epoch boundary with canonical root) → should return 64
@@ -353,6 +353,62 @@ func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
 	require.Equal(t, uint64(0), result)
 }
 
+func TestPtcWindowEpochReconstructionStart(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 1000
+	forkSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	lastPreForkEpochStart := forkSlot - cfg.SlotsPerEpoch
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, lastPreForkEpochStart, common.Hash{1}))
+	const targetSlot = uint64(1_000_000)
+
+	missing := func(string, []byte) ([]byte, error) { return nil, nil }
+	attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, 0, targetSlot, missing)
+	require.NoError(t, err)
+	require.True(t, forced)
+	require.Equal(t, lastPreForkEpochStart, attempt)
+
+	present := func(table string, key []byte) ([]byte, error) {
+		require.Equal(t, kv.PtcWindowEpochTable, table)
+		require.Equal(t, base_encoding.Encode64ToBytes4(forkSlot), key)
+		return []byte{1}, nil
+	}
+	attempt, forced, err = ptcWindowEpochReconstructionStart(tx, &cfg, 0, targetSlot, present)
+	require.NoError(t, err)
+	require.False(t, forced)
+	require.Equal(t, targetSlot, attempt)
+
+	t.Run("nothing processed", func(t *testing.T) {
+		cfg.GloasForkEpoch = 0
+		getter := func(string, []byte) ([]byte, error) {
+			t.Fatal("unexpected PtcWindowEpoch lookup")
+			return nil, nil
+		}
+		attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, 0, 0, getter)
+		require.NoError(t, err)
+		require.False(t, forced)
+		require.Zero(t, attempt)
+	})
+
+	t.Run("post-fork anchor", func(t *testing.T) {
+		cfg.GloasForkEpoch = 0
+		const anchorSlot = uint64(128)
+		presentAtAnchor := func(table string, key []byte) ([]byte, error) {
+			require.Equal(t, kv.PtcWindowEpochTable, table)
+			require.Equal(t, base_encoding.Encode64ToBytes4(anchorSlot), key)
+			return []byte{1}, nil
+		}
+		attempt, forced, err := ptcWindowEpochReconstructionStart(tx, &cfg, anchorSlot, targetSlot, presentAtAnchor)
+		require.NoError(t, err)
+		require.False(t, forced)
+		require.Equal(t, targetSlot, attempt)
+	})
+}
+
 func TestComputeSlotToBeRequested(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
@@ -365,7 +421,7 @@ func TestComputeSlotToBeRequested(t *testing.T) {
 	for slot := uint64(0); slot <= 200000; slot += cfg.SlotsPerEpoch {
 		root := common.Hash{}
 		binary.LittleEndian.PutUint64(root[:], slot)
-		require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 
 	// If targetSlot > SlotsPerDump * backoffStep, we get findNearestSlotBackwards(targetSlot - SlotsPerDump*backoffStep)
@@ -559,7 +615,7 @@ func TestBeaconStatesCollector_CollectBalancesDiffs(t *testing.T) {
 	binary.LittleEndian.PutUint64(newBal[8:], 250)
 	binary.LittleEndian.PutUint64(newBal[16:], 300)
 
-	require.NoError(t, c.collectBalancesDiffs(context.Background(), 500, old, newBal))
+	require.NoError(t, c.collectBalancesDiffs(500, old, newBal))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
@@ -589,7 +645,7 @@ func TestBeaconStatesCollector_CollectBalancesDump(t *testing.T) {
 	binary.LittleEndian.PutUint64(balances[24:], 32_050_000_000)
 
 	slot := uint64(clparams.SlotsPerDump * 2) // aligned to dump boundary
-	require.NoError(t, c.collectBalancesDump(t.Context(), slot, balances))
+	require.NoError(t, c.collectBalancesDump(slot, balances))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
@@ -803,4 +859,64 @@ func TestRetirementLoopReturnsOnContextCancellation(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("retirementLoop did not return after context cancellation")
 	}
+}
+
+func staticSnapshotHeaderReader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+	return &cltypes.SignedBeaconBlockHeader{
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:       slot,
+			Root:       common.Hash{byte(slot % 251)},
+			ParentRoot: common.Hash{byte((slot + 1) % 251)},
+		},
+	}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+}
+
+// BlocksAvailable is the inclusive last readable slot and ReadBeaconBlockBodyBySlot serves that slot
+// from the snapshot path, but indexBeaconSnapshots takes an exclusive bound. Handing it the
+// inclusive tip leaves that slot unindexed while the cursor records it as done, so a reader that
+// resolves roots through the canonical index sees a block with no root there for as long as the tip
+// stays put.
+func TestRebuildBeaconSnapshotIndexIndexesTheVisibleTip(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(antiquaryIndexBatchSlots + 3)
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, db, func() uint64 { return tip },
+		staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, tip)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, root, "the visible snapshot tip was left unindexed")
+
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress, "the cursor must be the first slot not yet indexed")
+		return nil
+	}))
+}
+
+// Re-running against an unchanged tip must be a no-op rather than treating a cursor of tip+1 as
+// progress that ran ahead of the snapshots.
+func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(4)
+	tipFn := func() uint64 { return tip }
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, baseDB, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	db := &countingRwDB{RwDB: baseDB}
+	_, err = rebuildBeaconSnapshotIndex(ctx, db, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+	require.Zero(t, db.commits, "a static tip must not be re-indexed")
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress)
+		return nil
+	}))
 }

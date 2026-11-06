@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 )
 
@@ -31,7 +30,7 @@ import (
 func TestCarriesOverlayView(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	overlay, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
 

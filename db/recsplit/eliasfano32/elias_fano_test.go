@@ -158,7 +158,7 @@ func TestEliasFanoSeek(t *testing.T) {
 			_, err := it.Next()
 			require.NoError(t, err)
 		}
-		//save all fields values
+		// save all fields values
 		v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.itemsIterated
 		// seek to same item and check new fields
 		it.Seek(ef.Max())
@@ -230,7 +230,6 @@ func TestEliasFanoSeek(t *testing.T) {
 			require.GreaterOrEqual(t, int(itV), int(search), int(v))
 		}
 	})
-
 }
 
 func TestEliasFanoSeekPosition(t *testing.T) {
@@ -763,7 +762,7 @@ func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 		_, err := efi.Next()
 		require.NoError(t, err)
 	}
-	//save all fields values
+	// save all fields values
 	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.itemsIterated
 	// seek to same item and check new fields
 	efi.Seek(vals[j])
@@ -808,4 +807,18 @@ func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {
 		values = append(values, v)
 	}
 	return stream.ReverseArray[uint64](values)
+}
+
+func TestGetProbeMatchesGet(t *testing.T) {
+	const count = 1000
+	ef := NewEliasFano(count, 3*count)
+	for i := range uint64(count) {
+		ef.AddOffset(3*i + i%3)
+	}
+	ef.Build()
+	for i := range uint64(count) {
+		v, w, s, c, l := ef.get(i)
+		pv, pw, ps, pc, pl := ef.getProbe(i, nil)
+		require.Equal(t, []uint64{v, w, uint64(s), c, l}, []uint64{pv, pw, uint64(ps), pc, pl}, "i=%d", i)
+	}
 }

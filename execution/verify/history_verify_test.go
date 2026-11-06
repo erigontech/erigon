@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/execution/verify"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 // TestHistoryVerification_SimpleBlocks is an integration test that generates blocks
 // with state changes, builds snapshot files, and verifies history via re-execution.

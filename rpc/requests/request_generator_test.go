@@ -17,9 +17,19 @@
 package requests
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func MockRequestGenerator(reqId int) *requestGenerator {
@@ -84,5 +94,45 @@ func TestParseResponse(t *testing.T) {
 	for _, testCase := range testCases {
 		got, _ := parseResponse(testCase.input)
 		require.Equal(t, testCase.expected, got)
+	}
+}
+
+// TraceCall sends a call object the server accepts: an empty data is filled in only when the
+// call sets neither data nor input, so it never disagrees with the input.
+func TestRequestGenerator_TraceCallData(t *testing.T) {
+	bodies := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies <- body
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"output":"0x"}}`))
+	}))
+	t.Cleanup(server.Close)
+	reqGen := NewRequestGenerator(strings.TrimPrefix(server.URL, "http://"), log.New())
+
+	calldata := hexutil.Bytes{0xaa}
+	for _, tc := range []struct {
+		name string
+		args ethapi.CallArgs
+		want hexutil.Bytes
+	}{
+		{name: "neither", args: ethapi.CallArgs{}, want: hexutil.Bytes{}},
+		{name: "data", args: ethapi.CallArgs{Data: &calldata}, want: calldata},
+		{name: "input", args: ethapi.CallArgs{Input: &calldata}, want: calldata},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := reqGen.TraceCall(rpc.LatestBlock, tc.args)
+			require.NoError(t, err)
+			var req struct {
+				Params []json.RawMessage `json:"params"`
+			}
+			require.NoError(t, json.Unmarshal(<-bodies, &req))
+			var sent ethapi.CallArgs
+			require.NoError(t, json.Unmarshal(req.Params[0], &sent))
+			if sent.Input != nil {
+				require.Equal(t, tc.want, *sent.Input)
+			} else {
+				require.Equal(t, tc.want, *sent.Data)
+			}
+		})
 	}
 }

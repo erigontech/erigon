@@ -22,53 +22,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
-
-	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
-
-// NewGatedRoDB wraps an RoDB so every View() call acquires gate.RLock() for
-// the duration of the tx. Purpose: serialize background read txs (e.g.
-// snapshot retirement reading chaindata) against a writer that briefly holds
-// gate.Lock() during commit. Without the gate, a concurrent reader pins the
-// MDBX freelist and prevents page reclamation at commit time.
-//
-// BeginRo is passed through ungated — gating open-ended Tx lifetimes has
-// ambiguous scope. Callers that need gating must use the View closure idiom.
-func NewGatedRoDB(inner RoDB, gate *sync.RWMutex) RoDB {
-	if gate == nil {
-		return inner
-	}
-	return &gatedRoDB{inner: inner, gate: gate}
-}
-
-type gatedRoDB struct {
-	inner RoDB
-	gate  *sync.RWMutex
-}
-
-func (g *gatedRoDB) Close()                                  { g.inner.Close() }
-func (g *gatedRoDB) BeginRo(ctx context.Context) (Tx, error) { return g.inner.BeginRo(ctx) }
-func (g *gatedRoDB) ReadOnly() bool                          { return g.inner.ReadOnly() }
-func (g *gatedRoDB) AllTables() TableCfg                     { return g.inner.AllTables() }
-func (g *gatedRoDB) PageSize() datasize.ByteSize             { return g.inner.PageSize() }
-func (g *gatedRoDB) CHandle() unsafe.Pointer                 { return g.inner.CHandle() }
-func (g *gatedRoDB) Path() string                            { return g.inner.Path() }
-func (g *gatedRoDB) View(ctx context.Context, f func(tx Tx) error) error {
-	g.gate.RLock()
-	defer g.gate.RUnlock()
-	return g.inner.View(ctx, f)
-}
 
 // Adapts an RoDB to the RwDB interface (invoking write operations results in error)
 type RwWrapper struct {
@@ -78,12 +39,15 @@ type RwWrapper struct {
 func (w RwWrapper) Update(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("Update not implemented")
 }
+
 func (w RwWrapper) UpdateNosync(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("UpdateNosync not implemented")
 }
+
 func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRw not implemented")
 }
+
 func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
 }
@@ -257,8 +221,8 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
+	for i, v := range slices.Backward(r) {
+		if v != 255 {
 			r[i]++
 			return r, true
 		}
@@ -266,19 +230,6 @@ func NextSubtree(in []byte) ([]byte, bool) {
 		r = r[:i] // make it shorter, because in tries after 11ff goes 12, but not 1200
 	}
 	return nil, false
-}
-
-func IncrementKey(tx RwTx, table string, k []byte) error {
-	v, err := tx.GetOne(table, k)
-	if err != nil {
-		return err
-	}
-	var version uint64
-	if len(v) == 8 {
-		version = binary.BigEndian.Uint64(v)
-	}
-	version++
-	return tx.Put(table, k, hexutil.EncodeTs(version))
 }
 
 type DomainEntryDiff struct {
@@ -293,10 +244,6 @@ type DomainDiff struct {
 	prevValsSlice []DomainEntryDiff
 
 	currentStepBuf, keyBuf []byte
-}
-
-func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
 }
 
 func (d *DomainDiff) Len() int {
@@ -346,4 +293,12 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
+}
+
+// RollbackUnless rolls tx back unless *ok is true. Defer it right after opening
+// a tx that is returned to the caller, so an early return or panic cannot leak it.
+func RollbackUnless(ok *bool, tx Tx) {
+	if !*ok {
+		tx.Rollback()
+	}
 }

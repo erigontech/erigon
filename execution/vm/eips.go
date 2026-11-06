@@ -25,6 +25,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -62,6 +63,7 @@ func ValidEip(eipNum int) bool {
 	_, ok := activators[eipNum]
 	return ok
 }
+
 func ActivateableEips() []string {
 	var nums []string //nolint:prealloc
 	for k := range activators {
@@ -206,9 +208,7 @@ func enable1153(jt *JumpTable) {
 // opTload implements TLOAD opcode
 func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
-	key := evm.internStorageKey(loc)
-	val := evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
-	*loc = val
+	*loc = evm.IntraBlockState().GetTransientState(scope.Contract.Address(), state.TransientKey(*loc))
 	return pc, nil, nil
 }
 
@@ -217,10 +217,9 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := evm.internStorageKey(scope.Stack.peek())
-	scope.Stack.drop()
-	val := scope.Stack.popCopy()
-	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), key, val)
+	key := scope.Stack.pop()
+	val := scope.Stack.pop()
+	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), (*state.TransientKey)(key), val)
 	return pc, nil, nil
 }
 
@@ -271,7 +270,7 @@ func opBlobHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	idx := scope.Stack.peek()
 	if idx.LtUint64(uint64(len(evm.BlobHashes))) {
 		hash := evm.BlobHashes[idx.Uint64()]
-		idx.SetBytes(hash[:])
+		idx.SetBytes32(hash[:])
 	} else {
 		idx.Clear()
 	}
@@ -296,15 +295,6 @@ func enable5656(jt *JumpTable) {
 		numPush:     0,
 		memorySize:  memoryMcopy,
 	}
-}
-
-// opMcopy implements the MCOPY opcode (https://eips.ethereum.org/EIPS/eip-5656)
-func opMcopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// These values are checked for overflow during memory expansion calculation
-	// (the memorySize function on the opcode).
-	dst, src, length := scope.Stack.pop3()
-	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
-	return pc, nil, nil
 }
 
 // enable6780 applies EIP-6780 (deactivate SELFDESTRUCT)

@@ -27,6 +27,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/execctx"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -34,9 +36,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -81,7 +82,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.NoError(t, err)
 	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	setup := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	setup := New(NewReaderV3(domains.AsGetter(tx)))
 	defer setup.Close()
 	require.NoError(t, setup.CreateAccount(addr, true))
 	require.NoError(t, setup.SetState(addr, key, valA))
@@ -91,7 +92,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	// IBS for the next block — reads block-start state (slot=A) from domains.
-	ibs := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	ibs := New(NewReaderV3(domains.AsGetter(tx)))
 	defer ibs.Close()
 
 	// Tx1: A → B.
@@ -115,6 +116,47 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.Equal(t, valB, rw2.storageWrites[0].orig, "tx2 origin must be B (last written value)")
 }
 
+func TestWriterAccountAndStorageNotifications(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		storageOriginal, storageValue uint64
+		nonces                        []uint64
+		action                        notifications.Action
+	}{
+		{"storage only", 0, 1, []uint64{1}, notifications.ActionStorage},
+		{"storage cleared", 1, 0, []uint64{1}, notifications.ActionStorage},
+		{"account and storage", 0, 1, []uint64{2}, notifications.ActionUpsert},
+		{"account restored", 0, 1, []uint64{2, 1}, notifications.ActionUpsert},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			accumulator := notifications.NewAccumulator()
+			accumulator.StartChange(&types.Header{Number: *uint256.NewInt(1)}, nil, false)
+			writer := NewWriter(domains.AsPutDel(tx), accumulator, 1)
+			address := accounts.InternAddress(common.Address{1})
+			original := accounts.NewAccount()
+			original.Nonce = 1
+			account := original
+
+			storageValue := uint256.NewInt(tc.storageValue)
+			require.NoError(t, writer.WriteAccountStorage(address, 0, accounts.ZeroKey, *uint256.NewInt(tc.storageOriginal), *storageValue))
+			for _, nonce := range tc.nonces {
+				account.Nonce = nonce
+				require.NoError(t, writer.UpdateAccountData(address, &original, &account))
+			}
+			changes := accumulator.Changes()
+			require.Len(t, changes, 1)
+			require.Len(t, changes[0].Changes, 1)
+			require.Equal(t, tc.action, changes[0].Changes[0].Action)
+			require.Len(t, changes[0].Changes[0].StorageChanges, 1)
+			require.Equal(t, storageValue.Bytes(), changes[0].Changes[0].StorageChanges[0].Data)
+			if tc.action == notifications.ActionUpsert {
+				require.Equal(t, accounts.SerialiseV3(&account), changes[0].Changes[0].Data)
+			}
+		})
+	}
+}
+
 func TestNull(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -123,7 +165,7 @@ func TestNull(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
@@ -157,7 +199,7 @@ func TestTouchDelete(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
@@ -194,7 +236,7 @@ func TestSnapshot(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
 	defer state.Close()
 
@@ -239,7 +281,7 @@ func TestSnapshotEmpty(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
 	defer state.Close()
 
@@ -260,7 +302,7 @@ func TestSnapshot2(t *testing.T) {
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -339,7 +381,7 @@ func TestCodeResolve(t *testing.T) {
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	state := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -369,7 +411,7 @@ func TestCodeResolve(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	state1 := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	state1 := New(NewReaderV3(domains.AsGetter(tx)))
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
@@ -380,9 +422,9 @@ func TestCodeResolve(t *testing.T) {
 	code, err := state1.GetCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, del, code)
-	code, err = state1.ResolveCode(stateobjaddr0)
+	resolved, err := state1.ResolveCode(stateobjaddr0)
 	require.NoError(t, err)
-	require.Equal(t, target, code)
+	require.Equal(t, target, resolved.Bytes)
 }
 
 func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
@@ -435,6 +477,25 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+
+	dirs := datadir.New(tb.TempDir())
+
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+
+	return db, tx, domains
+}
+
 func TestDump(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -444,7 +505,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	st := New(NewReaderV3(domains.AsGetter(tx)))
 	defer st.Close()
 
 	// generate a few entries
@@ -511,23 +572,4 @@ func TestDump(t *testing.T) {
 	if got != want {
 		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
-}
-
-func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
-	tb.Helper()
-
-	dirs := datadir.New(tb.TempDir())
-
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
-	tb.Cleanup(db.Close)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(tb, err)
-	tb.Cleanup(tx.Rollback)
-
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), execctx.WithParaTrieDB(db))
-	require.NoError(tb, err)
-	tb.Cleanup(domains.Close)
-
-	return db, tx, domains
 }

@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -147,7 +146,7 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 	blockID, err := beaconhttp.BlockIdFromRequest(request)
 	require.NoError(t, err)
 
-	root, err := a.rootFromBlockId(request.Context(), nil, blockID)
+	root, err := a.rootFromBlockId(nil, blockID)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{0xaa}, root)
 }
@@ -173,6 +172,7 @@ func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
 	selectedRoot := common.Hash{0xbb}
 	submittedState := state.New(&clparams.MainnetBeaconConfig)
 	selectedState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, selectedState.SetSlot(98))
 	fcu := mock_services2.NewForkChoiceStorageMock(t)
 	fcu.HeadVal = selectedRoot
 	fcu.HeadSlotVal = 99
@@ -184,7 +184,8 @@ func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, selectedRoot, root)
 	require.Equal(t, uint64(99), slot)
-	require.Same(t, selectedState, headState)
+	require.NotSame(t, selectedState, headState)
+	require.Equal(t, uint64(98), headState.Slot())
 }
 
 func TestSelectedHeadStateReportsMissingAuxiliaryRoot(t *testing.T) {
@@ -241,6 +242,6 @@ func TestViewHeadStateWithIdentityReportsSyncing(t *testing.T) {
 
 	err := a.viewHeadStateWithIdentity(func(*state.CachingBeaconState, common.Hash, uint64) error { return nil })
 	var endpointErr *beaconhttp.EndpointError
-	require.True(t, errors.As(err, &endpointErr))
+	require.ErrorAs(t, err, &endpointErr)
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 }

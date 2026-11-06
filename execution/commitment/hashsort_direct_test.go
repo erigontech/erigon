@@ -286,7 +286,7 @@ func TestHashSortInMem_WarmupNoRace(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, numKeys, visited)
-	require.NoError(t, warmuper.Wait())
+	warmuper.CloseAndWait()
 }
 
 func TestHashSortModeDirect_RetouchBetweenSorts(t *testing.T) {

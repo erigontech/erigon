@@ -22,8 +22,10 @@ import (
 	"sync"
 )
 
-var ErrStopped = errors.New("stopped")
-var ErrUnwind = errors.New("unwound")
+var (
+	ErrStopped = errors.New("stopped")
+	ErrUnwind  = errors.New("unwound")
+)
 
 // FastContextErr is faster than ctx.Err() because usually it doesn't lock an internal mutex.
 // It locks it only if the context is done and at the first call.
@@ -102,7 +104,7 @@ func (r *Ready) Set() {
 func PrioritizedSend[t any](ch chan t, msg t) {
 	select {
 	case ch <- msg:
-	default: //if channel is full (slow consumer), drop old messages (not new)
+	default: // if channel is full (slow consumer), drop old messages (not new)
 		for i := 0; i < cap(ch)/2; i++ {
 			select {
 			case <-ch:

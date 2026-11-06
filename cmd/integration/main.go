@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"os"
 
-	_ "github.com/erigontech/erigon/db/snaptype2" //hack
+	_ "github.com/erigontech/erigon/db/snaptype2" // hack
 
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	"github.com/erigontech/erigon/common"

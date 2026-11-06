@@ -17,12 +17,17 @@
 package jsonrpc
 
 import (
+	"context"
+	"errors"
 	"math"
 	"sync"
+	"time"
+	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 const (
@@ -67,7 +72,18 @@ type witnessResultCache struct {
 	mu            sync.Mutex
 	residentBytes int
 	entryBytes    map[common.Hash]int
+	building      map[common.Hash]*witnessBuild
 }
+
+type witnessBuild struct {
+	done   chan struct{}
+	result *ExecutionWitnessResult
+	took   time.Duration
+	err    error
+	stored bool
+}
+
+var errWitnessBuildPanicked = errors.New("witness build panicked")
 
 // WitnessCacheCapacity is the number of witnesses the cache actually holds for a
 // requested block count, after clamping to witnessCacheMaxBlocks.
@@ -85,6 +101,7 @@ func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly boo
 		cacheOnly:   cacheOnly,
 		maxBytes:    maxBytes,
 		entryBytes:  make(map[common.Hash]int),
+		building:    make(map[common.Hash]*witnessBuild),
 	}
 	cache, err := lru.NewWithEvict[common.Hash, *ExecutionWitnessResult](int(WitnessCacheCapacity(blocks)), c.onEvict)
 	if err != nil {
@@ -100,17 +117,75 @@ func (c *witnessResultCache) HeadCapture() bool { return c.headCapture }
 // CacheOnly reports whether a serve miss must fail out-of-window instead of recomputing.
 func (c *witnessResultCache) CacheOnly() bool { return c.cacheOnly }
 
-// ResidentBytes reports the total pre-marshaled JSON bytes currently cached.
+// ResidentBytes reports the estimated bytes of the witnesses currently cached.
 func (c *witnessResultCache) ResidentBytes() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.residentBytes
 }
 
-// store is the build paths' insert: it caches the pre-marshaled witness and publishes it.
-func (c *witnessResultCache) store(num uint64, hash common.Hash, enc []byte) {
-	c.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
-	c.feed.publish(witnessPush{num: num, hash: hash, json: enc})
+// store is the build paths' insert: it caches the witness and publishes it. The result is
+// shared with readers from here on and must not change.
+func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWitnessResult) {
+	r.headerByNumber = nil // only the build's BLOCKHASH lookups read it
+	c.Add(hash, r)
+	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
+}
+
+type witnessStoreFunc func(r *ExecutionWitnessResult, took time.Duration)
+
+func (c *witnessResultCache) buildOnce(ctx context.Context, hash common.Hash, build func(context.Context) (*ExecutionWitnessResult, error), store witnessStoreFunc) (*ExecutionWitnessResult, error) {
+	c.mu.Lock()
+	b, running := c.building[hash]
+	if !running {
+		b = &witnessBuild{done: make(chan struct{}), err: errWitnessBuildPanicked}
+		c.building[hash] = b
+	}
+	c.mu.Unlock()
+	if !running {
+		return c.lead(ctx, hash, b, build, store)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.done:
+	}
+	if b.err == nil && store != nil && !b.stored {
+		store(b.result, b.took)
+	}
+	return b.result, b.err
+}
+
+func (c *witnessResultCache) lead(ctx context.Context, hash common.Hash, b *witnessBuild, build func(context.Context) (*ExecutionWitnessResult, error), store witnessStoreFunc) (*ExecutionWitnessResult, error) {
+	defer func() {
+		c.mu.Lock()
+		delete(c.building, hash)
+		c.mu.Unlock()
+		close(b.done)
+	}()
+	start := time.Now()
+	b.result, b.err = build(context.WithoutCancel(ctx))
+	b.took = time.Since(start)
+	if b.err == nil && store != nil {
+		store(b.result, b.took)
+		b.stored = true
+	}
+	return b.result, b.err
+}
+
+func (c *witnessResultCache) awaitBuild(ctx context.Context, hash common.Hash) (*ExecutionWitnessResult, bool) {
+	c.mu.Lock()
+	b, running := c.building[hash]
+	c.mu.Unlock()
+	if !running {
+		return c.Get(hash)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, false
+	case <-b.done:
+		return b.result, b.err == nil
+	}
 }
 
 func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }
@@ -164,10 +239,18 @@ func (c *witnessResultCache) onEvict(hash common.Hash, _ *ExecutionWitnessResult
 	c.mu.Unlock()
 }
 
-// witnessResultSize is the resident cost of a cached result: its pre-marshaled JSON.
+// witnessResultSize estimates a cached result's resident bytes: each byte string plus its slice header.
 func witnessResultSize(r *ExecutionWitnessResult) int {
 	if r == nil {
 		return 0
 	}
-	return len(r.cachedJSON)
+	n := 0
+	for _, list := range [][]hexutil.Bytes{r.State, r.Codes, r.Keys, r.Headers} {
+		for _, b := range list {
+			n += len(b) + sliceHeaderBytes
+		}
+	}
+	return n
 }
+
+const sliceHeaderBytes = int(unsafe.Sizeof([]byte(nil)))

@@ -269,7 +269,7 @@ func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...a
 				"async", handler.async,
 				"callback", fmt.Sprint(handler.callBack),
 				"args", fmt.Sprint(args...),
-				//TODO Stack().
+				// TODO Stack().
 				"err", err)
 		}
 	}()

@@ -31,8 +31,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const RUNS = 1000 // for local tests increase this number
@@ -91,10 +92,10 @@ func (tr *TRand) RandBloom() Bloom {
 
 func (tr *TRand) RandWithdrawal() *Withdrawal {
 	return &Withdrawal{
-		Index:     tr.rnd.Uint64(),
-		Validator: tr.rnd.Uint64(),
+		Index:     hexutil.Uint64(tr.rnd.Uint64()),
+		Validator: hexutil.Uint64(tr.rnd.Uint64()),
 		Address:   tr.RandAddress(),
-		Amount:    tr.rnd.Uint64(),
+		Amount:    hexutil.Uint64(tr.rnd.Uint64()),
 	}
 }
 
@@ -218,7 +219,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 func (tr *TRand) RandTransaction(_type int) Transaction {
 	var txType int
 	if _type == -1 {
-		txType = tr.RandIntInRange(0, 6) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType
+		txType = []int{0, 1, 2, 3, 4, 6}[tr.RandIntInRange(0, 6)]
 	} else {
 		txType = _type
 	}
@@ -286,28 +287,13 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			},
 			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
-	case AccountAbstractionTxType:
-		senderAddress, paymaster, deployer := tr.RandAddress(), tr.RandAddress(), tr.RandAddress()
-		return &AccountAbstractionTransaction{
-			Nonce:                       commonTx.Nonce,
-			ChainID:                     uint256.NewInt(*tr.RandUint64()),
-			Tip:                         uint256.NewInt(*tr.RandUint64()),
-			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
-			GasLimit:                    commonTx.GasLimit,
-			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
-			SenderAddress:               accounts.InternAddress(senderAddress),
-			SenderValidationData:        tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
-			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			Paymaster:                   &paymaster,
-			PaymasterData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			Deployer:                    &deployer,
-			DeployerData:                tr.RandBytes(tr.RandIntInRange(128, 1024)),
-			BuilderFee:                  uint256.NewInt(*tr.RandUint64()),
-			ValidationGasLimit:          *tr.RandUint64(),
-			PaymasterValidationGasLimit: *tr.RandUint64(),
-			PostOpGasLimit:              *tr.RandUint64(),
-			NonceKey:                    uint256.NewInt(*tr.RandUint64()),
+	case FrameTxType:
+		return &FrameTransaction{
+			NonceKeys: []uint256.Int{{}},
+			ChainID:   *uint256.NewInt(*tr.RandUint64()), Nonce: commonTx.Nonce, SenderAddress: tr.RandAddress(),
+			Frames:     []Frame{{Mode: FrameDefault, Limits: mdgas.MdGas{Execution: 100_000}, Data: tr.RandBytes(tr.RandIntInRange(0, 100))}},
+			Fees:       FrameFees{FeeCap: *uint256.NewInt(100), TipCap: *uint256.NewInt(1)},
+			Signatures: []FrameSignature{{Signature: tr.RandBytes(tr.RandIntInRange(0, 100))}},
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -327,14 +313,6 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 	txns := make([]Transaction, size)
 	for i := range size {
 		txns[i] = tr.RandTransaction(-1)
-	}
-	return txns
-}
-
-func (tr *TRand) RandRawTransactions(size int) [][]byte {
-	txns := make([][]byte, size)
-	for i := range size {
-		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
 	}
 	return txns
 }
@@ -371,24 +349,6 @@ func (tr *TRand) RandRawBody() *RawBody {
 		Transactions: tr.RandRLPTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-	}
-}
-
-func (tr *TRand) RandRawBlock(setNil bool) *RawBlock {
-	if setNil {
-		return &RawBlock{
-			Header: tr.RandHeader(),
-			Body: &RawBody{
-				Uncles:      nil,
-				Withdrawals: nil,
-				// Deposits:     nil,
-			},
-		}
-	}
-
-	return &RawBlock{
-		Header: tr.RandHeader(),
-		Body:   tr.RandRawBody(),
 	}
 }
 
@@ -517,9 +477,10 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		}
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func compareBodies(t *testing.T, a, b *Body) error {
@@ -534,10 +495,10 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
-	compareHeaders(t, a.Uncles, b.Uncles)
-	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-
-	return nil
+	if err := compareHeaders(t, a.Uncles, b.Uncles); err != nil {
+		return err
+	}
+	return compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 }
 
 func TestTransactionEncodeDecodeRLP(t *testing.T) {

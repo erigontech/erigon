@@ -126,7 +126,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, comp, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, comp)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -163,7 +163,7 @@ func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compression seg.F
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, compression, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, compression)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
@@ -206,7 +206,7 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -251,7 +251,7 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -296,7 +296,7 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -341,7 +341,7 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -454,7 +454,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 }
 
 func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
-	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	// BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
 
@@ -465,9 +465,11 @@ func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
 	})
 }
 
-var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
-var cpuIters = flag.Int("bench.cpu-iters", 1000, "CPU work iterations between BeginFilesRo and Close")
-var sleepMs = flag.Int("bench.sleep-ms", 5, "sleep duration in milliseconds between BeginRo and Rollback")
+var (
+	parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
+	cpuIters = flag.Int("bench.cpu-iters", 1000, "CPU work iterations between BeginFilesRo and Close")
+	sleepMs  = flag.Int("bench.sleep-ms", 5, "sleep duration in milliseconds between BeginRo and Rollback")
+)
 
 func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	// RESULT: deteriorates after 2^21 goroutines

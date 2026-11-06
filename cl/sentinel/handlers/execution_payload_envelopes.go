@@ -17,7 +17,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"math"
 
 	"github.com/libp2p/go-libp2p/core/network"
 
@@ -25,14 +27,21 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/envelope_history"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+var errNoRebuildCredit = errors.New("execution payload envelope rebuild credit exhausted")
+
 // executionPayloadEnvelopesByRangeHandler handles the ExecutionPayloadEnvelopesByRange v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.Stream) error {
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
+	defer cancel()
+
 	curEpoch := c.ethClock.GetCurrentEpoch()
 	if curEpoch < c.beaconConfig.GloasForkEpoch {
 		return nil
@@ -49,73 +58,209 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if maxPayloads == 0 {
 		return errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	// Validate count
-	if req.Count > maxPayloads {
-		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
+	if maxPayloads > math.MaxInt {
+		return errors.New("MAX_REQUEST_PAYLOADS exceeds platform capacity")
 	}
 	if req.Count == 0 {
 		return nil
 	}
+	endSlot := req.StartSlot + req.Count
+	if endSlot < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 
-	if cost := min(int(req.Count), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := int(min(req.Count, maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
-	// Compute minimum serve slot: max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS) * SLOTS_PER_EPOCH
-	minServeEpoch := c.beaconConfig.GloasForkEpoch
-	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
-		if lowerBound := curEpoch - c.beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
-			minServeEpoch = lowerBound
-		}
+	minServeEpoch := minExecutionPayloadServeEpoch(c.beaconConfig, curEpoch, c.forkChoiceReader.FinalizedCheckpoint().Epoch)
+
+	startSlot := max(req.StartSlot, minServeEpoch*c.beaconConfig.SlotsPerEpoch)
+	if startSlot >= endSlot {
+		return nil
+	}
+	lowestAvailableSlot := c.forkChoiceReader.LowestAvailableSlot()
+	if c.envelopeRebuilder == nil && startSlot < lowestAvailableSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	}
+	needsCanonicalParent := c.envelopeRebuilder != nil && startSlot < lowestAvailableSlot
+
+	head, headSlot, err := c.forkChoiceReader.GetHeadNode()
+	if err != nil {
+		return err
 	}
 
-	var (
-		endSlot   = req.StartSlot + req.Count
-		startSlot = max(req.StartSlot, minServeEpoch*c.beaconConfig.SlotsPerEpoch)
-	)
-
-	curSlot := c.ethClock.GetCurrentSlot()
-
-	tx, err := c.indiciesDB.BeginRo(c.ctx)
+	lastSlot := endSlot - 1
+	lastSlot = min(lastSlot, c.ethClock.GetCurrentSlot(), headSlot)
+	if lastSlot < startSlot {
+		return nil
+	}
+	tx, err := c.indiciesDB.BeginRo(requestCtx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	count := uint64(0)
-	for slot := startSlot; slot < endSlot; slot++ {
-		if slot > curSlot {
-			break
+	canonicalHeadSlot, canonicalHeadRoot, err := beacon_indicies.ReadCanonicalHead(tx)
+	if err != nil {
+		return err
+	}
+	headIndexMatches := canonicalHeadSlot == headSlot && canonicalHeadRoot == head.Root
+	type responseCandidate struct {
+		root      common.Hash
+		slot      uint64
+		epoch     uint64
+		block     *cltypes.SignedBeaconBlock
+		childSlot uint64
+		child     *cltypes.SignedBeaconBlock
+	}
+	responseCandidates := make([]responseCandidate, 0, maxPayloads)
+	type canonicalBlock struct {
+		root  common.Hash
+		slot  uint64
+		block *cltypes.SignedBeaconBlock
+	}
+	var pending *canonicalBlock
+	var lastCanonical *canonicalBlock
+	canonicalUnavailable := false
+	canonicalReadLimit := maxPayloads
+	if canonicalReadLimit != math.MaxUint64 {
+		canonicalReadLimit++
+	}
+	canonicalReadCount := uint64(0)
+	scanLimitReached := false
+	err = beacon_indicies.RangeBlockRoots(tx, startSlot, headSlot, func(slot uint64, root common.Hash) bool {
+		if !needsCanonicalParent && pending == nil && slot > lastSlot {
+			return false
 		}
-
-		// Only serve envelopes from GLOAS fork onwards
-		epoch := slot / c.beaconConfig.SlotsPerEpoch
-		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			continue
+		block, ok := c.forkChoiceReader.GetBlock(root)
+		if (!ok || block == nil) && c.envelopeRebuilder != nil {
+			block, err = c.beaconDB.ReadBlockByRoot(requestCtx, tx, root)
+			ok = err == nil && block != nil
 		}
-
-		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
-			return err
+			log.Debug("failed to read block by root", "blockRoot", root, "error", err)
+			canonicalUnavailable = true
+			return false
 		}
-		if blockRoot == (common.Hash{}) {
-			continue
+		if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
+			canonicalUnavailable = true
+			return false
+		}
+		if needsCanonicalParent {
+			needsCanonicalParent = false
+			if slot > startSlot {
+				parentRoot := block.Block.ParentRoot
+				parentSlot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, parentRoot)
+				if readErr != nil || parentSlot == nil || *parentSlot >= startSlot {
+					canonicalUnavailable = true
+					return false
+				}
+				canonicalParent, readErr := beacon_indicies.ReadCanonicalBlockRoot(tx, *parentSlot)
+				if readErr != nil || canonicalParent != parentRoot {
+					canonicalUnavailable = true
+					return false
+				}
+			}
+		}
+		current := &canonicalBlock{root: root, slot: slot, block: block}
+		lastCanonical = current
+		if pending != nil {
+			if current.block.Block.ParentRoot != pending.root {
+				canonicalUnavailable = true
+				return false
+			}
+			epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
+			if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion &&
+				forkchoice.ParentPayloadStatusFromBids(pending.block, current.block.Block) == cltypes.PayloadStatusFull {
+				responseCandidates = append(responseCandidates, responseCandidate{
+					root:      pending.root,
+					slot:      pending.slot,
+					epoch:     epoch,
+					block:     pending.block,
+					childSlot: current.slot,
+					child:     current.block,
+				})
+				pending = nil
+				if uint64(len(responseCandidates)) == maxPayloads {
+					return false
+				}
+			}
+			pending = nil
+		}
+		if slot > lastSlot {
+			return false
+		}
+		pending = current
+		canonicalReadCount++
+		if canonicalReadCount == canonicalReadLimit {
+			scanLimitReached = true
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	if needsCanonicalParent {
+		canonicalUnavailable = true
+	}
+	if canonicalUnavailable {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	}
+	if !headIndexMatches {
+		if lastCanonical == nil || c.forkChoiceReader.Ancestor(head.Root, lastCanonical.slot).Root != lastCanonical.root {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+		}
+	}
+	if pending != nil {
+		if pending.slot != headSlot || pending.root != head.Root {
+			if scanLimitReached {
+				if len(responseCandidates) == 0 {
+					return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+				}
+				pending = nil
+			} else {
+				return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+			}
+		} else if uint64(len(responseCandidates)) == maxPayloads {
+			pending = nil
+		}
+	}
+	if pending != nil {
+		epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
+		if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion && head.PayloadStatus == cltypes.PayloadStatusFull {
+			responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, slot: pending.slot, epoch: epoch})
+		}
+	}
+
+	wroteResponse := false
+	peerID := s.Conn().RemotePeer().String()
+	for _, candidate := range responseCandidates {
+		var envelope *cltypes.SignedExecutionPayloadEnvelope
+		if c.forkChoiceReader.HasEnvelope(candidate.root) {
+			envelope, err = c.forkChoiceReader.ReadEnvelopeFromDisk(candidate.root)
+			if err != nil {
+				log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
+			}
+		}
+		if envelope == nil && err == nil && candidate.child != nil && c.envelopeRebuilder != nil {
+			prepared, prepareErr := c.envelopeRebuilder.PrepareFromBlocks(tx, candidate.slot, candidate.root, candidate.block, candidate.childSlot, candidate.child)
+			err = prepareErr
+			if err == nil && prepared != nil {
+				envelope, err = c.tryRebuildEnvelope(requestCtx, peerID, prepared)
+			}
+			if err != nil {
+				log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.root, "error", err)
+			}
+		}
+		if err != nil || envelope == nil {
+			if wroteResponse {
+				break
+			}
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 		}
 
-		if !c.forkChoiceReader.HasEnvelope(blockRoot) {
-			continue
-		}
-
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
-		if err != nil {
-			log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
-			continue
-		}
-		if envelope == nil {
-			continue
-		}
-
-		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
+		forkDigest, err := c.ethClock.ComputeForkDigest(candidate.epoch)
 		if err != nil {
 			log.Debug("failed to compute fork digest", "error", err)
 			return err
@@ -130,11 +275,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		if err := ssz_snappy.EncodeAndWrite(s, envelope); err != nil {
 			return err
 		}
-
-		count++
-		if count >= maxPayloads {
-			break
-		}
+		wroteResponse = true
 	}
 
 	return nil
@@ -143,6 +284,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 // executionPayloadEnvelopesByRootHandler handles the ExecutionPayloadEnvelopesByRoot v1 req/resp protocol.
 // [New in Gloas:EIP7732]
 func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Stream) error {
+	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
+	defer cancel()
+
 	curEpoch := c.ethClock.GetCurrentEpoch()
 	if curEpoch < c.beaconConfig.GloasForkEpoch {
 		return nil
@@ -169,58 +313,22 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
-	tx, err := c.indiciesDB.BeginRo(c.ctx)
+	tx, err := c.indiciesDB.BeginRo(requestCtx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// Compute serve range: [max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS), current_epoch]
-	// Spec: consensus-specs PR #4950
-	minServeEpoch := c.beaconConfig.GloasForkEpoch
-	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
-		if lowerBound := curEpoch - c.beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
-			minServeEpoch = lowerBound
-		}
+	minServeEpoch := minExecutionPayloadServeEpoch(c.beaconConfig, curEpoch, c.forkChoiceReader.FinalizedCheckpoint().Epoch)
+
+	type rebuildCandidate struct {
+		blockRoot common.Hash
+		slot      uint64
+		epoch     uint64
 	}
 
 	count := 0
-	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
-		if count >= int(maxPayloads) {
-			return false
-		}
-
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
-		if err != nil {
-			log.Debug("failed to read block slot by root", "blockRoot", blockRoot, "error", err)
-			return true
-		}
-		if slot == nil {
-			return true
-		}
-
-		// Only serve envelopes within the serve range
-		epoch := *slot / c.beaconConfig.SlotsPerEpoch
-		if epoch < minServeEpoch || epoch > curEpoch {
-			return true
-		}
-		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			return true
-		}
-
-		if !c.forkChoiceReader.HasEnvelope(blockRoot) {
-			return true
-		}
-
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
-		if err != nil {
-			log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
-			return true
-		}
-		if envelope == nil {
-			return true
-		}
-
+	writeEnvelope := func(envelope *cltypes.SignedExecutionPayloadEnvelope, epoch uint64) bool {
 		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
 		if err != nil {
 			log.Debug("failed to compute fork digest", "error", err)
@@ -239,7 +347,112 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 
 		count++
 		return true
+	}
+
+	rebuildCandidates := make([]rebuildCandidate, 0, req.Length())
+	stopped := false
+	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
+		if count >= int(maxPayloads) {
+			return false
+		}
+
+		slot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		if readErr != nil {
+			log.Debug("failed to read block slot by root", "blockRoot", blockRoot, "error", readErr)
+			return true
+		}
+		if slot == nil {
+			return true
+		}
+
+		// Only serve envelopes within the serve range
+		epoch := *slot / c.beaconConfig.SlotsPerEpoch
+		if epoch < minServeEpoch || epoch > curEpoch {
+			return true
+		}
+		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+			return true
+		}
+
+		var envelope *cltypes.SignedExecutionPayloadEnvelope
+		if c.forkChoiceReader.HasEnvelope(blockRoot) {
+			envelope, readErr = c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
+			if readErr != nil {
+				log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", readErr)
+				return true
+			}
+		}
+		if envelope == nil {
+			if c.envelopeRebuilder != nil {
+				rebuildCandidates = append(rebuildCandidates, rebuildCandidate{blockRoot: blockRoot, slot: *slot, epoch: epoch})
+			}
+			return true
+		}
+
+		if !writeEnvelope(envelope, epoch) {
+			stopped = true
+			return false
+		}
+		return true
 	})
 
+	if stopped {
+		return nil
+	}
+
+	peerID := s.Conn().RemotePeer().String()
+	for _, candidate := range rebuildCandidates {
+		if count >= int(maxPayloads) {
+			break
+		}
+
+		prepared, err := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.blockRoot)
+		if err != nil {
+			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
+			break
+		}
+		if prepared == nil {
+			continue
+		}
+		envelope, err := c.tryRebuildEnvelope(requestCtx, peerID, prepared)
+		if err != nil {
+			log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.blockRoot, "error", err)
+			break
+		}
+		if envelope != nil && !writeEnvelope(envelope, candidate.epoch) {
+			break
+		}
+	}
+
 	return nil
+}
+
+func (c *ConsensusHandlers) tryRebuildEnvelope(ctx context.Context, peerID string, prepared *envelope_history.PreparedRebuild) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	bucket := c.rateLimiter.tryStartEnvelopeRebuild(peerID)
+	if bucket == nil {
+		return nil, errNoRebuildCredit
+	}
+	started := c.rateLimiter.now()
+	charge := true
+	defer func() {
+		c.rateLimiter.finishEnvelopeRebuild(bucket, c.rateLimiter.now().Sub(started), charge)
+	}()
+	envelope, err := c.envelopeRebuilder.TryRebuild(ctx, prepared)
+	if errors.Is(err, envelope_history.ErrRebuildBusy) {
+		charge = false
+	}
+	return envelope, err
+}
+
+func minExecutionPayloadServeEpoch(beaconConfig *clparams.BeaconChainConfig, currentEpoch, finalizedEpoch uint64) uint64 {
+	minServeEpoch := beaconConfig.GloasForkEpoch
+	if currentEpoch > beaconConfig.MinEpochsForBlockRequests() {
+		if lowerBound := currentEpoch - beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
+			minServeEpoch = lowerBound
+		}
+	}
+	if finalizedEpoch < minServeEpoch {
+		minServeEpoch = max(beaconConfig.GloasForkEpoch, finalizedEpoch)
+	}
+	return minServeEpoch
 }

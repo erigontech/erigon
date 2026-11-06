@@ -18,6 +18,13 @@
 
 package backup
 
-import "os"
+import (
+	"os"
+
+	"github.com/erigontech/erigon/db/kv"
+)
 
 func restoreOwner(os.FileInfo, string) error { return nil }
+
+// closeBeforeRename: Windows can't rename over a file mdbx opened in exclusive mode.
+func closeBeforeRename(src kv.RoDB) { src.Close() }

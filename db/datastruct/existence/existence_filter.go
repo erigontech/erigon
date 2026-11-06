@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 )
 
@@ -61,6 +62,32 @@ func (b *Filter) AddHash(hash uint64) error {
 		return nil
 	}
 	return b.fuseWriterSharded.AddHash(hash)
+}
+
+// InMem reports whether a lookup reads only heap memory; a mapped filter reads file pages.
+func (b *Filter) InMem() bool {
+	switch {
+	case b.empty:
+		return true
+	case b.fuseReaderSharded != nil:
+		return b.fuseReaderSharded.InMem()
+	case b.fuseReader != nil:
+		return b.fuseReader.InMem()
+	}
+	return true // the bloom filter is heap-allocated
+}
+
+// ContainsHashProbe is ContainsHash with pr touching the filter pages it reads, for a mapped filter.
+func (b *Filter) ContainsHashProbe(hashedKey uint64, pr *mmap.Probe) bool {
+	switch {
+	case b.empty:
+		return true
+	case b.fuseReaderSharded != nil:
+		return b.fuseReaderSharded.ContainsHashProbe(hashedKey, pr)
+	case b.fuseReader != nil:
+		return b.fuseReader.ContainsHashProbe(hashedKey, pr)
+	}
+	return b.filter.ContainsHash(hashedKey)
 }
 
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
@@ -118,7 +145,7 @@ func isBloomMagic(peek []byte) bool {
 func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
 	_, fileName := filepath.Split(filePath)
 	idx = &Filter{FilePath: filePath, FileName: fileName}
-	var validationPassed = false
+	validationPassed := false
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", fileName, rec, dbg.Stack())

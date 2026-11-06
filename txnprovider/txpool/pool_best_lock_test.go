@@ -29,6 +29,8 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	mdgas "github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
@@ -40,7 +42,7 @@ func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
+	_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
 	require.ErrorIs(t, err, context.Canceled)
 
 	// Returning with the lock still held blocks every later pool operation, including the block
@@ -68,25 +70,30 @@ func (w *waitingBuffer) contains(s string) bool {
 	return strings.Contains(w.buf.String(), s)
 }
 
-func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
+// newLoggingPool returns a pool that has seen no block, with its log kept for waitingBuffer checks.
+func newLoggingPool() (*TxPool, *waitingBuffer) {
 	logs := &waitingBuffer{}
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(logs, log.LogfmtFormat()))
 
 	lock := &sync.Mutex{}
-	p := &TxPool{
+	return &TxPool{
 		lock:         lock,
 		lastSeenCond: sync.NewCond(lock),
 		logger:       logger,
 		pending:      NewPendingSubPool(PendingSubPool, 1),
 		baseFee:      NewSubPool(BaseFeeSubPool, 1),
 		queued:       NewSubPool(QueuedSubPool, 1),
-	}
+	}, logs
+}
+
+func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
+	p, logs := newLoggingPool()
 	ctx, cancel := context.WithCancel(t.Context())
 
 	returned := make(chan error, 1)
 	go func() {
-		_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
+		_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
 		returned <- err
 	}()
 
@@ -102,5 +109,45 @@ func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(5 * time.Second):
 		t.Fatal("best never returned; only a new block would have woken it")
+	}
+}
+
+func TestProvideTxnsReturnsNothingOnceTheParentBlockWaitIsStopped(t *testing.T) {
+	p, logs := newLoggingPool()
+	stop := make(chan struct{})
+
+	type provided struct {
+		txns []types.Transaction
+		err  error
+	}
+	returned := make(chan provided, 1)
+	go func() {
+		txns, err := p.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+		returned <- provided{txns, err}
+	}()
+
+	require.Eventually(t, func() bool { return logs.contains("Waiting for block") }, 5*time.Second, time.Millisecond)
+	close(stop)
+
+	// A payload being collected cannot wait for a parent the pool may never see again.
+	select {
+	case got := <-returned:
+		require.NoError(t, got.err)
+		require.Empty(t, got.txns)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ProvideTxns kept waiting for the parent block after the wait was stopped")
+	}
+}
+
+func TestProvideTxnsReportsCancellationWhenTheParentBlockWaitIsAlsoStopped(t *testing.T) {
+	p, _ := newLoggingPool()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	stop := make(chan struct{})
+	close(stop)
+
+	for range 100 {
+		_, err := p.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockWaitStop(stop))
+		require.ErrorIs(t, err, context.Canceled)
 	}
 }

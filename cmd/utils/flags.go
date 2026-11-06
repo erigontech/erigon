@@ -43,6 +43,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
+	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -54,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -143,6 +145,10 @@ var (
 	OverrideAmsterdamFlag = cli.Uint64Flag{
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
+	}
+	OverrideGenesisFlag = cli.StringFlag{
+		Name:  "override.genesis",
+		Usage: "Load the genesis block and chain config from this JSON file instead of the --chain network's; written on first start like `erigon init`, and must match a genesis already in the datadir",
 	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
@@ -270,10 +276,6 @@ var (
 		Usage: "Cap the number of blob transactions included in a built block",
 	}
 
-	VMEnableDebugFlag = cli.BoolFlag{
-		Name:  "vmdebug",
-		Usage: "Record information useful for VM and contract debugging",
-	}
 	InsecureUnlockAllowedFlag = cli.BoolFlag{
 		Name:  "allow-insecure-unlock",
 		Usage: "Allow insecure account unlocking when account-related RPCs are exposed by http",
@@ -394,6 +396,11 @@ var (
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
 		Value: true,
 	}
+	HttpCompressionLoopbackFlag = cli.BoolFlag{
+		Name:  "http.compression.loopback",
+		Usage: "Also compress HTTP-RPC responses to clients connecting from a loopback address (127.0.0.1, ::1). Off by default: on loopback compression only costs CPU and latency. Requests with an X-Forwarded-For or Forwarded header are treated as remote. Enable it when a reverse proxy on the same host sets neither header and does not compress itself",
+		Value: false,
+	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
 		Usage: "Enable compression over WebSocket (enabled by default in case WS-RPC is enabled). Use --ws.enabled=false to disable it",
@@ -433,6 +440,11 @@ var (
 		Usage: "Maximum number of requests in a batch",
 		Value: 100,
 	}
+	RpcSubscriptionLimit = cli.IntFlag{
+		Name:  "rpc.subscription.limit",
+		Usage: "Maximum number of concurrent subscriptions per connection (WebSocket, IPC). 0 = unlimited",
+		Value: rpccfg.DefaultSubscriptionLimit,
+	}
 	RpcReturnDataLimit = cli.IntFlag{
 		Name:  "rpc.returndata.limit",
 		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
@@ -449,7 +461,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -497,7 +509,7 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is held as its built result and encoded when served; memory use is roughly this count times the per-block witness size.",
 		Value: 0,
 	}
 	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
@@ -831,6 +843,12 @@ var (
 		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
+
+	DisableTCP = cli.BoolFlag{
+		Name:  "downloader.disable.tcp",
+		Usage: "Turns off TCP for the downloader, leaving uTP as the only BitTorrent transport",
+		Value: false,
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -856,6 +874,11 @@ var (
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
 		Value: (1 * datasize.TB).String(),
 	}
+	DbSafeNoSyncFlag = cli.BoolFlag{
+		Name:  "db.safe.nosync",
+		Usage: "Let writes reach the disk in the background: after a power cut the node resumes from the last flushed point and re-syncs the seconds in between, and the database is intact either way. Disable to flush before every commit returns",
+		Value: true,
+	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
 		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
@@ -871,12 +894,6 @@ var (
 		Name:  "webseed",
 		Usage: "Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
 		Value: "",
-	}
-
-	AAFlag = cli.BoolFlag{
-		Name:  "aa",
-		Usage: "Enable AA transactions",
-		Value: false,
 	}
 
 	ConfigFlag = cli.StringFlag{
@@ -897,8 +914,27 @@ var (
 	}
 	CaplinDiscoveryTCPPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.tcpport",
-		Usage: "TCP Port for Caplin DISCV5 protocol",
+		Usage: "TCP port for Caplin libp2p",
 		Value: 4001,
+	}
+	CaplinDiscoveryQUICPortFlag = cli.Uint64Flag{
+		Name:  "caplin.discovery.quicport",
+		Usage: "QUIC port for Caplin libp2p",
+		Value: 4002,
+	}
+	CaplinDisableQUICFlag = cli.BoolFlag{
+		Name:  "caplin.quic.disable",
+		Usage: "Disable the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed (e.g. some Docker/Kubernetes setups)",
+		Value: false,
+	}
+	CaplinIPBlockLimitsDisableFlag = cli.BoolFlag{
+		Name:  "caplin.ip-block-limits.disable",
+		Usage: "Restore the released connection limits: drop Caplin's caps per IPv4 /24 and /16 and per IPv6 /48 and /32, and the exemption of private networks when local discovery is enabled. Networks in --caplin.ip-block-limits.trusted-cidrs stay exempt",
+		Value: false,
+	}
+	CaplinIPBlockLimitsTrustedCIDRsFlag = cli.StringSliceFlag{
+		Name:  "caplin.ip-block-limits.trusted-cidrs",
+		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or an IPv6 /16 each, without host bits) exempt from every per-address and per-block connection cap. All connections of one network share a limit of 8 times --caplin.max-peer-count (at least 32); a loopback network stays unlimited. For trusted clusters on public addresses",
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",
@@ -954,10 +990,19 @@ var (
 		Usage: "MEV relay endpoint. Caplin runs in builder mode if this is set",
 		Value: "",
 	}
+	CaplinAllowPrivateBuilderURLs = cli.BoolFlag{
+		Name:  "caplin.builder.allow-private-urls",
+		Usage: "Allow validator-configured builder URLs to resolve to private or loopback addresses",
+		Value: false,
+	}
 	CaplinValidatorMonitorFlag = cli.BoolFlag{
 		Name:  "caplin.validator-monitor",
 		Usage: "Enable caplin validator monitoring metrics",
 		Value: false,
+	}
+	CaplinPayloadPreparationDisableFlag = cli.BoolFlag{
+		Name:  "caplin.payload-preparation.disable",
+		Usage: "disable speculative payload preparation while keeping the validator API and normal block production enabled",
 	}
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
@@ -981,12 +1026,12 @@ var (
 	}
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: []string{},
 	}
 	SentinelStaticPeers = cli.StringSliceFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: []string{},
 	}
 
@@ -1086,6 +1131,11 @@ var (
 		Usage: "set the cors' allow credentials",
 		Value: false,
 	}
+	BeaconApiPreserveGraffitiFlag = cli.BoolFlag{
+		Name:  "beacon.api.preserve-graffiti",
+		Usage: "use validator-supplied graffiti exactly as given, without prefixing the EL+CL client identification segment (default: prefix it)",
+		Value: false,
+	}
 	BeaconApiAllowMethodsFlag = cli.StringSliceFlag{
 		Name:  "beacon.api.cors.allow-methods",
 		Usage: "set the cors' allow methods",
@@ -1123,13 +1173,10 @@ var (
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
-	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
-	// (ModeParallel) for commitment computation. Default off; flip to compare
-	// root hashes against a sequential sync before enabling broadly.
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
-		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
-		Value: false,
+		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
+		Value: statecfg.DefaultParallelCommitment,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1163,6 +1210,11 @@ var (
 		Name:  "fcu.background.prune",
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
+	}
+	SlowBlockThresholdFlag = cli.DurationFlag{
+		Name:  "debug.slow-block-threshold",
+		Usage: "Log per-block execution metrics as JSON for blocks at or over this duration (0 logs every block, negative disables). Enabling it also times every state domain read process-wide, RPC included",
+		Value: -1,
 	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
@@ -1214,9 +1266,10 @@ var (
 		Value: false,
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
-		Name:  "exec.no-prune",
-		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
-		Value: false,
+		Name:    "debug.exec.no-prune",
+		Aliases: []string{"exec.no-prune"},
+		Usage:   "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only: chaindata grows without bound and --prune.mode is not enforced. The --exec.no-prune alias is deprecated and will be removed in the next release.",
+		Value:   false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
 		Name:  "exec.no-background-maintenance",
@@ -1250,6 +1303,7 @@ func setNodeUserIdent(ctx *cli.Command, cfg *nodecfg.Config) {
 		cfg.UserIdent = identity
 	}
 }
+
 func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	if identity := f.String(IdentityFlag.Name, IdentityFlag.Value, IdentityFlag.Usage); identity != nil && len(*identity) > 0 {
 		cfg.UserIdent = *identity
@@ -1412,8 +1466,11 @@ func NewP2PConfig(
 		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
-		cfg.NetRestrict = new(netutil.Netlist)
-		cfg.NetRestrict.Add(netRestrict)
+		list, err := netutil.ParseNetlist(netRestrict)
+		if err != nil {
+			return nil, fmt.Errorf("bad option %s: %w", NetrestrictFlag.Name, err)
+		}
+		cfg.NetRestrict = list
 	}
 	if staticPeers != nil {
 		staticNodes, err := enode.ParseNodesFromURLs(staticPeers)
@@ -1533,7 +1590,7 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 
 	if ctx.String(ChainFlag.Name) == networkname.Dev {
 		// --dev mode can't use p2p networking.
-		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		if !ctx.IsSet(ListenPortFlag.Name) {
 			cfg.ListenAddr = ":0"
 		}
@@ -1552,7 +1609,7 @@ func SetNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) err
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.Dirs.DataDir, logger)
 
-	cfg.SentryLogPeerInfo = ctx.IsSet(SentryLogPeerInfoFlag.Name)
+	cfg.SentryLogPeerInfo = ctx.Bool(SentryLogPeerInfoFlag.Name)
 	return nil
 }
 
@@ -1577,14 +1634,13 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+	if ctx.IsSet(DbSafeNoSyncFlag.Name) { // otherwise the flag's default would undo MDBX_DURABLE
+		mdbx.DefaultSafeNoSync = ctx.Bool(DbSafeNoSyncFlag.Name)
+	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
 			szLimit, DbSizeLimitFlag.Usage)
-	}
-
-	if err := cfg.Dirs.RenameOldVersions(false); err != nil {
-		return fmt.Errorf("failed to rename old versions: %w", err)
 	}
 
 	return nil
@@ -1620,7 +1676,7 @@ func setGPO(ctx *cli.Command, cfg *gaspricecfg.Config) {
 
 func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	cfg := txpoolcfg.DefaultConfig
-	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
+	if ctx.Bool(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolPriceLimitFlag.Name) {
@@ -1665,7 +1721,6 @@ func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	if ctx.IsSet(TxPoolQueuedDormancyFlag.Name) {
@@ -1705,7 +1760,7 @@ func setEthash(ctx *cli.Command, datadir string, cfg *ethconfig.Config) {
 	if ctx.IsSet(EthashCachesLockMmapFlag.Name) {
 		cfg.Ethash.CachesLockMmap = ctx.Bool(EthashCachesLockMmapFlag.Name)
 	}
-	if ctx.IsSet(FakePoWFlag.Name) {
+	if ctx.Bool(FakePoWFlag.Name) {
 		cfg.Ethash.PowMode = ethashcfg.ModeFake
 	}
 	if ctx.IsSet(EthashDatasetsLockMmapFlag.Name) {
@@ -1744,7 +1799,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 }
 
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
-	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
+	cfg.EnabledPOS = !ctx.Bool(ProposingDisableFlag.Name)
 
 	switch {
 	case ctx.IsSet(MinerExtraDataFlag.Name):
@@ -1815,11 +1870,19 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 	cfg.CaplinConfig.BeaconAPIRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.PreserveGraffiti = ctx.Bool(BeaconApiPreserveGraffitiFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.DisablePayloadPreparation = ctx.Bool(CaplinPayloadPreparationDisableFlag.Name)
 	return nil
 }
 
 func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
+	cfg.CaplinConfig.DisableIPBlockLimits = ctx.Bool(CaplinIPBlockLimitsDisableFlag.Name)
+	trustedCIDRs := ctx.StringSlice(CaplinIPBlockLimitsTrustedCIDRsFlag.Name)
+	if _, err := clp2p.ParseTrustedCIDRs(trustedCIDRs); err != nil {
+		Fatalf("Option %s: %v", CaplinIPBlockLimitsTrustedCIDRsFlag.Name, err)
+	}
+	cfg.CaplinConfig.TrustedCIDRs = trustedCIDRs
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {
@@ -1849,6 +1912,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
+	cfg.CaplinConfig.AllowPrivateBuilderURLs = ctx.Bool(CaplinAllowPrivateBuilderURLs.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
@@ -1898,6 +1962,12 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
+func setParallelCommitment(ctx *cli.Command) {
+	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
+		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
+	}
+}
+
 // RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
 func RpcGasCap(ctx *cli.Command) uint64 {
 	return uint64(ctx.Uint(RpcGasCapFlag.Name))
@@ -1912,6 +1982,8 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryQUICPort = ctx.Uint64(CaplinDiscoveryQUICPortFlag.Name)
+	cfg.CaplinConfig.CaplinDisableQUIC = ctx.Bool(CaplinDisableQUICFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}
@@ -1994,12 +2066,9 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	}
 	setCaplin(ctx, cfg)
 
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
-		cfg.ExperimentalParallelCommitment = true
-	}
+	setParallelCommitment(ctx)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
@@ -2036,11 +2105,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
 	}
+	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("BAL batch prefetch is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); it reads nothing")
+	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
 		parallelCommitmentReaders := 0
-		if cfg.ExperimentalParallelCommitment || statecfg.ExperimentalParallelCommitment {
+		if statecfg.ExperimentalParallelCommitment {
 			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
 		}
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
@@ -2056,6 +2128,9 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecNoPruneFlag.Name) {
 		dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
 	}
+	if dbg.NoPrune() {
+		logger.Warn("DB pruning is disabled by --debug.exec.no-prune or NO_PRUNE: chaindata grows without bound and --prune.mode is not enforced. This is a diagnostic setting, not for production; remove it unless you are sure you need it. The --exec.no-prune alias will be removed in the next release")
+	}
 	if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
 		dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
 	}
@@ -2070,7 +2145,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(RPCGlobalTxFeeCapFlag.Name) {
 		cfg.RPCTxFeeCap = ctx.Float64(RPCGlobalTxFeeCapFlag.Name)
 	}
-	if ctx.IsSet(NoDiscoverFlag.Name) {
+	if ctx.Bool(NoDiscoverFlag.Name) {
 		cfg.EthDiscoveryURLs = []string{}
 	} else if ctx.IsSet(DNSDiscoveryFlag.Name) {
 		urls := ctx.String(DNSDiscoveryFlag.Name)
@@ -2097,6 +2172,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		}
 	case networkname.Dev:
 		setDevnetEthConfig(ctx, cfg, logger)
+	}
+
+	if err := setOverrideGenesis(ctx, cfg); err != nil {
+		Fatalf("%v", err)
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
@@ -2146,6 +2225,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 			ctx.Bool(DbWriteMapFlag.Name),
 			downloadercfg.NewCfgOpts{
 				DisableTrackers:          boolFlagOpt(ctx, &TorrentDisableTrackers),
+				DisableTCP:               boolFlagOpt(ctx, &DisableTCP),
 				Verify:                   ctx.Bool(DownloaderVerifyFlag.Name),
 				DownloadRateLimit:        MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentDownloadRateFlag.Name)),
 				UploadRateLimit:          MustGetStringFlagDownloaderRateLimit(ctx.String(TorrentUploadRateFlag.Name)),
@@ -2203,7 +2283,8 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 		Fatalf("Failed to derive dev signer key: %v", err)
 	}
 	_ = signerKey // available for future use (e.g., auto-funding txs)
-	logger.Info("Using PoS dev mode",
+	logger.Info(
+		"Using PoS dev mode",
 		"seed", seed,
 		"validators", validatorCount,
 		"signer", signerAddr.Hex(),
@@ -2262,7 +2343,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	}
 	// Write beacon config and genesis state to temp files.
 	tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		Fatalf("Failed to create dev beacon dir: %v", err)
 	}
 	stateSSZ, err := beaconState.EncodeSSZ(nil)
@@ -2270,7 +2351,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 		Fatalf("Failed to encode dev genesis state: %v", err)
 	}
 	genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
-	if err := os.WriteFile(genesisStatePath, stateSSZ, 0644); err != nil {
+	if err := os.WriteFile(genesisStatePath, stateSSZ, 0o644); err != nil {
 		Fatalf("Failed to write dev genesis state: %v", err)
 	}
 
@@ -2290,8 +2371,9 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 			"ELECTRA_FORK_EPOCH: 0\n"+
 			"FULU_FORK_EPOCH: 0\n"+
 			"TERMINAL_TOTAL_DIFFICULTY: 0\n",
-		genesisTime, beaconCfg.SecondsPerSlot)
-	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+		genesisTime, beaconCfg.SecondsPerSlot,
+	)
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
 		Fatalf("Failed to write dev beacon config: %v", err)
 	}
 
@@ -2337,6 +2419,40 @@ func boolFlagOpt(ctx *cli.Command, flag *cli.BoolFlag) g.Option[bool] {
 		return g.Some(ctx.Bool(flag.Name))
 	}
 	return g.None[bool]()
+}
+
+// setOverrideGenesis must run after chain defaults so they cannot replace
+// the supplied genesis or network ID, or restore default DNS discovery.
+func setOverrideGenesis(ctx *cli.Command, cfg *ethconfig.Config) error {
+	// An explicitly empty path must fail instead of selecting the default chain.
+	if !ctx.IsSet(OverrideGenesisFlag.Name) {
+		return nil
+	}
+	if ctx.IsSet(ChainFlag.Name) {
+		return fmt.Errorf("--%s and --%s are mutually exclusive", OverrideGenesisFlag.Name, ChainFlag.Name)
+	}
+	genesis, err := ReadGenesisFile(ctx.String(OverrideGenesisFlag.Name))
+	if err != nil {
+		return err
+	}
+	if !ctx.IsSet(NetworkIdFlag.Name) {
+		if !genesis.Config.ChainID.IsUint64() {
+			return fmt.Errorf("--%s: genesis chain id %v exceeds 64 bits, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
+		networkID := genesis.Config.ChainID.Uint64()
+		// Sentry treats local status with network ID 0 as incomplete,
+		// so it cannot proceed with peer handshakes.
+		if networkID == 0 {
+			return fmt.Errorf("--%s: genesis chain id %v maps to network id 0, so --%s must be set to a nonzero network id", OverrideGenesisFlag.Name, genesis.Config.ChainID, NetworkIdFlag.Name)
+		}
+		cfg.NetworkID = networkID
+	}
+	cfg.Genesis = genesis
+	cfg.GenesisFromFile = true
+	if !ctx.IsSet(DNSDiscoveryFlag.Name) {
+		cfg.EthDiscoveryURLs = nil
+	}
+	return nil
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

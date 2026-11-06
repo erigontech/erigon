@@ -28,14 +28,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BySenderAndNonce - designed to perform most expensive operation in TxPool:
 // "recalculate all ephemeral fields of all transactions" by algo
-//   - for all senders - iterate over all transactions in nonce growing order
+//   - for all senders - iterate over transactions by nonce domain, then increasing nonce
 //
 // Performances decisions:
 //   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
@@ -45,12 +43,14 @@ type BySenderAndNonce struct {
 	search            *metaTxn
 	senderIDTxnCount  map[uint64]int    // count of sender's txns in the pool - may differ from nonce
 	senderIDBlobCount map[uint64]uint64 // count of sender's total number of blobs in the pool
+	senderIDFrameTxn  map[uint64]*metaTxn
 }
 
 func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = math.MaxUint64
+	s.keyedNonce = false
 
 	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID == senderID {
@@ -72,6 +72,7 @@ func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = 0
+	s.keyedNonce = false
 	b.tree.AscendGreaterOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID != senderID {
 			return false
@@ -84,6 +85,7 @@ func (b *BySenderAndNonce) descend(senderID uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = math.MaxUint64
+	s.keyedNonce = true
 	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
 		if mt.TxnSlot.SenderID != senderID {
 			return false
@@ -108,6 +110,7 @@ func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = txNonce
+	s.keyedNonce = false
 	if found, ok := b.tree.Get(s); ok {
 		return found
 	}
@@ -126,6 +129,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 		}
 
 		senderID := mt.TxnSlot.SenderID
+		if mt.TxnSlot.TxType() == FrameTxnType {
+			delete(b.senderIDFrameTxn, senderID)
+		}
 		count := b.senderIDTxnCount[senderID]
 		if count > 1 {
 			b.senderIDTxnCount[senderID] = count - 1
@@ -147,6 +153,12 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 
 func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *metaTxn {
 	it, ok := b.tree.ReplaceOrInsert(mt)
+	if ok && it.TxnSlot.TxType() == FrameTxnType {
+		delete(b.senderIDFrameTxn, it.TxnSlot.SenderID)
+	}
+	if mt.TxnSlot.TxType() == FrameTxnType {
+		b.senderIDFrameTxn[mt.TxnSlot.SenderID] = mt
+	}
 
 	if ok {
 		if mt.TxnSlot.Traced {
@@ -239,29 +251,11 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
-	var processedTxns bool
-	for _, diff := range stateChanges.ChangeBatch {
-		for _, change := range diff.Changes { // merge state changes
-			addrB := gointerfaces.ConvertH160toAddress(change.Address)
-			sc.getOrCreateID(addrB, logger)
-		}
-
-		// unwindTxns/minedTxns do not depend on individual diffs inside the batch.
-		// Processing them for every diff only repeats the same work.
-		if processedTxns {
-			continue
-		}
-		processedTxns = true
-
-		if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
-			return err
-		}
-		if err := sc.registerNewSenders(&minedTxns, logger); err != nil {
-			return err
-		}
+func (sc *sendersBatch) onNewBlock(unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+	if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
+		return err
 	}
-	return nil
+	return sc.registerNewSenders(&minedTxns, logger)
 }
 
 func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
@@ -277,8 +271,8 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 
 // Encode the details of txn sender into the given "buffer" byte-slice that should be big enough
 func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
-	var fieldSet = 0 // start with first bit set to 0
-	var pos = 1
+	fieldSet := 0 // start with first bit set to 0
+	pos := 1
 	if nonce > 0 {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))

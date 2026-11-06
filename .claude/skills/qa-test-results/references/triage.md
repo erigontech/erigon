@@ -70,6 +70,10 @@ comparison. Read `result-state-hashes-<chain>.json` in the
   the published snapshots. The named files say where: bisect on execution and
   collation, not on sync speed. `mismatched_<subdir>` localises it to
   `domain` (current state), `history` or `idx`.
+- `compared_<subdir> == 0` → that subdir was not compared at all (the console and
+  job summary print a WARNING). A green or red verdict says nothing about it;
+  compare the `local_only` / `published_only` names for a range or version-prefix
+  mismatch.
 - `outcome: ERROR` → nothing was comparable, i.e. the node built no state file at
   a published step boundary. Check that it got far enough, and that the file
   version prefixes still line up (a `v1.1` → `v1.2` bump on either side turns

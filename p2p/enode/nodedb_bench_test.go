@@ -40,7 +40,7 @@ import (
 //   - must use `-cpu=` because even 1-core overloading disk write IO. Multi-core bench is unreliable here (degradating with time).
 //   - same about `-benchtime=30s` and -benchtime can't be smaller than SyncPeriod
 //   - target is: to improve throughput without big ms_worst
-//   - params to choose: pageSize, syncPeriod, syncBytes
+//   - params to choose: pageSize, pollerSyncPeriod, syncBytes
 //
 // go test -bench=BenchmarkNodeDBGeometry/20kb      -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > old.txt
 // go test -bench=BenchmarkNodeDBGeometry/10mb_1sec -run=BenchmarkNodeDBGeometry -cpu=1 -count=1 -benchtime=10s ./p2p/enode > new.txt
@@ -59,7 +59,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 			return mdbxgo.SafeNoSync | mdbxgo.WriteMap
 		}).
 		SyncBytes(20 * datasize.MB).
-		SyncPeriod(2 * time.Second).
+		PollerSyncPeriod(2 * time.Second).
 		DirtySpace(uint64(32 * datasize.MB))
 
 	doBench := func(b *testing.B, db kv.RwDB) {
@@ -81,70 +81,70 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		}
 		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
 		db.Close()
-		dir.RemoveFile(db.Path())
+		_ = dir.RemoveFile(db.Path())
 	}
 
 	b.Run("20kb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.KB).SyncPeriod(1 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.KB).PollerSyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("200kb", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(200 * datasize.KB).SyncPeriod(1 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(200 * datasize.KB).PollerSyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("1mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).PollerSyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("1mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(1 * datasize.MB).PollerSyncPeriod(2 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("5mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).PollerSyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("5mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(5 * datasize.MB).PollerSyncPeriod(2 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 
 	b.Run("10mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).PollerSyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 
 	b.Run("10mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).PollerSyncPeriod(2 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("10mb 5sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(10 * datasize.MB).PollerSyncPeriod(5 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 
 	b.Run("20mb 1sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(1 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).PollerSyncPeriod(1 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 
 	b.Run("20mb 2sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(2 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).PollerSyncPeriod(2 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})
 	b.Run("20mb 5sec", func(b *testing.B) {
-		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).SyncPeriod(5 * time.Second).MustOpen()
+		db := cfg.Path(b.TempDir()).SyncBytes(20 * datasize.MB).PollerSyncPeriod(5 * time.Second).MustOpen()
 		defer db.Close()
 		doBench(b, db)
 	})

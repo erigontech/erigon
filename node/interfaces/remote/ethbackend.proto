@@ -69,7 +69,7 @@ service ETHBACKEND {
   // PendingBlock returns latest built block.
   rpc PendingBlock(google.protobuf.Empty) returns (PendingBlockReply);
 
-  rpc AAValidation(AAValidationRequest) returns (AAValidationReply);
+  rpc FrameValidation(FrameValidationRequest) returns (FrameValidationReply);
 
   rpc BlockForTxNum(BlockForTxNumRequest) returns(BlockForTxNumResponse);
 
@@ -78,6 +78,10 @@ service ETHBACKEND {
   rpc FrozenBlocks(google.protobuf.Empty) returns (FrozenBlocksReply);
 
   rpc SetHead(SetHeadRequest) returns (SetHeadReply);
+
+  // Returns body metadata and the user transaction count without reading transactions.
+  // Requires a non-zero block hash and its height; height zero selects genesis.
+  rpc BlockBody(BlockRequest) returns (BlockBodyReply);
 }
 
 enum Event {
@@ -112,7 +116,11 @@ message SyncingReply {
     uint64 block_number = 2;
   }
   repeated StageProgress stages = 5;
-  
+
+  // Block this sync session started from. Held for the session, lowered when an
+  // unwind takes execution below it. Absent from nodes predating the field,
+  // which the interface version does not separate from a genesis pin.
+  optional uint64 starting_block = 6;
 }
 
 message NetPeerCountRequest {}
@@ -205,6 +213,17 @@ message SubscribeReceiptsReply {
   uint64 excess_blob_gas = 17;
   uint64 blob_gas_used = 18;
   types.H256 blob_gas_price = 19;
+  bool last_in_block = 20; // the last receipt of its block sent on this stream
+  types.H256 effective_gas_price = 21;
+  types.H160 payer = 22;
+  repeated FrameReceipt frame_receipts = 23;
+}
+
+message FrameReceipt {
+  uint64 status = 1;
+  uint64 execution_gas_used = 2;
+  uint64 state_gas_used = 3;
+  repeated SubscribeLogsReply logs = 4;
 }
 
 message BlockRequest {
@@ -267,12 +286,20 @@ message EngineGetPayloadBodiesByRangeV1Request {
   uint64 count = 2;
 } 
 
-message AAValidationRequest {
-  types.AccountAbstractionTransaction tx = 1;
+message FrameValidationRequest {
+  bytes transaction = 1;
+  types.H256 expected_block_hash = 2;
 }
 
-message AAValidationReply {
+message FrameValidationReply {
   bool valid = 1;
+  types.H160 payer = 2;
+  types.H256 max_cost = 3;
+  types.H256 payer_balance = 4;
+  bool paymaster = 5;
+  uint64 deadline = 6;
+  repeated types.H160 dependencies = 7;
+  repeated FrameCreationNonce creation_nonces = 8;
 }
 
 message BlockForTxNumRequest {
@@ -298,4 +325,15 @@ message SetHeadRequest {
 
 message SetHeadReply {
   bool success = 1;
+}
+
+message BlockBodyReply {
+  bytes body_rlp = 1;
+  uint32 tx_count = 2;
+}
+
+message FrameCreationNonce {
+  types.H160 address = 1;
+  uint64 min_nonce = 2;
+  uint64 max_nonce = 3;
 }

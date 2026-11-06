@@ -79,6 +79,13 @@ func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*s
 	if version >= clparams.GloasVersion {
 		config.GloasForkEpoch = 0
 	}
+	if configBytes, err := fs.ReadFile(root, "config.yaml"); err == nil {
+		if err := yaml.Unmarshal(configBytes, &config); err != nil {
+			return nil, fmt.Errorf("couldn't parse config: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("couldn't read config: %w", err)
+	}
 	testState := state.New(&config)
 	if err := utils.DecodeSSZSnappy(testState, sszSnappy, int(version)); err != nil {
 		return nil, err
@@ -90,24 +97,6 @@ func ReadBlock(root fs.FS, version clparams.StateVersion, index int) (*cltypes.S
 	var blockBytes []byte
 	var err error
 	blockBytes, err = fs.ReadFile(root, fmt.Sprintf("blocks_%d.ssz_snappy", index))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	blk := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
-	if err := utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
-		return nil, err
-	}
-
-	return blk, nil
-}
-
-func ReadBlockByPath(root fs.FS, version clparams.StateVersion, path string) (*cltypes.SignedBeaconBlock, error) {
-	var blockBytes []byte
-	var err error
-	blockBytes, err = fs.ReadFile(root, path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}

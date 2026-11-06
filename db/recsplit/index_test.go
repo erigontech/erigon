@@ -17,9 +17,7 @@
 package recsplit
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func TestReWriteIndex(t *testing.T) {
+func TestExtractOffsets(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
@@ -57,28 +55,10 @@ func TestReWriteIndex(t *testing.T) {
 	idx := MustOpen(indexFile)
 	defer idx.Close()
 	offsets := idx.ExtractOffsets()
+	require.Len(t, offsets, 100)
 	for i := range 100 {
 		_, ok := offsets[uint64(i*17)]
 		require.True(t, ok)
-		offsets[uint64(i*17)] = uint64(i * 3965)
-	}
-	reindexFile := filepath.Join(tmpDir, "reindex")
-	f, err := os.Create(reindexFile)
-	require.NoError(t, err)
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	err = idx.RewriteWithOffsets(w, offsets)
-	require.NoError(t, err)
-	require.NoError(t, w.Flush())
-	require.NoError(t, f.Close())
-	reidx := MustOpen(reindexFile)
-	defer reidx.Close()
-	for i := range 100 {
-		reader := NewIndexReader(reidx)
-		offset, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
-		if offset != uint64(i*3965) {
-			t.Errorf("expected offset: %d, looked up: %d", i*3965, offset)
-		}
 	}
 }
 
@@ -92,11 +72,11 @@ func TestForwardCompatibility(t *testing.T) {
 		features := No | Enums
 		err := onlyKnownFeatures(features)
 		require.NoError(t, err)
-		assert.Equal(t, No|Enums, features) //no side-effects
+		assert.Equal(t, No|Enums, features) // no side-effects
 	})
 	t.Run("disallow_unknown", func(t *testing.T) {
 		features := Features(0xff)
 		err := onlyKnownFeatures(features)
-		assert.ErrorIs(t, err, IncompatibleErr)
+		assert.ErrorIs(t, err, ErrIncompatible)
 	})
 }

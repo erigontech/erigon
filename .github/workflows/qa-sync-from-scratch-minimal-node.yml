@@ -33,6 +33,9 @@ jobs:
       RETIREMENT_TIMEOUT_SECONDS: 1800 # 30 minutes to observe the first retirement
 
     steps:
+      - name: Clean workspace
+        run: find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
       - name: Check out repository
         uses: actions/checkout@v7
         with:
@@ -123,6 +126,14 @@ jobs:
         with:
           name: fd-leak-analysis-${{ env.CHAIN }}
           path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+      - name: Upload goroutine stacks
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: goroutine-stacks-${{ env.CHAIN }}
+          path: ${{ github.workspace }}/goroutine-stacks.txt
+          if-no-files-found: ignore
 
       - name: Measure disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}

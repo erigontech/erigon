@@ -44,7 +44,7 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create stack with existing datadir: %v", err)
 	}
-	if err := node.Close(); err != nil {
+	if err = node.Close(); err != nil {
 		t.Fatalf("failed to close node: %v", err)
 	}
 	// Generate a long non-existing datadir path and check that it gets created by a node
@@ -53,10 +53,10 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create stack with creatable datadir: %v", err)
 	}
-	if err := node.Close(); err != nil {
+	if err = node.Close(); err != nil {
 		t.Fatalf("failed to close node: %v", err)
 	}
-	if _, err := os.Stat(dir); err != nil {
+	if _, err = os.Stat(dir); err != nil {
 		t.Fatalf("freshly created datadir not accessible: %v", err)
 	}
 	// Verify that an impossible datadir fails creation
@@ -64,13 +64,15 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
-	dir2.RemoveFile(file.Name())
+	if err := dir2.RemoveFile(file.Name()); err != nil {
+		t.Fatalf("failed to remove temporary file: %v", err)
+	}
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different
 // platforms.
 func TestIPCPathResolution(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		DataDir  string
 		IPCPath  string
 		Windows  bool

@@ -158,6 +158,7 @@ func FuzzEncoder(f *testing.F) {
 		}
 	})
 }
+
 func FuzzDecoder(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		fuzzDecode(data)

@@ -38,7 +38,7 @@
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-sequential
 #                                              race-detector variant of
 #                                              blocktests-stable-sequential, split by
 #                                              fork via the manifest `run` regex so
@@ -281,7 +281,7 @@ for path in "${paths[@]}"; do
 	part_file=$(mktemp)
 	part_files+=("$part_file")
 	rc=0
-	"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || rc=$?
+	"$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" || rc=$?
 	if (( rc == 66 )); then
 		echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
 		exit 1

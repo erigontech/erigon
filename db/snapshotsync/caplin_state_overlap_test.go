@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"bytes"
 	"cmp"
 	"os"
 	"path/filepath"
@@ -113,7 +114,7 @@ func openTestCaplinStateSnapshots(t *testing.T, dirs datadir.Dirs, table string,
 		KeyValueGetters: map[string]KeyValueGetter{table: nil},
 		Compression:     map[string]bool{},
 	}
-	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, types, logger)
 	t.Cleanup(s.Close)
 	require.NoError(t, s.OpenFolder())
 	return s
@@ -204,6 +205,92 @@ func TestCaplinStateRemoveOverlapsUnindexedSuperset(t *testing.T) {
 	require.FileExists(t, supSeg, "the indexed covering segment must survive")
 	require.FileExists(t, supIdx)
 	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table))
+}
+
+func TestCaplinStateBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	_, idxPath := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	require.NoError(t, os.WriteFile(idxPath, []byte("not an index"), 0o600))
+
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, SnapshotTypes{
+		KeyValueGetters: map[string]KeyValueGetter{table: nil},
+		Compression:     map[string]bool{},
+	}, logger)
+	t.Cleanup(s.Close)
+	require.Error(t, s.OpenFolder(), "a strict open must not accept a corrupt index")
+	require.Empty(t, s.visibleRangesForType(table))
+
+	require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+	require.Equal(t, []Range{{from: 0, to: 50_000}}, s.visibleRangesForType(table))
+}
+
+func TestCaplinStateBuildMissingIndicesWithGlobPath(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		idxData []byte
+	}{
+		{name: "missing"},
+		{name: "corrupt", idxData: []byte("not an index")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := log.New()
+			dirs := datadir.New(filepath.Join(t.TempDir(), "dd[1]"))
+			table := kv.PendingDepositsDump
+
+			_, idxPath := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+			if tc.idxData == nil {
+				require.NoError(t, dir2.RemoveFile(idxPath))
+			} else {
+				require.NoError(t, os.WriteFile(idxPath, tc.idxData, 0o600))
+			}
+
+			s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, SnapshotTypes{
+				KeyValueGetters: map[string]KeyValueGetter{table: nil},
+				Compression:     map[string]bool{},
+			}, logger)
+			t.Cleanup(s.Close)
+			if tc.idxData == nil {
+				require.NoError(t, s.OpenFolder())
+			} else {
+				require.Error(t, s.OpenFolder())
+			}
+			require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+			require.Equal(t, []Range{{from: 0, to: 50_000}}, s.visibleRangesForType(table))
+		})
+	}
+}
+
+func TestCaplinStateBuildMissingIndicesIndexesNewestEqualRangeVersion(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	for _, f := range []struct {
+		v     version.Version
+		words [][]byte
+	}{
+		{version.V1_0, [][]byte{bytes.Repeat([]byte{'a'}, 300), []byte("OLD")}},
+		{version.V1_1, [][]byte{[]byte("N"), []byte("NEW")}},
+	} {
+		segPath := filepath.Join(dirs.SnapCaplin, strings.ReplaceAll(snaptype.BeaconBlocks.FileName(f.v, 0, 2), "beaconblocks", table))
+		c, err := seg.NewCompressor(t.Context(), "test", segPath, dirs.SnapCaplin, seg.DefaultCfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		c.DisableFsync()
+		for _, w := range f.words {
+			require.NoError(t, c.AddWord(w))
+		}
+		require.NoError(t, c.Compress())
+		c.Close()
+	}
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+	got, err := s.Get(table, 1)
+	require.NoError(t, err)
+	require.Equal(t, "NEW", string(got))
 }
 
 func TestCaplinStateRemoveOverlapsIgnoresUnknownType(t *testing.T) {
@@ -300,4 +387,141 @@ func TestCaplinStateRemoveOverlapsKeepsNewestEqualRangeVersion(t *testing.T) {
 
 	require.FileExists(t, newSeg, "the newest version is what View() serves")
 	require.NoFileExists(t, oldSeg)
+}
+
+func TestCaplinStateRemoveOverlapsReportsDownloaderKeys(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	subSeg, subIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+
+	require.NoFileExists(t, subSeg)
+	// The downloader is rooted at dirs.Snap and stores these under a slash-separated
+	// caplin/ key; filepath.Join would report caplin\... on Windows and match nothing.
+	require.Contains(t, reported, "caplin/"+filepath.Base(subSeg))
+	require.Contains(t, reported, "caplin/"+filepath.Base(subIdx))
+	for _, name := range reported {
+		require.NotContains(t, name, `\`, "downloader keys are slash-separated")
+	}
+}
+
+func TestCaplinStateRemoveOverlapsSkipsTheCallbackWithNothingToRemove(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 150_000, 200_000, logger)
+	require.False(t, hasDiskOverlap(t, dirs.SnapCaplin, table))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	called := 0
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		called++
+		return nil
+	}))
+	require.Zero(t, called, "steady state must not cost a downloader round-trip")
+}
+
+// The index list needs the same equal-range filtering as the segment list. findOverlaps
+// marks the newer of two equal ranges as the overlapped one, so without it the surviving
+// segment's own index is what gets reported to the downloader and unlinked.
+func TestCaplinStateRemoveOverlapsReportsOlderEqualRangeIndex(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	oldSeg, oldIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
+	newSeg, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+
+	require.Contains(t, reported, "caplin/"+filepath.Base(oldIdx))
+	require.NotContains(t, reported, "caplin/"+filepath.Base(newIdx),
+		"unregistering the kept segment's index leaves it unusable after restart")
+	require.FileExists(t, newSeg)
+	require.FileExists(t, newIdx, "openIdx resolves the highest version for both segments")
+	require.NoFileExists(t, oldSeg)
+	require.NoFileExists(t, oldIdx, "the same-range index of the removed segment must go with it")
+}
+
+// A live reader pins the generation holding the retired subset, so its file is still on disk
+// at the next cadence. Rescanning the directory must not build a second DirtySegment for it:
+// the next removal would retire that one too, costing an fd and a mapping every cadence for
+// as long as the reader lasts.
+func TestCaplinStateRemoveOverlapsDoesNotReopenPendingUnlink(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+	subName := filepath.Base(subSeg)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	pin := s.View()
+	defer pin.Close()
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.FileExists(t, subSeg, "the pin must defer the unlink, or this test proves nothing")
+
+	for range 3 {
+		require.NoError(t, s.OpenFolder())
+	}
+
+	count, total := 0, 0
+	for _, typ := range s.Types() {
+		s.WalkDirtySegments(typ.Enum(), func(seg *DirtySegment) bool {
+			total++
+			if seg.FileName() == subName {
+				count++
+			}
+			return true
+		})
+	}
+	require.NotZero(t, total, "walk must reach the dirty set, else a zero count proves nothing")
+	require.Zero(t, count, "a retired segment awaiting unlink must not be reopened")
+}
+
+func TestCaplinStateRemoveOverlapsKeepsSupersededIdxPinnedByRetiredSegment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	oldSeg, oldIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	pin := s.View()
+	defer pin.Close()
+
+	_, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+	require.NoError(t, s.OpenFolder())
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.FileExists(t, oldSeg, "the pin must defer the unlink, or this test proves nothing")
+	require.FileExists(t, oldIdx, "a retired segment's open index outlives the dirty set")
+	require.FileExists(t, newIdx)
+
+	pin.Close()
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.NoFileExists(t, oldIdx, "once the pin drains the next pass must reclaim it")
 }

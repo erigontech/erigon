@@ -56,6 +56,91 @@ func TestVerifyBlobSidecarsGloasDoesNotRequireInclusionProof(t *testing.T) {
 
 	require.NoError(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.GloasVersion, nil))
 	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.FuluVersion, nil))
+
+	// Not checking the proof's contents does not make its shape optional: the reader always decodes
+	// a fixed-length vector, so a short one is unreadable once stored.
+	short := cltypes.NewBlobSidecar(
+		0,
+		(*cltypes.Blob)(&blob),
+		common.Bytes48(commitment),
+		common.Bytes48(proof),
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		solid.NewHashVector(0),
+	)
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{short}, clparams.GloasVersion, nil))
+}
+
+// Skipping the inclusion-proof check for Gloas must not also skip checking that the sidecar can be
+// encoded in the shape the reader expects: a short proof vector round-trips through the writer but
+// not the reader, so accepting one replaces readable data with a file nothing can decode.
+func TestVerifyAgainstIdentifiersRejectsAShortProofWithoutLosingStoredData(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	header := &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}
+	blockRoot, err := header.Header.HashSSZ()
+	require.NoError(t, err)
+
+	stored := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{stored}))
+	_, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.True(t, found, "the fixture must start from readable data")
+
+	// What an explicit "kzg_commitment_inclusion_proof": [] decodes to.
+	short := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(0))
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: blockRoot, Index: 0})
+
+	_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{short}, clparams.GloasVersion, nil)
+	require.Error(t, err, "a sidecar the reader cannot decode must be rejected before it is written")
+	require.Zero(t, inserted)
+
+	// A JSON null proof decodes to a nil interface rather than a short vector, so the shape check
+	// has to answer that without dereferencing it.
+	nilProof := cltypes.NewBlobSidecar(0, (*cltypes.Blob)(&blob), common.Bytes48(commitment), common.Bytes48(proof), header, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	nilProof.CommitmentInclusionProof = nil
+	_, inserted, err = VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{nilProof}, clparams.GloasVersion, nil)
+	require.Error(t, err, "a nil proof must be an error, not a panic")
+	require.Zero(t, inserted)
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{nilProof}, clparams.GloasVersion, nil))
+
+	sidecars, found, err := bs.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.True(t, found, "a rejected write must leave the existing sidecar readable")
+	require.Len(t, sidecars, 1)
+	require.Equal(t, stored.CommitmentInclusionProof, sidecars[0].CommitmentInclusionProof)
+}
+
+// A remote response can decode with the nested header absent, and the insert path reads through it
+// before validating anything, so the structural check has to come first.
+func TestVerifyAgainstIdentifiersRejectsAnIncompleteHeader(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
+	ids.Append(&cltypes.BlobIdentifier{BlockRoot: common.HexToHash("0xaa"), Index: 0})
+
+	for _, tc := range []struct {
+		name    string
+		sidecar *cltypes.BlobSidecar
+	}{
+		{"nil signed block header", &cltypes.BlobSidecar{}},
+		{"nil header", &cltypes.BlobSidecar{SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, inserted, err := VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(t.Context(), bs, ids, []*cltypes.BlobSidecar{tc.sidecar}, clparams.DenebVersion, nil)
+			require.Error(t, err)
+			require.Zero(t, inserted)
+		})
+	}
 }
 
 func setupTestDB(t *testing.T) kv.RwDB {
@@ -122,6 +207,30 @@ func TestBlobStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
 	_, found, err = bs.ReadBlobSidecars(t.Context(), 500, boundaryRoot)
 	require.NoError(t, err)
 	require.True(t, found, "the floor itself remains writable")
+}
+
+func TestBlobStorePruneDropsTheCountRowsOfPrunedBuckets(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	pruned, prunedToo, kept := common.Hash{1}, common.Hash{3}, common.Hash{2}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), pruned, []*cltypes.BlobSidecar{testSidecar(100, 0, 1), testSidecar(100, 1, 1)}))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), prunedToo, []*cltypes.BlobSidecar{testSidecar(200, 0, 3)}))
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), kept, []*cltypes.BlobSidecar{testSidecar(subdivisionSlot, 0, 2)}))
+
+	require.NoError(t, bs.PruneBelow(subdivisionSlot))
+
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		for _, root := range []common.Hash{pruned, prunedToo} {
+			row, err := tx.GetOne(kv.BlockRootToKzgCommitments, root[:])
+			require.NoError(t, err)
+			require.Nil(t, row, "a pruned block must not keep its count row")
+		}
+		row, err := tx.GetOne(kv.BlockRootToKzgCommitments, kept[:])
+		require.NoError(t, err)
+		require.NotNil(t, row, "a block above the floor keeps its row")
+		return nil
+	}))
 }
 
 type blockingBlobRemoveFs struct {

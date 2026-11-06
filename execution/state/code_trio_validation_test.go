@@ -24,22 +24,26 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Code, CodeHash and CodeSize always co-write (one code change bumps all
-// three) and validate in the SAME value class: each carries a tiebreaker, so a
-// cold StorageRead that collides with a concurrent worker's Done flush stays
-// valid when the flushed value matches what was read, and invalidates when it
-// differs. The unification is deliberate: a value-matching collision is not a
-// real conflict, and re-executing on it costs determinism on the BAL-fed path.
-func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
+// Code, CodeHash and CodeSize always co-write (one code change bumps all three) and
+// validate uniformly on version. A StorageRead-sourced read carrying a concrete version
+// that collides with a concurrent worker's Done flush at a different version invalidates
+// on all three paths, regardless of the shadowing cell's valStatus — including a
+// CodeHash cell stamped net-zero (ValueUnchanged). One value per version makes the
+// version check value-exact, so no value-path exemption is needed.
+func TestCodeTrio_UniformVersionValidation(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(80)
 	code := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3})
 
 	vm := NewVersionMap(nil)
-	// A concurrent worker's Done flush of the trio lands at tx1.
-	vm.WriteCode(addr, Version{TxIndex: 1}, code, true)
-	vm.WriteCodeHash(addr, Version{TxIndex: 1}, code.Hash, true)
-	vm.WriteCodeSize(addr, Version{TxIndex: 1}, code.Len(), true)
+	// A concurrent worker's Done flush of the trio lands at tx1. The code-hash is a
+	// net-zero re-publication of the committed origin (ValueUnchanged); code and
+	// code-size are stamped as real changes (ValueChanged).
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: code})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: Version{TxIndex: 1}, valStatus: ValueUnchanged}, Val: code.Hash})
+	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: code.Len()})
+	vm.FlushVersionedWrites(ws, true)
 
 	// tx3's reads were served from storage (cold) and now collide with the flush.
 	readStorage := ReadHeader{Source: StorageRead, Version: Version{TxIndex: 3}}
@@ -48,34 +52,20 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 	rsHash := ReadSet{}
 	rsHash.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: readStorage, Val: code.Hash})
 	ioHash.RecordReads(Version{TxIndex: 3}, rsHash)
-	require.Equal(t, VersionValid, vm.ValidateVersion(3, ioHash, validateEqualVersion, true, false, false, ""),
-		"CodeHash value-path tiebreaker: the flushed value matches, so the cold read stays valid")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioHash, validateEqualVersion, false, ""),
+		"CodeHash: a version-mismatched read invalidates even under a net-zero (ValueUnchanged) shadow")
 
 	ioCode := NewVersionedIO(4)
 	rsCode := ReadSet{}
-	rsCode.SetCode(addr, VersionedRead[[]byte]{ReadHeader: readStorage, Val: code.Bytes})
+	rsCode.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: readStorage, Val: code})
 	ioCode.RecordReads(Version{TxIndex: 3}, rsCode)
-	require.Equal(t, VersionValid, vm.ValidateVersion(3, ioCode, validateEqualVersion, true, false, false, ""),
-		"CodePath tiebreaker: the flushed bytes match, so the cold read stays valid")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioCode, validateEqualVersion, false, ""),
+		"CodePath noValue: the storage/flush collision invalidates (conservative)")
 
 	ioSize := NewVersionedIO(4)
 	rsSize := ReadSet{}
 	rsSize.SetCodeSize(addr, VersionedRead[int]{ReadHeader: readStorage, Val: code.Len()})
 	ioSize.RecordReads(Version{TxIndex: 3}, rsSize)
-	require.Equal(t, VersionValid, vm.ValidateVersion(3, ioSize, validateEqualVersion, true, false, false, ""),
-		"CodeSizePath tiebreaker: the flushed size matches, so the cold read stays valid")
-
-	ioCodeStale := NewVersionedIO(4)
-	rsCodeStale := ReadSet{}
-	rsCodeStale.SetCode(addr, VersionedRead[[]byte]{ReadHeader: readStorage, Val: []byte{0xde, 0xad}})
-	ioCodeStale.RecordReads(Version{TxIndex: 3}, rsCodeStale)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioCodeStale, validateEqualVersion, true, false, false, ""),
-		"CodePath: a genuinely different flushed value still invalidates")
-
-	ioSizeStale := NewVersionedIO(4)
-	rsSizeStale := ReadSet{}
-	rsSizeStale.SetCodeSize(addr, VersionedRead[int]{ReadHeader: readStorage, Val: 2})
-	ioSizeStale.RecordReads(Version{TxIndex: 3}, rsSizeStale)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioSizeStale, validateEqualVersion, true, false, false, ""),
-		"CodeSizePath: a genuinely different flushed size still invalidates")
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioSize, validateEqualVersion, false, ""),
+		"CodeSizePath noValue: same collision verdict as Code")
 }

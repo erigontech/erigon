@@ -33,18 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// writeIndex builds a lookup map from a WriteSet, keyed by (Path, Key) — the
-// address is not part of the key, so this assumes a single-address WriteSet
-// (use addrWriteIndex for multiple). Value is the typed Val field.
-func writeIndex(writes *WriteSet) map[AccountKey]any {
-	idx := make(map[AccountKey]any)
-	for h := range writes.AllHeaders() {
-		idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
-	}
-	return idx
-}
-
-// addrWriteIndex is like writeIndex but scoped to a single address.
+// addrWriteIndex builds a (Path, Key) lookup map of the writes to addr.
 func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {
@@ -247,7 +236,7 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	// Capture and flush before FinalizeTx (journal.dirties still populated).
 	writes0 := ibs0.VersionedWrites()
-	mvhm.FlushVersionedWrites(writes0, true, "")
+	mvhm.FlushVersionedWrites(writes0, true)
 
 	// — tx1 (txIndex 1) — reads committed state before modifying —
 	ibs1 := NewWithVersionMap(reader, mvhm)

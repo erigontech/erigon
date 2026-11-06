@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -133,9 +132,11 @@ func (u UnwindReason) Err() error {
 	return nil
 }
 
-var StagedUnwind = UnwindReason{}
-var ExecUnwind = UnwindReason{}
-var ForkChoice = UnwindReason{}
+var (
+	StagedUnwind = UnwindReason{}
+	ExecUnwind   = UnwindReason{}
+	ForkChoice   = UnwindReason{}
+)
 
 func BadBlock(badBlock common.Hash, err error) UnwindReason {
 	if !errors.Is(err, rules.ErrInvalidBlock) {
@@ -181,7 +182,7 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
-	FinalityCtx     dbfinality.Context
+	FinalityCtx     kv.FinalityContext
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
@@ -190,6 +191,7 @@ func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" 
 func (s *PruneState) Done(db kv.Putter) error {
 	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
 }
+
 func (s *PruneState) DoneAt(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }

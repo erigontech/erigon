@@ -17,6 +17,7 @@
 package types
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/rlp"
@@ -29,5 +30,29 @@ func BenchmarkReceiptForStorageEncode(b *testing.B) {
 		if _, err := rlp.EncodeToBytes(r); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkReceiptForStorageDecode(b *testing.B) {
+	for _, copies := range []int{1, 4, 16, 64} {
+		r := storageReceiptFixture()
+		base := r.Logs
+		r.Logs = nil
+		for range copies {
+			r.Logs = append(r.Logs, base...)
+		}
+		enc, err := rlp.EncodeToBytes(r)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("logs%03d", len(r.Logs)), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				var got ReceiptForStorage
+				if err := rlp.DecodeBytes(enc, &got); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

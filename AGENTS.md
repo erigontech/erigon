@@ -2,6 +2,16 @@
 
 Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
 
+## Ponytail
+
+Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to keep changes simple.
+
+- Reuse an existing installation. Otherwise, follow the upstream [installation instructions](https://github.com/DietrichGebert/ponytail#install) and [portability guide](https://github.com/DietrichGebert/ponytail/blob/main/docs/agent-portability.md) for your agent and version. Prefer user-local setup, complete prerequisites and activation steps, and verify it is loaded.
+- If native integration is unavailable, clone Ponytail outside the Erigon checkout and read `skills/ponytail/SKILL.md` from that checkout at the start of each coding session. Preserve existing agent configuration and this `AGENTS.md`.
+- Before handing off code changes, use `ponytail-review` through your agent's invocation syntax, or read and apply `skills/ponytail-review/SKILL.md` from the Ponytail checkout. Review the current diff for unnecessary complexity; this supplements correctness, security, and performance checks.
+
+Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
+
 ## Build & Test
 
 ```bash
@@ -27,6 +37,7 @@ Before committing, always verify changes with: `make lint && make erigon integra
 | Directory | Purpose | Component Docs |
 |-----------|---------|----------------|
 | `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
+| `execution/commitment/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
 | `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
 | `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
 | `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
@@ -51,6 +62,12 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 ### Before adding a test
 
 Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
+
+### Before changing a bound or constant
+
+A deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+
+A red test does not settle this. It proves the code disagrees with your expectation, not that your expectation matches the system's contract — a test that encodes the same wrong assumption as the change passes for the wrong reason.
 
 ### For bug fixes
 
@@ -89,7 +106,7 @@ These rules apply project-wide — to every contributor and every automated agen
 
 ### Why skips are dangerous
 
-A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` documenting a known parallel-exec CREATE2-reincarnation bug that was never actually fixed (the inline comment claimed a fix on a branch that never merged), so removing it broke CI across downstream PRs.
+A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there.
 
 ### Valid reasons a skip may exist
 
@@ -112,7 +129,7 @@ When an agent encounters a failing test:
 - Fix the underlying bug
 - If genuinely unfixable in-session: (a) escalate with the findings, or (b) report a tracked blocker — never (c) skip it
 
-If a flaky test blocks the agent's own CI iteration, the agent reproduces locally and either fixes it or hands off with the repro recipe. Adding a skip "just to get CI green" is exactly the pattern that produced #21153's surprise.
+If a flaky test blocks the agent's own CI iteration, the agent reproduces locally and either fixes it or hands off with the repro recipe. Adding a skip "just to get CI green" is exactly this pattern.
 
 Except for that `testing.Short()` convention, this applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, and removing tests from a runner matrix without a tracking issue. **All are off-limits for automated agents.**
 
@@ -124,9 +141,7 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 Don't sign commits, pr's, issues, comments.
 
-Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
-
-**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
+Run `make lint` before every commit and push and fix every finding; it is non-deterministic, so run it until clean. PRs must pass it before being opened or updated.
 
 ## Code Style
 
@@ -144,41 +159,18 @@ When a comment is genuinely required, it MUST be:
 
 - **Concise, but err on the side of clarity.** Most comments fit in a sentence or two; keep an extra sentence when cutting it would cost understanding, and cut it when it only adds length — two clear sentences beat both a cryptic one-liner and a six-line essay. An explanation that needs sub-headings (`// Concurrency:` / `// Why:`) or bullet lists to stay organized has outgrown source: put the full story in the commit message, the PR description, or a design doc, and keep the distilled why in the code.
 - **High-level, not scenario-specific.** Explain the invariant or gotcha in general terms. Don't walk through specific call sites, sequences of operations, or particular situations a reader could find with `grep`. The right level of abstraction is "what must remain true," not "what happened to me last Tuesday."
-- **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, and "used by X, Y, Z" callsite lists. That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
+- **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, "used by X, Y, Z" callsite lists, and scope or limitation narration (`// forward-only`, `// safety net`, `// cannot repair X`). That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
+- **Stated once.** The why lives at its canonical place — the field, type or function it belongs to; other sites get a terse pointer, not the paragraph again.
 - **Not a restatement of the code.** If a reader could delete the comment without losing information, delete it. Standard Go idioms and well-known library behavior don't need annotation.
 
-A good comment:
-
-```go
-// Safe to close while read views are still iterating: the memStore backing
-// makes Rollback a no-op on the data.
-func (m *MemoryMutation) Rollback() { ... }
-```
-
-The same constraint written badly — long, name-dropping internal callers, threading review history through the source:
-
-```go
-// Rollback releases this mutation's local cursor cache and forwards Rollback
-// to the backing in-memory tx / db. Concurrency invariant (load-bearing —
-// see also Filters.WithOverlay): for a MemoryMutation created via
-// NewMemoryBatch (the pure-Go memStore backing used by
-// SharedDomains.blockOverlay), memTx.Rollback and memDb.Close are no-ops on
-// the in-memory data — see memory_store.go. That is what makes it safe for
-// the FCU bg-commit goroutine to call Close on the published BlockOverlay
-// while concurrent RPC readers are still iterating views obtained via
-// NewReadView / NewTemporalReadView. If this is ever switched to
-// NewMemoryBatchMDBX (real MDBX backing, where Rollback DOES invalidate
-// cursors), the bg-commit close + concurrent-RPC-reader pattern becomes
-// unsafe and refcounting/drain logic is required...
-```
 
 If a constraint really needs to be enforced for the codebase's safety, prefer **code that enforces it** (a runtime assert, a type the caller can't misuse, a single private constructor) over a comment that describes it. A `panic` survives refactors; a long comment doesn't.
 
-Function docstrings follow the same rule: a one-line summary, plus param/return notes only when the signature doesn't already say it. A docstring that needs sections is a sign the function does too much, or the explanation belongs elsewhere.
+Function docstrings follow the same rule: a one-line summary, plus param/return notes only when the signature doesn't already say it. A docstring that needs sections is a sign the function does too much, or the explanation belongs elsewhere. A test docstring may name the non-obvious scenario the test pins, under the same rules.
 
 `// TODO` notes are only acceptable with a linked tracking issue and an owner. Better: file the issue and don't add the TODO; or fix it now.
 
-**For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. The forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
+**For automated agents:** the forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
 
 ## Code Reviews
 
@@ -210,26 +202,6 @@ When opening a PR against `release/3.4` (or another release branch):
 - **Body**: keep it short. For a straight cherry-pick: `Cherry-pick of #<N> to release/3.4.` When release-branch adjustments were needed (different APIs, skipped tests, etc.), add a `## r3.4-specific adaptations` section listing the deltas. When the change is not a cherry-pick of a merged PR (e.g. a dependency bump pulling a fix), describe what's being pulled in and why it's needed on the release branch.
 - **Branch name**: keep a `3.4` marker. Common forms: `cherry-pick-<PR#>-to-release-3.4`, `cherry-pick-<PR#>-r34`, `cp/<PR#>-to-3.4`, or `<user>/<short>_34`.
 - **Base branch**: `release/3.4`.
-
-## Pre-push
-
-Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
-
-## Lint Notes
-
-The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
-
-A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
-
-Common lint categories and fixes:
-- **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
-- **prealloc:** Pre-allocate slices when the length is known from a range.
-- **unslice:** Remove redundant `[:]` on variables that are already slices.
-- **newDeref:** Replace `*new(T)` with `T{}`.
-- **appendCombine:** Combine consecutive `append` calls into one.
-- **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
-- **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
-- **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
 
 ## Workflows
 

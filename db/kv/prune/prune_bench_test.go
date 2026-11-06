@@ -46,7 +46,7 @@ func BenchmarkTableScanningPrune(b *testing.B) {
 		prune.TableScanningPrune( //nolint:errcheck
 			b.Context(), "bench", "txlookup",
 			0, N/2, 1, logEvery, logger,
-			nil, cur, false, &prune.Stat{}, prune.ValueOffset8StorageMode,
+			nil, cur, &prune.Stat{}, prune.ValueOffset8StorageMode,
 		)
 		cur.Close()
 	}

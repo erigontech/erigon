@@ -69,12 +69,14 @@ func TestStateTransitionObserver(t *testing.T) {
 	defer mu.Unlock()
 	for _, point := range []execmodule.StateTransitionPoint{
 		execmodule.StateTransitionOverlayPublished,
+		execmodule.StateTransitionCommitReady,
 		execmodule.StateTransitionCommitComplete,
 		execmodule.StateTransitionOverlayCleared,
 	} {
 		require.Positivef(t, observed[point], "state transition %d was not observed", point)
 	}
 	published := observed[execmodule.StateTransitionOverlayPublished]
+	require.Equal(t, published, observed[execmodule.StateTransitionCommitReady], "each published FCU result must reach the commit boundary")
 	require.Equal(t, published, observed[execmodule.StateTransitionCommitComplete], "each published FCU result must become durable")
 	require.Equal(t, published, observed[execmodule.StateTransitionOverlayCleared], "only a published overlay may emit a clear event")
 }

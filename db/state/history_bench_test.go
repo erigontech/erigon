@@ -149,9 +149,9 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 }
 
 // BenchmarkHistorySeekInFiles measures a point lookup against merged (page-compressed)
-// history files. The `warm` arm reuses one HistoryRoTx, so ht.blockCompressionBuf is
-// reused across seeks; `coldTx` opens a fresh HistoryRoTx per seek, which is what an
-// rpcdaemon request does and what leaves the page-decode buffer cold every time.
+// history files. The `warm` arm reuses one HistoryRoTx, so its paged readers keep the page
+// they decoded; `coldReaders` drops those readers before every seek; `coldTx` opens a fresh
+// HistoryRoTx per seek, which is what an rpcdaemon request does.
 func BenchmarkHistorySeekInFiles(b *testing.B) {
 	logger := log.New()
 	db, h, txs := filledHistory(b, true, logger)
@@ -186,11 +186,11 @@ func BenchmarkHistorySeekInFiles(b *testing.B) {
 		}
 	})
 
-	b.Run("coldBuf", func(b *testing.B) {
+	b.Run("coldReaders", func(b *testing.B) {
 		b.ReportAllocs()
 		i := 0
 		for b.Loop() {
-			ht.blockCompressionBuf = nil
+			ht.pagedGetters = nil
 			seek(b, ht, i)
 			i++
 		}

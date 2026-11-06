@@ -22,10 +22,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
+	"github.com/klauspost/compress/gzhttp"
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -186,6 +189,32 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
 }
 
+// A flushed response must reach the client while the handler is still running.
+func TestGzipHandlerFlushReachesClient(t *testing.T) {
+	body := bytes.Repeat([]byte("erigon "), 1024)
+	release := make(chan struct{})
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+		w.(http.Flusher).Flush()
+		<-release
+	})))
+	defer srv.Close()
+	defer close(release)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	zr, err := gzip.NewReader(resp.Body)
+	require.NoError(t, err)
+	got := make([]byte, len(body))
+	_, err = io.ReadFull(zr, got)
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
+}
+
 // TestGzipMetricsCounters verifies the raw/compressed byte counters:
 // in must grow by the uncompressed payload size, out by the bytes on the wire.
 func TestGzipMetricsCounters(t *testing.T) {
@@ -303,7 +332,7 @@ func TestHTTPHandlerStackCompressionDisabled(t *testing.T) {
 					f.Flush()
 				}
 			})
-			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, nil, tc.compression, 0, false))
+			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, nil, tc.compression, true, 0, false))
 			defer srv.Close()
 
 			req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, nil)
@@ -444,6 +473,165 @@ func TestCompressionMetricsAttributed(t *testing.T) {
 			require.Greater(t, tc.in.GetValueUint64(), beforeIn, "raw bytes were not counted")
 			require.Greater(t, tc.out.GetValueUint64(), beforeOut, "wire bytes were not counted")
 			require.Less(t, tc.out.GetValueUint64()-beforeOut, tc.in.GetValueUint64()-beforeIn, "ratio must be under 1")
+		})
+	}
+}
+
+// TestCompressorFactoriesRejectOtherLevels pins that a wrapper cannot be built
+// with a level the level-blind pools would silently ignore.
+func TestCompressorFactoriesRejectOtherLevels(t *testing.T) {
+	t.Run("gzip", func(t *testing.T) {
+		_, err := gzhttp.NewWrapper(
+			gzhttp.CompressionLevel(gzip.BestCompression),
+			gzhttp.Implementation(gzipWriterFactory),
+		)
+		require.Error(t, err)
+	})
+	t.Run("zstd", func(t *testing.T) {
+		_, err := gzhttp.NewWrapper(
+			gzhttp.EnableZstd(true),
+			gzhttp.ZstdCompressionLevel(int(zstd.SpeedBestCompression)),
+			gzhttp.ZstdImplementation(zstdWriterFactory),
+		)
+		require.Error(t, err)
+	})
+}
+
+// TestCompressionWritersInUse pins that a writer counts as in use from the
+// moment compression starts until the response is closed.
+func TestCompressionWritersInUse(t *testing.T) {
+	for _, tc := range []struct {
+		accept string
+		inUse  metrics.Gauge
+	}{
+		{"gzip", gzipWritersInUse},
+		{"zstd", zstdWritersInUse},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			before := tc.inUse.GetValue()
+			var during float64
+			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(bytes.Repeat([]byte("x"), 4*minGzipBodySize))
+				during = tc.inUse.GetValue()
+			}))
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.Header.Set("Accept-Encoding", tc.accept)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tc.accept, rec.Header().Get("Content-Encoding"))
+
+			assert.Equal(t, before+1, during, "an active response must hold one writer")
+			assert.Equal(t, before, tc.inUse.GetValue(), "a closed response must release its writer")
+		})
+	}
+}
+
+// TestPooledWritersDetachDestination pins that an idle pooled writer does not
+// keep the response writer of its last response alive.
+func TestPooledWritersDetachDestination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		new  func(io.Writer) io.WriteCloser
+	}{
+		{"gzip", func(w io.Writer) io.WriteCloser { return gzipWriterFactory.New(w, gzipLevel) }},
+		{"zstd", func(w io.Writer) io.WriteCloser { return zstdWriterFactory.New(w, int(zstdLevel)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := new(bytes.Buffer)
+			ref := weak.Make(dst)
+			w := tc.new(dst)
+			_, err := w.Write(bytes.Repeat([]byte("x"), minGzipBodySize))
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+
+			runtime.GC()
+			assert.Nil(t, ref.Value(), "a pooled writer must not retain its destination")
+		})
+	}
+}
+
+func TestHTTPHandlerStackLoopbackCompression(t *testing.T) {
+	body := bytes.Repeat([]byte(`{"jsonrpc":"2.0","result":"x"}`), 200)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	})
+
+	for _, tc := range []struct {
+		name       string
+		loopback   bool
+		remoteAddr string
+		header     string
+		wantEnc    string
+	}{
+		{"skip, ipv4 loopback", false, "127.0.0.1:5000", "", ""},
+		{"skip, ipv4 loopback range", false, "127.1.2.3:5000", "", ""},
+		{"skip, ipv6 loopback", false, "[::1]:5000", "", ""},
+		{"skip, ipv4-mapped loopback", false, "[::ffff:127.0.0.1]:5000", "", ""},
+		{"skip, remote ipv4", false, "192.0.2.1:5000", "", "gzip"},
+		{"skip, remote ipv6", false, "[2001:db8::1]:5000", "", "gzip"},
+		{"skip, unparsable addr", false, "@", "", "gzip"},
+		{"skip, loopback behind proxy (X-Forwarded-For)", false, "127.0.0.1:5000", "X-Forwarded-For", "gzip"},
+		{"skip, loopback behind proxy (Forwarded)", false, "127.0.0.1:5000", "Forwarded", "gzip"},
+		{"keep, ipv4 loopback", true, "127.0.0.1:5000", "", "gzip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := NewHTTPHandlerStack(inner, nil, []string{"*"}, true, tc.loopback, 0, false)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			req.Header.Set("Accept-Encoding", "gzip")
+			if tc.header != "" {
+				req.Header.Set(tc.header, "203.0.113.7")
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			require.Equal(t, tc.wantEnc, rec.Header().Get("Content-Encoding"))
+			got := rec.Body.Bytes()
+			if tc.wantEnc == "gzip" {
+				got = decompressGzip(t, rec.Body)
+			}
+			require.Equal(t, body, got)
+		})
+	}
+}
+
+func TestHTTPHandlerStackLoopbackCompressionOverTCP(t *testing.T) {
+	body := bytes.Repeat([]byte(`{"jsonrpc":"2.0","result":"x"}`), 200)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	})
+
+	for _, tc := range []struct {
+		name     string
+		loopback bool
+		wantEnc  string
+	}{
+		{"loopback compression off", false, ""},
+		{"loopback compression on", true, "gzip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, []string{"*"}, true, tc.loopback, 0, false))
+			defer srv.Close()
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, nil)
+			require.NoError(t, err)
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, tc.wantEnc, resp.Header.Get("Content-Encoding"))
+			var got []byte
+			if tc.wantEnc == "gzip" {
+				got = decompressGzip(t, resp.Body)
+			} else {
+				got, err = io.ReadAll(resp.Body)
+				require.NoError(t, err)
+			}
+			require.Equal(t, body, got)
 		})
 	}
 }

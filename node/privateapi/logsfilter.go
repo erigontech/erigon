@@ -166,7 +166,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 
 // distributeLogs receives native log notifications, filters them, and converts
 // to protobuf only when sending over gRPC.
-func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotification) error {
+func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotification) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 
@@ -213,8 +213,6 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 	for filterId, filter := range filtersToDelete {
 		a.removeLogsFilterLocked(filterId, filter)
 	}
-
-	return nil
 }
 
 func (a *LogsFilterAggregator) chooseTopicsNative(filterTopics map[common.Hash]int, logTopics []common.Hash) bool {

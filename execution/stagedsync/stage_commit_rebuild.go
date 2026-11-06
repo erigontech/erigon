@@ -21,12 +21,11 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execfinality"
 )
 
@@ -56,23 +55,23 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 	txNumsReader := cfg.blockReader.TxnumReader()
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New(), squeeze)
 	if err != nil {
-		return trie.EmptyRoot, err
+		return empty.RootHash, err
 	}
 	return common.BytesToHash(rh), err
 }
 
 func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
-	var finalityCtx dbfinality.Context
+	var finalityCtx kv.FinalityContext
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false, execfinality.WithTxNumsReader(cfg.db, cfg.blockReader.TxnumReader()))
+		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false, cfg.blockReader.TxnumReader())
 		return err
 	}); err != nil {
-		return trie.EmptyRoot, err
+		return empty.RootHash, err
 	}
 	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, cfg.blockReader, finalityCtx, log.New(), squeeze)
 	if err != nil {
-		return trie.EmptyRoot, err
+		return empty.RootHash, err
 	}
 
 	return common.BytesToHash(rh), err

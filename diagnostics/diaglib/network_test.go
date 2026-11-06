@@ -66,7 +66,7 @@ var mockOutboundUpdMsg = diaglib.PeerStatisticMsgUpdate{
 }
 
 func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
-	//test handing inbound message
+	// test handing inbound message
 	inboundPeerStats := diaglib.PeerStatisticsFromMsgUpdate(mockInboundUpdMsg, nil)
 	require.Equal(t, mockInboundPeerStats, inboundPeerStats)
 
@@ -82,7 +82,7 @@ func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
 		TypeBytesOut: map[string]uint64{},
 	}, inboundPeerStats)
 
-	//test handing outbound message
+	// test handing outbound message
 	outboundPeerStats := diaglib.PeerStatisticsFromMsgUpdate(mockOutboundUpdMsg, nil)
 	require.Equal(t, mockOutboundPeerStats, outboundPeerStats)
 
@@ -97,11 +97,10 @@ func TestPeerStatisticsFromMsgUpdate(t *testing.T) {
 		CapBytesOut:  map[string]uint64{"msgCap1": 20},
 		TypeBytesOut: map[string]uint64{"msgType1": 20},
 	}, outboundPeerStats)
-
 }
 
 func TestAddPeer(t *testing.T) {
-	var peerStats = diaglib.NewPeerStats(100)
+	peerStats := diaglib.NewPeerStats(100)
 
 	peerStats.AddPeer("test1", mockInboundUpdMsg)
 	require.Equal(t, 1, peerStats.GetPeersCount())

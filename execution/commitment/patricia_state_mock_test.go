@@ -43,6 +43,21 @@ type MockState struct {
 	sm     map[string][]byte
 	cm     map[string]BranchData
 	numBuf [binary.MaxVarintLen64]byte
+
+	putBranches int
+
+	recordPuts atomic.Bool
+	putLog     []recordedBranchPut
+
+	// reuseBranchBuf makes Branch return a single reused buffer, mirroring the
+	// production TrieContext.Branch, so a caller that keeps a branch across a later
+	// Branch read sees it overwritten.
+	reuseBranchBuf atomic.Bool
+	branchBuf      []byte
+}
+
+type recordedBranchPut struct {
+	prefix, data, prev []byte
 }
 
 func NewMockState(t testing.TB) *MockState {
@@ -70,6 +85,10 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 	// Clone is required by PutBranch's no-retain contract, not incidental: callers pass
 	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
 	ms.cm[string(prefix)] = bytes.Clone(data)
+	ms.putBranches++
+	if ms.recordPuts.Load() {
+		ms.putLog = append(ms.putLog, recordedBranchPut{bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prevData)})
+	}
 	return nil
 }
 
@@ -79,6 +98,10 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		defer ms.mu.RUnlock()
 	}
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
+		if ms.reuseBranchBuf.Load() {
+			ms.branchBuf = append(ms.branchBuf[:0], exBytes...)
+			return ms.branchBuf, 0, nil
+		}
 		return exBytes, 0, nil
 	}
 	return nil, 0, nil
@@ -186,20 +209,6 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 		}
 	}
 	return nil
-}
-
-func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
-	for key, update := range updates {
-		if pre, ok := ms.cm[key]; ok {
-			merged, err := pre.MergeHexBranches(update, nil)
-			if err != nil {
-				panic(err)
-			}
-			ms.cm[key] = merged
-		} else {
-			ms.cm[key] = update
-		}
-	}
 }
 
 func decodeHex(in string) []byte {
@@ -352,7 +361,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	keccak := keccak.NewFastKeccak()
 	for key := range ub.keyset {
 		keccak.Reset()
-		keccak.Write([]byte(key))
+		_, _ = keccak.Write([]byte(key))
 		h := keccak.Sum(nil)
 		hashedKey := make([]byte, len(h)*2)
 		for i, c := range h {
@@ -365,7 +374,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashedKey := make([]byte, 128)
 	for sk1, k := range ub.keyset2 {
 		keccak.Reset()
-		keccak.Write([]byte(sk1))
+		_, _ = keccak.Write([]byte(sk1))
 		h := keccak.Sum(nil)
 		for i, c := range h {
 			hashedKey[i*2] = (c >> 4) & 0xf
@@ -373,7 +382,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 		}
 		for sk2 := range k {
 			keccak.Reset()
-			keccak.Write([]byte(sk2))
+			_, _ = keccak.Write([]byte(sk2))
 			h2 := keccak.Sum(nil)
 			for i, c := range h2 {
 				hashedKey[64+i*2] = (c >> 4) & 0xf
