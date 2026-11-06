@@ -20,9 +20,11 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	das_state_mock "github.com/erigontech/erigon/cl/das/state/mock_services"
+	"github.com/erigontech/erigon/cl/gossip"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossipmock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -1403,6 +1405,40 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndBlobs
 
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndBlobsRecovered_RejectsInvalidSidecar() {
 	t.assertGloasArchiveSidecar(true, false)
+}
+
+// A published Gloas column, such as a recovered one, is marked seen, so a later gossip copy is a duplicate that is
+// ignored before the KZG check.
+func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_MarksColumnSeenSoGossipCopyIsIgnored() {
+	t.activateGloas()
+	publisher := gossipmock.NewMockGossip(t.gomockCtrl)
+	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = publisher
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index }
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)
+	encoded, err := sidecar.EncodeSSZ(nil)
+	t.Require().NoError(err)
+	digest := common.Bytes4{1, 2, 3, 4}
+	t.mockEthClock.EXPECT().ComputeForkDigest(testSlot/testSlotsPerEpoch).Return(digest, nil)
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), digest, gossip.TopicNameDataColumnSidecar(1), encoded).Return(nil).Times(1)
+
+	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{sidecar})
+
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Times(0)
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.Equal(ErrIgnore, t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_WhenSlotFinalized_PublishesNothing() {
+	t.activateGloas()
+	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = gossipmock.NewMockGossip(t.gomockCtrl)
+	t.mockForkChoice.FinalizedSlotVal = testSlot
+
+	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)})
+
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	t.False(seen)
 }
 
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveMode_StoresSidecar() {
