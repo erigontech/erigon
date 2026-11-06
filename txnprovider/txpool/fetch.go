@@ -352,7 +352,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			waitingUntil = until
 		}
 	}
-	timedOut := f.waiting[:len(f.waiting):len(f.waiting)]
+	timedOut := slices.Clip(f.waiting)
 	if !scanWaiting {
 		timedOut = nil
 	}
@@ -438,11 +438,11 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	var wg sync.WaitGroup
 	for _, peers := range bySentry {
 		wg.Go(func() {
-			ctx, cancel := context.WithTimeout(ctx, txFetchTimeout)
+			sendCtx, cancel := context.WithTimeout(ctx, txFetchTimeout)
 			defer cancel()
 			for _, peer := range peers {
 				for _, hashes := range plans[peer].reqs {
-					if unsent, at, err := f.requestPooledTxns(ctx, peer, hashes, sent); err != nil {
+					if unsent, at, err := f.requestPooledTxns(sendCtx, peer, hashes, sent); err != nil {
 						f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
 						if errors.Is(err, errPeerGone) {
 							f.dropAlternate(peer) // its Disconnect event may have been lost
