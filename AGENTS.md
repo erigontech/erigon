@@ -106,7 +106,7 @@ These rules apply project-wide — to every contributor and every automated agen
 
 ### Why skips are dangerous
 
-A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` documenting a known parallel-exec CREATE2-reincarnation bug that was never actually fixed (the inline comment claimed a fix on a branch that never merged), so removing it broke CI across downstream PRs.
+A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there.
 
 ### Valid reasons a skip may exist
 
@@ -129,7 +129,7 @@ When an agent encounters a failing test:
 - Fix the underlying bug
 - If genuinely unfixable in-session: (a) escalate with the findings, or (b) report a tracked blocker — never (c) skip it
 
-If a flaky test blocks the agent's own CI iteration, the agent reproduces locally and either fixes it or hands off with the repro recipe. Adding a skip "just to get CI green" is exactly the pattern that produced #21153's surprise.
+If a flaky test blocks the agent's own CI iteration, the agent reproduces locally and either fixes it or hands off with the repro recipe. Adding a skip "just to get CI green" is exactly this pattern.
 
 Except for that `testing.Short()` convention, this applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, and removing tests from a runner matrix without a tracking issue. **All are off-limits for automated agents.**
 
@@ -141,9 +141,7 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 Don't sign commits, pr's, issues, comments.
 
-Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
-
-**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
+Run `make lint` before every commit and push and fix every finding; it is non-deterministic, so run it until clean. PRs must pass it before being opened or updated.
 
 ## Code Style
 
@@ -161,17 +159,18 @@ When a comment is genuinely required, it MUST be:
 
 - **Concise, but err on the side of clarity.** Most comments fit in a sentence or two; keep an extra sentence when cutting it would cost understanding, and cut it when it only adds length — two clear sentences beat both a cryptic one-liner and a six-line essay. An explanation that needs sub-headings (`// Concurrency:` / `// Why:`) or bullet lists to stay organized has outgrown source: put the full story in the commit message, the PR description, or a design doc, and keep the distilled why in the code.
 - **High-level, not scenario-specific.** Explain the invariant or gotcha in general terms. Don't walk through specific call sites, sequences of operations, or particular situations a reader could find with `grep`. The right level of abstraction is "what must remain true," not "what happened to me last Tuesday."
-- **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, and "used by X, Y, Z" callsite lists. That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
+- **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, "used by X, Y, Z" callsite lists, and scope or limitation narration (`// forward-only`, `// safety net`, `// cannot repair X`). That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
+- **Stated once.** The why lives at its canonical place — the field, type or function it belongs to; other sites get a terse pointer, not the paragraph again.
 - **Not a restatement of the code.** If a reader could delete the comment without losing information, delete it. Standard Go idioms and well-known library behavior don't need annotation.
 
 
 If a constraint really needs to be enforced for the codebase's safety, prefer **code that enforces it** (a runtime assert, a type the caller can't misuse, a single private constructor) over a comment that describes it. A `panic` survives refactors; a long comment doesn't.
 
-Function docstrings follow the same rule: a one-line summary, plus param/return notes only when the signature doesn't already say it. A docstring that needs sections is a sign the function does too much, or the explanation belongs elsewhere.
+Function docstrings follow the same rule: a one-line summary, plus param/return notes only when the signature doesn't already say it. A docstring that needs sections is a sign the function does too much, or the explanation belongs elsewhere. A test docstring may name the non-obvious scenario the test pins, under the same rules.
 
 `// TODO` notes are only acceptable with a linked tracking issue and an owner. Better: file the issue and don't add the TODO; or fix it now.
 
-**For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. The forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
+**For automated agents:** the forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
 
 ## Code Reviews
 
@@ -203,10 +202,6 @@ When opening a PR against `release/3.4` (or another release branch):
 - **Body**: keep it short. For a straight cherry-pick: `Cherry-pick of #<N> to release/3.4.` When release-branch adjustments were needed (different APIs, skipped tests, etc.), add a `## r3.4-specific adaptations` section listing the deltas. When the change is not a cherry-pick of a merged PR (e.g. a dependency bump pulling a fix), describe what's being pulled in and why it's needed on the release branch.
 - **Branch name**: keep a `3.4` marker. Common forms: `cherry-pick-<PR#>-to-release-3.4`, `cherry-pick-<PR#>-r34`, `cp/<PR#>-to-3.4`, or `<user>/<short>_34`.
 - **Base branch**: `release/3.4`.
-
-## Pre-push
-
-Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
 
 ## Workflows
 
