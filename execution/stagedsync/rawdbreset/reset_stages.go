@@ -164,6 +164,14 @@ func ResetSenders(ctx context.Context, db kv.RwDB) error {
 }
 
 func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
+	return resetExec(ctx, db, false)
+}
+
+func ResetExecKeepStoppedCommitment(ctx context.Context, db kv.TemporalRwDB) error {
+	return resetExec(ctx, db, true)
+}
+
+func resetExec(ctx context.Context, db kv.TemporalRwDB, keepStopped bool) error {
 	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain, kv.ReceiptDomain, kv.RCacheDomain))
 	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
 	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)
@@ -179,6 +187,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
 		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return fmt.Errorf("reset exec state tables: %w", err)
+		}
+		if keepStopped {
+			return nil
 		}
 		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 			if err := rawdb.DeleteCommitmentDomainStopped(tx, domain); err != nil {
@@ -196,7 +207,9 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	branchCacheCleared := false
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
-			agg.ClearStoppedCommitmentDomains()
+			if !keepStopped {
+				agg.ClearStoppedCommitmentDomains()
+			}
 			aggTx := agg.BeginFilesRo()
 			defer aggTx.Close()
 			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
