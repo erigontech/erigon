@@ -227,7 +227,7 @@ func (v ReadView) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	if v.c == nil {
 		return nil, false
 	}
-	return v.c.getCodeByHash(codeHash)
+	return v.c.GetCodeByHash(codeHash)
 }
 
 // GetCodeSizeByHash returns the cached code length for codeHash.
@@ -259,7 +259,7 @@ func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
 	if !ok || codeHash == ([32]byte{}) {
 		return nil, false
 	}
-	code, ok := v.c.getCodeByHash(codeHash[:])
+	code, ok := v.c.GetCodeByHash(codeHash[:])
 	if !ok {
 		return nil, false
 	}
