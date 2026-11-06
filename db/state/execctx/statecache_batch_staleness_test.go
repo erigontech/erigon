@@ -106,7 +106,6 @@ func TestStateCache_UncommittedBatchWinsOnEveryReadPath(t *testing.T) {
 	got, _, err = sd2.GetLatest(kv.StorageDomain, rw2, slot)
 	require.NoError(t, err)
 	require.Equal(t, st2, got, "sd.GetLatest storage")
-
 }
 
 func TestStateCache_CodeByHashNotPoisonedByHalfAppliedDeploy(t *testing.T) {
