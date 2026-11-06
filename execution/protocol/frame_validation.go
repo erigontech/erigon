@@ -163,7 +163,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	if i < len(tx.Frames) {
 		f := &tx.Frames[i]
 		if f.IsRecentRootVerifier() {
-			if f.Flags != 0 || !f.Value.IsZero() || f.Limits.State != 0 {
+			if !f.Value.IsZero() || f.Limits.State != 0 {
 				return nil, invalid
 			}
 			if err := validateRecentRootDataLength(len(f.Data)); err != nil {

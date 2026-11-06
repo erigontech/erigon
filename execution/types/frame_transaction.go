@@ -124,7 +124,7 @@ func (frame *Frame) IsExpiryVerifier() bool {
 }
 
 func (frame *Frame) IsRecentRootVerifier() bool {
-	return frame.Mode == FrameVerify && frame.Target != nil && *frame.Target == FrameRecentRootVerifier
+	return frame.Mode == FrameVerify && frame.Flags == 0 && frame.Target != nil && *frame.Target == FrameRecentRootVerifier
 }
 
 func (sig *FrameSignature) VerificationGas() uint64 {

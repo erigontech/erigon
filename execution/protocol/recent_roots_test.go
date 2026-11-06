@@ -83,6 +83,31 @@ func TestFrameValidationRecentRoot(t *testing.T) {
 	}
 }
 
+func TestFrameValidationRecentRootAddressAsSender(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			tx.SenderAddress = types.FrameRecentRootVerifier
+			sender := accounts.InternAddress(tx.SenderAddress)
+			require.NoError(t, evm.IntraBlockState().SetBalance(sender, *uint256.NewInt(10_000_000), tracing.BalanceChangeUnspecified))
+			require.NoError(t, evm.IntraBlockState().SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
+			if explicit {
+				tx.Frames[0].Target = &tx.SenderAddress
+			}
+			validation, validationErr := ValidateFrameTransaction(evm, tx)
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			require.NoError(t, validationErr)
+			require.Empty(t, validation.RecentRoots)
+			refs, err := FrameTransactionRecentRoots(tx)
+			require.NoError(t, err)
+			require.Empty(t, refs)
+		})
+	}
+}
+
 func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 	for _, deploy := range []bool{false, true} {
 		for _, sponsored := range []bool{false, true} {
