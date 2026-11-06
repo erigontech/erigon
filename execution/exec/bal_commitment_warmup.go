@@ -28,7 +28,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/crypto"
 	commonerrors "github.com/erigontech/erigon/common/errors"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -37,31 +39,50 @@ import (
 )
 
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
-	keyCount := 0
+	const accLen, slotLen = 2 * length.Hash, 4 * length.Hash
+	nKeys, arenaLen := 0, 0
 	for i := range bal {
-		account := &bal[i]
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keyCount++
+		if balAccountChanged(&bal[i]) {
+			nKeys++
 		}
-		keyCount += len(account.StorageChanges)
+		if balAccountChanged(&bal[i]) || len(bal[i].StorageChanges) > 0 {
+			arenaLen += accLen
+		}
+		nKeys += len(bal[i].StorageChanges)
+		arenaLen += len(bal[i].StorageChanges) * slotLen
 	}
-	keys := make([][]byte, 0, keyCount)
+	// One arena holds every key, each capped at its own length; the account's hashed address is computed once.
+	arena := make([]byte, 0, arenaLen)
+	keys := make([][]byte, 0, nKeys)
 	for i := range bal {
 		account := &bal[i]
-		address := account.Address
-		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
+		changed := balAccountChanged(account)
+		if !changed && len(account.StorageChanges) == 0 {
+			continue
+		}
+		addrHash := crypto.Keccak256Hash(account.Address[:])
+		at := len(arena)
+		arena = arena[:at+accLen]
+		nibbles.Expand(addrHash[:], arena[at:])
+		addrKey := arena[at : at+accLen : at+accLen]
+		if changed {
+			keys = append(keys, addrKey)
 		}
 		for _, storage := range account.StorageChanges {
 			slot := storage.Slot.Value()
-			plainKey := make([]byte, len(address)+len(slot))
-			copy(plainKey, address[:])
-			copy(plainKey[len(address):], slot[:])
-			keys = append(keys, commitment.KeyToHexNibbleHash(plainKey))
+			slotHash := crypto.Keccak256Hash(slot[:])
+			at := len(arena)
+			arena = append(arena, addrKey...)[:at+slotLen]
+			nibbles.Expand(slotHash[:], arena[at+accLen:])
+			keys = append(keys, arena[at:at+slotLen:at+slotLen])
 		}
 	}
 	slices.SortFunc(keys, bytes.Compare)
 	return keys
+}
+
+func balAccountChanged(account *types.AccountChanges) bool {
+	return len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0
 }
 
 type balCommitmentContext struct {

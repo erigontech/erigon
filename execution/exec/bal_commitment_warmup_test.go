@@ -145,6 +145,23 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	require.True(t, slices.IsSortedFunc(got, bytes.Compare))
 }
 
+func TestBALCommitmentWarmupKeysOfManySlotsUnderOneAccount(t *testing.T) {
+	addr := common.Address{19: 7}
+	bal := types.BlockAccessList{{Address: addr, NonceChanges: []*types.NonceChange{{}}}}
+	want := [][]byte{commitment.KeyToHexNibbleHash(addr[:])}
+	for i := range 3 {
+		slot := common.Hash{31: byte(i)}
+		bal[0].StorageChanges = append(bal[0].StorageChanges, types.SlotChanges{Slot: accounts.InternKey(slot)})
+		want = append(want, commitment.KeyToHexNibbleHash(append(addr[:], slot[:]...)))
+	}
+	slices.SortFunc(want, bytes.Compare)
+
+	got := balCommitmentWarmupKeys(bal)
+	require.Equal(t, want, got)
+	got[0] = append(got[0], 0xff)
+	require.Equal(t, want[1:], got[1:], "an append to one key does not reach the next")
+}
+
 func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 	tx := new(commitmentRecordingTx)
 	db := &singleTxRoDB{tx: tx}
