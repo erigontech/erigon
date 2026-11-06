@@ -143,7 +143,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 		if n > lastKnownNumber {
 			if n > refNumber {
-				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
+				return common.Hash{}, nil
 			}
 			lastKnownNumber = refNumber
 			lastKnownHash = refHash

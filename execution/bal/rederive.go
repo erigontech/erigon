@@ -59,14 +59,10 @@ func RederiveBlockAccessList(
 	blockNum := header.Number.Uint64()
 	balIO := &state.VersionedIO{}
 	noopWriter := state.NewNoopWriter()
-	var headerErr error
 	hashFn := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 		h, err := getHeader(hash, number)
 		if err == nil && h == nil {
 			err = fmt.Errorf("header %d %x not found", number, hash)
-		}
-		if err != nil && headerErr == nil {
-			headerErr = err
 		}
 		return h, err
 	})
@@ -79,9 +75,6 @@ func RederiveBlockAccessList(
 		}
 		if readErr := ibs.StateReadError(); readErr != nil {
 			return readErr
-		}
-		if headerErr != nil {
-			return headerErr
 		}
 		if errors.Is(err, protocol.ErrExecPanic) {
 			return err
