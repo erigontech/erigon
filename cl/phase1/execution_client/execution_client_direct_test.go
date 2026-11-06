@@ -71,15 +71,19 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		transactions [][]byte
-		wrapped      bool
+		invalid      bool
 	}{
 		{name: "empty"},
 		{name: "legacy", transactions: transactions[:1]},
 		{name: "typed", transactions: transactions[1:]},
 		{name: "mixed", transactions: transactions},
-		{name: "wrapped short", transactions: [][]byte{wrappedShort}, wrapped: true},
-		{name: "wrapped long", transactions: [][]byte{wrappedLong}, wrapped: true},
-		{name: "wrapped after canonical", transactions: [][]byte{transactions[0], transactions[1], wrappedLong}, wrapped: true},
+		{name: "wrapped short", transactions: [][]byte{wrappedShort}, invalid: true},
+		{name: "wrapped long", transactions: [][]byte{wrappedLong}, invalid: true},
+		{name: "wrapped after canonical", transactions: [][]byte{transactions[0], transactions[1], wrappedLong}, invalid: true},
+		{name: "malformed legacy", transactions: [][]byte{{0xc1, 0x80}}, invalid: true},
+		{name: "malformed access list", transactions: [][]byte{{types.AccessListTxType, 0xc0}}, invalid: true},
+		{name: "malformed dynamic fee", transactions: [][]byte{{types.DynamicFeeTxType, 0xc0}}, invalid: true},
+		{name: "malformed set code", transactions: [][]byte{{types.SetCodeTxType, 0xc0}}, invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			module := &newPayloadModuleStub{}
@@ -96,7 +100,7 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 			require.NoError(t, err)
 
 			status, err := client.NewPayload(t.Context(), payload, &parentRoot, []common.Hash{}, nil)
-			if tc.wrapped {
+			if tc.invalid {
 				require.EqualValues(t, PayloadStatusInvalidated, status)
 				require.Error(t, err)
 				require.Empty(t, module.inserted)

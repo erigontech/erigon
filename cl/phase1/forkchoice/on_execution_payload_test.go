@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -3619,6 +3620,21 @@ func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
 }
 
+func TestNewPayloadWithAdmissionDefersNonBlobTransactionValidation(t *testing.T) {
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{types.DynamicFeeTxType, 0xc0}})
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	invalidTransaction := errors.New("invalid transaction")
+	engine.EXPECT().NewPayload(gomock.Any(), payload, gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusInvalidated, invalidTransaction)
+	f := &ForkChoiceStore{engine: engine}
+
+	status, err := f.NewPayloadWithAdmission(t.Context(), payload, nil, []common.Hash{}, nil)
+
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	require.ErrorIs(t, err, invalidTransaction)
+}
+
 func TestNewPayloadWithAdmissionSerializesCallers(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
@@ -4202,6 +4218,62 @@ func TestExecutionPayloadDerivedHashRejectionDoesNotInvalidateVerifiedSibling(t 
 	require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 	require.False(t, graph.invalid.Load())
+}
+
+func TestValidatePayloadBlobHashes(t *testing.T) {
+	hashes := []common.Hash{{1, 1}, {1, 2}, {1, 3}}
+	blob := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}},
+		BlobVersionedHashes:   hashes[:2],
+	}
+	frame := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes[2:]}
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{
+		&types.LegacyTx{}, &types.AccessListTx{}, &types.DynamicFeeTransaction{},
+		&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}}},
+		blob, &types.DynamicFeeTransaction{}, frame,
+	})
+	require.NoError(t, err)
+	var wrapped bytes.Buffer
+	require.NoError(t, blob.EncodeRLP(&wrapped))
+
+	for _, tc := range []struct {
+		name         string
+		transactions [][]byte
+		expected     []common.Hash
+		mismatch     bool
+	}{
+		{name: "empty"},
+		{name: "non-blob", transactions: raw[:4]},
+		{name: "mixed", transactions: raw, expected: hashes},
+		{name: "no commitments", transactions: raw, mismatch: true},
+		{name: "missing commitment", transactions: raw, expected: hashes[:2], mismatch: true},
+		{name: "extra commitment", transactions: raw, expected: append(hashes, common.Hash{1, 4}), mismatch: true},
+		{name: "reordered", transactions: raw, expected: []common.Hash{hashes[1], hashes[0], hashes[2]}, mismatch: true},
+		{name: "wrapped blob", transactions: [][]byte{wrapped.Bytes()}, mismatch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(tc.transactions)
+			err := validatePayloadBlobHashes(payload, tc.expected)
+			if tc.mismatch {
+				require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
+	for _, raw := range [][]byte{nil, {types.BlobTxType}, {types.BlobTxType, 0xc0}, {types.FrameTxType, 0xc0}, {0x7f, 0xc0}, {0x81, types.BlobTxType}} {
+		t.Run(fmt.Sprintf("%x", raw), func(t *testing.T) {
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{raw})
+			err := validatePayloadBlobHashes(payload, []common.Hash{})
+			require.Error(t, err)
+			require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
+		})
+	}
 }
 
 func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testing.T) {

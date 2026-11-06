@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -659,12 +660,22 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 }
 
 func validatePayloadBlobHashes(payload *cltypes.Eth1Block, versionedHashes []common.Hash) error {
-	transactions, err := types.DecodeTransactions(payload.Transactions.UnderlyngReference())
-	if err != nil {
-		return err
-	}
 	actualHashes := make([]common.Hash, 0, len(versionedHashes))
-	for _, transaction := range transactions {
+	for _, raw := range payload.Transactions.UnderlyngReference() {
+		// The EL validates non-blob transactions; only their type matters here.
+		if len(raw) > 0 {
+			if raw[0] >= rlp.EmptyListCode {
+				continue
+			}
+			switch raw[0] {
+			case types.AccessListTxType, types.DynamicFeeTxType, types.SetCodeTxType:
+				continue
+			}
+		}
+		transaction, err := types.UnmarshalTransactionFromBinary(raw, false)
+		if err != nil {
+			return err
+		}
 		actualHashes = append(actualHashes, transaction.GetBlobHashes()...)
 	}
 	if !slices.Equal(actualHashes, versionedHashes) {
