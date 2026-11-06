@@ -882,6 +882,7 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 			}
 			return unknown, a.filterErr
 		}).AnyTimes()
+	pool.EXPECT().AddNewGoodPeer(gomock.Any()).AnyTimes()
 	pool.EXPECT().HeldOrQueuedIdHashes(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ kv.Tx, hashes Hashes) (Hashes, Hashes, error) {
 			if a.onFilter != nil {
@@ -1503,4 +1504,23 @@ func TestDisconnectedPeerLeavesTheAlternates(t *testing.T) {
 	require.NotContains(t, a.fetch.alternatesOf, fetchPeer{a.sentryClient, gone}, "a disconnected peer holds no alternate quota")
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerC}, a.requestedFrom, "the disconnected peer is not asked")
+}
+
+func TestDisconnectedPeerIsNotKeptByALateAnnouncementOrFailedSend(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hashLate, hashSent, peerA, gone := [32]byte{0xaa}, [32]byte{0xbb}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hashSent)
+	a.announce(t, gone, hashSent)
+	a.timeoutSweep() // gone is asked for hashSent
+	require.NoError(t, a.fetch.handleNewPeer(a.sentryClient, &sentryproto.PeerEvent{PeerId: gointerfaces.ConvertHashToH512(gone), EventId: sentryproto.PeerEvent_Disconnect}))
+	a.fetch.keepAlternate(fetchPeer{a.sentryClient, gone}, hashSent[:], *a.now) // its retry send failed after the disconnect
+
+	a.announce(t, peerA, hashLate)
+	a.announce(t, gone, hashLate) // buffered before the disconnect, handled after it
+	require.NotContains(t, a.fetch.alternatesOf, fetchPeer{a.sentryClient, gone}, "a disconnected peer is not an alternate again")
+
+	require.NoError(t, a.fetch.handleNewPeer(a.sentryClient, &sentryproto.PeerEvent{PeerId: gointerfaces.ConvertHashToH512(gone), EventId: sentryproto.PeerEvent_Connect}))
+	a.announce(t, gone, hashLate)
+	require.Contains(t, a.fetch.alternatesOf, fetchPeer{a.sentryClient, gone}, "a reconnected peer is an alternate again")
 }

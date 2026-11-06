@@ -56,6 +56,9 @@ const maxAlternatesPerPeer = 4096
 
 const maxFetchRequests = 64 * 1024
 
+// disconnectedPeerMemory is longer than an announcement of a peer waits in the inbound queue.
+const disconnectedPeerMemory = time.Minute
+
 // maxRetryRequestsPerPeer keeps one sweep well under sentry's 32-message outbound queue, which drops the oldest when full.
 const maxRetryRequestsPerPeer = 8
 
@@ -112,7 +115,8 @@ type Fetch struct {
 	requested                *maphash.LRU[*fetchRequest]
 	pending                  []pendingFetch // in request order, so the oldest expires first
 	retryBudgets             map[fetchPeer]*retryBudget
-	alternatesOf             map[fetchPeer]int // hashes each peer waits on as an alternate
+	alternatesOf             map[fetchPeer]int       // hashes each peer waits on as an alternate
+	disconnected             map[fetchPeer]time.Time // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
 	now                      func() time.Time
 	logger                   log.Logger
 }
@@ -153,6 +157,7 @@ func NewFetch(
 		requested:            requested,
 		retryBudgets:         map[fetchPeer]*retryBudget{},
 		alternatesOf:         map[fetchPeer]int{},
+		disconnected:         map[fetchPeer]time.Time{},
 		now:                  time.Now,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
@@ -396,7 +401,7 @@ func (f *Fetch) addAlternate(r *fetchRequest, peer fetchPeer) {
 }
 
 func (f *Fetch) appendAlternate(r *fetchRequest, peer fetchPeer) {
-	if slices.Contains(r.alternates, peer) || f.alternatesOf[peer] >= maxAlternatesPerPeer {
+	if _, gone := f.disconnected[peer]; gone || slices.Contains(r.alternates, peer) || f.alternatesOf[peer] >= maxAlternatesPerPeer {
 		return
 	}
 	r.alternates = append(r.alternates, peer)
@@ -1059,6 +1064,9 @@ func (f *Fetch) handleNewPeer(sentryClient sentryproto.SentryClient, req *sentry
 	switch req.EventId {
 	case sentryproto.PeerEvent_Connect:
 		f.pool.AddNewGoodPeer(req.PeerId)
+		f.requestedLock.Lock()
+		delete(f.disconnected, fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)})
+		f.requestedLock.Unlock()
 	case sentryproto.PeerEvent_Disconnect:
 		f.dropAlternate(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)})
 	}
@@ -1070,6 +1078,13 @@ func (f *Fetch) handleNewPeer(sentryClient sentryproto.SentryClient, req *sentry
 func (f *Fetch) dropAlternate(peer fetchPeer) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
+	now := f.now()
+	for p, at := range f.disconnected {
+		if now.Sub(at) >= disconnectedPeerMemory {
+			delete(f.disconnected, p)
+		}
+	}
+	f.disconnected[peer] = now
 	for _, p := range f.pending {
 		if f.alternatesOf[peer] == 0 {
 			return
