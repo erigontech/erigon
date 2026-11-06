@@ -1267,6 +1267,25 @@ func TestGrpcServer_CloseStopsOwnedServer(t *testing.T) {
 		"GrpcServer.Close (owned server) must close the listener")
 }
 
+func TestGrpcServer_PenalizePeerConcurrentWithStatusUpdate(t *testing.T) {
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	ss.peers.Store(NewPeerStore())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			ss.statusDataLock.Lock()
+			ss.statusData = &sentryproto.StatusData{NetworkId: 1}
+			ss.statusDataLock.Unlock()
+		}
+	}()
+	for range 100 {
+		_, err := ss.PenalizePeer(context.Background(), &sentryproto.PenalizePeerRequest{PeerId: gointerfaces.ConvertHashToH512([64]byte{1})})
+		require.NoError(t, err)
+	}
+	<-done
+}
+
 // TestGrpcServer_AwaitStatus_ReturnsExistingImmediately covers the fast path
 // where a *usable* statusData (statusUsable: NetworkId != 0 && ForkData != nil)
 // has already been populated by SetStatus.
