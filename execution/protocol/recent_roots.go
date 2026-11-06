@@ -56,7 +56,7 @@ func (r RecentRootReference) ValidAt(slot uint64) bool {
 // FrameTransactionRecentRoots uses the validation prefix, so approval frames
 // targeting the verifier address do not become recent-root dependencies.
 func FrameTransactionRecentRoots(tx *types.FrameTransaction) ([]RecentRootReference, error) {
-	prefix, err := frameValidationPrefix(tx)
+	prefix, err := parseFrameValidationPrefix(tx)
 	if err != nil {
 		return nil, err
 	}

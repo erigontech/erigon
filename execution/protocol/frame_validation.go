@@ -93,14 +93,14 @@ var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657
 // without verifying signatures or accessing state. Root hashes are derived
 // separately to keep repeated prechecks cheap.
 func ValidateFrameTransactionPrefix(tx *types.FrameTransaction) error {
-	_, err := frameValidationPrefix(tx)
+	_, err := parseFrameValidationPrefix(tx)
 	return err
 }
 
 // ValidateFrameTransaction applies public-mempool policy to the validation prefix,
 // stopping after payment approval and reverting all simulated state changes.
 func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameValidation, error) {
-	prefix, err := frameValidationPrefix(tx)
+	prefix, err := parseFrameValidationPrefix(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -154,10 +154,11 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 	return &validation.FrameValidation, nil
 }
 
-// frameValidationPrefix recognizes optional expiry, recent-root and deployment frames followed by
-// sender approval and, if separate, payer approval. Restricting this prefix
-// bounds unpaid validation work; execution frames after it are not simulated.
-func frameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error) {
+// parseFrameValidationPrefix recognizes optional expiry, recent-root and deployment
+// frames followed by sender approval and, if separate, payer approval.
+// Restricting this prefix bounds unpaid validation work; later execution frames
+// are not simulated.
+func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error) {
 	invalid := errors.New("unrecognized frame validation prefix")
 	if len(tx.Frames) == 0 {
 		return framePrefix{}, invalid

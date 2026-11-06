@@ -137,7 +137,7 @@ func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 							payer := common.Address{9}
 							tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer})
 						}
-						prefix, err := frameValidationPrefix(tx)
+						prefix, err := parseFrameValidationPrefix(tx)
 						require.NoError(t, err)
 						require.Equal(t, rootIndex, prefix.recentRootFrame)
 						require.Equal(t, deployIndex, prefix.deploymentFrame)
