@@ -1,0 +1,142 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package state
+
+import (
+	"fmt"
+	"path/filepath"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+)
+
+const COMMITMENT_STOP_FILE = "commitment-stop.json"
+
+func commitmentStopFilePath(dirs datadir.Dirs) string {
+	return filepath.Join(dirs.Snap, COMMITMENT_STOP_FILE)
+}
+
+func readCommitmentStopFile(dirs datadir.Dirs) (map[string]bool, error) {
+	path := commitmentStopFilePath(dirs)
+	var domains map[string]bool
+	if _, err := readPBTMarker(path, &domains); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return domains, nil
+}
+
+func writeCommitmentStopFile(dirs datadir.Dirs, domains map[string]bool) error {
+	path := commitmentStopFilePath(dirs)
+	if len(domains) == 0 {
+		return removePBTMarker(path)
+	}
+	return writePBTMarker(path, domains)
+}
+
+func (a *Aggregator) WriteCommitmentStopFile(domain kv.Domain) error {
+	a.commitmentStopFileMu.Lock()
+	defer a.commitmentStopFileMu.Unlock()
+	if a.commitmentStopFileWritten[domain] {
+		return nil
+	}
+	domains, err := readCommitmentStopFile(a.dirs)
+	if err != nil {
+		return err
+	}
+	if domains == nil {
+		domains = make(map[string]bool, 1)
+	}
+	if domains[domain.String()] {
+		a.commitmentStopFileWritten[domain] = true
+		return nil
+	}
+	domains[domain.String()] = true
+	if err := writeCommitmentStopFile(a.dirs, domains); err != nil {
+		return err
+	}
+	a.commitmentStopFileWritten[domain] = true
+	return nil
+}
+
+func (a *Aggregator) readCommitmentStopKeys(db kv.RoDB) (stopped [kv.DomainLen]bool, err error) {
+	if a.trieVariant != TrieVariantHexBin || db == nil {
+		return stopped, nil
+	}
+	err = db.View(a.ctx, func(tx kv.Tx) error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			if stopped[domain], err = rawdb.ReadCommitmentDomainStopped(tx, domain); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return stopped, err
+}
+
+func (a *Aggregator) readCommitmentStopPoints(db kv.RoDB) (map[string]bool, error) {
+	if a.trieVariant != TrieVariantHexBin || db == nil {
+		return nil, nil
+	}
+	return readCommitmentStopFile(a.dirs)
+}
+
+func (a *Aggregator) restoreCommitmentStopFile(points map[string]bool, stoppedInDB [kv.DomainLen]bool) error {
+	if len(points) == 0 {
+		return nil
+	}
+	var applied bool
+	var dropped []kv.Domain
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if !points[domain.String()] || a.CommitmentDomainStopped(domain) {
+			continue
+		}
+		other := kv.CommitmentDomain
+		if domain == kv.CommitmentDomain {
+			other = kv.CommitmentBinDomain
+		}
+		if a.d[domain] == nil || a.d[other] == nil || a.d[other].dirtyFiles.EndTxNumMax() <= a.d[domain].dirtyFiles.EndTxNumMax() {
+			if stoppedInDB[domain] {
+				continue
+			}
+			dropped = append(dropped, domain)
+			continue
+		}
+		a.StopCommitmentDomain(domain)
+		if a.CanonicalCommitmentDomain() == domain {
+			a.SetCanonicalCommitmentDomain(other)
+		}
+		applied = true
+	}
+	if applied {
+		a.recalcVisibleFiles(nil)
+	}
+	if len(dropped) == 0 || !a.ownCommitmentStopFile {
+		return nil
+	}
+	a.commitmentStopFileMu.Lock()
+	defer a.commitmentStopFileMu.Unlock()
+	current, err := readCommitmentStopFile(a.dirs)
+	if err != nil {
+		return err
+	}
+	for _, domain := range dropped {
+		delete(current, domain.String())
+		a.commitmentStopFileWritten[domain] = false
+	}
+	return writeCommitmentStopFile(a.dirs, current)
+}

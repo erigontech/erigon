@@ -83,6 +83,9 @@ type Aggregator struct {
 	commitmentRefsMu            sync.RWMutex
 	canonicalCommitment         atomic.Uint32
 	stoppedCommitment           [kv.DomainLen]atomic.Bool
+	commitmentStopFileMu        sync.Mutex
+	commitmentStopFileWritten   [kv.DomainLen]bool
+	ownCommitmentStopFile       bool
 	commitmentLifecycleRestored atomic.Bool
 	trieVariant                 string
 	frozenMu                    sync.RWMutex
@@ -703,7 +706,15 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 }
 
 func (a *Aggregator) OpenFolder(db kv.RoDB) error {
-	if err := a.restoreCommitmentLifecycle(db); err != nil {
+	stopPoints, err := a.readCommitmentStopPoints(db)
+	if err != nil {
+		return err
+	}
+	stoppedInDB, err := a.readCommitmentStopKeys(db)
+	if err != nil {
+		return err
+	}
+	if err := a.restoreCommitmentLifecycle(db, stoppedInDB); err != nil {
 		return err
 	}
 	if err := func() error {
@@ -715,7 +726,10 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 		if err := a.openFolder(); err != nil {
 			return fmt.Errorf("OpenFolder: %w", err)
 		}
-		return nil
+		if db == nil {
+			return nil
+		}
+		return a.restoreCommitmentStopFile(stopPoints, stoppedInDB)
 	}(); err != nil {
 		return err
 	}
@@ -788,20 +802,16 @@ func validatePBinOpenState(value []byte) error {
 	return nil
 }
 
-func (a *Aggregator) restoreCommitmentLifecycle(db kv.RoDB) error {
+func (a *Aggregator) restoreCommitmentLifecycle(db kv.RoDB, stoppedInDB [kv.DomainLen]bool) error {
 	if a.trieVariant != TrieVariantHexBin || db == nil || a.commitmentLifecycleRestored.Load() {
 		return nil
 	}
-	if err := db.View(a.ctx, func(tx kv.Tx) error {
-		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-			stopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
-			if err != nil {
-				return err
-			}
-			if stopped {
-				a.StopCommitmentDomain(domain)
-			}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if stoppedInDB[domain] {
+			a.StopCommitmentDomain(domain)
 		}
+	}
+	if err := db.View(a.ctx, func(tx kv.Tx) error {
 		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			return err
@@ -2083,6 +2093,9 @@ func (at *AggregatorRoTx) CommitmentStopper() func(kv.Domain) {
 	a := at.a
 	return func(domain kv.Domain) {
 		a.StopCommitmentDomain(domain)
+		if err := a.WriteCommitmentStopFile(domain); err != nil {
+			a.logger.Error("failed to write commitment stop marker", "domain", domain, "err", err)
+		}
 	}
 }
 

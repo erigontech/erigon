@@ -47,6 +47,7 @@ var (
 	domain                       string
 	reset, squeeze, yes          bool
 	skipFilesDBGapCheck          bool
+	ownCommitmentStopFile        bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string
