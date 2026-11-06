@@ -59,7 +59,8 @@ const maxFetchRequests = 64 * 1024
 // disconnectedPeerMemory is longer than an announcement of a peer waits in the inbound queue.
 const disconnectedPeerMemory = time.Minute
 
-// maxRetryRequestsPerPeer keeps one sweep well under sentry's 32-message outbound queue, which drops the oldest when full.
+// maxRetryRequestsPerPeer keeps a peer's retries per retryBudgetWindow well under sentry's 32-message outbound queue,
+// which drops the oldest when full.
 const maxRetryRequestsPerPeer = 8
 
 // retryBudgetWindow spans p2p's frameWriteTimeout: a stalled peer is dropped before a third window's retries reach its queue.
@@ -74,7 +75,8 @@ type fetchRequest struct {
 	at         time.Time
 	peer       fetchPeer
 	alternates []fetchPeer
-	unsent     bool // reserved for peer, but its request is not sent yet, so it cannot time out
+	unsent     bool      // reserved for peer, but its request is not sent yet, so it cannot time out
+	retryAt    time.Time // while waiting: when the first alternate's retry budget window ends
 }
 
 // retryBudget counts a peer's retry requests in the current retryBudgetWindow.
@@ -118,6 +120,8 @@ type Fetch struct {
 	requestedLock            sync.Mutex
 	requested                *maphash.LRU[*fetchRequest]
 	pending                  []pendingFetch // in request order, so the oldest expires first
+	waiting                  []pendingFetch // timed-out requests whose alternates' retry budgets are spent
+	waitingUntil             time.Time      // no waiting request can be retried before then
 	retryBudgets             map[fetchPeer]*retryBudget
 	alternatesOf             map[fetchPeer]int       // hashes each peer waits on as an alternate
 	disconnected             map[fetchPeer]time.Time // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
@@ -214,11 +218,15 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		// An announcement flood: forget the oldest requests before the insert, so a full LRU evicts no other
 		// pending request, and a forgotten hash is asked again on its next announcement. A restamped retry
 		// leaves a stale entry that frees no slot, so trim until the queue is below the cache size.
-		for len(f.pending) >= maxFetchRequests {
-			if old, found := f.requested.Get(f.pending[0].hash[:]); found && old.at.Equal(f.pending[0].at) {
-				f.forget(f.pending[0].hash[:], old)
+		for len(f.pending)+len(f.waiting) >= maxFetchRequests {
+			oldest := &f.pending
+			if len(f.waiting) > 0 {
+				oldest = &f.waiting
 			}
-			f.pending = f.pending[1:]
+			if old, found := f.requested.Get((*oldest)[0].hash[:]); found && old.at.Equal((*oldest)[0].at) {
+				f.forget((*oldest)[0].hash[:], old)
+			}
+			*oldest = (*oldest)[1:]
 			if ok {
 				r, ok = f.requested.Get(h)
 			}
@@ -232,6 +240,20 @@ func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.Se
 		toRequest = append(toRequest, h...)
 	}
 	return toRequest, now
+}
+
+// retryLoop runs the one timeout sweep shared by all sentry streams.
+func (f *Fetch) retryLoop() {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-f.ctx.Done():
+			return
+		case <-ticker.C:
+			f.retryTimedOutRequests(f.ctx)
+		}
+	}
 }
 
 func (f *Fetch) retryTimedOutRequests(ctx context.Context) {
@@ -253,7 +275,7 @@ type retryPlan struct {
 	limit int // requests the peer's budget still allows
 }
 
-// add reports false when the hash needs a request beyond maxRetryRequestsPerPeer.
+// add reports false when the hash needs a request beyond the peer's remaining budget (limit).
 func (p *retryPlan) add(hash []byte, size int) bool {
 	if n := len(p.reqs); n == 0 || len(p.reqs[n-1]) == 256*32 || p.size >= p2pTxPacketLimit {
 		if n == p.limit {
@@ -285,7 +307,15 @@ func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
 func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	f.requestedLock.Lock()
 	now := f.now()
+	scanWaiting := !now.Before(f.waitingUntil)
 	var expired Hashes
+	if scanWaiting {
+		for _, p := range f.waiting {
+			if r, ok := f.requested.Get(p.hash[:]); ok && r.at.Equal(p.at) && !now.Before(r.retryAt) {
+				expired = append(expired, p.hash[:]...)
+			}
+		}
+	}
 	for _, p := range f.pending {
 		if now.Sub(p.at) < txFetchTimeout {
 			break
@@ -312,15 +342,38 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	sent := f.now() // the lookup may have been slow; retries time out from when they are sent
 	plans := map[fetchPeer]*retryPlan{}
 	var deferred []pendingFetch
-	for len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
-		p := f.pending[0]
-		f.pending = f.pending[1:]
+	waiting, waitingUntil := f.waiting, f.waitingUntil
+	if scanWaiting {
+		waiting, waitingUntil = nil, time.Time{}
+	}
+	wait := func(p pendingFetch, until time.Time) {
+		waiting = append(waiting, p)
+		if waitingUntil.IsZero() || until.Before(waitingUntil) {
+			waitingUntil = until
+		}
+	}
+	timedOut := f.waiting[:len(f.waiting):len(f.waiting)]
+	if !scanWaiting {
+		timedOut = nil
+	}
+	for len(timedOut) > 0 || len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
+		var p pendingFetch
+		fromWaiting := len(timedOut) > 0
+		if fromWaiting {
+			p, timedOut = timedOut[0], timedOut[1:]
+		} else {
+			p, f.pending = f.pending[0], f.pending[1:]
+		}
 		r, ok := f.requested.Get(p.hash[:])
 		if !ok || !r.at.Equal(p.at) {
 			continue
 		}
 		if r.unsent { // it times out from its send; until then it keeps its entry for cleanup and admission
 			deferred = append(deferred, p)
+			continue
+		}
+		if fromWaiting && now.Before(r.retryAt) {
+			wait(p, r.retryAt)
 			continue
 		}
 		if isHeld, found := state[p.hash]; found {
@@ -347,10 +400,16 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 				plan = &retryPlan{limit: maxRetryRequestsPerPeer - b.used}
 				plans[alt] = plan
 			}
-			return plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
+			return plan.limit > 0 && plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
 		})
-		if picked < 0 {
-			deferred = append(deferred, p) // every alternate's budget is spent: keep them for the next sweep
+		if picked < 0 { // every alternate's budget is spent: wait until the first window ends
+			r.retryAt = time.Time{}
+			for _, alt := range r.alternates {
+				if end := f.retryBudgets[alt].since.Add(retryBudgetWindow); r.retryAt.IsZero() || end.Before(r.retryAt) {
+					r.retryAt = end
+				}
+			}
+			wait(p, r.retryAt)
 			continue
 		}
 		r.at, r.peer, r.unsent = sent, f.removeAlternate(r, picked), true
@@ -359,6 +418,7 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	if len(deferred) > 0 {
 		f.pending = append(deferred, f.pending...)
 	}
+	f.waiting, f.waitingUntil = waiting, waitingUntil
 	for peer, plan := range plans {
 		f.retryBudgets[peer].used += len(plan.reqs)
 	}
@@ -636,6 +696,7 @@ func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) e
 
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
+	f.connectWg.Go(f.retryLoop)
 	for i := range f.sentryClients {
 		client := f.sentryClients[i]
 		f.connectWg.Go(func() {
@@ -803,7 +864,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 				return
 			case <-ticker.C:
 				flushBatch()
-				f.retryTimedOutRequests(streamCtx)
 			}
 		}
 	}()
@@ -918,8 +978,8 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
-		// Record only for hashes a reply can still come back for: unknown ones and tracked ones whose body
-		// is still queued for validation.
+		// Record only for hashes a reply can still come back for: unknown ones and tracked ones (a tracked one
+		// the pool already holds stays until the next sweep forgets it).
 		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId))
 		unknownHashes, reservedAt := f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 
@@ -1162,13 +1222,15 @@ func (f *Fetch) dropAlternate(peer fetchPeer) {
 		}
 	}
 	f.disconnected[peer] = now
-	for _, p := range f.pending {
-		if f.alternatesOf[peer] == 0 {
-			return
-		}
-		if r, ok := f.requested.Get(p.hash[:]); ok && r.at.Equal(p.at) {
-			if i := slices.Index(r.alternates, peer); i >= 0 {
-				f.removeAlternate(r, i)
+	for _, queue := range [][]pendingFetch{f.pending, f.waiting} {
+		for _, p := range queue {
+			if f.alternatesOf[peer] == 0 {
+				return
+			}
+			if r, ok := f.requested.Get(p.hash[:]); ok && r.at.Equal(p.at) {
+				if i := slices.Index(r.alternates, peer); i >= 0 {
+					f.removeAlternate(r, i)
+				}
 			}
 		}
 	}

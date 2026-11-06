@@ -917,6 +917,7 @@ type announceFetchTest struct {
 	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
 	onSend        func()
+	lookedUp      int // hashes passed to HeldOrQueuedIdHashes
 	sendErr       error
 	failSendAt    int               // when > 0, only that send (1-based) fails with sendErr
 	gone          map[[64]byte]bool // peers sentry no longer knows: a send reaches no one
@@ -949,6 +950,7 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 			if a.onFilter != nil {
 				a.onFilter()
 			}
+			a.lookedUp += len(hashes) / 32
 			var held, queued Hashes
 			for i := 0; i < len(hashes); i += 32 {
 				switch h := [32]byte(hashes[i : i+32]); {
@@ -1399,6 +1401,30 @@ func TestQueuedBodyKeepsAlternatesUntilValidated(t *testing.T) {
 	delete(a.queued, hash) // the body failed validation
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "the alternate is still there")
+}
+
+func TestBudgetDeferredHashesWaitForTheWindow(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, (maxRetryRequestsPerPeer+2)*256)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	for c := range slices.Chunk(hashes, 1000) {
+		a.announce(t, peerA, c...)
+		a.announce(t, peerB, c...)
+	}
+	a.timeoutSweep()
+	looked := a.lookedUp
+	for range 3 {
+		*a.now = a.now.Add(time.Second)
+		a.fetch.requestFromAlternates(a.ctx, nil)
+	}
+	require.Equal(t, looked, a.lookedUp, "a hash waiting for B's budget is not looked up again before B's window ends")
+	*a.now = a.now.Add(retryBudgetWindow)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Greater(t, a.lookedUp, looked)
 }
 
 func TestRetryBudgetHoldsAcrossSweeps(t *testing.T) {
