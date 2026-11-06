@@ -192,11 +192,14 @@ func TestGetReceiptReplayMatchesWithoutNoMaterialize(t *testing.T) {
 // replay folding every key the block has changed so far.
 func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	defer func(prev bool) { dbg.CallNoMaterialize = prev }(dbg.CallNoMaterialize)
-	for _, noMaterialize := range []bool{true, false} {
-		t.Run(fmt.Sprintf("noMaterialize=%t", noMaterialize), func(t *testing.T) {
-			dbg.CallNoMaterialize = noMaterialize
-			testPreByzantiumPostStateFromCommitmentHistory(t)
-		})
+	for _, v3 := range []bool{false, true} {
+		for _, noMaterialize := range []bool{true, false} {
+			t.Run(fmt.Sprintf("v3=%t/noMaterialize=%t", v3, noMaterialize), func(t *testing.T) {
+				t.Cleanup(statecfg.SetCommitmentV3(v3))
+				dbg.CallNoMaterialize = noMaterialize
+				testPreByzantiumPostStateFromCommitmentHistory(t)
+			})
+		}
 	}
 }
 
