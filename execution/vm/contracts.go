@@ -589,10 +589,11 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modLen > 32 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
-		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
+	case modLen > 96 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
+		// For small exponents (≤255) with moduli above 768 bits, use Go's math/big
 		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
-		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings.
+		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings;
+		// up to 96 bytes evmone is still faster.
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
