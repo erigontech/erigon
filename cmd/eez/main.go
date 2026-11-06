@@ -191,7 +191,7 @@ func mirror(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	defer reader.Close()
-	to, err := tools.MirrorTarget(ctx, reader, cmd.Uint64("to"), cmd.IsSet("to"))
+	to, err := tools.MirrorTarget(ctx, reader, l2.L1ChainID, cmd.Uint64("to"), cmd.IsSet("to"))
 	if err != nil {
 		return err
 	}

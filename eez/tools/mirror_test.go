@@ -119,28 +119,35 @@ func TestMirror(t *testing.T) {
 
 // TestMirrorTarget indexes through the finalized block by default and
 // refuses an explicit target past it: Mirror resumes after the last indexed
-// block, so it would never rescan one a reorg replaced.
+// block, so it would never rescan one a reorg replaced. It refuses an
+// endpoint of another L1 too.
 func TestMirrorTarget(t *testing.T) {
-	c, err := recording.NewMemoryChain(1, &recording.Block{Header: l1.Header{Hash: common.Hash{0, 1}}})
+	c, err := recording.NewMemoryChain(10200, &recording.Block{Header: l1.Header{Hash: common.Hash{0, 1}}})
 	require.NoError(t, err)
 	for n := byte(1); n <= 9; n++ {
 		require.NoError(t, c.Append(&recording.Block{Header: l1.Header{Number: uint64(n), Hash: common.Hash{n, 1}, ParentHash: common.Hash{n - 1, 1}}}))
 	}
 	ctx := t.Context()
-	_, err = tools.MirrorTarget(ctx, c, 0, false)
+	_, err = tools.MirrorTarget(ctx, c, 10200, 0, false)
 	require.ErrorIs(t, err, l1.ErrNotFound)
-	_, err = tools.MirrorTarget(ctx, c, 3, true)
+	_, err = tools.MirrorTarget(ctx, c, 10200, 3, true)
 	require.ErrorIs(t, err, l1.ErrNotFound, "nothing finalized yet")
 
 	require.NoError(t, c.Finalize(6))
-	to, err := tools.MirrorTarget(ctx, c, 0, false)
+	to, err := tools.MirrorTarget(ctx, c, 10200, 0, false)
 	require.NoError(t, err)
 	require.Equal(t, uint64(6), to)
 	for _, explicit := range []uint64{4, 6} {
-		to, err = tools.MirrorTarget(ctx, c, explicit, true)
+		to, err = tools.MirrorTarget(ctx, c, 10200, explicit, true)
 		require.NoError(t, err)
 		require.Equal(t, explicit, to)
 	}
-	_, err = tools.MirrorTarget(ctx, c, 7, true)
+	_, err = tools.MirrorTarget(ctx, c, 10200, 7, true)
 	require.ErrorContains(t, err, "L1 block 7 is past the finalized block 6")
+
+	// An endpoint of another L1 would index none of the network's batches.
+	for _, explicit := range []bool{false, true} {
+		_, err = tools.MirrorTarget(ctx, c, 1, 6, explicit)
+		require.ErrorContains(t, err, "L1 chain 10200, want 1")
+	}
 }

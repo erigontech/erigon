@@ -92,10 +92,18 @@ type MirrorStats struct {
 const mirrorAttempts = 6
 
 // MirrorTarget returns the last L1 block a Mirror run indexes: to when
-// explicit, the finalized block reader serves otherwise. An explicit to past
-// the finalized block is refused: Mirror resumes after the last indexed
-// block, so it never rescans one a reorg replaced.
-func MirrorTarget(ctx context.Context, reader l1.ChainReader, to uint64, explicit bool) (uint64, error) {
+// explicit, the finalized block reader serves otherwise. A reader of another
+// chain than l1ChainID is refused, and so is an explicit to past the
+// finalized block: Mirror resumes after the last indexed block, so it never
+// rescans one a reorg replaced.
+func MirrorTarget(ctx context.Context, reader l1.ChainReader, l1ChainID, to uint64, explicit bool) (uint64, error) {
+	id, err := reader.ChainID(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("L1 chain id: %w", err)
+	}
+	if id != l1ChainID {
+		return 0, fmt.Errorf("L1 chain %d, want %d", id, l1ChainID)
+	}
 	f, err := reader.Finalized(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("L1 finalized block: %w", err)
