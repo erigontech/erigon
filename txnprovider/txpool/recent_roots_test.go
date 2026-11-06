@@ -274,3 +274,50 @@ func TestFramePoolRecentRootReplacement(t *testing.T) {
 		}
 	}
 }
+
+func TestFramePoolRecentRootIncompleteNotifications(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		height     uint64
+		incomplete bool
+	}{
+		{"complete empty block", 1_012, false},
+		{"deep reorg without root rewrite", 11, true},
+		{"head-only catch-up", 1_200, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.dependencies = []*typesproto.H160{gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier)}
+			initial := newBlockChangeForAccounts(common.Hash{1}, 0)
+			initial.ChangeBatch[0].BlockHeight = 1_011
+			initial.ChangeBatch[0].SlotNumber = common.NewUint64(1_011)
+			require.NoError(t, pool.OnNewBlock(ctx, initial, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			slot := recentRootPoolSlot(t, sender, 10, 1)
+			var txns TxnSlots
+			txns.Append(slot, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			backend.valid, backend.calls = false, nil
+			backend.onValidate = func() {
+				require.Zero(t, pool.byHash[string(slot.IDHash[:])].currentSubPool, "park before simulation")
+			}
+			change := newBlockChangeForAccounts(common.Hash{2}, 0)
+			change.StateChangesIncomplete = tc.incomplete
+			change.ChangeBatch[0].BlockHeight = tc.height
+			change.ChangeBatch[0].SlotNumber = common.NewUint64(tc.height)
+			require.True(t, slot.frameValidation.RecentRoots[0].ValidAt(tc.height+1), "age checks alone cannot detect the missing root")
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			if tc.incomplete {
+				require.Equal(t, []common.Hash{slot.IDHash}, backend.calls)
+				require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
+				require.Empty(t, pool.frameReservations)
+			} else {
+				require.Empty(t, backend.calls)
+				require.Contains(t, pool.byHash, string(slot.IDHash[:]))
+			}
+		})
+	}
+}

@@ -27,11 +27,12 @@ import (
 // Accumulator collects state changes per block in native Go types.
 // Protobuf conversion happens only at the gRPC boundary via ToProto methods.
 type Accumulator struct {
-	plainStateID       uint64
-	changes            []StateChange
-	latestChange       *StateChange
-	accountChangeIndex map[common.Address]int // For the latest change, allows finding account change by address
-	storageChangeIndex map[common.Address]map[common.Hash]int
+	plainStateID           uint64
+	changes                []StateChange
+	stateChangesIncomplete bool
+	latestChange           *StateChange
+	accountChangeIndex     map[common.Address]int // For the latest change, allows finding account change by address
+	storageChangeIndex     map[common.Address]map[common.Hash]int
 }
 
 func NewAccumulator() *Accumulator {
@@ -44,6 +45,7 @@ func (a *Accumulator) Changes() []StateChange {
 
 func (a *Accumulator) Reset(plainStateID uint64) {
 	a.changes = nil
+	a.stateChangesIncomplete = false
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
@@ -57,12 +59,13 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 		return
 	}
 	batch := &BlockBatchNotification{
-		StateVersionID:      a.plainStateID,
-		Changes:             a.changes,
-		PendingBlockBaseFee: pendingBaseFee,
-		PendingBlobFee:      pendingBlobFee,
-		BlockGasLimit:       blockGasLimit,
-		FinalizedBlock:      finalizedBlock,
+		StateVersionID:         a.plainStateID,
+		Changes:                a.changes,
+		StateChangesIncomplete: a.stateChangesIncomplete,
+		PendingBlockBaseFee:    pendingBaseFee,
+		PendingBlobFee:         pendingBlobFee,
+		BlockGasLimit:          blockGasLimit,
+		FinalizedBlock:         finalizedBlock,
 	}
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
@@ -72,6 +75,12 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 
 func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
+}
+
+// MarkIncomplete records omitted state changes for the whole batch. Later
+// complete blocks cannot restore completeness; only a reset starts a new batch.
+func (a *Accumulator) MarkIncomplete() {
+	a.stateChangesIncomplete = true
 }
 
 // StartChange begins accumulation of changes for a new block.
@@ -196,6 +205,8 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 func (a *Accumulator) CopyAndReset(target *Accumulator) {
 	target.changes = a.changes
 	a.changes = nil
+	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
+	a.stateChangesIncomplete = false
 	target.latestChange = a.latestChange
 	a.latestChange = nil
 	target.accountChangeIndex = a.accountChangeIndex

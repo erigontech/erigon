@@ -75,12 +75,13 @@ type StorageChange struct {
 // BlockBatchNotification carries state changes for a batch of blocks.
 // This is the primary notification type for local (in-process) consumers.
 type BlockBatchNotification struct {
-	StateVersionID      uint64
-	Changes             []StateChange
-	PendingBlockBaseFee uint64
-	PendingBlobFee      uint64
-	BlockGasLimit       uint64
-	FinalizedBlock      uint64
+	StateVersionID         uint64
+	Changes                []StateChange
+	StateChangesIncomplete bool
+	PendingBlockBaseFee    uint64
+	PendingBlobFee         uint64
+	BlockGasLimit          uint64
+	FinalizedBlock         uint64
 }
 
 // LogNotification carries a log event in native types.
@@ -168,11 +169,12 @@ func (sc *StorageChange) ToProto() *remoteproto.StorageChange {
 // ToProtoBatch converts a BlockBatchNotification to a protobuf StateChangeBatch.
 func (b *BlockBatchNotification) ToProtoBatch() *remoteproto.StateChangeBatch {
 	batch := &remoteproto.StateChangeBatch{
-		StateVersionId:       b.StateVersionID,
-		PendingBlockBaseFee:  b.PendingBlockBaseFee,
-		PendingBlobFeePerGas: b.PendingBlobFee,
-		BlockGasLimit:        b.BlockGasLimit,
-		FinalizedBlock:       b.FinalizedBlock,
+		StateVersionId:         b.StateVersionID,
+		StateChangesIncomplete: b.StateChangesIncomplete,
+		PendingBlockBaseFee:    b.PendingBlockBaseFee,
+		PendingBlobFeePerGas:   b.PendingBlobFee,
+		BlockGasLimit:          b.BlockGasLimit,
+		FinalizedBlock:         b.FinalizedBlock,
 	}
 	for i := range b.Changes {
 		batch.ChangeBatch = append(batch.ChangeBatch, b.Changes[i].ToProto())
