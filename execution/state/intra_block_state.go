@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -2826,6 +2827,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
 		}
+		if _, sd := realSelfDestruct[addr]; sd && x5SkipRealSD {
+			continue
+		}
 		view := NewVersionedAccountView(addr, ibs.txIndex, ibs.versionMap, ibs.stateReader)
 		if err := view.Err(); err != nil {
 			// A failed base read zeroes the composed fields, which would read as
@@ -3840,3 +3844,6 @@ func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 	}
 	return nil
 }
+
+// x5SkipRealSD is a probe bound: X5_SKIP_REALSD=1 skips the removal encoding of accounts with a real SELFDESTRUCT.
+var x5SkipRealSD = os.Getenv("X5_SKIP_REALSD") == "1"
