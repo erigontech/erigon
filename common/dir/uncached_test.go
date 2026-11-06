@@ -47,9 +47,13 @@ func TestUncachedWriterWritesEveryByteInOrder(t *testing.T) {
 		rest = rest[n:]
 	}
 	require.NoError(t, bw.Flush())
+	_, err = f.WriteString("tail")
+	require.NoError(t, err)
 	require.NoError(t, f.Sync())
 
+	want := append(append([]byte("head"), data...), "tail"...)
 	got, err := os.ReadFile(f.Name())
 	require.NoError(t, err)
-	require.True(t, bytes.Equal(append([]byte("head"), data...), got))
+	require.Equal(t, len(want), len(got))
+	require.True(t, bytes.Equal(want, got))
 }

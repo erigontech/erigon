@@ -30,7 +30,6 @@ var dontCacheWrites = dbg.EnvBool("FILE_BUILD_DONTCACHE", true)
 
 type uncachedWriter struct {
 	f           *os.File
-	off         int64
 	unsupported bool
 }
 
@@ -38,17 +37,13 @@ func UncachedWriter(f *os.File) io.Writer {
 	if !dontCacheWrites {
 		return f
 	}
-	off, err := f.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return f
-	}
-	return &uncachedWriter{f: f, off: off}
+	return &uncachedWriter{f: f}
 }
 
 func (w *uncachedWriter) Write(p []byte) (int, error) {
 	written := 0
 	for written < len(p) && !w.unsupported {
-		n, err := unix.Pwritev2(int(w.f.Fd()), [][]byte{p[written:]}, w.off, unix.RWF_DONTCACHE)
+		n, err := unix.Pwritev2(int(w.f.Fd()), [][]byte{p[written:]}, -1, unix.RWF_DONTCACHE)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
@@ -60,12 +55,10 @@ func (w *uncachedWriter) Write(p []byte) (int, error) {
 			return written, io.ErrShortWrite
 		}
 		written += n
-		w.off += int64(n)
 	}
 	if written == len(p) {
 		return written, nil
 	}
-	n, err := w.f.WriteAt(p[written:], w.off)
-	w.off += int64(n)
+	n, err := w.f.Write(p[written:])
 	return written + n, err
 }
