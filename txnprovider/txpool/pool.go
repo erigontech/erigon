@@ -649,7 +649,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
 		// Retryable failures may clear before the discarded pool row is removed.
 		switch reason {
-		case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
+		case txpoolcfg.NonceTooDistant, txpoolcfg.BlobNonceGap, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
 			return false, nil
 		default:
 			return true, nil
@@ -1941,8 +1941,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				// This pool rule is stricter than execution. Its rejection depends only on
 				// the transaction, so cache it to avoid repeating authorization recovery.
-				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.NonceTooLow)
-				return txpoolcfg.NonceTooLow
+				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.InvalidAuthorizationNonce)
+				return txpoolcfg.InvalidAuthorizationNonce
 			}
 			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
 				p.logger.Debug("setCodeTxn ", "duplicateAuthority", a.authority, "nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
@@ -2351,7 +2351,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
-		discardReason := txpoolcfg.NonceTooLow
+		discardReason := txpoolcfg.NotSet
 		switch {
 		case !nonceChainBlocked && senderHasCode && senderTxnKept:
 			deleteAndContinueReasonLog = "delegated sender transaction limit"
@@ -2360,6 +2360,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			// Keyed frames share the delegated sender limit, but not the account nonce checks.
 		case senderNonce > mt.TxnSlot.Nonce:
 			deleteAndContinueReasonLog = "low nonce"
+			discardReason = txpoolcfg.NonceTooLow
 		case !nonceChainBlocked && senderHasCode && mt.TxnSlot.Nonce != senderNonce:
 			deleteAndContinueReasonLog = "delegated sender nonce gap"
 			discardReason = txpoolcfg.DelegatedNonceGap
@@ -2368,6 +2369,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			discardReason = txpoolcfg.NonceTooDistant
 		case !nonceChainBlocked && mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.HasBlobs(): // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
+			discardReason = txpoolcfg.BlobNonceGap
 		}
 		if deleteAndContinueReasonLog != "" {
 			if mt.TxnSlot.Traced {

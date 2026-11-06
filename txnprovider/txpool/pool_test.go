@@ -1064,7 +1064,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			authNonce:      1,
 			feecap:         100_000,
 			tipcap:         100_000,
-			expectedReason: txpoolcfg.NonceTooLow,
+			expectedReason: txpoolcfg.InvalidAuthorizationNonce,
 		},
 		{
 			title:          "own authorization with correct sender nonce, and one higher authority nonce",
@@ -3402,7 +3402,7 @@ func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
 	txns.Append(replacement, sender[:], true)
 	reasons, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidAuthorizationNonce}, reasons)
 
 	require.Contains(t, pool.byHash, string(original.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))

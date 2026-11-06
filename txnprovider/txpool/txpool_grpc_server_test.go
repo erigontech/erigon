@@ -172,6 +172,95 @@ func TestGrpcServerAddNonceTooLow(t *testing.T) {
 	}, reply)
 }
 
+func TestGrpcServerAddBlobNonceGap(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	blob := types.MakeV1WrappedBlobTxn(&pool.chainID)
+	blob.Tx.Nonce = 1
+	signer := *types.LatestSignerForChainID(&pool.chainID)
+	signed, err := types.SignTx(blob, signer, key)
+	require.NoError(t, err)
+	var encoded bytes.Buffer
+	require.NoError(t, signed.(*types.BlobTxWrapper).MarshalBinaryWrapped(&encoded))
+	server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, &txpoolproto.AddReply{
+		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID},
+		Errors:   []string{"nonce-gapped blob transaction"},
+	}, reply)
+	hash := signed.Hash()
+	require.False(t, pool.HasTxn(hash[:]))
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		known, knownErr := pool.IdHashKnown(tx, hash[:])
+		require.NoError(t, knownErr)
+		require.False(t, known, "a blob transaction must be refetchable after its nonce gap closes")
+		return nil
+	}))
+
+	predecessor := newTestTxnSlot(0, 0, 1, 2, 21_000).Txn.(*types.DynamicFeeTransaction)
+	predecessor.ChainID = pool.chainID
+	signedPredecessor, err := types.SignTx(predecessor, signer, key)
+	require.NoError(t, err)
+	var predecessorRLP bytes.Buffer
+	require.NoError(t, signedPredecessor.MarshalBinary(&predecessorRLP))
+	reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{predecessorRLP.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+
+	reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+	require.True(t, pool.HasTxn(hash[:]))
+}
+
+func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		nonce uint64
+	}{
+		{"below required nonce", 0},
+		{"above required nonce", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, poolDB, _ := newTestPool(t)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, tc.nonce)
+			require.NoError(t, err)
+			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000).Txn.(*types.SetCodeTransaction)
+			txn.ChainID = pool.chainID
+			txn.Authorizations = []types.Authorization{auth}
+			signed, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), key)
+			require.NoError(t, err)
+			var encoded bytes.Buffer
+			require.NoError(t, signed.MarshalBinary(&encoded))
+			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+			for range 2 {
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+				require.NoError(t, err)
+				require.Equal(t, &txpoolproto.AddReply{
+					Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID},
+					Errors:   []string{"self-authorization nonce must equal transaction nonce plus one"},
+				}, reply)
+			}
+			hash := signed.Hash()
+			require.False(t, pool.HasTxn(hash[:]))
+			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+				known, knownErr := pool.IdHashKnown(tx, hash[:])
+				require.NoError(t, knownErr)
+				require.True(t, known, "this self-authorization nonce mismatch is independent of state")
+				return nil
+			}))
+		})
+	}
+}
+
 type concurrentAddTxPool struct {
 	*TxPool
 	admissions atomic.Int32

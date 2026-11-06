@@ -113,7 +113,7 @@ func TestLocalAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	slots.Append(txn, sender[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InvalidAuthorizationNonce}, reasons)
 	require.True(t, unlocked, "authorization recovery must not hold the pool lock")
 	dbTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)

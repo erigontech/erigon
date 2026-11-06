@@ -270,8 +270,9 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpoolproto.ImportR
 		return txpoolproto.ImportResult_FEE_TOO_LOW
 	case txpoolcfg.InvalidSender, txpoolcfg.InitCodeTooLarge,
 		txpoolcfg.RLPTooLong, txpoolcfg.InvalidCreateTxn, txpoolcfg.NoBlobs, txpoolcfg.TooManyBlobs,
-		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail,
-		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
+		txpoolcfg.TypeNotActivated, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.BlobNonceGap,
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.NoAuthorizations, txpoolcfg.InvalidAuthorizationNonce,
+		txpoolcfg.TipAboveFeeCap, txpoolcfg.InvalidFrame:
 		// TODO(EIP-7702) TypeNotActivated may be transient (e.g. a set code transaction is submitted 1 sec prior to the Pectra activation)
 		return txpoolproto.ImportResult_INVALID
 	default:
