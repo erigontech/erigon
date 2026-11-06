@@ -43,6 +43,10 @@ func cachedPages(t *testing.T, f *os.File) uint64 {
 }
 
 func TestUncachedWriterLeavesWrittenPagesOutOfPageCache(t *testing.T) {
+	prev := dontCacheWrites
+	dontCacheWrites = true
+	t.Cleanup(func() { dontCacheWrites = prev })
+
 	tmp := t.TempDir()
 	supported := dontCacheSupported(t, tmp)
 
