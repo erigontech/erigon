@@ -14,7 +14,6 @@
 ### Changed
 
 - engine: testing block-building APIs require every supplied transaction in the requested order. If a transaction cannot be included, the request fails with its index, hash and cause instead of returning an incomplete block (#25752).
-- rpc, txpool: rejected frame submissions report `INVALID` instead of `ALREADY_EXISTS`; pooled duplicates still report `ALREADY_EXISTS`. Transactions with consumed account nonces report `STALE` instead of `INTERNAL_ERROR` (#25752).
 - rpc: malformed frame gas budgets in tracing and overlay requests return an invalid-parameters error, including when the RPC gas cap is disabled (#25752).
 - cmd/utils: `--exec.no-prune` is renamed to `--debug.exec.no-prune`, and Erigon logs a warning at startup while pruning is disabled by this flag or `NO_PRUNE`. The setting is for diagnostics only: chaindata grows without bound and `--prune.mode` is not enforced. `--exec.no-prune` still works as a deprecated alias and will be removed in the next release (#25772) — by @awskii
 - execution, txpool: add EIP-8141 frame transactions and EIP-8250 keyed nonces at the Bogota devnet-1 spec level, activated at the chain's Bogota fork. Deploy the nonce manager before activation or include it in genesis (#25243).
