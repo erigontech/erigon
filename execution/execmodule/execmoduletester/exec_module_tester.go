@@ -742,6 +742,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			panic(err)
 		}
 	}
+	// Tests expect a GetReceipts answer for every requested block; the time
+	// budget would cut it short on slow runners (e.g. under -race).
+	mock.sentriesClient.SetReceiptsReplayTimeout(0)
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 

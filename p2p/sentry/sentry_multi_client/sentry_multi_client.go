@@ -173,6 +173,7 @@ type MultiClient struct {
 	balGenerator                     eth.BlockAccessListGetter
 	balReplayLimiter                 *rate.Limiter
 	balReplayMu                      sync.Mutex
+	receiptsReplayTimeout            time.Duration // time budget of one GetReceipts request; zero means none
 }
 
 var (
@@ -204,10 +205,15 @@ func NewMultiClient(
 		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
 		balReplayLimiter:                 rate.NewLimiter(rate.Every(balReplayInterval), 1),
+		receiptsReplayTimeout:            receiptsReplayTimeout,
 	}
 
 	return cs, nil
 }
+
+// SetReceiptsReplayTimeout sets the time budget of one GetReceipts request;
+// zero disables it, so every requested block is served.
+func (cs *MultiClient) SetReceiptsReplayTimeout(d time.Duration) { cs.receiptsReplayTimeout = d }
 
 func (cs *MultiClient) Sentries() []sentryproto.SentryClient { return cs.sentries }
 
@@ -464,7 +470,9 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 			return err
 		}
 		defer tx.Rollback()
-		opts.Deadline = time.Now().Add(receiptsReplayTimeout)
+		if cs.receiptsReplayTimeout > 0 {
+			opts.Deadline = time.Now().Add(cs.receiptsReplayTimeout)
+		}
 		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, p.query, cached, opts)
 		if err != nil {
 			return err
