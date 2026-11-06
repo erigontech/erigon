@@ -2335,5 +2335,5 @@ func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
 // TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
 // registers only up to that size, and every version-map read returns one.
 func TestReadResultFitsInRegisters(t *testing.T) {
-	require.LessOrEqual(t, reflect.TypeOf(ReadResult{}).NumField(), 4)
+	require.LessOrEqual(t, reflect.TypeFor[ReadResult]().NumField(), 4)
 }
