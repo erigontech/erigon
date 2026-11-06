@@ -26,6 +26,15 @@ func (x *RPCReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
 func (x *RPCReceipt) writeJSONFields(s *jsonstream.Stream) error {
+	if x.Payer != nil {
+		ethjson.Data(s, "payer", x.Payer[:])
+	}
+	if len(x.FrameReceipts) > 0 {
+		s.Field("frameReceipts")
+		if err := x.FrameReceipts.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
 	ethjson.Data(s, "blockHash", x.BlockHash[:])
 	ethjson.Quantity(s, "blockNumber", x.BlockNumber)
 	ethjson.Data(s, "transactionHash", x.TransactionHash[:])

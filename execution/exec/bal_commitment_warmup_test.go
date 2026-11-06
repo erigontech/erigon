@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -319,4 +320,30 @@ func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
 
 	require.Positive(t, tx.calls, "a touched key's path is read")
 	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
+}
+
+// branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.
+type branchTx struct {
+	kv.TemporalTx
+	children map[string]uint16
+}
+
+func (t branchTx) AggTx() any { return t }
+
+func (t branchTx) GetLatestBranchRaw(prefix []byte, _ kv.Tx) ([]byte, bool, error) {
+	bits, ok := t.children[string(prefix)]
+	if !ok {
+		return nil, false, nil
+	}
+	return []byte{0, 0, byte(bits >> 8), byte(bits)}, true, nil
+}
+
+func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
+	compact := func(path ...byte) string { return string(nibbles.HexToCompactInto(nil, path)) }
+	tx := branchTx{children: map[string]uint16{
+		compact(1): 1 << 2, // branch 1 has only child 2
+	}}
+	keys := [][]byte{{1, 2, 0}, {1, 5, 0}, {3, 0, 0}, {4}}
+	got := keysWithChild(context.Background(), nil, tx, keys, 1)
+	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
 }

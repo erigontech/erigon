@@ -223,6 +223,9 @@ func (s *executionPayloadService) processMessage(
 	beaconBlockRoot := envelope.BeaconBlockRoot
 	builderIndex := envelope.BuilderIndex
 	block, blockKnown := s.forkchoiceStore.GetBlock(beaconBlockRoot)
+	if (!blockKnown || block == nil) && s.forkchoiceStore.IsBlockInvalid(beaconBlockRoot) {
+		return fmt.Errorf("%w: beacon block %v failed validation", forkchoice.ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 
 	log.Trace("Received execution payload via gossip",
 		"beaconBlockRoot", beaconBlockRoot,
@@ -474,6 +477,9 @@ func (s *executionPayloadService) releasePendingEnvelopeBytes(ownedBytes uint64)
 // tryProcessPendingEnvelope retains queue ownership until validation finishes or forkchoice takes over.
 func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, job *pendingEnvelopeJob) pendingJobDecision {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
+	if (!ok || block == nil) && s.forkchoiceStore.IsBlockInvalid(key.blockRoot) {
+		return pendingJobRemoveThenProcess
+	}
 	if !ok || block == nil || block.Block == nil || !job.processing.CompareAndSwap(false, true) {
 		return pendingJobKeep
 	}
