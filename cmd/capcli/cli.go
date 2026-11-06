@@ -1088,9 +1088,9 @@ func storeCheckFloor(beaconConfig *clparams.BeaconChainConfig, frozenBlobs uint6
 // an audit that silently skips them reports completeness it never established.
 func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
 	var mismatched, unresolved uint64
-	// Counts down with next = i+1, so a floor at slot 0 (a chain with Deneb at genesis) still ends.
-	for next := fromSlot + 1; next > targetSlot; next-- {
-		i := next - 1
+	// done is set from the slot just checked, so the countdown neither wraps below a floor of 0 (a
+	// chain with Deneb at genesis) nor overflows at the largest fromSlot.
+	for i, done := fromSlot, fromSlot < targetSlot; !done; i, done = i-1, i == targetSlot {
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return mismatched, unresolved, err

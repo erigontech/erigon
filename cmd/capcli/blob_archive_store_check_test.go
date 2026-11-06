@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -260,18 +261,29 @@ func (r *slotRecorder) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slo
 	return nil, nil
 }
 
-// Hoodi has Deneb at genesis, so the floor can be slot 0. The scan counts down on unsigned slots and
-// must still stop after it.
-func TestBlobArchiveStoreCheckEndsAtAFloorOfZero(t *testing.T) {
+// The scan counts down on unsigned slots. It must stop after a floor of 0 (hoodi has Deneb at
+// genesis), check every slot when it starts at the largest slot, and check nothing for an empty range.
+func TestBlobArchiveStoreCheckScansEverySlotOfTheRange(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	reader := &slotRecorder{}
-
-	_, _, err = checkBlobStore(t.Context(), tx, reader, nil, 3, 0, false)
-	require.NoError(t, err)
-	require.Equal(t, []uint64{3, 2, 1, 0}, reader.read)
+	for name, tc := range map[string]struct {
+		from, floor uint64
+		read        []uint64
+	}{
+		"floor of zero":   {3, 0, []uint64{3, 2, 1, 0}},
+		"largest slot":    {math.MaxUint64, math.MaxUint64 - 2, []uint64{math.MaxUint64, math.MaxUint64 - 1, math.MaxUint64 - 2}},
+		"one slot":        {7, 7, []uint64{7}},
+		"below the floor": {6, 7, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := &slotRecorder{}
+			_, _, err := checkBlobStore(t.Context(), tx, reader, nil, tc.from, tc.floor, false)
+			require.NoError(t, err)
+			require.Equal(t, tc.read, reader.read)
+		})
+	}
 }
 
 // Below the frozen blob frontier the store holds nothing by design, so the scan stops there.
