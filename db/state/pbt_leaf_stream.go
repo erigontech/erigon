@@ -545,7 +545,7 @@ func pbinLoadSortedLeafCollectors(ctx context.Context, collectors []*etl.Collect
 		previousStamp = binary.BigEndian.Uint64(value)
 		return nil
 	}, etl.TransformArgs{Progress: progress, Quit: ctx.Done()})
-	if errors.Is(err, common.ErrStopped) {
+	if errors.Is(err, common.ErrStopped) && ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if err != nil {
