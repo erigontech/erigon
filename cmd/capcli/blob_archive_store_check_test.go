@@ -248,3 +248,36 @@ func TestBlobArchiveStoreCheckPropagatesDeleteFailure(t *testing.T) {
 	_, _, err = checkBlobStore(t.Context(), tx, reader, storage, slot, slot, true)
 	require.ErrorIs(t, err, wantErr, "a failed delete must not be swallowed")
 }
+
+// slotRecorder records which slots the check reads; every slot is empty.
+type slotRecorder struct {
+	freezeblocks.BeaconSnapshotReader
+	read []uint64
+}
+
+func (r *slotRecorder) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	r.read = append(r.read, slot)
+	return nil, nil
+}
+
+// Hoodi has Deneb at genesis, so the floor can be slot 0. The scan counts down on unsigned slots and
+// must still stop after it.
+func TestBlobArchiveStoreCheckEndsAtAFloorOfZero(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	reader := &slotRecorder{}
+
+	_, _, err = checkBlobStore(t.Context(), tx, reader, nil, 3, 0, false)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{3, 2, 1, 0}, reader.read)
+}
+
+// Below the frozen blob frontier the store holds nothing by design, so the scan stops there.
+func TestStoreCheckFloorIsTheFrozenBlobFrontier(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	deneb := cfg.DenebForkEpoch * cfg.SlotsPerEpoch
+	require.Equal(t, deneb, storeCheckFloor(cfg, 0))
+	require.Equal(t, deneb+1000, storeCheckFloor(cfg, deneb+1000))
+}

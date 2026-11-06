@@ -390,8 +390,8 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 					break
 				}
 
-				// Look the blobs up under the walked root: the stored body has no execution transactions
-				// or withdrawals, so its own hash is not the block root.
+				// Look the blobs up under the walked root: before Gloas the stored body has no execution
+				// transactions or withdrawals, so its own hash is not the block root.
 				kzgCommitments := 0
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
@@ -1064,7 +1064,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
-	targetSlot := beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+	targetSlot := storeCheckFloor(beaconConfig, csn.FrozenBlobs())
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1076,12 +1076,21 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	return err
 }
 
+// storeCheckFloor is the lowest slot the store check scans. Below the frozen blob frontier the API
+// serves sidecars from segments and the store holds none by design, so a slot there could only be
+// reported as a false mismatch, and --remove-mismatched would delete what the store holds.
+func storeCheckFloor(beaconConfig *clparams.BeaconChainConfig, frozenBlobs uint64) uint64 {
+	return max(beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch, frozenBlobs)
+}
+
 // checkBlobStore reports how many blob-bearing slots hold a different number of sidecars than
 // their block commits to, and how many could not be checked at all. Unresolved slots are an error:
 // an audit that silently skips them reports completeness it never established.
 func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, fromSlot, targetSlot uint64, removeMismatched bool) (uint64, uint64, error) {
 	var mismatched, unresolved uint64
-	for i := fromSlot; i >= targetSlot; i-- {
+	// Counts down with next = i+1, so a floor at slot 0 (a chain with Deneb at genesis) still ends.
+	for next := fromSlot + 1; next > targetSlot; next-- {
+		i := next - 1
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return mismatched, unresolved, err
