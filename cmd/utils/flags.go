@@ -275,10 +275,6 @@ var (
 		Usage: "Cap the number of blob transactions included in a built block",
 	}
 
-	VMEnableDebugFlag = cli.BoolFlag{
-		Name:  "vmdebug",
-		Usage: "Record information useful for VM and contract debugging",
-	}
 	InsecureUnlockAllowedFlag = cli.BoolFlag{
 		Name:  "allow-insecure-unlock",
 		Usage: "Allow insecure account unlocking when account-related RPCs are exposed by http",
@@ -899,12 +895,6 @@ var (
 		Value: "",
 	}
 
-	AAFlag = cli.BoolFlag{
-		Name:  "aa",
-		Usage: "Enable AA transactions",
-		Value: false,
-	}
-
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
@@ -1275,9 +1265,10 @@ var (
 		Value: false,
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
-		Name:  "exec.no-prune",
-		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
-		Value: false,
+		Name:    "debug.exec.no-prune",
+		Aliases: []string{"exec.no-prune"},
+		Usage:   "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/old transaction files; block files are still built) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only: chaindata grows without bound and --prune.mode is not enforced. The --exec.no-prune alias is deprecated and will be removed in the next release.",
+		Value:   false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
 		Name:  "exec.no-background-maintenance",
@@ -1729,7 +1720,6 @@ func setTxPool(ctx *cli.Command, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	if ctx.IsSet(TxPoolQueuedDormancyFlag.Name) {
@@ -2075,7 +2065,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	}
 	setCaplin(ctx, cfg)
 
-	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	setParallelCommitment(ctx)
@@ -2115,11 +2104,17 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
 	}
+	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("BAL batch prefetch is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); it reads nothing")
+	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
 	}
 	if ctx.IsSet(ExecNoPruneFlag.Name) {
 		dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
+	}
+	if dbg.NoPrune() {
+		logger.Warn("DB pruning is disabled by --debug.exec.no-prune or NO_PRUNE: chaindata grows without bound and --prune.mode is not enforced. This is a diagnostic setting, not for production; remove it unless you are sure you need it. The --exec.no-prune alias will be removed in the next release")
 	}
 	if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
 		dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))

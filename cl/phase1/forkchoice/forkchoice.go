@@ -1087,6 +1087,10 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
+func (f *ForkChoiceStore) IsBlockInvalid(blockRoot common.Hash) bool {
+	return f.forkGraph.IsBlockInvalid(blockRoot)
+}
+
 // IsPayloadVerified returns whether the execution payload for the beacon block root
 // has been accepted by the execution layer.
 // [New in Gloas:EIP7732]

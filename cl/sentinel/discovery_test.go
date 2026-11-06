@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
@@ -320,4 +321,32 @@ func TestGoRoutinesOpeningPeerConnectionsConst(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 4, goRoutinesOpeningPeerConnections,
 		"goRoutinesOpeningPeerConnections must be 4; changing this affects concurrency bounds")
+}
+
+func TestUnderservedSubnetsBelowMeshLowWatermark(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	coverage[3] = 5
+	coverage[7] = 0
+
+	require.Equal(t, []subnetSearchState{{idx: 7, wanted: 6}, {idx: 3, wanted: 1}}, underservedSubnets(&coverage))
+}
+
+func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	peerSubnets := bitfield.NewBitvector64()
+	peerSubnets.SetBitAt(3, true)
+
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 5
+	require.True(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 0
+	coverage[4] = 0
+	peerSubnets.SetBitAt(3, false)
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
 }

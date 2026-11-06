@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -218,15 +219,17 @@ func TestBackwardBeaconDownloaderPrefetchHitResetsEmptyBackoff(t *testing.T) {
 }
 
 func TestBackwardBeaconDownloaderTakesPrefetchBelowEmptyRangeBottom(t *testing.T) {
-	blocks := denebChain(t, slotsUpTo(640, func(slot uint64) bool { return slot == 512 }))
-	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, calls: map[uint64]int{}}
+	synctest.Test(t, func(t *testing.T) {
+		blocks := denebChain(t, slotsUpTo(640, func(slot uint64) bool { return slot == 512 }))
+		server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, calls: map[uint64]int{}}
 
-	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
-	want := map[uint64]int{}
-	for start := uint64(0); start < 640; start += slotsPerRange {
-		want[start] = 1
-	}
-	require.Equal(t, want, server.calls)
+		require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
+		want := map[uint64]int{}
+		for start := uint64(0); start < 640; start += slotsPerRange {
+			want[start] = 1
+		}
+		require.Equal(t, want, server.calls)
+	})
 }
 
 func TestBackwardBeaconDownloaderKeepsPrefetchesWhenFirstResponseIsPartial(t *testing.T) {

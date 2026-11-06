@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -130,6 +131,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -178,13 +180,16 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
-			if traceErr != nil {
-				return traceErr
-			}
-			return ethapi.FinalizeCallTx(ibs, rules)
+			return traceErr
 		})
 
 		stream.WriteObjectEnd()
+
+		// Trace output can fail after execution. Finalize even then so the next
+		// transaction starts with its own storage originals, journal and refunds.
+		if err := ethapi.FinalizeCallTx(ibs, rules); err != nil {
+			return err
+		}
 
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
@@ -263,6 +268,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	defer ibs.Close()
 	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	// The state is built from history at txnIndex, so the earlier transactions of
 	// the block never ran and the log counter they left has to be handed in.
@@ -328,16 +334,6 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return fmt.Errorf("get block number: %w", err)
 	}
 
-	postState := config == nil || config.TxIndex == nil || isLatest
-	if postState {
-		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
-	} else {
-		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, dbtx, blockNumber, uint64(*config.TxIndex))
-	}
-	if err != nil {
-		return err
-	}
-
 	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
 	if err != nil {
 		return err
@@ -346,9 +342,22 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	var txIndex int
 	if config != nil && config.TxIndex != nil {
 		txIndex = int(min(*config.TxIndex, math.MaxInt))
-		if err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+		if _, err := api.checkTxIndexInBlock(ctx, dbtx, blockNumber, txIndex); err != nil {
+			if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+				err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", *config.TxIndex, blockNumber)}
+			}
 			return err
 		}
+	}
+
+	postState := config == nil || config.TxIndex == nil || isLatest
+	if postState {
+		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
+	} else {
+		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, dbtx, blockNumber, uint64(*config.TxIndex))
+	}
+	if err != nil {
+		return err
 	}
 
 	var stateReader state.StateReader
@@ -411,7 +420,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	return err
 }
 
-// TraceCall implements debug_traceCallMany. Returns Geth style call traces.
+// TraceCallMany implements debug_traceCallMany and returns Geth-style call traces.
+// A transaction index of -1 selects post-block state, including the final system transaction.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
 		return err
@@ -452,6 +462,15 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
+		return err
+	}
+	if simulateContext.TransactionIndex != nil {
+		if _, err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
+			return err
+		}
+	}
+
 	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
@@ -472,17 +491,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	var stateReader state.StateReader
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
-	if err != nil {
-		return err
-	}
-
-	if simulateContext.TransactionIndex != nil {
-		if err := api.checkTxIndexInBlock(ctx, tx, blockNum, *simulateContext.TransactionIndex); err != nil {
-			return err
-		}
-	}
 
 	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)

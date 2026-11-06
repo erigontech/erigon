@@ -87,7 +87,7 @@ func DeriveForRange(
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
 		if err == nil {
-			err = endTx(ibs, evm.ChainRules())
+			err = EndTx(ibs, evm.ChainRules(), nil)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d (warmup): %w", i, err)
@@ -114,7 +114,7 @@ func DeriveForRange(
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("receipts.DeriveForRange: execution aborted (context cancelled)")
 		}
-		if err := endTx(ibs, evm.ChainRules()); err != nil {
+		if err := EndTx(ibs, evm.ChainRules(), nil); err != nil {
 			return nil, fmt.Errorf("receipts.DeriveForRange: replay tx %d: %w", i, err)
 		}
 		receipts = append(receipts, receipt)
@@ -123,10 +123,14 @@ func DeriveForRange(
 	return receipts, nil
 }
 
-// endTx publishes a versioned state's finished tx to its version map, where the next tx reads it.
-func endTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
+// EndTx publishes a versioned state's finished tx to its version map, where the next tx reads it.
+// A non-nil stateWriter also receives the tx's writes.
+func EndTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if !ibs.IsVersioned() {
-		return nil
+		if stateWriter == nil {
+			return nil
+		}
+		return ibs.CommitBlock(rules, stateWriter)
 	}
 	writes, err := ibs.FinalizedWrites(rules)
 	defer writes.ReleaseMaps() // the flush copies values into version-map cells
@@ -134,6 +138,11 @@ func endTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 		return err
 	}
 	ibs.FlushWritesToVersionMap(writes)
+	if stateWriter != nil {
+		if err := ibs.WriteFlushedTo(writes, stateWriter); err != nil {
+			return err
+		}
+	}
 	ibs.ResetVersionedIO()
 	return nil
 }

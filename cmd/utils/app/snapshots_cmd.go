@@ -1279,7 +1279,7 @@ func DeleteBlockSnapshots(args DeleteBlockSnapshotsArgs) error {
 		f := &toRemove[i]
 		// Catch both ".torrent" and partial ".torrent<suffix>" companions
 		// (see snaptype.IsTorrentPartial).
-		torrentArtifacts, err := filepath.Glob(f.Path + ".torrent*")
+		torrentArtifacts, err := dir2.Glob(f.Path + ".torrent*")
 		if err != nil {
 			return err
 		}

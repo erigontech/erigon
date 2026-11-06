@@ -2817,7 +2817,9 @@ func (c *vmTraceOpContext) Gas() mdgas.MdGas         { return mdgas.MdGas{Execut
 // TestOeTracerCoversInstructionSet fails when an opcode of the latest fork
 // pushes or writes memory but vmTrace does not report it.
 func TestOeTracerCoversInstructionSet(t *testing.T) {
-	jt := vm.LookupInstructionSet((&evmtypes.BlockContext{}).Rules(chain.AllProtocolChanges))
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	jt := vm.LookupInstructionSet((&evmtypes.BlockContext{}).Rules(cfg))
 	scope := &vmTraceOpContext{stack: make([]uint256.Int, 17), memory: make([]byte, 64), code: make([]byte, 3)}
 	for i := range scope.stack {
 		scope.stack[i].SetOne()
@@ -2836,7 +2838,7 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 			ex := tracer.r.VmTrace.Ops[1].Ex
 			require.Len(t, ex.Push, jt[op].NumPush())
 			switch op {
-			case vm.KECCAK256, vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4, vm.RETURN, vm.REVERT:
+			case vm.KECCAK256, vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4, vm.RETURN, vm.REVERT, vm.APPROVE:
 				require.Nil(t, ex.Mem)
 			default:
 				require.Equal(t, jt[op].UsesMemory(), ex.Mem != nil)
