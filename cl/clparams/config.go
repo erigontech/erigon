@@ -50,6 +50,10 @@ type CaplinConfig struct {
 	ArchiveStates             bool
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
+	// BlobsArchiveFromSlot bounds ArchiveBlobs: blob sidecars below this slot are neither
+	// downloaded nor backfilled, and are pruned once they leave the spec serving window.
+	// Zero keeps the whole history since Deneb.
+	BlobsArchiveFromSlot      uint64
 	SnapshotGenerationEnabled bool
 	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
 	// Zero resolves to the active chain's spec window, MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS *
@@ -130,6 +134,19 @@ func (c CaplinConfig) ApplyNetworkOverrides(networkConfig *NetworkConfig) {
 
 func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
+}
+
+// BlobRetentionFloor returns the lowest slot whose blob sidecars are kept at currentSlot.
+// A bounded archive never drops below the spec serving window.
+func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSlot uint64) uint64 {
+	if c.BlobPruningDisabled {
+		return 0
+	}
+	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	if c.ArchiveBlobs {
+		return min(c.BlobsArchiveFromSlot, serveFloor)
+	}
+	return serveFloor
 }
 
 type NetworkType int

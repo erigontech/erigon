@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -615,4 +616,46 @@ func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
 	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
 		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+}
+
+func TestBlobSidecarDownloadFilter(t *testing.T) {
+	seg := "v1.1-008620-008630-blobsidecars.seg"
+	idx := "v1.1-008620-008630-blocksidecars.idx"
+	require.True(t, isBlobSidecarFile(seg))
+	require.True(t, isBlobSidecarFile(idx), "the blob index is named blocksidecars and must follow its segment")
+	require.False(t, isBlobSidecarFile("v1.1-008620-008630-beaconblocks.seg"))
+	require.False(t, isBlobSidecarFile("v1.1-000000-000500-bodies.seg"))
+
+	for _, name := range []string{seg, idx} {
+		require.False(t, blobSegmentBelow(name, 0), "zero keeps every segment")
+		require.True(t, blobSegmentBelow(name, 8_630_000), "a segment ending at the start slot holds nothing kept")
+		require.False(t, blobSegmentBelow(name, 8_629_999), "the segment holding the start slot is kept")
+		require.False(t, blobSegmentBelow(name, 8_000_000))
+	}
+}
+
+func TestBlobRetentionDownloadFloorKeepsTheServingWindow(t *testing.T) {
+	const window = 131_072 + 32
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-000000-000500-bodies.seg"},
+		{Name: "v1.1-008620-008630-blobsidecars.seg"},
+		{Name: "v1.1-008620-008630-blocksidecars.idx"},
+		{Name: "v1.1-013560-013570-blobsidecars.seg"},
+		{Name: "v1.1-013560-013570-blocksidecars.idx"},
+	}
+	const tip = 13_570_000
+	for _, tc := range []struct {
+		name string
+		r    BlobRetention
+		want uint64
+	}{
+		{name: "no bound downloads everything", r: BlobRetention{ServeWindowSlots: window}, want: 0},
+		{name: "old start slot is the floor", r: BlobRetention{FromSlot: 9_000_000, ServeWindowSlots: window}, want: 9_000_000},
+		{name: "start slot inside the serving window keeps the window", r: BlobRetention{FromSlot: tip - 10, ServeWindowSlots: window}, want: tip - window},
+		{name: "unknown window downloads everything", r: BlobRetention{FromSlot: 9_000_000, ServeWindowSlots: math.MaxUint64}, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, uint64(tc.want), tc.r.downloadFloor(items))
+		})
+	}
 }

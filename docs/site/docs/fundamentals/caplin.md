@@ -23,6 +23,7 @@ Caplin also has an archive mode for historical states, blocks, and blobs. These 
 * `--caplin.states-archive`: Enables the storage and retrieval of historical state data, allowing access to past states of the blockchain for debugging, analytics, or other use cases.
 * `--caplin.blocks-archive`: Enables the storage of historical block data, making it possible to query or analyze full block history.
 * `--caplin.blobs-archive`: Enables the storage of historical blobs, ensuring access to additional off-chain data that might be required for specific applications.
+* `--caplin.blobs-archive-from-slot <slot>`: Bounds the blob archive to this beacon slot and later, for rollup nodes (Arbitrum Nitro, OP) that started from a snapshot and need blobs only from that point. Only blob snapshots that reach the slot are downloaded on first sync. A rollup derives the slot from an L1 block timestamp as `(timestamp - genesis_time) / 12`. Raising it later drops the older blob snapshots; lowering it does not fetch them again.
 
 In addition, Caplin can backfill recent blobs for an op-node or other uses with the new flag:
 

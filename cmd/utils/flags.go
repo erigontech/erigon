@@ -1095,6 +1095,11 @@ var (
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
+	CaplinArchiveBlobsFromSlotFlag = cli.Uint64Flag{
+		Name:  "caplin.blobs-archive-from-slot",
+		Usage: "keep blob sidecars from this beacon slot onward (implies --caplin.blobs-archive); the first sync downloads only blob snapshots that reach this slot or the spec retention window, older sidecars and blob snapshots are dropped once outside that window; 0 keeps all history since Deneb",
+		Value: 0,
+	}
 	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-immediate-backfill",
 		Usage: "sets whether caplin should immediately backfill blobs (4096 epochs)",
@@ -1886,8 +1891,11 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {
-		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || ctx.Bool(CaplinArchiveBlobsFlag.Name)
-		cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+		blobsFromSlot := ctx.Uint64(CaplinArchiveBlobsFromSlotFlag.Name)
+		archiveBlobs := ctx.Bool(CaplinArchiveBlobsFlag.Name) || ctx.IsSet(CaplinArchiveBlobsFromSlotFlag.Name)
+		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || archiveBlobs
+		cfg.CaplinConfig.ArchiveBlobs = archiveBlobs
+		cfg.CaplinConfig.BlobsArchiveFromSlot = blobsFromSlot
 		cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 		cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)
 	} else {
@@ -1897,7 +1905,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 		if ctx.IsSet(CaplinArchiveStatesFlag.Name) {
 			log.Warn("Caplin's state backfilling is disabled when engine API is enabled")
 		}
-		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) {
+		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) || ctx.IsSet(CaplinArchiveBlobsFromSlotFlag.Name) {
 			log.Warn("Caplin's blob backfilling is disabled when engine API is enabled")
 		}
 		if ctx.IsSet(CaplinImmediateBlobBackfillFlag.Name) {
@@ -1907,6 +1915,9 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
+	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
+		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)
+	}
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)

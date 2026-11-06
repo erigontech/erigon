@@ -564,3 +564,13 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	}
 	return s.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum())
 }
+
+// RetireBlobsBelow retires blob sidecar segments holding no slot at or above floor and hands
+// their files to onDelete so the seeder drops them. The newest segment always stays, so
+// FrozenBlobs and the backfill boundary it sets do not move.
+func (s *CaplinSnapshots) RetireBlobsBelow(floor uint64, onDelete func([]string) error) (bool, error) {
+	if floor == 0 {
+		return false, nil
+	}
+	return s.RetireFilesBelow(snaptype.BlobSidecars, min(floor+1, s.FrozenBlobs()), onDelete)
+}

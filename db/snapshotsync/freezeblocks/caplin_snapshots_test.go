@@ -864,3 +864,51 @@ func TestRemoveBlobIndexAndTorrents(t *testing.T) {
 	}
 	require.ElementsMatch(t, kept, left)
 }
+
+func TestRetireBlobsBelowDropsSegmentsUnderTheFloor(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	for _, tc := range []struct {
+		name        string
+		floor       uint64
+		wantRetired int
+		wantFirst   uint64
+	}{
+		{name: "zero floor keeps everything", floor: 0, wantRetired: 0, wantFirst: 0},
+		{name: "floor inside the first segment keeps it", floor: limit - 1, wantRetired: 0, wantFirst: 0},
+		{name: "floor at a segment end retires it", floor: limit, wantRetired: 1, wantFirst: limit},
+		{name: "floor inside the second segment", floor: limit + 1, wantRetired: 1, wantFirst: limit},
+		{name: "floor past the tip keeps the newest segment", floor: 10 * limit, wantRetired: 2, wantFirst: 2 * limit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for i := uint64(0); i < 3; i++ {
+				writeEmptyBlobSidecarsSegment(t, dirs, i*limit, (i+1)*limit)
+			}
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			var deleted []string
+			_, err := sn.RetireBlobsBelow(tc.floor, func(paths []string) error {
+				deleted = append(deleted, paths...)
+				return nil
+			})
+			require.NoError(t, err)
+
+			view := sn.View()
+			defer view.Close()
+			segs := view.BlobSidecars()
+			require.Len(t, segs, 3-tc.wantRetired)
+			require.Equal(t, tc.wantFirst, segs[0].From())
+			require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
+			if tc.wantRetired == 0 {
+				require.Empty(t, deleted)
+			} else {
+				require.NotEmpty(t, deleted)
+				for _, path := range deleted {
+					require.False(t, strings.Contains(filepath.Base(path), "beaconblocks"))
+				}
+			}
+		})
+	}
+}
