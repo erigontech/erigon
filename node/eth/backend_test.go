@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -88,4 +89,19 @@ func TestMCPNamespacesFollowHTTPAPI(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestDeletedMappingsWatchWarnsOnlyAfterTheyStay(t *testing.T) {
+	var w deletedMappingsWatch
+	t0 := time.Unix(1_000_000, 0)
+	require.False(t, w.warn(t0, 3))
+	require.False(t, w.warn(t0.Add(deletedMappingsWarnAfter-time.Second), 3), "mappings of files that readers still drain are normal")
+	require.True(t, w.warn(t0.Add(deletedMappingsWarnAfter), 3))
+	require.False(t, w.warn(t0.Add(deletedMappingsWarnAfter+time.Minute), 3), "one warning per period")
+	require.True(t, w.warn(t0.Add(2*deletedMappingsWarnAfter), 3))
+
+	require.False(t, w.warn(t0.Add(3*deletedMappingsWarnAfter), 0))
+	t1 := t0.Add(4 * deletedMappingsWarnAfter)
+	require.False(t, w.warn(t1, 1), "a count that dropped to zero starts the period again")
+	require.True(t, w.warn(t1.Add(deletedMappingsWarnAfter), 1))
 }

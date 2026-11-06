@@ -86,3 +86,34 @@ func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
 	cancel()
 	require.ErrorIs(t, ReadPages(ctx, []uintptr{uintptr(unsafe.Pointer(&m[0]))}), context.Canceled)
 }
+
+func TestDeletedMappingsCountsAMappedFileUntilUnmap(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f.seg")
+	pg := os.Getpagesize()
+	require.NoError(t, os.WriteFile(p, make([]byte, pg*4), 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	m, err := OpenRo(f, pg*4)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	n, size, err := DeletedMappings(dir)
+	require.NoError(t, err)
+	require.Zero(t, n, "a mapped file that still exists is not counted")
+
+	require.NoError(t, os.Remove(p))
+	n, size, err = DeletedMappings(dir)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, uint64(pg*4), size)
+
+	n, _, err = DeletedMappings(filepath.Join(dir, "other"))
+	require.NoError(t, err)
+	require.Zero(t, n, "mappings outside dir are not counted")
+
+	require.NoError(t, m.Unmap())
+	n, _, err = DeletedMappings(dir)
+	require.NoError(t, err)
+	require.Zero(t, n)
+}
