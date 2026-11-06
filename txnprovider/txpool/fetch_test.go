@@ -817,7 +817,7 @@ func TestAnnouncedHashRequestedFromOnePeerUntilTimeout(t *testing.T) {
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			requestedFrom = append(requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
-			return nil, nil
+			return &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}, nil
 		}).AnyTimes()
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
 	require.NoError(t, err)
@@ -858,7 +858,8 @@ type announceFetchTest struct {
 	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
 	sendErr       error
-	failSendAt    int // when > 0, only that send (1-based) fails with sendErr
+	failSendAt    int               // when > 0, only that send (1-based) fails with sendErr
+	gone          map[[64]byte]bool // peers sentry no longer knows: a send reaches no one
 	sends         int
 }
 
@@ -903,10 +904,14 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
 			a.sends++
-			if a.failSendAt > 0 && a.sends != a.failSendAt {
-				return nil, nil
+			sent := &sentryproto.SentPeers{Peers: []*typesproto.H512{r.PeerId}}
+			if a.gone[gointerfaces.ConvertH512ToHash(r.PeerId)] {
+				sent = &sentryproto.SentPeers{}
 			}
-			return nil, a.sendErr
+			if a.failSendAt > 0 && a.sends != a.failSendAt {
+				return sent, nil
+			}
+			return sent, a.sendErr
 		}).AnyTimes()
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
 	require.NoError(t, err)
@@ -1488,9 +1493,45 @@ func TestAlternateQuotaBoundsAPeerAndIsReleased(t *testing.T) {
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "a peer at its quota is not kept as an alternate")
 
 	delete(a.fetch.alternatesOf, fullPeer)
+	a.announce(t, [64]byte{0xc}, hash)
+	a.announce(t, [64]byte{0xd}, hash)
+	require.NotEmpty(t, a.fetch.alternatesOf)
 	a.known = map[[32]byte]bool{hash: true}
 	a.timeoutSweep()
-	require.Empty(t, a.fetch.alternatesOf, "resolved requests release their alternates")
+	require.Empty(t, a.fetch.alternatesOf, "a held txn releases the alternates still waiting")
+}
+
+func TestPeerGoneAtSendLeavesEveryAlternate(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, gone, peerC := [32]byte{0xa1}, [32]byte{0xa2}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	a.announce(t, peerA, h1)
+	a.announce(t, gone, h1)
+	*a.now = a.now.Add(time.Second) // h2 is requested later, so h1 retries first
+	a.announce(t, peerA, h2)
+	a.announce(t, gone, h2)
+	a.announce(t, peerC, h2)
+	a.gone = map[[64]byte]bool{gone: true}           // its Disconnect event was lost
+	*a.now = a.now.Add(txFetchTimeout - time.Second) // h1 expired, h2 not yet
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.NotContains(t, a.fetch.alternatesOf, fetchPeer{a.sentryClient, gone}, "a send that reaches no one drops the peer everywhere")
+	a.requestedFrom = nil
+	*a.now = a.now.Add(time.Second)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerC}, a.requestedFrom, "h2 goes to its live alternate")
+}
+
+func TestFailedSendKeepsThePeerAtFullQuota(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xaa}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.sendErr, a.failSendAt = errors.New("queue full"), 2
+	a.fetch.alternatesOf[fetchPeer{a.sentryClient, peerB}] = maxAlternatesPerPeer + 1 // this hash plus a full quota of others, announced meanwhile
+	a.timeoutSweep()
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB, peerB}, a.requestedFrom, "a peer whose send failed is asked again, even at its quota")
 }
 
 func TestDisconnectedPeerLeavesTheAlternates(t *testing.T) {

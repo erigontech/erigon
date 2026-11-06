@@ -364,7 +364,11 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		for _, hashes := range plan.reqs {
 			if unsent, err := f.requestPooledTxns(peer.sentry, gointerfaces.ConvertHashToH512(peer.peerID), hashes); err != nil {
 				f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
-				f.keepAlternate(peer, unsent, sent)
+				if errors.Is(err, errPeerGone) {
+					f.dropAlternate(peer) // its Disconnect event may have been lost
+				} else {
+					f.keepAlternate(peer, unsent, sent)
+				}
 			}
 		}
 	}
@@ -382,16 +386,24 @@ func (f *Fetch) releaseRequested(peer fetchPeer, hashes Hashes) {
 	}
 }
 
-// keepAlternate puts a peer whose retry request was not sent back among the hashes' alternates.
+// keepAlternate puts a peer whose retry request was not sent back among the hashes' alternates, even at its
+// quota: it held that slot before the send.
 func (f *Fetch) keepAlternate(peer fetchPeer, hashes Hashes, sent time.Time) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
+	if _, gone := f.disconnected[peer]; gone {
+		return
+	}
 	for i := 0; i < len(hashes); i += 32 {
-		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && r.at.Equal(sent) {
-			f.appendAlternate(r, peer)
+		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && r.at.Equal(sent) && !slices.Contains(r.alternates, peer) {
+			r.alternates = append(r.alternates, peer)
+			f.alternatesOf[peer]++
 		}
 	}
 }
+
+// errPeerGone: sentry no longer knows the peer, so a request to it reaches no one.
+var errPeerGone = errors.New("peer gone")
 
 // addAlternate keeps an announcer to ask after the requested peer.
 func (f *Fetch) addAlternate(r *fetchRequest, peer fetchPeer) {
@@ -434,11 +446,15 @@ func (f *Fetch) requestPooledTxns(sentryClient sentryproto.SentryClient, peerID 
 		if err != nil {
 			return hashes[start:], err
 		}
-		if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
+		sentTo, err := sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
 			Data:   &sentryproto.OutboundMessageData{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
 			PeerId: peerID,
-		}, &grpc.EmptyCallOption{}); err != nil {
+		}, &grpc.EmptyCallOption{})
+		if err != nil {
 			return hashes[start:], err
+		}
+		if len(sentTo.GetPeers()) == 0 {
+			return hashes[start:], errPeerGone
 		}
 	}
 	return nil, nil

@@ -620,8 +620,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 		return true, nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
-		// A nonce gap can close before the discarded pool row is removed.
-		return reason != txpoolcfg.NonceTooDistant, nil
+		return !refetchableDiscard(reason), nil
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
@@ -648,6 +647,16 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 	return unknownHashes, err
 }
 
+// refetchableDiscard reports a discard another peer's body can undo: a nonce gap can close before the discarded pool
+// row is removed, and a blob txn's hash does not cover its sidecar, so one peer's bad sidecar says nothing about the txn.
+func refetchableDiscard(reason txpoolcfg.DiscardReason) bool {
+	switch reason {
+	case txpoolcfg.NonceTooDistant, txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.UnmatchedBlobTxExt:
+		return true
+	}
+	return false
+}
+
 // HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation;
 // a discarded txn is neither.
 func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error) {
@@ -665,7 +674,10 @@ func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Has
 			held = append(held, hash...)
 			continue
 		}
-		if _, discarded := p.discardReasonsLRU.Get(hashS); discarded {
+		if reason, discarded := p.discardReasonsLRU.Get(hashS); discarded {
+			if !refetchableDiscard(reason) { // a refetched body would be dropped as known
+				held = append(held, hash...)
+			}
 			continue
 		}
 		has, err := tx.Has(kv.PoolTransaction, hash)
