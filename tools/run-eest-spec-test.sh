@@ -233,7 +233,12 @@ result_file=$(mktemp)
 raw_files=()
 part_files=()
 ramdisk=""
+evm_pid=""
+watchdog_pid=""
 cleanup() {
+	# A background evm ignores SIGINT, so an interrupted script must stop it before removing its files.
+	[[ -n "$watchdog_pid" ]] && kill "$watchdog_pid" 2>/dev/null || true
+	[[ -n "$evm_pid" ]] && kill "$evm_pid" 2>/dev/null && wait "$evm_pid" 2>/dev/null || true
 	# Auto-detach Darwin ramdisk we created in this run; leave existing
 	# user-provided ones (ERIGON_EXECUTION_TESTS_TMPDIR) untouched.
 	if [[ -n "$ramdisk" && "$(uname -s)" == "Darwin" ]]; then
@@ -291,7 +296,9 @@ for path in "${paths[@]}"; do
 		( sleep $((evm_timeout_minutes * 60)); echo yes > "$timed_out"; kill -QUIT "$evm_pid"; sleep 60; kill -KILL "$evm_pid" ) </dev/null >/dev/null 2>&1 &
 		watchdog_pid=$!
 		wait "$evm_pid" || rc=$?
+		evm_pid=""
 		kill "$watchdog_pid" 2>/dev/null || true
+		watchdog_pid=""
 		if [[ -s "$timed_out" ]]; then
 			echo "ERROR: evm still running after ${evm_timeout_minutes} min; its goroutine dump is above" >&2
 			exit 1
