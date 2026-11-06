@@ -30,10 +30,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func cachedMiB(tb testing.TB, f *os.File) float64 {
+func cachedMiB(f *os.File) (float64, bool) {
 	var st unix.Cachestat_t
-	require.NoError(tb, unix.Cachestat(uint(f.Fd()), &unix.CachestatRange{}, &st, 0))
-	return float64(st.Cache*uint64(os.Getpagesize())) / (1 << 20)
+	if err := unix.Cachestat(uint(f.Fd()), &unix.CachestatRange{}, &st, 0); err != nil {
+		return 0, false
+	}
+	return float64(st.Cache*uint64(os.Getpagesize())) / (1 << 20), true
 }
 
 func BenchmarkCollectorSpillAndLoad(b *testing.B) {
@@ -41,6 +43,7 @@ func BenchmarkCollectorSpillAndLoad(b *testing.B) {
 	key, val := make([]byte, 32), make([]byte, 32)
 	noop := func(_, _ []byte, _ CurrentTableReader, _ LoadNextFunc) error { return nil }
 	var cached float64
+	measured := true
 	for b.Loop() {
 		c := NewCollector("bench", b.TempDir(), NewSortableBuffer(64*datasize.MB), logger)
 		for i := range 8_000_000 {
@@ -51,11 +54,15 @@ func BenchmarkCollectorSpillAndLoad(b *testing.B) {
 		for _, p := range c.dataProviders {
 			require.NoError(b, p.Wait())
 			if fp, ok := p.(*fileDataProvider); ok {
-				cached += cachedMiB(b, fp.file)
+				mib, ok := cachedMiB(fp.file)
+				measured = measured && ok
+				cached += mib
 			}
 		}
 		require.NoError(b, c.Load(nil, "", noop, TransformArgs{}))
 		c.Close()
 	}
-	b.ReportMetric(cached/float64(b.N), "spill-cached-MiB/op")
+	if measured {
+		b.ReportMetric(cached/float64(b.N), "spill-cached-MiB/op")
+	}
 }
