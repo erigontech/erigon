@@ -1089,7 +1089,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	}
 
 	s.bgComponentsEg.Go(func() error {
-		watchDeletedMappings(ctx, config.Dirs.DataDir, s.logger)
+		watchDeletedMappings(ctx, config.Dirs, s.logger)
 		return nil
 	})
 

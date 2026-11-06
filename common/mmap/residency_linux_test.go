@@ -90,7 +90,8 @@ func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
 }
 
 func TestDeletedMappingsCountsAMappedFileUntilUnmap(t *testing.T) {
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir()) // /proc shows resolved paths
+	require.NoError(t, err)
 	p := filepath.Join(dir, "f.seg")
 	pg := os.Getpagesize()
 	require.NoError(t, os.WriteFile(p, make([]byte, pg*4), 0o600))

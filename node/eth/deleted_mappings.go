@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
@@ -67,11 +69,14 @@ func (w *deletedFilesWatch) warn(now time.Time, paths []string) (oldest string, 
 	return oldest, since, true
 }
 
-// watchDeletedMappings exports how many files under datadir stay open or mapped after deletion, and warns when
+// watchDeletedMappings exports how many files of the datadir stay open or mapped after deletion, and warns when
 // one of them does not go away.
-func watchDeletedMappings(ctx context.Context, datadir string, logger log.Logger) {
-	if resolved, err := filepath.EvalSymlinks(datadir); err == nil {
-		datadir = resolved
+func watchDeletedMappings(ctx context.Context, dirs datadir.Dirs, logger log.Logger) {
+	var roots []string // resolved, because any of them can be a symlink to another disk
+	for _, d := range []string{dirs.DataDir, dirs.Chaindata, dirs.Tmp, dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.Downloader} {
+		if resolved, err := filepath.EvalSymlinks(d); err == nil && !slices.Contains(roots, resolved) {
+			roots = append(roots, resolved)
+		}
 	}
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -81,23 +86,24 @@ func watchDeletedMappings(ctx context.Context, datadir string, logger log.Logger
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			mapped, size, err := mmap.DeletedMappings(datadir)
+			mapped, size, err := mmap.DeletedMappings(roots...)
 			if errors.Is(err, errors.ErrUnsupported) {
 				return
 			}
 			if err != nil {
 				continue
 			}
-			fds, err := dir.DeletedOpenFiles(datadir)
+			fds, err := dir.DeletedOpenFiles(roots...)
 			if err != nil {
 				continue
 			}
-			mxDeletedMappedFiles.SetUint64(uint64(len(mapped)))
+			mappedFiles := slices.Compact(slices.Sorted(slices.Values(mapped))) // a file can be mapped more than once
+			mxDeletedMappedFiles.SetUint64(uint64(len(mappedFiles)))
 			mxDeletedMappedBytes.SetUint64(size)
 			mxDeletedOpenFds.SetUint64(uint64(len(fds)))
-			if oldest, since, ok := w.warn(now, append(mapped, fds...)); ok {
+			if oldest, since, ok := w.warn(now, append(mappedFiles, fds...)); ok {
 				logger.Warn("[files] deleted files are still open or mapped; their disk space is freed only after close and unmap",
-					"mapped", len(mapped), "mappedSize", datasize.ByteSize(size).HR(), "deletedFds", len(fds), "oldest", oldest, "since", since.Format(time.DateTime))
+					"mapped", len(mappedFiles), "mappedSize", datasize.ByteSize(size).HR(), "deletedFds", len(fds), "oldest", oldest, "since", since.Format(time.DateTime))
 			}
 		}
 	}

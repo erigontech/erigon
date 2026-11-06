@@ -65,7 +65,8 @@ func Test_CreateTempWithExt(t *testing.T) {
 }
 
 func TestDeletedOpenFilesListsADeletedFileUntilClose(t *testing.T) {
-	d := t.TempDir()
+	d, err := filepath.EvalSymlinks(t.TempDir()) // /proc shows resolved paths
+	require.NoError(t, err)
 	p := filepath.Join(d, "f.seg")
 	require.NoError(t, os.WriteFile(p, []byte{1}, 0o600))
 	f, err := os.Open(p)

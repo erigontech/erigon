@@ -22,12 +22,13 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
-// DeletedMappings returns the path of each of this process's mappings of a file under dir that was deleted on disk,
-// and their total size. dir must be symlink-resolved, as /proc shows paths.
-func DeletedMappings(dir string) (paths []string, size uint64, err error) {
+// DeletedMappings returns the path of each of this process's mappings of a file under one of dirs that was deleted
+// on disk, and their total size. dirs must be symlink-resolved, as /proc shows paths.
+func DeletedMappings(dirs ...string) (paths []string, size uint64, err error) {
 	f, err := os.Open("/proc/self/maps")
 	if err != nil {
 		return nil, 0, err
@@ -38,7 +39,7 @@ func DeletedMappings(dir string) (paths []string, size uint64, err error) {
 		line := sc.Text()
 		line, deleted := strings.CutSuffix(line, " (deleted)")
 		i := strings.IndexByte(line, '/')
-		if !deleted || i < 0 || !strings.HasPrefix(line[i:], dir+"/") {
+		if !deleted || i < 0 || !slices.ContainsFunc(dirs, func(d string) bool { return strings.HasPrefix(line[i:], d+"/") }) {
 			continue
 		}
 		var start, end uint64

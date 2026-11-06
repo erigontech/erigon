@@ -1868,7 +1868,9 @@ func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 // mapping of a deleted file once the reader is gone: such mappings hold disk space until restart.
 func TestMergeCyclesLeaveNoDeletedFileMapped(t *testing.T) {
 	logger := log.New()
-	dir, require := t.TempDir(), require.New(t)
+	require := require.New(t)
+	dir, err := filepath.EvalSymlinks(t.TempDir()) // /proc shows resolved paths
+	require.NoError(err)
 	for i := range uint64(4) {
 		for _, snT := range snaptype2.BlockSnapshotTypes {
 			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)

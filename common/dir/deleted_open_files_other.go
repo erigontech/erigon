@@ -20,4 +20,4 @@ package dir
 
 import "errors"
 
-func DeletedOpenFiles(string) ([]string, error) { return nil, errors.ErrUnsupported }
+func DeletedOpenFiles(...string) ([]string, error) { return nil, errors.ErrUnsupported }

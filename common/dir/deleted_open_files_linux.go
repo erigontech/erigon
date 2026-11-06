@@ -20,12 +20,13 @@ package dir
 
 import (
 	"os"
+	"slices"
 	"strings"
 )
 
-// DeletedOpenFiles returns the path of each of this process's open fds of a file under dir that was deleted on disk.
-// dir must be symlink-resolved, as /proc shows paths.
-func DeletedOpenFiles(dir string) (paths []string, err error) {
+// DeletedOpenFiles returns the path of each of this process's open fds of a file under one of dirs that was deleted
+// on disk. dirs must be symlink-resolved, as /proc shows paths.
+func DeletedOpenFiles(dirs ...string) (paths []string, err error) {
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
 		return nil, err
@@ -35,7 +36,8 @@ func DeletedOpenFiles(dir string) (paths []string, err error) {
 		if err != nil {
 			continue // closed since ReadDir
 		}
-		if path, ok := strings.CutSuffix(target, " (deleted)"); ok && strings.HasPrefix(path, dir+"/") {
+		path, ok := strings.CutSuffix(target, " (deleted)")
+		if ok && slices.ContainsFunc(dirs, func(d string) bool { return strings.HasPrefix(path, d+"/") }) {
 			paths = append(paths, path)
 		}
 	}
