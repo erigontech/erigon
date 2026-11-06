@@ -59,8 +59,8 @@ func (view *VersionMapView) txIdx() int {
 // to the base domain as a delete — and an account with no live cell here that the base
 // also reports absent does not exist (in a cross-block batch the touched union carries
 // accounts removed in an earlier block; the base resolves them as absent). Otherwise the
-// composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
-// the read; it is the why-free add/remove projection.
+// composed account is present. wasDeleted reports a self-destruct or EIP-161 removal at
+// or below the view's txNum, the commitment's signal to drop the whole storage subtree.
 func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDeleted bool) {
 	f := view.vm.accountFloorsAt(addr, view.txIdx())
 	if f.balanceDeleted {
