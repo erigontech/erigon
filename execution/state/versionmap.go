@@ -1930,7 +1930,7 @@ func eqUint64(a, b uint64) bool       { return a == b }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
-func eqCode(a, b accounts.Code) bool { return a.Hash == b.Hash }
+func eqCode(a, b accounts.Code) bool { return a.Hash == b.Hash && bytes.Equal(a.Bytes, b.Bytes) }
 func eqInt(a, b int) bool            { return a == b }
 
 func eqAccount(a, b *accounts.Account) bool {
