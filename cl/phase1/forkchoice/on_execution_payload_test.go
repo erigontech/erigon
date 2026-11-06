@@ -4276,6 +4276,56 @@ func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadUnauthenticatedBlobMismatchAllowsRetry(t *testing.T) {
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	payload := envelope.Message.Payload
+	beaconRoot := common.Hash(envelope.Message.BeaconBlockRoot)
+	executionHash := payload.BlockHash
+	verifiedRoot := common.HexToHash("0xaa")
+	authenticTransactions := payload.Transactions
+	txn, err := types.UnmarshalTransactionFromBinary(authenticTransactions.UnderlyngReference()[0], false)
+	require.NoError(t, err)
+	txn.(*types.BlobTx).BlobVersionedHashes[0][1] ^= 1
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+	require.NoError(t, err)
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.engine = engine
+	f.MarkPayloadVerified(verifiedRoot, executionHash)
+
+	err = f.OnExecutionPayload(t.Context(), envelope, false, true)
+
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+	require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
+	require.ErrorContains(t, err, "mismatching hash")
+	require.False(t, f.IsEnvelopeRejected(beaconRoot))
+	require.False(t, f.IsEnvelopeRejected(verifiedRoot))
+	require.True(t, f.verifiedExecutionPayload.Contains(verifiedRoot))
+	require.False(t, f.IsPayloadVerified(beaconRoot))
+	require.False(t, graph.HasEnvelope(beaconRoot))
+	require.False(t, graph.invalid.Load())
+	_, ok := f.payloadStatusByRoot.Get(beaconRoot)
+	require.False(t, ok)
+	status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusValidated, status)
+
+	payload.Transactions = authenticTransactions
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), payload, gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusValidated, nil)
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, true))
+	require.True(t, f.verifiedExecutionPayload.Contains(verifiedRoot))
+	require.False(t, f.IsEnvelopeRejected(beaconRoot))
+	require.True(t, f.IsPayloadVerified(beaconRoot))
+	require.True(t, graph.HasEnvelope(beaconRoot))
+	require.False(t, graph.invalid.Load())
+}
+
 func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testing.T) {
 	for _, validatePayload := range []bool{true, false} {
 		t.Run(fmt.Sprintf("validatePayload=%t", validatePayload), func(t *testing.T) {
