@@ -909,10 +909,6 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
-		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
-			return
-		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
 			return
@@ -940,6 +936,9 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
+		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
+			return
+		}
 		httpHandler.ServeHTTP(w, r)
 	})
 
