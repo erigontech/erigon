@@ -447,7 +447,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
-	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource}
+	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource()}
 
 	if !commited {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {

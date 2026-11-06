@@ -716,13 +716,15 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -823,13 +825,15 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -2278,11 +2282,26 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation Incarnation
-	// validated: the floor cell was Validated (pre-seal, revertible); the reader
+	valStatus   valueStatus
+	flags       readFlags
+}
+
+// readFlags packs a read's boolean facts into one field: ReadResult stays at 4 fields, so the compiler keeps it in
+// registers.
+type readFlags uint8
+
+const (
+	// readValidated: the floor cell was Validated (pre-seal, revertible); the reader
 	// continues on it like Done but the dep is not yet final.
-	validated bool
-	valStatus valueStatus
-	accSource AccountSource
+	readValidated readFlags = 1 << iota
+	readFromBAL             // the cell's record is an AccountFromBAL existence marker
+)
+
+func (res ReadResult) accSource() AccountSource {
+	if res.flags&readFromBAL != 0 {
+		return AccountFromBAL
+	}
+	return AccountFromBase
 }
 
 func (res *ReadResult) DepString() string {
@@ -2314,7 +2333,7 @@ func (res *ReadResult) ValStatus() valueStatus {
 
 func (res ReadResult) Status() int {
 	if res.depIdx != UnknownDep {
-		if res.validated {
+		if res.flags&readValidated != 0 {
 			return MVReadResultValidated
 		}
 		if res.incarnation == -1 {
