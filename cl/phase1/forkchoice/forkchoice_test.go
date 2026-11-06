@@ -2197,6 +2197,50 @@ func TestHasImportedDescendantAfterSkipsNonViableBranches(t *testing.T) {
 	}
 }
 
+func TestHasImportedDescendantAfterSkipsRejectedEnvelopeBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		full          bool
+		rejectSibling bool
+		wantLag       bool
+	}{
+		{name: "rejected FULL branch", full: true},
+		{name: "EMPTY branch", wantLag: true},
+		{name: "valid sibling FULL branch", full: true, rejectSibling: true, wantLag: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newViabilityTree(t)
+			headRoot, childRoot, descendantRoot := common.Hash{0xbb}, common.Hash{0xcc}, common.Hash{0xdd}
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(childRoot, headRoot, 65, tc.full, true)
+			v.add(descendantRoot, childRoot, 98, true, true)
+			rejectedRoot := headRoot
+			if tc.rejectSibling {
+				rejectedRoot = common.Hash{0xee}
+				v.add(rejectedRoot, v.justified.Root, 64, true, true)
+				siblingBid := v.graph.blocks[rejectedRoot].Block.Body.GetSignedExecutionPayloadBid().Message
+				siblingBid.BlockHash = v.graph.blocks[headRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+			}
+			v.store.setLatestMessage(0, LatestMessage{Slot: 100, Root: descendantRoot})
+			toleranceSlot := uint64(64) + v.store.beaconCfg.SlotsPerEpoch
+			require.True(t, v.store.HasImportedDescendantAfter(headRoot, toleranceSlot))
+
+			v.store.RejectEnvelope(rejectedRoot)
+
+			require.True(t, v.store.IsEnvelopeRejected(rejectedRoot))
+			require.False(t, v.store.IsBlockInvalid(rejectedRoot))
+			head, _, err := v.store.GetHeadNode()
+			require.NoError(t, err)
+			if tc.wantLag {
+				require.Equal(t, descendantRoot, head.Root)
+			} else {
+				require.Equal(t, ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+			}
+			require.Equal(t, tc.wantLag, v.store.HasImportedDescendantAfter(headRoot, toleranceSlot))
+		})
+	}
+}
+
 // A block whose only viable descendant sits on its invalidated payload is not reachable: get_head
 // drops its FULL variant, and its EMPTY variant fails justification as a leaf. The served head
 // H/EMPTY at slot 64 has an EMPTY child C at slot 98 with a FULL child D at slot 99.

@@ -1383,9 +1383,8 @@ func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) boo
 	return variant == head.PayloadStatus || (variant == cltypes.PayloadStatusFull && !f.isPayloadAvailable(root))
 }
 
-// cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
-// invalidations: an invalid pre-Gloas block, a child of one (it has no EMPTY alternative), or a
-// Gloas block built on an invalid parent payload.
+// cutOffByInvalidation reports whether root has no surviving fork-choice variant.
+// Rejecting a Gloas payload cuts off its FULL children while preserving its EMPTY branch.
 func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 	block, ok := f.forkGraph.GetBlock(root)
 	if !ok || block == nil || block.Block == nil {
@@ -1395,7 +1394,7 @@ func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 		return f.forkGraph.IsBlockInvalid(root)
 	}
 	parentRoot := block.Block.ParentRoot
-	if !f.forkGraph.IsBlockInvalid(parentRoot) {
+	if !f.forkGraph.IsBlockInvalid(parentRoot) && !f.IsEnvelopeRejected(parentRoot) {
 		return false
 	}
 	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {

@@ -263,6 +263,7 @@ type headSnapshotForkGraph struct {
 	onGetBlock func()
 	invalid    map[common.Hash]bool
 	noEnvelope map[common.Hash]bool
+	rejected   map[common.Hash]bool
 }
 
 func (g *headSnapshotForkGraph) IsBlockInvalid(root common.Hash) bool {
@@ -277,11 +278,26 @@ func (g *headSnapshotForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaco
 }
 
 func (g *headSnapshotForkGraph) HasEnvelope(root common.Hash) bool {
-	return g.blocks[root] != nil && !g.noEnvelope[root]
+	return g.blocks[root] != nil && !g.noEnvelope[root] && !g.IsEnvelopeRejected(root)
 }
 
 func (g *headSnapshotForkGraph) PayloadAccepted(root common.Hash) (bool, bool) {
-	return true, g.blocks[root] != nil
+	return true, g.blocks[root] != nil && !g.IsEnvelopeRejected(root)
+}
+
+func (g *headSnapshotForkGraph) RejectEnvelope(root common.Hash) bool {
+	if g.blocks[root] == nil {
+		return false
+	}
+	if g.rejected == nil {
+		g.rejected = make(map[common.Hash]bool)
+	}
+	g.rejected[root] = true
+	return true
+}
+
+func (g *headSnapshotForkGraph) IsEnvelopeRejected(root common.Hash) bool {
+	return g.rejected[root]
 }
 
 func newHeadSnapshotTestStore() (*ForkChoiceStore, *headSnapshotForkGraph) {
