@@ -18,6 +18,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -195,7 +197,7 @@ func TestStoreBlobsForBlockRejectsFewerIdentifiersThanCommitments(t *testing.T) 
 	}
 
 	endpoint := &ChainEndpoint{Blobs: true}
-	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, "", block)
+	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, block)
 
 	require.Error(t, err, "a block whose commitments exceed the request cap must not pass silently")
 	require.ErrorContains(t, err, "identifier")
@@ -302,4 +304,16 @@ func TestStoreRemoteBlobsRejectsAPreGloasSidecarWithABadInclusionProof(t *testin
 
 	require.Error(t, err, "a pre-Gloas sidecar with a zero inclusion proof must be rejected")
 	require.ErrorContains(t, err, "inclusion proof")
+}
+
+// An empty JSON entry is a few bytes on the wire but a whole blob once decoded, so the entry count
+// is checked against the block's commitments before anything is decoded.
+func TestRetrieveBlobsRefusesMoreSidecarsThanCommitments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{},{},{}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := retrieveBlobsFromRemoteEndpoint(t.Context(), srv.URL, common.Hash{1}, 2)
+	require.ErrorContains(t, err, "3 sidecars")
 }

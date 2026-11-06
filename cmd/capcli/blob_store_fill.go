@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -51,6 +50,10 @@ import (
 // fillWorkers is the number of slots checked and filled at once. Each holds at most one block's
 // sidecars, a few MB.
 const fillWorkers = 8
+
+// fillRequestTimeout bounds one endpoint request. A full response, 21 blobs of hex JSON, is about
+// 6 MB. A variable so tests can shorten it.
+var fillRequestTimeout = time.Minute
 
 type BlobArchiveStoreFill struct {
 	chainCfg
@@ -115,12 +118,7 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 		return err
 	}
 	defer csn.Close()
-	// The API serves slots below the frontier from blob segments, so a store write there would
-	// never be read.
-	if frozen := csn.FrozenBlobs(); b.FromSlot < frozen {
-		return fmt.Errorf("slots below %d are served from blob segments, which this command does not repair; use --from-slot=%d or later", frozen, frozen)
-	}
-	return b.fill(ctx, db, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig), blobStore)
+	return b.fill(ctx, db, freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig), blobStore, csn.FrozenBlobs())
 }
 
 func openCaplinDB(ctx context.Context, path string, readonly bool) (kv.RwDB, error) {
@@ -133,7 +131,8 @@ func openCaplinDB(ctx context.Context, path string, readonly bool) (kv.RwDB, err
 func (b *BlobArchiveStoreFill) openBlobStore(ctx context.Context, dirs datadir.Dirs) (blob_storage.BlobStorage, func(), error) {
 	path := filepath.Join(dirs.CaplinBlobs, "chaindata")
 	if b.DryRun {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		// A directory without its data file is a store nothing was ever written to.
+		if _, err := os.Stat(filepath.Join(path, "mdbx.dat")); errors.Is(err, os.ErrNotExist) {
 			return emptyBlobStore{}, func() {}, nil
 		}
 	} else if err := os.MkdirAll(path, 0o700); err != nil {
@@ -153,17 +152,14 @@ func (emptyBlobStore) ReadBlobSidecars(context.Context, uint64, common.Hash) ([]
 	return nil, false, nil
 }
 
-func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, store blob_storage.BlobStorage) error {
-	// Past the local head a slot reads as empty, so it would pass without being checked.
-	var head uint64
-	if err := db.View(ctx, func(tx kv.Tx) (err error) {
-		head, _, err = beacon_indicies.ReadCanonicalHead(tx)
-		return err
-	}); err != nil {
-		return err
+func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, store blob_storage.BlobStorage, frozenBlobs uint64) error {
+	// The API serves slots below the frontier from blob segments, so a store write there would
+	// never be read.
+	if b.FromSlot < frozenBlobs {
+		return fmt.Errorf("slots below %d are served from blob segments, which this command does not repair; use --from-slot=%d or later", frozenBlobs, frozenBlobs)
 	}
-	if b.ToSlot > head {
-		return fmt.Errorf("--to-slot %d is past the local chain, which ends at slot %d", b.ToSlot, head)
+	if err := db.View(ctx, func(tx kv.Tx) error { return checkRangeIndexed(tx, b.FromSlot, b.ToSlot) }); err != nil {
+		return err
 	}
 	recorder := &writeErrRecorder{BlobStorage: store}
 	report := &fillReport{}
@@ -189,6 +185,72 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 	}
 	if len(report.failed) > 0 {
 		return fmt.Errorf("%d slots could not be checked or filled: %s", len(report.failed), formatSlots(report.failed))
+	}
+	return nil
+}
+
+// checkRangeIndexed fails when the local index cannot vouch for every slot of [from, to]. A slot
+// with no canonical root counts as empty, so the run must not reach one that is only unindexed:
+// past the local head, or in a stretch the backfill never wrote. Blocks are linked by their parent
+// roots, from the first block of the range back below it and from the last one to the next block
+// after the range, so an empty slot is one the chain itself skipped.
+func checkRangeIndexed(tx kv.Tx, from, to uint64) error {
+	head, _, err := beacon_indicies.ReadCanonicalHead(tx)
+	if err != nil {
+		return err
+	}
+	if to > head {
+		return fmt.Errorf("--to-slot %d is past the local chain, which ends at slot %d", to, head)
+	}
+	var prevSlot uint64
+	var prevRoot common.Hash
+	linked := func(slot uint64, root common.Hash) error {
+		parent, err := beacon_indicies.ReadParentBlockRoot(tx, root)
+		if err != nil {
+			return err
+		}
+		if prevRoot != (common.Hash{}) {
+			if parent != prevRoot {
+				return fmt.Errorf("slots %d to %d are not in the local index: block at slot %d does not follow the one at slot %d", prevSlot+1, slot-1, slot, prevSlot)
+			}
+			return nil
+		}
+		parentSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, parent)
+		if err != nil {
+			return err
+		}
+		if slot > from && (parentSlot == nil || *parentSlot >= from) {
+			return fmt.Errorf("slots %d to %d are not in the local index: the parent of the block at slot %d is not indexed below them", from, slot-1, slot)
+		}
+		return nil
+	}
+	for slot := from; ; slot++ {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return err
+		}
+		if root != (common.Hash{}) {
+			if err := linked(slot, root); err != nil {
+				return err
+			}
+			prevSlot, prevRoot = slot, root
+		}
+		if slot == to {
+			break
+		}
+	}
+	// Empty slots at the end of the range are empty only if the next block follows the last one.
+	for slot := to + 1; slot <= head; slot++ {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return err
+		}
+		if root != (common.Hash{}) {
+			if err := linked(slot, root); err != nil {
+				return err
+			}
+			break
+		}
 	}
 	return nil
 }
@@ -256,11 +318,12 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 }
 
 func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {
-	base, err := url.JoinPath(endpoint, "eth/v1/beacon/blob_sidecars")
-	if err != nil {
-		return err
-	}
-	sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, base, root)
+	commitments := block.Block.Body.GetBlobKzgCommitments()
+	// An endpoint that accepts the request and never answers fails like any other, so the next one
+	// is tried.
+	fetchCtx, cancel := context.WithTimeout(ctx, fillRequestTimeout)
+	defer cancel()
+	sidecars, err := retrieveBlobsFromRemoteEndpoint(fetchCtx, endpoint, root, commitments.Len())
 	if err != nil {
 		return err
 	}
@@ -273,7 +336,6 @@ func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, end
 	slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int { return cmp.Compare(a.Index, b.Index) })
 	// Identifiers carry the canonical root: the block read from storage keeps no transactions,
 	// so its own hash is not that root.
-	commitments := block.Block.Body.GetBlobKzgCommitments()
 	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](commitments.Len(), 40)
 	for i := range commitments.Len() {
 		ids.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: uint64(i)})
@@ -282,7 +344,8 @@ func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, end
 }
 
 // storedBlobsValid reports whether the store serves one valid sidecar per commitment: each carries
-// its commitment, a header of this block with its signature, and valid inclusion and KZG proofs. A
+// its commitment, a header of this block with its signature, a valid KZG proof and, before Gloas, a
+// valid inclusion proof. A
 // read error counts as invalid, so the slot is rewritten; a store that cannot write then stops the
 // run.
 func storedBlobsValid(ctx context.Context, store blob_storage.BlobStorage, slot uint64, root common.Hash, block *cltypes.SignedBeaconBlock) bool {

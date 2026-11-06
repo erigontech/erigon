@@ -230,42 +230,58 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	return block, nil
 }
 
-func retrieveBlobsFromRemoteEndpoint(ctx context.Context, uri string, root common.Hash) ([]*cltypes.BlobSidecar, error) {
-	blobUri := fmt.Sprintf("%s/0x%x", uri, root)
+// maxBlobSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
+const maxBlobSidecarJSONSize = 512 << 10
+
+// retrieveBlobsFromRemoteEndpoint fetches the blob sidecars of root from a beacon API base URL, which
+// may carry a query such as an API key. A response with more than maxSidecars entries is refused
+// before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
+func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
+	base, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root)).String()
 	log.Debug("[Blob Retrieval] Requesting blob sidecars", "uri", blobUri)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri, nil)
 	if err != nil {
 		return nil, err
 	}
-
 	req.Header.Set("Accept", "application/json")
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		err = r.Body.Close()
-	}()
+	defer r.Body.Close()
 
 	if r.StatusCode == http.StatusNotFound {
 		// No blobs for this block (pre-Deneb or no blob transactions)
 		return nil, nil
 	}
-
 	if r.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("blob retrieval failed, bad status code %d", r.StatusCode)
 	}
 
 	var blobsResponse struct {
-		Data []*cltypes.BlobSidecar `json:"data"`
+		Data []json.RawMessage `json:"data"`
 	}
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&blobsResponse); err != nil {
+	body := io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize)
+	if err := json.NewDecoder(body).Decode(&blobsResponse); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
-	return blobsResponse.Data, nil
+	if len(blobsResponse.Data) > maxSidecars {
+		return nil, fmt.Errorf("blob response has %d sidecars, the block has %d commitments", len(blobsResponse.Data), maxSidecars)
+	}
+	sidecars := make([]*cltypes.BlobSidecar, len(blobsResponse.Data))
+	for i, raw := range blobsResponse.Data {
+		sidecars[i] = &cltypes.BlobSidecar{}
+		if err := sidecars[i].UnmarshalJSON(raw); err != nil {
+			return nil, fmt.Errorf("blob retrieval decode failed %w", err)
+		}
+	}
+	return sidecars, nil
 }
 
 func (c *ChainEndpoint) Run(ctx context.Context) error {
@@ -298,11 +314,6 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		return err
 	}
 
-	baseUriBlob, err := url.JoinPath(c.Endpoint, "eth/v1/beacon/blob_sidecars")
-	if err != nil {
-		return err
-	}
-
 	log.Info("Hooked", "uri", baseUri)
 	// Let's fetch the head first
 	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
@@ -324,7 +335,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
-	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -356,7 +367,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
+		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, currentBlock); err != nil {
 			return false, err
 		}
 

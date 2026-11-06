@@ -269,7 +269,7 @@ func (b *BlobArchiveStoreFill) fromCmd(cmd *cli.Command) error {
 func (b *BlobArchiveStoreFill) command() *cli.Command {
 	return &cli.Command{
 		Name:  "blob-archive-store-fill",
-		Usage: "refill missing or invalid blob sidecars of a slot range from beacon API endpoints; the node must be stopped",
+		Usage: "refill missing or invalid blob sidecars of a slot range from beacon API endpoints; stop the node first, erigon or standalone caplin",
 		Flags: []cli.Flag{
 			&cliutils.ChainFlag, &cliutils.DataDirFlag,
 			blobStoreFillEndpointFlag, blobStoreFillFromSlotFlag, blobStoreFillToSlotFlag, blobStoreFillDryRunFlag,

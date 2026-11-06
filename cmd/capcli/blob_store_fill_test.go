@@ -23,11 +23,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
@@ -55,6 +57,8 @@ type fillFixture struct {
 	blocks   *storeCheckReader
 	store    blob_storage.BlobStorage
 	sidecars map[common.Hash][]*cltypes.BlobSidecar
+	tip      common.Hash // the last block added; the next one builds on it
+	frozen   uint64      // the frozen blob frontier
 }
 
 func newFillFixture(t *testing.T) *fillFixture {
@@ -80,6 +84,7 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 	t := f.t
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = slot
+	block.Block.ParentRoot = f.tip
 	if txs {
 		block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x02, 0x01}})
 	}
@@ -107,8 +112,15 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 			common.Bytes48(commitments[i]), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusion))
 	}
 	require.NoError(t, f.db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHeaderSlot(tx, root, slot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteParentBlockRoot(tx, root, f.tip); err != nil {
+			return err
+		}
 		return beacon_indicies.MarkRootCanonical(tx, slot, root)
 	}))
+	f.tip = root
 	if txs {
 		stored := block.Clone().(*cltypes.SignedBeaconBlock)
 		encoded, err := block.EncodeSSZ(nil)
@@ -164,7 +176,7 @@ func (f *fillFixture) fill(cmd *BlobArchiveStoreFill, store blob_storage.BlobSto
 	if store == nil {
 		store = f.store
 	}
-	return cmd.fill(f.t.Context(), f.db, f.blocks, store)
+	return cmd.fill(f.t.Context(), f.db, f.blocks, store, f.frozen)
 }
 
 func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
@@ -211,6 +223,7 @@ func TestBlobArchiveStoreFillReplacesInvalidSidecars(t *testing.T) {
 // report success over it.
 func TestBlobArchiveStoreFillReportsASlotWithoutCanonicalRoot(t *testing.T) {
 	f := newFillFixture(t)
+	f.addBlock(fillTestSlot-1, 0)
 	f.blocks.blocks[fillTestSlot] = cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	f.addBlock(fillTestSlot+1, 0)
 	url, _ := f.endpoint(false)
@@ -278,28 +291,144 @@ func TestBlobArchiveStoreFillUsesTheCanonicalRootOfAStoredBlock(t *testing.T) {
 	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
-// A dry run on a datadir without a blob store must report the slot and create nothing.
-func TestBlobArchiveStoreFillDryRunCreatesNoBlobStore(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	block.Block.Slot = fillTestSlot
-	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
-	db, err := openCaplinDB(t.Context(), dirs.CaplinIndexing, false)
-	require.NoError(t, err)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
-	}))
-	db.Close()
+// A dry run must not write: it creates no directory and opens an existing blob store read-only.
+func TestBlobArchiveStoreFillDryRunIsReadOnly(t *testing.T) {
+	for name, store := range map[string]string{"no blob store": "", "empty blob directory": "dir", "read-only blob store": "file"} {
+		t.Run(name, func(t *testing.T) {
+			dirs := datadir.Open(t.TempDir())
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+			block.Block.Slot = fillTestSlot
+			block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+			db, err := openCaplinDB(t.Context(), dirs.CaplinIndexing, false)
+			require.NoError(t, err)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
+			}))
+			db.Close()
+			blobData := filepath.Join(dirs.CaplinBlobs, "chaindata", "mdbx.dat")
+			if store != "" {
+				require.NoError(t, os.MkdirAll(filepath.Dir(blobData), 0o700))
+			}
+			if store == "file" {
+				blobDB, err := openCaplinDB(t.Context(), filepath.Dir(blobData), false)
+				require.NoError(t, err)
+				blobDB.Close()
+				require.NoError(t, os.Chmod(blobData, 0o400)) // a read-write open fails
+			}
 
-	cmd := &BlobArchiveStoreFill{
-		chainCfg:     chainCfg{Chain: networkname.Mainnet},
-		outputFolder: outputFolder{Datadir: dirs.DataDir},
-		FromSlot:     fillTestSlot,
-		ToSlot:       fillTestSlot,
-		DryRun:       true,
+			cmd := &BlobArchiveStoreFill{
+				chainCfg:     chainCfg{Chain: networkname.Mainnet},
+				outputFolder: outputFolder{Datadir: dirs.DataDir},
+				FromSlot:     fillTestSlot,
+				ToSlot:       fillTestSlot,
+				DryRun:       true,
+			}
+			require.NoError(t, cmd.Run(t.Context()))
+			require.NoDirExists(t, dirs.Chaindata, "the dry run created datadir directories")
+			if store != "file" {
+				require.NoFileExists(t, blobData)
+			}
+		})
 	}
-	require.NoError(t, cmd.Run(t.Context()))
-	require.NoDirExists(t, filepath.Join(dirs.CaplinBlobs, "chaindata"))
+}
+
+// The insert stores nothing for a response whose headers name another block and returns no error,
+// so only the read-back after the fetch can tell that the slot is still invalid.
+func TestBlobArchiveStoreFillReportsASlotTheResponseDidNotRepair(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	bad := cloneSidecar(t, f.sidecars[root][0])
+	bad.SignedBlockHeader.Header.ProposerIndex++
+	require.NoError(t, f.store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{bad}))
+	f.sidecars[root] = []*cltypes.BlobSidecar{bad} // the endpoint serves the same wrong header
+	url, _ := f.endpoint(false)
+
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil)
+	require.ErrorContains(t, err, fmt.Sprint(fillTestSlot))
+}
+
+// An endpoint that never answers, or answers with a malformed or oversized body, fails like any
+// other, so the next endpoint fills the slot.
+func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
+	defer func(old time.Duration) { fillRequestTimeout = old }(fillRequestTimeout)
+	fillRequestTimeout = 200 * time.Millisecond
+	for name, respond := range map[string]func(http.ResponseWriter, *http.Request){
+		"stalled":   func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
+		"null blob": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{"blob":null}]}`)) },
+		"too many":  func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{},{},{}]}`)) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			root := f.addBlock(fillTestSlot, 1)
+			bad := httptest.NewServer(http.HandlerFunc(respond))
+			t.Cleanup(bad.Close)
+			good, _ := f.endpoint(false)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{bad.URL, good}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+			require.True(t, f.storedValid(fillTestSlot, root))
+		})
+	}
+}
+
+// Providers that authenticate with a query-string key must get the block id in the path.
+func TestBlobArchiveStoreFillKeepsTheEndpointQuery(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	good, requests := f.endpoint(false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("apikey") != "k" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{srv.URL + "?apikey=k"}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+	require.EqualValues(t, 1, requestsFor(requests, root))
+}
+
+func TestBlobArchiveStoreFillRefusesSlotsBelowTheFrozenFrontier(t *testing.T) {
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot, 1)
+	f.frozen = fillTestSlot + 1
+	url, requests := f.endpoint(false)
+
+	err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil)
+	require.ErrorContains(t, err, "served from blob segments")
+	n := 0
+	requests.Range(func(any, any) bool { n++; return true })
+	require.Zero(t, n)
+}
+
+// A stretch the index does not cover reads as empty slots; the run must refuse it rather than
+// report it as checked. The gap is inside the range, before its first block, or after its last.
+func TestBlobArchiveStoreFillRefusesAnUnindexedStretch(t *testing.T) {
+	for name, tc := range map[string]struct{ from, to uint64 }{
+		"inside":   {fillTestSlot, fillTestSlot + 3},
+		"leading":  {fillTestSlot + 1, fillTestSlot + 3},
+		"trailing": {fillTestSlot, fillTestSlot + 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			f.addBlock(fillTestSlot, 1)
+			f.tip = common.HexToHash("0x0a") // slots +1 and +2 hold a block the index never got
+			f.addBlock(fillTestSlot+3, 1)
+			url, _ := f.endpoint(false)
+
+			err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: tc.from, ToSlot: tc.to}, nil)
+			require.ErrorContains(t, err, "not in the local index")
+		})
+	}
+}
+
+func cloneSidecar(t *testing.T, sidecar *cltypes.BlobSidecar) *cltypes.BlobSidecar {
+	t.Helper()
+	encoded, err := sidecar.EncodeSSZ(nil)
+	require.NoError(t, err)
+	clone := &cltypes.BlobSidecar{}
+	require.NoError(t, clone.DecodeSSZ(encoded, int(clparams.DenebVersion)))
+	return clone
 }
 
 type failingWrites struct{ blob_storage.BlobStorage }
