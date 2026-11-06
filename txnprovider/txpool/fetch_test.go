@@ -1442,7 +1442,7 @@ func TestRetryBudgetSpansTheSentryWriteTimeout(t *testing.T) {
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a stalled peer holds its queued retries until sentry's write timeout")
 }
 
-func TestStaleRetryBatchIsNotSent(t *testing.T) {
+func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
 	h1, h2, peerA, peerB, peerC := [32]byte{0xd1}, [32]byte{0xd2}, [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
@@ -1451,9 +1451,42 @@ func TestStaleRetryBatchIsNotSent(t *testing.T) {
 		a.announceSized(t, peer, blobTxnSize, h1, h2)
 	}
 	a.requestedFrom = nil
-	a.onSend = a.timeoutSweep // the first send to B stalls past the timeout, so another sweep asks C
+	a.onSend = a.timeoutSweep // the first send to B stalls past the timeout, so another sweep runs
 	a.timeoutSweep()
-	require.Equal(t, [][64]byte{peerB, peerC, peerC}, a.requestedFrom, "B's second batch now belongs to C")
+	require.Equal(t, [][64]byte{peerB, peerC, peerB}, a.requestedFrom, "only the sent hash moves on to C; the unsent one goes to B once")
+}
+
+func TestStalledSendKeepsTheFinalFallback(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	h1, h2, peerA, peerB := [32]byte{0xd3}, [32]byte{0xd4}, [64]byte{0xa}, [64]byte{0xb}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, h1, h2)
+	a.announceSized(t, peerB, blobTxnSize, h1, h2)
+	a.requestedFrom = nil
+	a.onSend = a.timeoutSweep
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerB, peerB}, a.requestedFrom, "B is the last announcer of the unsent hash, so it is still asked")
+}
+
+func TestStalledFirstChunkKeepsTheLastChunkWithItsPeer(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, 257)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	a.onSend = func() { // A's first request stalls past the timeout while B announces the same hashes
+		*a.now = a.now.Add(txFetchTimeout)
+		a.announce(t, peerB, hashes...)
+	}
+	a.announce(t, peerA, hashes...)
+	require.Equal(t, [][64]byte{peerA, peerB, peerA}, a.requestedFrom, "B asks only for the timed-out chunk")
+	r, ok := a.fetch.requested.Get(hashes[256][:])
+	require.True(t, ok)
+	require.Equal(t, fetchPeer{a.sentryClient, peerA}, r.peer)
+	require.Equal(t, []fetchPeer{{a.sentryClient, peerB}}, r.alternates)
 }
 
 func TestRetryBudgetCountsTheSizeSlack(t *testing.T) {
