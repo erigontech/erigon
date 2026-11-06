@@ -122,6 +122,7 @@ type Downloader struct {
 
 	// Temporary manifest torrents must be dropped before local seeding can reuse their info hashes.
 	chainTomlTorrentLock sync.Mutex
+	chainTomlSeedPending atomic.Bool
 
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.
@@ -457,7 +458,7 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 // PublishLocalChainToml generates chain.toml from local torrents + preverified registry,
 // builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
 // derived from the preverified registry's ExpectBlocks.
-// It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
+// It also schedules seeding so other nodes can download the manifest.
 func (d *Downloader) PublishLocalChainToml() error {
 	d.lock.RLock()
 	updater := d.enrUpdater
@@ -467,9 +468,15 @@ func (d *Downloader) PublishLocalChainToml() error {
 		return err
 	}
 
-	// Seed the chain.toml torrent so other nodes can download it by info-hash.
-	if err := d.seedChainTomlTorrent(); err != nil {
-		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+	if !d.chainTomlSeedPending.CompareAndSwap(false, true) {
+		return nil
+	}
+	if !d.spawn(func() {
+		if err := d.seedChainTomlTorrent(); err != nil {
+			d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+		}
+	}) {
+		d.chainTomlSeedPending.Store(false)
 	}
 	return nil
 }
@@ -478,6 +485,14 @@ func (d *Downloader) PublishLocalChainToml() error {
 func (d *Downloader) seedChainTomlTorrent() error {
 	d.chainTomlTorrentLock.Lock()
 	defer d.chainTomlTorrentLock.Unlock()
+	// Clear before loading so later publications can queue another task with updated metadata.
+	d.chainTomlSeedPending.Store(false)
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	if err := d.ctx.Err(); err != nil {
+		return err
+	}
 
 	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
 	if err != nil {

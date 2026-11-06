@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,6 +104,7 @@ func TestChainTomlDiscoveryPreservesConcurrentSeed(t *testing.T) {
 			defer store.Close()
 			defer client.Close()
 			d := &Downloader{
+				ctx:           t.Context(),
 				cfg:           &downloadercfg.Cfg{Dirs: dirs},
 				torrentClient: client,
 				torrentFS:     torrentFS,
@@ -142,6 +144,95 @@ func TestChainTomlDiscoveryPreservesConcurrentSeed(t *testing.T) {
 			assert.Empty(t, entries)
 		})
 	}
+}
+
+func TestChainTomlDiscoveryDoesNotBlockDownloadBatches(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		discover func(*Downloader, context.Context, string, NodeSource)
+	}{
+		{name: "acquire", discover: (*Downloader).acquireChainToml},
+		{name: "verify", discover: (*Downloader).verifyChainToml},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test := newDownloaderTest(t)
+			d := test.downloader
+			d.EnableP2PManifest()
+			require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, "snapshot.seg"), []byte("snapshot data"), 0o644))
+			require.NoError(t, d.AddNewSeedableFile(t.Context(), "snapshot.seg"))
+			snapshotSpec, err := d.torrentFS.LoadByName("snapshot.seg")
+			require.NoError(t, err)
+			require.NoError(t, PublishChainToml(d.snapDir(), d.torrentFS, "", nil))
+			manifestSpec, err := d.torrentFS.LoadByName(ChainTomlFileName)
+			require.NoError(t, err)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			node := makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: manifestSpec.InfoHash})
+			ns := &mockNodeSource{nodes: []*enode.Node{node}}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				tc.discover(d, ctx, "testnet", ns)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+			require.Eventually(t, func() bool {
+				_, ok := d.torrentClient.Torrent(manifestSpec.InfoHash)
+				return ok
+			}, 5*time.Second, time.Millisecond)
+
+			batchesDone := make(chan struct{})
+			var batchErr error
+			go func() {
+				defer close(batchesDone)
+				items := []preverifiedSnapshot{{InfoHash: snapshotSpec.InfoHash, Name: "snapshot.seg"}}
+				for range 2 {
+					if batchErr = d.DownloadSnapshots(t.Context(), items, "completed batch"); batchErr != nil {
+						return
+					}
+				}
+			}()
+			defer func() {
+				cancel()
+				<-batchesDone
+			}()
+			select {
+			case <-batchesDone:
+				require.NoError(t, batchErr)
+			case <-time.After(5 * time.Second):
+				t.Fatal("completed batches must not wait for peer manifest downloads")
+			}
+			pending, registered := d.torrentClient.Torrent(manifestSpec.InfoHash)
+			require.True(t, registered)
+			require.False(t, pending.Complete().Bool(), "discovery must still be waiting for the peer")
+
+			cancel()
+			<-done
+			require.Eventually(t, func() bool {
+				seed, registered := d.torrentClient.Torrent(manifestSpec.InfoHash)
+				return registered && seed.Complete().Bool()
+			}, 5*time.Second, time.Millisecond, "download cleanup must preserve the local seed")
+			entries, err := os.ReadDir(test.dirs.Tmp)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestChainTomlSeedStopsAfterClose(t *testing.T) {
+	d := newDownloaderTest(t).downloader
+	d.chainTomlTorrentLock.Lock()
+	unlock := sync.OnceFunc(d.chainTomlTorrentLock.Unlock)
+	defer unlock()
+
+	require.NoError(t, d.PublishLocalChainToml())
+	d.lockingClose()
+	unlock()
+	d.wg.Wait()
+	require.Empty(t, d.torrentClient.Torrents(), "pending seeding must not add torrents after shutdown")
 }
 
 func TestDownloadChainTomlByInfoHashPreservesSnapshotFiles(t *testing.T) {
