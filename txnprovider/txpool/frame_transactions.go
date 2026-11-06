@@ -211,8 +211,10 @@ func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Has
 			continue
 		}
 		reason := p.validateFrame(txn, txns.IsLocal[i])
-		if senderID, ok := p.senders.getID(txns.Senders.AddressAt(i)); reason == txpoolcfg.Success && ok {
-			reason = p.checkFrameSender(txn, senderID)
+		if reason == txpoolcfg.Success {
+			if senderID, ok := p.senders.getID(txns.Senders.AddressAt(i)); ok {
+				reason = p.checkFrameSender(txn, senderID)
+			}
 		}
 		batch.results[txn] = frameValidationResult{reason: reason}
 	}
@@ -372,10 +374,14 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 
 // checkFrameSender requires the pool lock. A matching nonce and key set may replace the existing frame.
 func (p *TxPool) checkFrameSender(txn *TxnSlot, senderID uint64) txpoolcfg.DiscardReason {
-	pooledFrame := p.all.senderIDFrameTxn[senderID]
-	if pooledFrame != nil && (pooledFrame.TxnSlot.Nonce != txn.Nonce ||
-		!slices.Equal(pooledFrame.TxnSlot.Txn.(*types.FrameTransaction).NonceKeys, txn.Txn.(*types.FrameTransaction).NonceKeys)) {
-		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{blocker: pooledFrame.TxnSlot.IDHash})
+	pooled := p.all.senderIDFrameTxn[senderID]
+	if pooled == nil {
+		return txpoolcfg.Success
+	}
+	pooledFrame := pooled.TxnSlot.Txn.(*types.FrameTransaction)
+	candidateFrame := txn.Txn.(*types.FrameTransaction)
+	if pooled.TxnSlot.Nonce != txn.Nonce || !slices.Equal(pooledFrame.NonceKeys, candidateFrame.NonceKeys) {
+		p.frameRejections.Add(string(txn.IDHash[:]), frameRejection{blocker: pooled.TxnSlot.IDHash})
 		return txpoolcfg.InvalidFrame
 	}
 	return txpoolcfg.Success

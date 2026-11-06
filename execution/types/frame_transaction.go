@@ -116,9 +116,9 @@ type FrameTransaction struct {
 type frameTransactionRLP FrameTransaction
 
 type frameSignatureValidation struct {
-	sender     common.Address
-	hash       common.Hash
-	signatures []FrameSignature
+	sender      common.Address
+	signingHash common.Hash
+	signatures  []FrameSignature
 }
 
 func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
@@ -267,45 +267,47 @@ func (tx *FrameTransaction) validateSignatures() error {
 	if len(tx.Signatures) == 0 {
 		return nil
 	}
-	var hash common.Hash
+	var signingHash common.Hash
 	for i := range tx.Signatures {
 		sig := &tx.Signatures[i]
 		if (sig.Scheme == FrameSignatureSecp256k1 || sig.Scheme == FrameSignatureP256) && len(sig.Message) == 0 {
-			hash = tx.SigningHash(nil)
+			signingHash = tx.SigningHash(nil)
 			break
 		}
 	}
 	// Successful cryptographic checks are cached; Validate still checks structure and gas.
 	// Copied signer, message and signature bytes, plus a fresh digest for signatures over
 	// the transaction, prevent changed inputs from reusing an earlier result.
-	var verified, updated []FrameSignature
-	if cached := tx.verifiedSignatures.Load(); cached != nil && cached.sender == tx.SenderAddress && cached.hash == hash {
-		verified = cached.signatures
+	var cachedSignatures, updatedSignatures []FrameSignature
+	if cached := tx.verifiedSignatures.Load(); cached != nil && cached.sender == tx.SenderAddress && cached.signingHash == signingHash {
+		cachedSignatures = cached.signatures
 	}
 	for i := range tx.Signatures {
 		sig := &tx.Signatures[i]
-		if sig.Scheme != FrameSignatureArbitrary && i < len(verified) &&
-			sig.Scheme == verified[i].Scheme && bytes.Equal(sig.Signer, verified[i].Signer) &&
-			bytes.Equal(sig.Message, verified[i].Message) && bytes.Equal(sig.Signature, verified[i].Signature) {
+		if sig.Scheme != FrameSignatureArbitrary && i < len(cachedSignatures) &&
+			sig.Scheme == cachedSignatures[i].Scheme && bytes.Equal(sig.Signer, cachedSignatures[i].Signer) &&
+			bytes.Equal(sig.Message, cachedSignatures[i].Message) && bytes.Equal(sig.Signature, cachedSignatures[i].Signature) {
 			continue
 		}
-		if err := sig.validate(tx.SenderAddress, hash); err != nil {
+		if err := sig.validate(tx.SenderAddress, signingHash); err != nil {
 			return fmt.Errorf("invalid frame signature %d: %w", i, err)
 		}
 		if sig.Scheme == FrameSignatureArbitrary {
 			continue
 		}
-		if updated == nil {
-			updated = make([]FrameSignature, len(tx.Signatures))
-			copy(updated, verified)
+		if updatedSignatures == nil {
+			updatedSignatures = make([]FrameSignature, len(tx.Signatures))
+			copy(updatedSignatures, cachedSignatures)
 		}
-		updated[i] = FrameSignature{
+		updatedSignatures[i] = FrameSignature{
 			Scheme: sig.Scheme, Signer: bytes.Clone(sig.Signer),
 			Message: bytes.Clone(sig.Message), Signature: bytes.Clone(sig.Signature),
 		}
 	}
-	if updated != nil {
-		tx.verifiedSignatures.Store(&frameSignatureValidation{sender: tx.SenderAddress, hash: hash, signatures: updated})
+	if updatedSignatures != nil {
+		tx.verifiedSignatures.Store(&frameSignatureValidation{
+			sender: tx.SenderAddress, signingHash: signingHash, signatures: updatedSignatures,
+		})
 	}
 	return nil
 }
