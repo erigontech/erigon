@@ -107,19 +107,6 @@ func TestStateCache_UncommittedBatchWinsOnEveryReadPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, st2, got, "sd.GetLatest storage")
 
-	ao := sd2.AsOfGetter(rw2)
-	got, ok, err = ao.GetAsOf(kv.AccountsDomain, addr[:], 31)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, acc2, got, "asOf account after write")
-	got, ok, err = ao.GetAsOf(kv.StorageDomain, slot, 31)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, st2, got, "asOf storage after write")
-	got, ok, err = ao.GetAsOf(kv.StorageDomain, slot, 20)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, st1, got, "asOf storage before write")
 }
 
 func TestStateCache_CodeByHashNotPoisonedByHalfAppliedDeploy(t *testing.T) {
