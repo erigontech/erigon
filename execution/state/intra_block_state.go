@@ -2861,8 +2861,9 @@ func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 	}
 }
 
-// withholdCreatedEmptyAccounts replaces the writes of accounts the tx observed as
-// absent and left empty (EIP-161) with the EIP-161 removal. An account that existed
+// withholdCreatedEmptyAccounts drops the writes of accounts the tx observed as absent
+// and left empty (EIP-161), or replaces them with the EIP-161 removal when the version
+// map holds cells for the account. An account that existed
 // before is kept even when it ends empty — clearing it needs an explicit delete,
 // which encodeExistingEmptyRemovals emits.
 func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
