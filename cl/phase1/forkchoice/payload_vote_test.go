@@ -734,6 +734,57 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 	}
 }
 
+func TestValidateParentPayloadPathWithRejectedParent(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	parentRoot := common.Hash{1}
+	executionHash := common.Hash{2}
+	previousExecutionHash := common.Hash{3}
+	parent := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	parent.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlockHash:       executionHash,
+		ParentBlockHash: previousExecutionHash,
+	}}
+
+	for _, test := range []struct {
+		name     string
+		full     bool
+		rejected bool
+	}{
+		{name: "rejected FULL", full: true, rejected: true},
+		{name: "rejected EMPTY", rejected: true},
+		{name: "missing FULL", full: true},
+	} {
+		for _, requireEngineAcceptance := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
+				f := newPayloadVoteTestStore(t, parentRoot, false, false)
+				f.forkGraph = payloadVoteForkGraph{
+					ForkGraph:         ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent}},
+					rejectedEnvelopes: map[common.Hash]bool{parentRoot: test.rejected},
+				}
+				f.executionPayloadStatus.Add(executionHash, execution_client.PayloadStatusValidated)
+				child := cltypes.NewBeaconBlock(cfg, clparams.GloasVersion)
+				child.ParentRoot = parentRoot
+				parentHash := previousExecutionHash
+				if test.full {
+					parentHash = executionHash
+				}
+				child.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{ParentBlockHash: parentHash}}
+
+				err := f.validateParentPayloadPath(child, requireEngineAcceptance)
+				switch {
+				case !test.full:
+					require.NoError(t, err)
+				case test.rejected:
+					require.Error(t, err)
+					require.NotErrorIs(t, err, ErrParentEnvelopePending)
+				default:
+					require.ErrorIs(t, err, ErrParentEnvelopePending)
+				}
+			})
+		}
+	}
+}
+
 func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(nil, &cltypes.BeaconBlock{}))
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(&cltypes.SignedBeaconBlock{}, &cltypes.BeaconBlock{}))

@@ -472,6 +472,9 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, 
 	}
 
 	if f.isParentNodeFull(block) {
+		if f.IsEnvelopeRejected(block.ParentRoot) {
+			return errors.New("parent execution payload envelope is rejected")
+		}
 		// Missing local data is retryable because sync may persist the envelope later.
 		if !f.isPayloadLocallyAvailable(block.ParentRoot) || requireEngineAcceptance && !f.isPayloadAvailable(block.ParentRoot) {
 			return ErrParentEnvelopePending
