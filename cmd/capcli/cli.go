@@ -390,20 +390,19 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 					break
 				}
 
-				// check if we have all the blobs, under the root being walked: the stored body has no
-				// transactions, so its own hash is not that root
+				// Look the blobs up under the walked root: the stored body has no execution transactions
+				// or withdrawals, so its own hash is not the block root.
 				kzgCommitments := 0
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, currentRoot)
+				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
-				if kzgCommitmentsInDB != uint32(kzgCommitments) {
+				if !stored {
 					break
 				}
-
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
