@@ -73,7 +73,7 @@ func (w *deletedFilesWatch) warn(now time.Time, paths []string) (oldest string, 
 // one of them does not go away.
 func watchDeletedMappings(ctx context.Context, dirs datadir.Dirs, logger log.Logger) {
 	var roots []string // resolved, because any of them can be a symlink to another disk
-	for _, d := range []string{dirs.DataDir, dirs.Chaindata, dirs.Tmp, dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.Downloader} {
+	for _, d := range dirs.All() {
 		if resolved, err := filepath.EvalSymlinks(d); err == nil && !slices.Contains(roots, resolved) {
 			roots = append(roots, resolved)
 		}
