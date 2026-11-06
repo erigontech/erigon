@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -243,6 +244,64 @@ func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
 			require.Equal(t, *uint256.NewInt(7), got.Balance)
 		})
 	}
+}
+
+// TestEstimateFlushReplacesBALAddressMarker pins that the creating tx's in-flight flush may
+// replace its Done existence marker with an Estimate (the marker value is a placeholder),
+// and that its complete flush then publishes the tx value as Done.
+func TestEstimateFlushReplacesBALAddressMarker(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	a := accounts.InternAddress(common.HexToAddress("0xacc5"))
+	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
+	marker := accounts.NewAccount()
+	marker.Balance = *uint256.NewInt(7)
+	inFlight := accounts.NewAccount()
+
+	vm := NewVersionMap(types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}})
+	vm.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
+	ws := &WriteSet{}
+	ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &inFlight})
+
+	vm.FlushVersionedWrites(ws, false)
+	_, res, ok := vm.ReadAddress(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDependency, res.Status())
+
+	vm.FlushVersionedWrites(ws, true)
+	got, res, ok := vm.ReadAddress(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, inFlight.Balance, got.Balance)
+}
+
+// TestEstimateFlushKeepsBALSeededCode pins that the deploying tx's in-flight flush of the
+// code its BAL entry already seeded leaves the seeded Done code cells in place.
+func TestEstimateFlushKeepsBALSeededCode(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	a := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	bytecode := []byte{0x60, 0x00}
+	vm := NewVersionMap(types.BlockAccessList{{Address: a.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: bytecode}}}})
+	code := accounts.NewCode(bytecode)
+	v := Version{TxIndex: 0}
+	ws := &WriteSet{}
+	ws.SetCode(a, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: a, Path: CodePath, Version: v}, Val: code})
+	ws.SetCodeSize(a, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: a, Path: CodeSizePath, Version: v}, Val: code.Len()})
+
+	vm.FlushVersionedWrites(ws, false)
+	got, res, ok := vm.ReadCode(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, code.Hash, got.Hash)
+	size, res, ok := vm.ReadCodeSize(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, len(bytecode), size)
 }
 
 func TestBALMarkedAccountReadsCommittedBaseOncePerBlock(t *testing.T) {
