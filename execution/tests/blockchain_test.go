@@ -2630,3 +2630,48 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 }
+
+// A BAL block large enough for the committer's base-account prefetch must reproduce the serial root: the
+// prefetched block-start accounts replace the per-key reads of the touch bookkeeping.
+func TestParallelLargeBALBlockMatchesSerial(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	config := libchain.AllProtocolChanges
+	gasPrice := uint256.NewInt(10_000_000_000)
+	keys := make([]*ecdsa.PrivateKey, 20)
+	alloc := types.GenesisAlloc{}
+	for i := range keys {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = key
+		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
+	}
+	receivers := make([]common.Address, 30)
+	for i := range receivers {
+		receivers[i] = common.BytesToAddress([]byte{byte(i) + 1, 0xbe})
+		if i%2 == 0 { // existing accounts: a transfer changes only their balance
+			alloc[receivers[i]] = types.GenesisAccount{Balance: big.NewInt(1), Nonce: 7}
+		}
+	}
+	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]),
+		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
+		execmoduletester.WithExperimentalBAL())
+	signer := types.LatestSignerForChainID(config.ChainID)
+	nonces := make([]uint64, len(keys))
+	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		for i := range 1100 {
+			s := i % len(keys)
+			signed, err := types.SignTx(types.NewTransaction(nonces[s], receivers[i%len(receivers)], uint256.NewInt(1), 21_000, gasPrice, nil), *signer, keys[s])
+			require.NoError(t, err)
+			b.AddTx(signed)
+			nonces[s]++
+		}
+	})
+	require.NoError(t, err)
+	require.Len(t, chainPack.Blocks[0].Transactions(), 1100)
+	dbg.Exec3Parallel = true
+	require.NoError(t, m.InsertChain(chainPack))
+}
