@@ -139,6 +139,20 @@ func TestCheckCompatibleBaseFeeDenominator(t *testing.T) {
 	require.Equal(t, uint64(9), err.RewindTo)
 }
 
+// TestCheckConfigZeroBaseFeeDenominator: an explicit zero denominator is
+// rejected where genesis setup validates the config, before CalcBaseFee
+// divides by it.
+func TestCheckConfigZeroBaseFeeDenominator(t *testing.T) {
+	withDenominator := func(denominator *uint64) *chain.Config {
+		cfg := chain.AllProtocolChanges.Copy()
+		cfg.BaseFeeChangeDenominator = denominator
+		return cfg
+	}
+	require.NoError(t, withDenominator(nil).CheckConfigForkOrder())
+	require.NoError(t, withDenominator(common.NewUint64(1)).CheckConfigForkOrder())
+	require.ErrorContains(t, withDenominator(common.NewUint64(0)).CheckConfigForkOrder(), "baseFeeChangeDenominator")
+}
+
 func TestCheckCompatibleTimestampForks(t *testing.T) {
 	for _, tc := range []struct {
 		name           string

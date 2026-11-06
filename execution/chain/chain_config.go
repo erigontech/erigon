@@ -19,6 +19,7 @@ package chain
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -683,8 +684,12 @@ func (c *Config) SameTimestampForks(newcfg *Config) bool {
 	return true
 }
 
-// CheckConfigForkOrder checks that we don't "skip" any forks
+// CheckConfigForkOrder checks that we don't "skip" any forks, and that an
+// explicit BaseFeeChangeDenominator is positive.
 func (c *Config) CheckConfigForkOrder() error {
+	if c != nil && c.BaseFeeChangeDenominator != nil && *c.BaseFeeChangeDenominator == 0 {
+		return errors.New("baseFeeChangeDenominator must be positive")
+	}
 	if c != nil && c.ChainID != nil && c.ChainID.Uint64() == 77 {
 		return nil
 	}
