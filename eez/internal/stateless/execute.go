@@ -139,7 +139,8 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 		if err := protocol.CheckTxGas(engine, chainRules.IsAmsterdam, txn, gp); err != nil {
 			return nil, fmt.Errorf("block %d: transaction %d: %w", block.NumberU64(), i, err)
 		}
-		receipt, err := protocol.ApplyTransactionWithEVM(chainConfig, engine, gp, ibs, ws, header, txn, &gasUsed, vm.Config{}, evm)
+		receipt, err := protocol.ApplyTransactionWithEVMPostProcessed(chainConfig, engine, gp, ibs, ws, header, txn, &gasUsed, vm.Config{}, evm,
+			protocol.TxPostProcess(engine, chainConfig, ibs, block.Transactions(), i))
 		if err != nil {
 			return nil, fmt.Errorf("block %d: transaction %d: %w", block.NumberU64(), i, err)
 		}

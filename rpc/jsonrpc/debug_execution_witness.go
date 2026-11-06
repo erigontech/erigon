@@ -690,6 +690,9 @@ func (api *BaseAPI) buildAccessedState(
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
+		if err = protocol.PostProcessTx(engine, chainConfig, ibs, block.Transactions(), txIndex); err != nil {
+			return nil, nil, fmt.Errorf("failed to post-process tx %d: %w", txIndex, err)
+		}
 
 		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
 			return nil, nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
@@ -2113,6 +2116,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
+		}
+		if err = protocol.PostProcessTx(engine, chainConfig, ibs, block.Transactions(), txIndex); err != nil {
+			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to post-process tx %d: %w", txIndex, err)
 		}
 
 		// Finalize tx - state changes go to the witness stateless

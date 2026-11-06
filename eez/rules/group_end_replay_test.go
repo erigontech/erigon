@@ -17,22 +17,102 @@
 package rules_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/eez/deriver/derivertest"
+	"github.com/erigontech/erigon/eez/internal/stateless"
 	"github.com/erigontech/erigon/eez/protocol"
 	execprotocol "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+// branchingReaderCase ends a group, then calls a reader that reads the
+// balance of one of two accounts as EEZL2's balance is zero or not: a witness
+// recorded without the burn holds the other account.
+func branchingReaderCase() groupEndCase {
+	eezl2 := protocol.RollupXEEZL2Address
+	reader, unburnt, burnt := common.HexToAddress("0x8eb0"), common.HexToAddress("0x8eb1"), common.HexToAddress("0x8eb2")
+	code := append([]byte{byte(vm.PUSH20)}, eezl2[:]...)
+	code = append(code, byte(vm.BALANCE), byte(vm.ISZERO), byte(vm.PUSH1), 52, byte(vm.JUMPI))
+	code = append(storeOf(code, unburnt, vm.BALANCE, 0), byte(vm.STOP), byte(vm.JUMPDEST))
+	code = append(storeOf(code, burnt, vm.BALANCE, 0), byte(vm.STOP))
+	alloc := types.GenesisAlloc{
+		derivertest.UserAddress(): groupEndRich,
+		reader:                    {Code: code},
+		unburnt:                   {Balance: big.NewInt(1)},
+		burnt:                     {Balance: big.NewInt(2)},
+	}
+	recipient := common.HexToAddress("0x7ec1")
+	return groupEndCase{"reader branching on the burn", alloc, eezl2, func(c *groupEndChain) []types.Transaction {
+		return []types.Transaction{
+			c.nativeTx(protocol.LoadExecutionTableSelector, 0),
+			c.userTx(derivertest.UserKey, 0, recipient, 0, 21_000),
+			c.userTx(derivertest.UserKey, 1, reader, 0, 100_000),
+		}
+	}}
+}
+
+// TestGroupEndBurnStateless checks that the witness of a v0.1 block proves it,
+// to its own stateless check and to the stateless executor, when a group-end
+// burn changes what a later transaction reads.
+func TestGroupEndBurnStateless(t *testing.T) {
+	// The witness reads the parent's commitment from history.
+	schema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = schema })
+	cases := []groupEndCase{branchingReaderCase()}
+	for _, tc := range afterFeesCases() {
+		cases = append(cases, tc.groupEndCase)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newGroupEndChain(t, tc.alloc)
+			m, _, built := c.build(tc.coinbase, tc.txs(c))
+			require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+				return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+			}))
+			api := jsonrpc.NewPrivateDebugAPI(
+				jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+				m.DB, nil, &rpccfg.DebugApiConfig{})
+			number := rpc.BlockNumber(1)
+			// The witness checks itself statelessly under assertions only.
+			res, err := func() (*jsonrpc.ExecutionWitnessResult, error) {
+				defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+				dbg.AssertEnabled = true
+				return api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &number}, nil)
+			}()
+			require.NoError(t, err)
+			raw := func(bs []hexutil.Bytes) [][]byte {
+				out := make([][]byte, len(bs))
+				for i, b := range bs {
+					out[i] = b
+				}
+				return out
+			}
+			w := &stateless.Witness{State: raw(res.State), Codes: raw(res.Codes), Headers: raw(res.Headers)}
+			_, err = stateless.Execute(m.ChainConfig, m.Engine, built.Block, w)
+			require.NoError(t, err)
+		})
+	}
+}
 
 // TestGroupEndBurnReceipts checks that receipts regenerated for a v0.1 block
 // carry the gas its later transactions used on the burnt state.
