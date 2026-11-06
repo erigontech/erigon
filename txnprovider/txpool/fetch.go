@@ -429,18 +429,32 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 	}
 	f.requestedLock.Unlock()
 
-	for peer, plan := range plans {
-		for _, hashes := range plan.reqs {
-			if unsent, at, err := f.requestPooledTxns(peer, hashes, sent); err != nil {
-				f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
-				if errors.Is(err, errPeerGone) {
-					f.dropAlternate(peer) // its Disconnect event may have been lost
-				} else {
-					f.keepAlternate(peer, unsent, at)
+	// One goroutine per sentry, under one deadline, so a stalled sentry neither holds the others nor the next sweep
+	// for long; after the deadline its remaining sends fail at once and their hashes keep the peer as an alternate.
+	bySentry := map[sentryproto.SentryClient][]fetchPeer{}
+	for peer := range plans {
+		bySentry[peer.sentry] = append(bySentry[peer.sentry], peer)
+	}
+	var wg sync.WaitGroup
+	for _, peers := range bySentry {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, txFetchTimeout)
+			defer cancel()
+			for _, peer := range peers {
+				for _, hashes := range plans[peer].reqs {
+					if unsent, at, err := f.requestPooledTxns(ctx, peer, hashes, sent); err != nil {
+						f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
+						if errors.Is(err, errPeerGone) {
+							f.dropAlternate(peer) // its Disconnect event may have been lost
+						} else {
+							f.keepAlternate(peer, unsent, at)
+						}
+					}
 				}
 			}
-		}
+		})
 	}
+	wg.Wait()
 }
 
 // claimUnsent keeps the hashes still reserved and unsent for peer at reservedAt, marks them sent and restamps
@@ -553,7 +567,7 @@ func (f *Fetch) forget(hash []byte, r *fetchRequest) {
 // requestPooledTxns sends the hashes reserved for peer at reservedAt in requests of 256, because a responder
 // answers only the first 256. Each request claims its hashes when it is sent, so an earlier stalled send cannot
 // make a later one stale. On a failed send it returns the hashes not sent and when they were claimed.
-func (f *Fetch) requestPooledTxns(peer fetchPeer, hashes Hashes, reservedAt time.Time) (Hashes, time.Time, error) {
+func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, hashes Hashes, reservedAt time.Time) (Hashes, time.Time, error) {
 	for start := 0; start < len(hashes); start += 256 * 32 {
 		end := min(start+256*32, len(hashes))
 		chunk, at := f.claimUnsent(peer, hashes[start:end], reservedAt)
@@ -563,7 +577,7 @@ func (f *Fetch) requestPooledTxns(peer fetchPeer, hashes Hashes, reservedAt time
 		encodedRequest, err := EncodeGetPooledTransactions66(chunk, uint64(1), nil)
 		if err == nil {
 			var sentTo *sentryproto.SentPeers
-			sentTo, err = peer.sentry.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
+			sentTo, err = peer.sentry.SendMessageById(ctx, &sentryproto.SendMessageByIdRequest{
 				Data:   &sentryproto.OutboundMessageData{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
 				PeerId: gointerfaces.ConvertHashToH512(peer.peerID),
 			}, &grpc.EmptyCallOption{})
@@ -955,7 +969,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		unknownHashes, reservedAt := f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 		if len(unknownHashes) > 0 {
 			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
-			if unsent, _, err := f.requestPooledTxns(peer, unknownHashes, reservedAt); err != nil {
+			if unsent, _, err := f.requestPooledTxns(f.ctx, peer, unknownHashes, reservedAt); err != nil {
 				f.releaseRequested(peer, unsent)
 				return err
 			}
@@ -985,7 +999,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 
 		if len(unknownHashes) > 0 {
 			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
-			if unsent, _, err := f.requestPooledTxns(peer, unknownHashes, reservedAt); err != nil {
+			if unsent, _, err := f.requestPooledTxns(f.ctx, peer, unknownHashes, reservedAt); err != nil {
 				f.releaseRequested(peer, unsent)
 				return err
 			}

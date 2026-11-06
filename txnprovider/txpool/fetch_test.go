@@ -917,7 +917,8 @@ type announceFetchTest struct {
 	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
 	onSend        func()
-	lookedUp      int // hashes passed to HeldOrQueuedIdHashes
+	lookedUp      int  // hashes passed to HeldOrQueuedIdHashes
+	noDeadline    bool // a send reached sentry without a deadline
 	sendErr       error
 	failSendAt    int               // when > 0, only that send (1-based) fails with sendErr
 	gone          map[[64]byte]bool // peers sentry no longer knows: a send reaches no one
@@ -963,7 +964,10 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 			return held, queued, a.filterErr
 		}).AnyTimes()
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+		DoAndReturn(func(ctx context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				a.noDeadline = true
+			}
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
 			a.sends++
 			if onSend := a.onSend; onSend != nil {
@@ -1497,6 +1501,18 @@ func TestDisconnectDuringAStalledSendReachesTheUnsentRequest(t *testing.T) {
 	}
 	a.timeoutSweep()
 	require.Zero(t, a.fetch.alternatesOf[gone], "the unsent request keeps its pending entry, so the cleanup finds C there")
+}
+
+func TestRetrySendHasADeadline(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xd7}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.noDeadline = false
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
+	require.False(t, a.noDeadline, "a stalled sentry must not hold the one retry loop")
 }
 
 func TestStalledSendKeepsTheFinalFallback(t *testing.T) {
