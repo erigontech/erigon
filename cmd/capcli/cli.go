@@ -1119,7 +1119,7 @@ func checkBlobStore(ctx context.Context, tx kv.Tx, snr freezeblocks.BeaconSnapsh
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantBlobs = c.Len()
 		}
-		// PruneBelow drops sidecar files but leaves their count rows, so a matching count is not
+		// A count row does not prove its sidecar files are on disk, so a matching count is not
 		// evidence the store can still serve the slot. Stat each expected file rather than reading
 		// it back: the scan runs to the Deneb fork, so decoding every blob is not affordable, and
 		// an absent file is the failure this has to catch.
