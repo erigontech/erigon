@@ -3159,6 +3159,8 @@ func collectPublishedPayloadData(
 	lookup func(common.Bytes48) (BlobBundle, bool),
 ) ([]peerdasutils.CellsAndKZGProofs, bool, error) {
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
+	var withoutCells []int
+	var blobsWithoutCells [][]byte
 	for i := 0; i < commitments.Len(); i++ {
 		commitment := commitments.Get(i)
 		if commitment == nil {
@@ -3174,18 +3176,22 @@ func collectPublishedPayloadData(
 		if bundle.Blob == nil {
 			return nil, false, fmt.Errorf("nil blob bundle for commitment %x", commitment)
 		}
-		cells := bundle.Cells
-		if cells == nil {
-			var err error
-			if cells, err = peerdasutils.ComputeCells(bundle.Blob); err != nil {
-				return nil, false, err
-			}
+		if bundle.Cells == nil {
+			withoutCells = append(withoutCells, i)
+			blobsWithoutCells = append(blobsWithoutCells, bundle.Blob[:])
 		}
 		proofs := make([]cltypes.KZGProof, len(bundle.KzgProofs))
 		for i := range proofs {
 			proofs[i] = cltypes.KZGProof(bundle.KzgProofs[i])
 		}
-		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
+		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: bundle.Cells, Proofs: proofs})
+	}
+	cells, err := peerdasutils.ComputeBlobsCells(blobsWithoutCells)
+	if err != nil {
+		return nil, false, err
+	}
+	for j, i := range withoutCells {
+		cellsAndProofs[i].Blobs = cells[j]
 	}
 	return cellsAndProofs, false, nil
 }
