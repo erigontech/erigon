@@ -84,13 +84,15 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 }
 
 // DownloadChainTomlByInfoHash downloads chain.toml from the BitTorrent network using its info-hash.
-// The file is downloaded to snapDir, read, and the torrent is dropped afterward.
+// The file is downloaded to snapDir and read; a torrent added here is dropped afterward.
 //
 // If peer is non-nil, it is used to directly add the peer's torrent endpoint via AddPeers,
 // bypassing the need for DHT or tracker discovery.
 func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string, peer *ChainTomlPeer) ([]byte, error) {
-	t, _ := client.AddTorrentInfoHash(infoHash)
-	defer t.Drop()
+	t, isNew := client.AddTorrentInfoHash(infoHash)
+	if isNew {
+		defer t.Drop()
+	}
 
 	// If the peer advertised a BT port in their ENR, add them directly as a torrent peer.
 	if peer != nil {
