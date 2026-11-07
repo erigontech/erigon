@@ -30,6 +30,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -975,4 +976,44 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 		messages <- nil
 		require.NoError(t, <-done)
 	})
+}
+
+func TestPenalizePeerForBroadcastBlobTxn(t *testing.T) {
+	t.Parallel()
+	for _, known := range []bool{false, true} {
+		t.Run(fmt.Sprintf("known=%t", known), func(t *testing.T) {
+			t.Parallel()
+			testPenalizePeerForBroadcastBlobTxn(t, known)
+		})
+	}
+}
+
+func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool) {
+	ctx := t.Context()
+
+	ctrl := gomock.NewController(t)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().Started().Return(true)
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(known, nil).AnyTimes()
+	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	sentryServer.EXPECT().
+		PenalizePeer(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+			assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
+			return &emptypb.Empty{}, nil
+		}).
+		Times(1)
+
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
+
+	blobTxnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1)
+	err = fetch.handleInboundMessageWithTx(ctx, nil, &sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_TRANSACTIONS_66,
+		Data:   EncodeTransactions([][]byte{blobTxnRlp}, nil),
+		PeerId: peerID,
+	}, sentryClient)
+	require.NoError(t, err)
 }

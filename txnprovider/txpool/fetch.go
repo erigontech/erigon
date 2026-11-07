@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -616,6 +617,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		txns := TxnSlots{}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
+			if hasBlobTxn(req.Data) {
+				f.logger.Debug("[txpool] penalizing peer for broadcast blob tx", "peer", req.PeerId)
+				f.penalizePeer(ctx, sentryClient, req.PeerId)
+				return nil
+			}
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
@@ -666,9 +672,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		}
 		// Post-parse peer-behaviour checks. checkPooledTxnAnnouncement only
 		// applies to the POOLED_TRANSACTIONS_66 (pull) path since TRANSACTIONS_66
-		// has no prior announcement to compare against; checkBlobSidecar applies
-		// to both because a peer can ship a blob-tx wrapper with mismatched
-		// commitments via either message and must be kicked either way.
+		// has no prior announcement to compare against.
 		for i := range txns.Txns {
 			if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
 				if err := f.checkPooledTxnAnnouncement(req.PeerId, txns.Txns[i]); err != nil {
@@ -693,6 +697,26 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	}
 
 	return nil
+}
+
+// hasBlobTxn reports whether a Transactions payload contains a blob transaction.
+// Malformed payloads report false and are left to the regular parser.
+func hasBlobTxn(payload []byte) bool {
+	pos, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return false
+	}
+	for pos < len(payload) {
+		dataPos, dataLen, isList, err := rlp.Prefix(payload, pos)
+		if err != nil {
+			return false
+		}
+		if !isList && dataPos > pos && dataLen > 0 && payload[dataPos] == BlobTxnType {
+			return true
+		}
+		pos = dataPos + dataLen
+	}
+	return false
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {
