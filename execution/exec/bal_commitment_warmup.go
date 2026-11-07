@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -450,7 +451,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 	var err error
 	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
 		p, ok := ttx.AggTx().(latestPrefetcher)
-		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
+		if !ok || (!trieGateOff && trieMostlyResident(ctx, p, hashedKeys)) {
 			return
 		}
 		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
@@ -638,3 +639,6 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
 }
+
+// trieGateOff is a probe bound: TRIE_GATE_OFF=1 skips the trie residency gate, so the trie prefetch always runs.
+var trieGateOff = os.Getenv("TRIE_GATE_OFF") == "1"
