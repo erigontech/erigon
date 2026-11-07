@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
@@ -117,4 +118,23 @@ func TestPromoteSkipsABlobTxnWaitingForTheBlobFee(t *testing.T) {
 	require.Equal(t, ordinary, pool.pending.Best().TxnSlot)
 	require.Equal(t, 1, pool.baseFee.Len())
 	require.Equal(t, blob, pool.baseFee.Best().TxnSlot)
+}
+
+// Pending holds a sender's txns as a gap-free nonce chain, so a txn after a blob txn below the blob fee cannot be
+// included either, even if it covers the fees itself.
+func TestBestHoldsBackTheSuccessorOfABlobTxnBelowTheBlobFee(t *testing.T) {
+	ctx, pool, blob, txns := newPoolWithBlobTxn(t, "Osaka")
+	next := newTestTxnSlot(blob.Nonce+1, 0, 1, 1_000_000, 21_000)
+	next.IDHash[0], next.Rlp = 0xee, []byte{0xee}
+	next.Size = uint32(len(next.Rlp))
+	sender := common.Address{1}
+	txns.Append(next, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+	require.Equal(t, 2, pool.pending.Len())
+
+	pool.pendingBlobFee.Store(blob.GetBlobFeeCap().Uint64() + 1)
+	require.Zero(t, bestOf(t, pool))
+	require.Zero(t, pool.pending.Len())
 }
