@@ -214,6 +214,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, beginErr
 	}
 	defer tx.Rollback()
+	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
+	tx = rpchelper.PinToOverlay(tx, nil)
 
 	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
 		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}

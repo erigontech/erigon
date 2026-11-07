@@ -54,10 +54,10 @@ func TestSeedEmptyRemovals(t *testing.T) {
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
 	// GetAccount reads the seeded removal deterministically — no SetRules.
-	_, ok := vm.View(1, reader).GetAccount(emptied)
+	_, ok, _ := vm.View(1, reader).GetAccount(emptied)
 	require.False(t, ok, "a touched account drained to empty is removed via the seeded self-destruct")
 
-	acc, ok := vm.View(1, reader).GetAccount(survives)
+	acc, ok, _ := vm.View(1, reader).GetAccount(survives)
 	require.True(t, ok, "a balance-zeroed account with a non-zero base nonce is NOT empty and survives")
 	require.Equal(t, uint64(5), acc.Nonce)
 }
@@ -99,7 +99,7 @@ func TestSeedEmptyRemovalsReadsBaseWhenLastChangeClears(t *testing.T) {
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 	require.Equal(t, 3, reader.reads)
 	for _, a := range []accounts.Address{drained, renonced, uncoded} {
-		_, ok := vm.View(2, reader).GetAccount(a)
+		_, ok, _ := vm.View(2, reader).GetAccount(a)
 		require.False(t, ok, a)
 	}
 }
@@ -237,7 +237,7 @@ func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, ok := build().View(1, reader).GetAccount(a)
+			got, ok, _ := build().View(1, reader).GetAccount(a)
 			require.True(t, ok)
 			require.Equal(t, uint64(9), got.Nonce)
 			require.Equal(t, *uint256.NewInt(7), got.Balance)
@@ -310,15 +310,15 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	vm := NewVersionMap(bal)
 	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
 
-	_, ok := vm.View(1, reader).GetAccount(refunded)
+	_, ok, _ := vm.View(1, reader).GetAccount(refunded)
 	require.False(t, ok, "drained to empty at index 1: absent before the re-fund")
-	acc, ok := vm.View(2, reader).GetAccount(refunded)
+	acc, ok, _ := vm.View(2, reader).GetAccount(refunded)
 	require.True(t, ok, "funded again at index 2: present at block end")
 	require.Equal(t, *uint256.NewInt(7), acc.Balance)
 
-	_, ok = vm.View(1, reader).GetAccount(recreated)
+	_, ok, _ = vm.View(1, reader).GetAccount(recreated)
 	require.False(t, ok, "drained to empty at index 1")
-	acc, ok = vm.View(2, reader).GetAccount(recreated)
+	acc, ok, _ = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
 }
@@ -343,4 +343,28 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	exists, err := ibs.Exist(x)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+// TestVersionedReaderServesBALMarkedAccountFromOrigin pins that a versioned reader over an
+// empty read set (the fee calculation) answers a BAL-marked account from its stored origin
+// instead of reading the committed base again for every tx.
+func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xc0ba5e"))
+	acc := accounts.NewAccount()
+	acc.Nonce = 3
+	acc.Balance = *uint256.NewInt(100)
+	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
+	bal := types.BlockAccessList{{Address: a.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(50)}}}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	SeedOrigin(vm, a, &acc)
+
+	for txIndex := 1; txIndex <= 3; txIndex++ {
+		got, err := NewVersionedStateReader(txIndex, ReadSet{}, vm, reader).ReadAccountData(a)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, uint64(3), got.Nonce)
+		require.Equal(t, *uint256.NewInt(50), got.Balance, "txIndex %d: the BAL balance cell overlays the origin", txIndex)
+	}
+	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }

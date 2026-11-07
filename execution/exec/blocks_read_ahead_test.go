@@ -116,6 +116,9 @@ func (db *singleTxRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	return db.tx, nil
 }
 
+// Rollback is a no-op: singleTxRoDB hands this one tx to every warmup goroutine, and the test rolls back the base tx.
+func (*firstAccountReadErrorTx) Rollback() {}
+
 func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
 		tx.accountReads++
@@ -1078,4 +1081,28 @@ func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
 	}
 	bra.CancelWarmup()
 	<-waited
+}
+
+func TestPerKeyWarmupKeepsSlotsTheBatchDidNotRead(t *testing.T) {
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: []common.Hash{{}}}}
+	warm, stripped := perKeyWarmupBAL(bal, coldState{storage: true}, true)
+	require.True(t, stripped)
+	require.Equal(t, balAccounts(bal), warm, "slots the batch read are dropped")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{storage: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "a failed storage batch leaves the slots to the per-key warmup")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{accounts: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "a warm storage domain keeps the slots")
+}
+
+func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
+	a1, a2 := common.Address{19: 1}, common.Address{19: 2}
+	bal := types.BlockAccessList{
+		{Address: a1, BalanceChanges: []*types.BalanceChange{{Index: 1}}, StorageChanges: []types.SlotChanges{{}}, StorageReads: []common.Hash{{}}},
+		{Address: a2, StorageReads: []common.Hash{{}}},
+	}
+	got := balAccounts(bal)
+	require.Equal(t, types.BlockAccessList{{Address: a1, BalanceChanges: bal[0].BalanceChanges}, {Address: a2}}, got)
+	require.Len(t, bal[0].StorageChanges, 1, "the BAL itself is unchanged")
 }
