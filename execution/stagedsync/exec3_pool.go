@@ -245,7 +245,17 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
-	result := wk.w.RunTxTask(tv)
+	return pt.afterRun(p, wk.w.RunTxTask(tv), finalExec)
+}
+
+// afterRun decides what follows a run: re-run, publish, or wait for the read target.
+func (pt *poolTask) afterRun(p *taskPool, result *exec.TxResult, finalExec bool) bool {
+	be, tv := pt.be, pt.tv
+	// A run that recorded a read dependency is void whatever it returned (a cancelled frame tx returns an error).
+	// A recorded dependency always names a lower tx.
+	if result.Dep >= 0 && result.Dep < tv.version.TxIndex && !result.Operational {
+		return pt.rerunAfter(be.taskIndexOf(result.Dep))
+	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
 		return pt.rerunAfterPredecessor()
@@ -256,9 +266,6 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 			return false
 		}
 		return pt.rerunAfterPredecessor()
-	}
-	if result.Dep >= 0 {
-		return pt.rerunAfter(be.taskIndexOf(result.Dep))
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
 	pt.prevWrites = result.TxOut
