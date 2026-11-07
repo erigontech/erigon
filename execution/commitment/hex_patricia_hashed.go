@@ -2350,6 +2350,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	hph.root.stateHashLen = 0
+	if _, err := hph.loadStateIfNeeded(&hph.root, skipStat{}); err != nil {
+		return nil, err
+	}
 	rootHash, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
