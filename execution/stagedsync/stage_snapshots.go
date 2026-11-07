@@ -287,7 +287,7 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 // snapshotBlobRetention resolves the blob serving window of the chain. An unknown chain keeps
 // an unbounded window, so no blob segment is skipped.
 func snapshotBlobRetention(cfg SnapshotsCfg) snapshotsync.BlobRetention {
-	r := snapshotsync.BlobRetention{FromSlot: cfg.blobsFromSlot, ServeWindowSlots: math.MaxUint64}
+	r := snapshotsync.BlobRetention{SnapshotDir: cfg.dirs.Snap, FromSlot: cfg.blobsFromSlot, ServeWindowSlots: math.MaxUint64}
 	if _, beaconCfg, _, err := clparams.GetConfigsByNetworkName(cfg.chainConfig.ChainName); err == nil {
 		r.ServeWindowSlots = beaconCfg.MinSlotsForBlobsSidecarsRequest() + beaconCfg.SlotsPerEpoch
 	}

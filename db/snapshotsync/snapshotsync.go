@@ -99,6 +99,7 @@ func isBlobSidecarFile(name string) bool {
 
 // BlobRetention bounds the blob sidecar snapshots a bounded blob archive downloads.
 type BlobRetention struct {
+	SnapshotDir string
 	// FromSlot is the first slot the archive keeps; zero keeps every segment.
 	FromSlot uint64
 	// ServeWindowSlots is the spec blob-serving window plus one epoch of rounding slack. It is
@@ -109,9 +110,9 @@ type BlobRetention struct {
 // downloadFloor returns the slot below which blob segments are skipped. The wall clock is not
 // known here, but it is at or past the newest preverified blob segment, so measuring the serving
 // window back from that segment's end never skips a slot the node still has to serve.
-func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) uint64 {
+func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, error) {
 	if r.FromSlot == 0 {
-		return 0
+		return 0, nil
 	}
 	var tip uint64
 	for _, p := range items {
@@ -123,9 +124,19 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) uint64 {
 		}
 	}
 	if tip <= r.ServeWindowSlots {
-		return 0
+		return 0, nil
 	}
-	return min(r.FromSlot, tip-r.ServeWindowSlots)
+	floor := min(r.FromSlot, tip-r.ServeWindowSlots)
+	segments, err := snaptype.Segments(r.SnapshotDir)
+	if err != nil {
+		return 0, err
+	}
+	for i := range segments {
+		if segments[i].Type.Enum() == snaptype.BlobSidecars.Enum() {
+			floor = min(floor, segments[i].From)
+		}
+	}
+	return floor, nil
 }
 
 // blobSegmentBelow reports whether a blob sidecar segment ends at or before floor,
@@ -563,7 +574,10 @@ func SyncSnapshots(
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
-		blobFloor := blobRetention.downloadFloor(preverifiedBlockSnapshots.Items)
+		blobFloor, err := blobRetention.downloadFloor(preverifiedBlockSnapshots.Items)
+		if err != nil {
+			return err
+		}
 		if blobs && blobFloor > 0 {
 			log.Info(fmt.Sprintf("[%s] Filtering old blob sidecar segments", logPrefix), "fromSlot", blobRetention.FromSlot, "floor", blobFloor)
 		}

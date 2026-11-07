@@ -586,7 +586,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.blobs-archive`: Enables backfilling for blobs.
   * Default: `false`
-* `--caplin.blobs-archive-from-slot value`: Keeps blob sidecars from this beacon slot onward and implies `--caplin.blobs-archive`. The first sync downloads only the blob snapshots that reach this slot or the spec retention window; older sidecars and blob snapshots are dropped once they leave that window. Cannot be combined with `--caplin.snapgen`.
+* `--caplin.blobs-archive-from-slot value`: Keeps blob sidecars from this beacon slot onward and implies `--caplin.blobs-archive`. The first sync downloads only the blob snapshots that reach this slot or the spec retention window; with `--caplin.custom-config` or `--caplin.custom-genesis` all blob snapshots are downloaded, then pruned. Older sidecars and blob snapshots are dropped once they leave that window, but the newest blob snapshot is always kept. Cannot be combined with `--caplin.snapgen`.
   * Default: `0` — keeps all history since Deneb
 * `--caplin.states-archive`: Enables the archival node for historical states.
   * Default: `false`

@@ -1097,7 +1097,7 @@ var (
 	}
 	CaplinArchiveBlobsFromSlotFlag = cli.Uint64Flag{
 		Name:  "caplin.blobs-archive-from-slot",
-		Usage: "keep blob sidecars from this beacon slot onward (implies --caplin.blobs-archive); the first sync downloads only blob snapshots that reach this slot or the spec retention window, older sidecars and blob snapshots are dropped once outside that window; 0 keeps all history since Deneb",
+		Usage: "keep blob sidecars from this beacon slot (implies --caplin.blobs-archive); first sync filters snapshots by slot and spec serving window; with --caplin.custom-config or --caplin.custom-genesis downloads all, then prunes; newest blob snapshot always kept; 0 keeps all since Deneb",
 		Value: 0,
 	}
 	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{

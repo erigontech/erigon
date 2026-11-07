@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -655,9 +657,45 @@ func TestBlobRetentionDownloadFloorKeepsTheServingWindow(t *testing.T) {
 		{name: "unknown window downloads everything", r: BlobRetention{FromSlot: 9_000_000, ServeWindowSlots: math.MaxUint64}, want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, uint64(tc.want), tc.r.downloadFloor(items))
+			tc.r.SnapshotDir = t.TempDir()
+			floor, err := tc.r.downloadFloor(items)
+			require.NoError(t, err)
+			require.Equal(t, uint64(tc.want), floor)
 		})
 	}
+}
+
+func TestBlobRetentionDownloadFloorKeepsLocalSegmentsContiguous(t *testing.T) {
+	const tip = 13_570_000
+	const window = 131_072 + 32
+	items := snapcfg.PreverifiedItems{}
+	for from := 8_990_000; from < tip; from += 10_000 {
+		items = append(items,
+			snapcfg.PreverifiedItem{Name: fmt.Sprintf("v1.1-%06d-%06d-blobsidecars.seg", from/1000, (from+10_000)/1000)},
+			snapcfg.PreverifiedItem{Name: fmt.Sprintf("v1.1-%06d-%06d-blocksidecars.idx", from/1000, (from+10_000)/1000)},
+		)
+	}
+	r := BlobRetention{SnapshotDir: t.TempDir(), FromSlot: tip, ServeWindowSlots: window}
+	floor, err := r.downloadFloor(items)
+	require.NoError(t, err)
+	require.Equal(t, uint64(tip-window), floor)
+
+	for _, name := range []string{
+		"v1.1-009020-009030-blobsidecars.seg",
+		"v1.1-009000-009010-blobsidecars.seg",
+		"v1.1-009000-009010-blocksidecars.idx",
+		"v1.1-008000-008010-beaconblocks.seg",
+		"v1.1-008500-008510-blocksidecars.idx",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(r.SnapshotDir, name), []byte("segment"), 0o644))
+	}
+	floor, err = r.downloadFloor(items)
+	require.NoError(t, err)
+	for _, p := range items {
+		require.Equal(t, strings.Contains(p.Name, "008990-009000"), skipBlobDownload(p.Name, true, floor),
+			"only segments and indexes before the local prefix may be skipped: %s", p.Name)
+	}
+	require.Equal(t, uint64(9_000_000), floor)
 }
 
 func TestSkipBlobDownload(t *testing.T) {
