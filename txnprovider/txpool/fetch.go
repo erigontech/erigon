@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -45,6 +46,49 @@ import (
 // errInternalDB wraps errors that originate from local DB lookups (not from the peer's data).
 // This prevents penalizing peers for our own internal failures.
 var errInternalDB = errors.New("internal db error")
+
+// txFetchTimeout is how long an announced hash waits for the requested peer before another announcer is asked.
+const txFetchTimeout = 5 * time.Second
+
+// maxAlternatesPerPeer bounds the hashes a peer waits on as an alternate, as geth's maxTxAnnounces does: a hash
+// keeps every announcer, so silent peers that announce first cannot crowd out a later one.
+const maxAlternatesPerPeer = 4096
+
+const maxFetchRequests = 64 * 1024
+
+// disconnectedPeerMemory is longer than an announcement of a peer waits in the inbound queue.
+const disconnectedPeerMemory = time.Minute
+
+// maxRetryRequestsPerPeer keeps a peer's retries per retryBudgetWindow well under sentry's 32-message outbound queue,
+// which drops the oldest when full.
+const maxRetryRequestsPerPeer = 8
+
+// retryBudgetWindow spans p2p's frameWriteTimeout: a stalled peer is dropped before a third window's retries reach its queue.
+const retryBudgetWindow = 20 * time.Second
+
+type fetchPeer struct {
+	sentry sentryproto.SentryClient
+	peerID [64]byte
+}
+
+type fetchRequest struct {
+	at         time.Time
+	peer       fetchPeer
+	alternates []fetchPeer
+	unsent     bool      // reserved for peer, but its request is not sent yet, so it cannot time out
+	retryAt    time.Time // while waiting: when the first alternate's retry budget window ends
+}
+
+// retryBudget counts a peer's retry requests in the current retryBudgetWindow.
+type retryBudget struct {
+	used  int
+	since time.Time
+}
+
+type pendingFetch struct {
+	hash [32]byte
+	at   time.Time
+}
 
 // announceInfo records the (type, size) that a peer promised for a given hash
 // in an eth/68 NewPooledTransactionHashes announcement. We keep the peer id so
@@ -73,6 +117,15 @@ type Fetch struct {
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
 	announcements            *maphash.LRU[announceInfo] // announceKey(txHash, peerHash) -> announced (type, size) from that peer
+	requestedLock            sync.Mutex
+	requested                *maphash.LRU[*fetchRequest]
+	pending                  []pendingFetch // in request order, so the oldest expires first
+	waiting                  []pendingFetch // timed-out requests whose alternates' retry budgets are spent
+	waitingUntil             time.Time      // no waiting request can be retried before then
+	retryBudgets             map[fetchPeer]*retryBudget
+	alternatesOf             map[fetchPeer]int       // hashes each peer waits on as an alternate
+	disconnected             map[fetchPeer]time.Time // recently disconnected peers: an announcement buffered before the disconnect or a failed send must not keep them
+	now                      func() time.Time
 	logger                   log.Logger
 }
 
@@ -99,6 +152,7 @@ func NewFetch(
 	// reply is typically seconds, at worst minutes), and bounded so a DoSing
 	// peer spamming unique hashes can't grow this unboundedly.
 	announcements, _ := maphash.NewLRU[announceInfo](64 * 1024)
+	requested, _ := maphash.NewLRU[*fetchRequest](maxFetchRequests)
 	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -108,6 +162,11 @@ func NewFetch(
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
+		requested:            requested,
+		retryBudgets:         map[fetchPeer]*retryBudget{},
+		alternatesOf:         map[fetchPeer]int{},
+		disconnected:         map[fetchPeer]time.Time{},
+		now:                  time.Now,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
@@ -137,6 +196,401 @@ func announceKey(txHash []byte, peerHash uint64) [40]byte {
 	copy(k[:32], txHash)
 	binary.BigEndian.PutUint64(k[32:], peerHash)
 	return k
+}
+
+// skipRecentlyRequested drops hashes already requested less than txFetchTimeout ago and keeps
+// the announcer as an alternate for them.
+func (f *Fetch) skipRecentlyRequested(hashes Hashes, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) (Hashes, time.Time) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	now := f.now()
+	peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(peerID)}
+	var toRequest Hashes
+	for i := 0; i < len(hashes); i += 32 {
+		h := hashes[i : i+32]
+		r, ok := f.requested.Get(h)
+		if ok && (now.Sub(r.at) < txFetchTimeout || len(r.alternates) > 0 || r.unsent) {
+			if peer != r.peer {
+				f.addAlternate(r, peer) // a timed-out request asks its waiting alternates first
+			}
+			continue
+		}
+		// An announcement flood: forget the oldest requests before the insert, so a full LRU evicts no other
+		// pending request, and a forgotten hash is asked again on its next announcement. A restamped retry
+		// leaves a stale entry that frees no slot, so trim until the queue is below the cache size.
+		for len(f.pending)+len(f.waiting) >= maxFetchRequests {
+			oldest := &f.pending
+			if len(f.waiting) > 0 {
+				oldest = &f.waiting
+			}
+			if old, found := f.requested.Get((*oldest)[0].hash[:]); found && old.at.Equal((*oldest)[0].at) {
+				f.forget((*oldest)[0].hash[:], old)
+			}
+			*oldest = (*oldest)[1:]
+			if ok {
+				r, ok = f.requested.Get(h)
+			}
+		}
+		if ok {
+			r.at, r.peer, r.unsent = now, peer, true
+		} else {
+			f.requested.Set(h, &fetchRequest{at: now, peer: peer, unsent: true})
+		}
+		f.pending = append(f.pending, pendingFetch{[32]byte(h), now})
+		toRequest = append(toRequest, h...)
+	}
+	return toRequest, now
+}
+
+// retryLoop runs the one timeout sweep shared by all sentry streams.
+func (f *Fetch) retryLoop() {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-f.ctx.Done():
+			return
+		case <-ticker.C:
+			f.retryTimedOutRequests(f.ctx)
+		}
+	}
+}
+
+func (f *Fetch) retryTimedOutRequests(ctx context.Context) {
+	if f.db == nil || !f.pool.Started() {
+		return
+	}
+	tx, err := f.db.BeginRo(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	f.requestFromAlternates(ctx, tx)
+}
+
+// retryPlan groups a sweep's retries for one peer into requests a responder answers in full.
+type retryPlan struct {
+	reqs  []Hashes
+	size  int // announced bytes in the last request
+	limit int // requests the peer's budget still allows
+}
+
+// add reports false when the hash needs a request beyond the peer's remaining budget (limit).
+func (p *retryPlan) add(hash []byte, size int) bool {
+	if n := len(p.reqs); n == 0 || len(p.reqs[n-1]) == 256*32 || p.size >= p2pTxPacketLimit {
+		if n == p.limit {
+			return false
+		}
+		p.reqs, p.size = append(p.reqs, nil), 0
+	}
+	p.reqs[len(p.reqs)-1] = append(p.reqs[len(p.reqs)-1], hash...)
+	p.size += size
+	return true
+}
+
+// announcedSize is the size the peer announced for the hash. An unknown size counts as a full
+// response, since it may be a blob.
+func (f *Fetch) announcedSize(hash []byte, peer fetchPeer) int {
+	if f.announcements == nil {
+		return p2pTxPacketLimit
+	}
+	k := announceKey(hash, peerHash(gointerfaces.ConvertHashToH512(peer.peerID)))
+	info, ok := f.announcements.Get(k[:])
+	if !ok {
+		return p2pTxPacketLimit
+	}
+	return int(info.size) + announcedSizeSlack // a delivered body may be that much larger
+}
+
+// requestFromAlternates asks the next announcer for each hash whose request timed out. Hashes the pool holds
+// leave the retry state, queued ones wait for their validation, and a rejected body keeps its alternates.
+func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
+	f.requestedLock.Lock()
+	now := f.now()
+	scanWaiting := !now.Before(f.waitingUntil)
+	var expired Hashes
+	if scanWaiting {
+		for _, p := range f.waiting {
+			if r, ok := f.requested.Get(p.hash[:]); ok && r.at.Equal(p.at) && !now.Before(r.retryAt) {
+				expired = append(expired, p.hash[:]...)
+			}
+		}
+	}
+	for _, p := range f.pending {
+		if now.Sub(p.at) < txFetchTimeout {
+			break
+		}
+		expired = append(expired, p.hash[:]...)
+	}
+	f.requestedLock.Unlock()
+	if len(expired) == 0 {
+		return
+	}
+	state := map[[32]byte]bool{} // true: held, false: queued for validation
+	held, queued, err := f.pool.HeldOrQueuedIdHashes(tx, expired)
+	if err != nil {
+		held, queued = nil, nil // ask anyway: a held txn costs only a duplicate reply
+	}
+	for i := 0; i < len(held); i += 32 {
+		state[[32]byte(held[i:i+32])] = true
+	}
+	for i := 0; i < len(queued); i += 32 {
+		state[[32]byte(queued[i:i+32])] = false
+	}
+
+	f.requestedLock.Lock()
+	sent := f.now() // the lookup may have been slow; retries time out from when they are sent
+	plans := map[fetchPeer]*retryPlan{}
+	var deferred []pendingFetch
+	waiting, waitingUntil := f.waiting, f.waitingUntil
+	if scanWaiting {
+		waiting, waitingUntil = nil, time.Time{}
+	}
+	wait := func(p pendingFetch, until time.Time) {
+		waiting = append(waiting, p)
+		if waitingUntil.IsZero() || until.Before(waitingUntil) {
+			waitingUntil = until
+		}
+	}
+	timedOut := slices.Clip(f.waiting)
+	if !scanWaiting {
+		timedOut = nil
+	}
+	for len(timedOut) > 0 || len(f.pending) > 0 && now.Sub(f.pending[0].at) >= txFetchTimeout {
+		var p pendingFetch
+		fromWaiting := len(timedOut) > 0
+		if fromWaiting {
+			p, timedOut = timedOut[0], timedOut[1:]
+		} else {
+			p, f.pending = f.pending[0], f.pending[1:]
+		}
+		r, ok := f.requested.Get(p.hash[:])
+		if !ok || !r.at.Equal(p.at) {
+			continue
+		}
+		if r.unsent { // it times out from its send; until then it keeps its entry for cleanup and admission
+			deferred = append(deferred, p)
+			continue
+		}
+		if fromWaiting && now.Before(r.retryAt) {
+			wait(p, r.retryAt)
+			continue
+		}
+		if isHeld, found := state[p.hash]; found {
+			if isHeld {
+				f.forget(p.hash[:], r)
+				continue
+			}
+			r.at = sent // a queued body may still fail validation; keep the alternates
+			f.pending = append(f.pending, pendingFetch{p.hash, sent})
+			continue
+		}
+		if len(r.alternates) == 0 {
+			f.requested.Delete(p.hash[:]) // exhausted: free the slot for live requests
+			continue
+		}
+		picked := slices.IndexFunc(r.alternates, func(alt fetchPeer) bool {
+			plan := plans[alt]
+			if plan == nil {
+				b := f.retryBudgets[alt]
+				if b == nil || sent.Sub(b.since) >= retryBudgetWindow {
+					b = &retryBudget{since: sent}
+					f.retryBudgets[alt] = b
+				}
+				plan = &retryPlan{limit: maxRetryRequestsPerPeer - b.used}
+				plans[alt] = plan
+			}
+			return plan.limit > 0 && plan.add(p.hash[:], f.announcedSize(p.hash[:], alt))
+		})
+		if picked < 0 { // every alternate's budget is spent: wait until the first window ends
+			r.retryAt = time.Time{}
+			for _, alt := range r.alternates {
+				if end := f.retryBudgets[alt].since.Add(retryBudgetWindow); r.retryAt.IsZero() || end.Before(r.retryAt) {
+					r.retryAt = end
+				}
+			}
+			wait(p, r.retryAt)
+			continue
+		}
+		r.at, r.peer, r.unsent = sent, f.removeAlternate(r, picked), true
+		f.pending = append(f.pending, pendingFetch{p.hash, sent})
+	}
+	if len(deferred) > 0 {
+		f.pending = append(deferred, f.pending...)
+	}
+	f.waiting, f.waitingUntil = waiting, waitingUntil
+	for peer, plan := range plans {
+		f.retryBudgets[peer].used += len(plan.reqs)
+	}
+	for peer, b := range f.retryBudgets {
+		if sent.Sub(b.since) >= retryBudgetWindow {
+			delete(f.retryBudgets, peer)
+		}
+	}
+	f.requestedLock.Unlock()
+
+	// One goroutine per sentry, under one deadline, so a stalled sentry neither holds the others nor the next sweep
+	// for long; after the deadline its remaining sends fail at once and their hashes keep the peer as an alternate.
+	bySentry := map[sentryproto.SentryClient][]fetchPeer{}
+	for peer := range plans {
+		bySentry[peer.sentry] = append(bySentry[peer.sentry], peer)
+	}
+	var wg sync.WaitGroup
+	for _, peers := range bySentry {
+		wg.Go(func() {
+			sendCtx, cancel := context.WithTimeout(ctx, txFetchTimeout)
+			defer cancel()
+			for _, peer := range peers {
+				for _, hashes := range plans[peer].reqs {
+					if unsent, at, err := f.requestPooledTxns(sendCtx, peer, hashes, sent); err != nil {
+						f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
+						if errors.Is(err, errPeerGone) {
+							f.dropAlternate(peer) // its Disconnect event may have been lost
+						} else {
+							f.keepAlternate(peer, unsent, at)
+						}
+					}
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+// claimUnsent keeps the hashes still reserved and unsent for peer at reservedAt, marks them sent and restamps
+// them, so their timeout runs from this send.
+func (f *Fetch) claimUnsent(peer fetchPeer, hashes Hashes, reservedAt time.Time) (Hashes, time.Time) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	now := f.now()
+	var claimed Hashes
+	for i := 0; i < len(hashes); i += 32 {
+		r, ok := f.requested.Get(hashes[i : i+32])
+		if !ok || r.peer != peer || !r.at.Equal(reservedAt) || !r.unsent {
+			continue
+		}
+		r.unsent = false
+		if !now.Equal(reservedAt) {
+			r.at = now
+			f.pending = append(f.pending, pendingFetch{[32]byte(hashes[i : i+32]), now})
+		}
+		claimed = append(claimed, hashes[i:i+32]...)
+	}
+	return claimed, now
+}
+
+// releaseRequested forgets hashes whose request was not sent and that have no alternate to retry, so the
+// next announcement asks at once; hashes with alternates retry one after the timeout.
+func (f *Fetch) releaseRequested(peer fetchPeer, hashes Hashes) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && len(r.alternates) == 0 {
+			f.requested.Delete(hashes[i : i+32])
+		}
+	}
+}
+
+// keepAlternate puts a peer whose retry request was not sent back among the hashes' alternates, even at its
+// quota: it held that slot before the send.
+func (f *Fetch) keepAlternate(peer fetchPeer, hashes Hashes, sent time.Time) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	if _, gone := f.disconnected[peer]; gone {
+		return
+	}
+	for i := 0; i < len(hashes); i += 32 {
+		if r, ok := f.requested.Get(hashes[i : i+32]); ok && r.peer == peer && r.at.Equal(sent) && !slices.Contains(r.alternates, peer) {
+			r.alternates = append(r.alternates, peer)
+			f.alternatesOf[peer]++
+		}
+	}
+}
+
+// errPeerGone: sentry no longer knows the peer, so a request to it reaches no one.
+var errPeerGone = errors.New("peer gone")
+
+// keepAnnouncersOfTracked keeps the announcer of a hash the pool already knows but a request still tracks (its body
+// may yet fail validation) as an alternate, without a request. It returns the hashes a reply can still come back
+// for, in announcement order: the unknown ones and those tracked ones.
+func (f *Fetch) keepAnnouncersOfTracked(hashes, unknown Hashes, sentryClient sentryproto.SentryClient, peerID *typesproto.H512) Hashes {
+	peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(peerID)}
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	var keep Hashes
+	for i, j := 0, 0; i < len(hashes); i += 32 {
+		h := hashes[i : i+32]
+		if j < len(unknown) && bytes.Equal(unknown[j:j+32], h) {
+			keep, j = append(keep, h...), j+32
+			continue
+		}
+		if r, ok := f.requested.Get(h); ok {
+			f.addAlternate(r, peer)
+			keep = append(keep, h...)
+		}
+	}
+	return keep
+}
+
+// addAlternate keeps an announcer to ask after the requested peer.
+func (f *Fetch) addAlternate(r *fetchRequest, peer fetchPeer) {
+	if peer != r.peer {
+		f.appendAlternate(r, peer)
+	}
+}
+
+func (f *Fetch) appendAlternate(r *fetchRequest, peer fetchPeer) {
+	if _, gone := f.disconnected[peer]; gone || slices.Contains(r.alternates, peer) || f.alternatesOf[peer] >= maxAlternatesPerPeer {
+		return
+	}
+	r.alternates = append(r.alternates, peer)
+	f.alternatesOf[peer]++
+}
+
+func (f *Fetch) removeAlternate(r *fetchRequest, i int) fetchPeer {
+	peer := r.alternates[i]
+	r.alternates = slices.Delete(r.alternates, i, i+1)
+	if f.alternatesOf[peer]--; f.alternatesOf[peer] <= 0 {
+		delete(f.alternatesOf, peer)
+	}
+	return peer
+}
+
+// forget drops a request and its alternates.
+func (f *Fetch) forget(hash []byte, r *fetchRequest) {
+	for len(r.alternates) > 0 {
+		f.removeAlternate(r, len(r.alternates)-1)
+	}
+	f.requested.Delete(hash)
+}
+
+// requestPooledTxns sends the hashes reserved for peer at reservedAt in requests of 256, because a responder
+// answers only the first 256. Each request claims its hashes when it is sent, so an earlier stalled send cannot
+// make a later one stale. On a failed send it returns the hashes not sent and when they were claimed.
+func (f *Fetch) requestPooledTxns(ctx context.Context, peer fetchPeer, hashes Hashes, reservedAt time.Time) (Hashes, time.Time, error) {
+	for start := 0; start < len(hashes); start += 256 * 32 {
+		end := min(start+256*32, len(hashes))
+		chunk, at := f.claimUnsent(peer, hashes[start:end], reservedAt)
+		if len(chunk) == 0 {
+			continue
+		}
+		encodedRequest, err := EncodeGetPooledTransactions66(chunk, uint64(1), nil)
+		if err == nil {
+			var sentTo *sentryproto.SentPeers
+			sentTo, err = peer.sentry.SendMessageById(ctx, &sentryproto.SendMessageByIdRequest{
+				Data:   &sentryproto.OutboundMessageData{Id: sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66, Data: encodedRequest},
+				PeerId: gointerfaces.ConvertHashToH512(peer.peerID),
+			}, &grpc.EmptyCallOption{})
+			if err == nil && len(sentTo.GetPeers()) == 0 {
+				err = errPeerGone
+			}
+		}
+		if err != nil {
+			rest, _ := f.claimUnsent(peer, hashes[end:], reservedAt)
+			return append(chunk, rest...), at, err
+		}
+	}
+	return nil, time.Time{}, nil
 }
 
 // recordAnnouncement remembers the (type, size) a peer promised for each
@@ -256,6 +710,7 @@ func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) e
 
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
+	f.connectWg.Go(f.retryLoop)
 	for i := range f.sentryClients {
 		client := f.sentryClients[i]
 		f.connectWg.Go(func() {
@@ -510,17 +965,12 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
+		f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId)
+		unknownHashes, reservedAt := f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 		if len(unknownHashes) > 0 {
-			var encodedRequest []byte
-			var messageID sentryproto.MessageId
-			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
-				return err
-			}
-			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
-			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
-				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
-				PeerId: req.PeerId,
-			}, &grpc.EmptyCallOption{}); err != nil {
+			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
+			if unsent, _, err := f.requestPooledTxns(f.ctx, peer, unknownHashes, reservedAt); err != nil {
+				f.releaseRequested(peer, unsent)
 				return err
 			}
 		}
@@ -542,22 +992,15 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if err != nil {
 			return err
 		}
-		// Record only for unknown hashes — a POOLED_TRANSACTIONS_66 reply
-		// won't come back for already-known txs, so entries for them would
-		// just sit unused in the LRU until evicted.
-		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, unknownHashes)
+		// Record only for hashes a reply can still come back for: unknown ones and tracked ones (a tracked one
+		// the pool already holds stays until the next sweep forgets it).
+		f.recordAnnouncement(req.PeerId, txTypes, sizes, hashes, f.keepAnnouncersOfTracked(hashes, unknownHashes, sentryClient, req.PeerId))
+		unknownHashes, reservedAt := f.skipRecentlyRequested(unknownHashes, sentryClient, req.PeerId)
 
 		if len(unknownHashes) > 0 {
-			var encodedRequest []byte
-			var messageID sentryproto.MessageId
-			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
-				return err
-			}
-			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
-			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
-				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
-				PeerId: req.PeerId,
-			}, &grpc.EmptyCallOption{}); err != nil {
+			peer := fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}
+			if unsent, _, err := f.requestPooledTxns(f.ctx, peer, unknownHashes, reservedAt); err != nil {
+				f.releaseRequested(peer, unsent)
 				return err
 			}
 		}
@@ -686,7 +1129,6 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		if len(txns.Txns) == 0 {
 			return nil
 		}
-
 		f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
@@ -757,7 +1199,7 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 		if req == nil {
 			return nil
 		}
-		if err := f.handleNewPeer(req); err != nil {
+		if err := f.handleNewPeer(sentryClient, req); err != nil {
 			return err
 		}
 		if f.wg != nil {
@@ -766,15 +1208,46 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 	}
 }
 
-func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
+func (f *Fetch) handleNewPeer(sentryClient sentryproto.SentryClient, req *sentryproto.PeerEvent) error {
 	if req == nil {
 		return nil
 	}
-	if req.EventId == sentryproto.PeerEvent_Connect {
+	switch req.EventId {
+	case sentryproto.PeerEvent_Connect:
 		f.pool.AddNewGoodPeer(req.PeerId)
+		f.requestedLock.Lock()
+		delete(f.disconnected, fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)})
+		f.requestedLock.Unlock()
+	case sentryproto.PeerEvent_Disconnect:
+		f.dropAlternate(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)})
 	}
-
 	return nil
+}
+
+// dropAlternate removes a disconnected peer from the hashes it waits on as an alternate: fresh peer IDs would
+// otherwise grow the alternates without bound.
+func (f *Fetch) dropAlternate(peer fetchPeer) {
+	f.requestedLock.Lock()
+	defer f.requestedLock.Unlock()
+	now := f.now()
+	for p, at := range f.disconnected {
+		if now.Sub(at) >= disconnectedPeerMemory {
+			delete(f.disconnected, p)
+		}
+	}
+	f.disconnected[peer] = now
+	for _, queue := range [][]pendingFetch{f.pending, f.waiting} {
+		for _, p := range queue {
+			if f.alternatesOf[peer] == 0 {
+				return
+			}
+			if r, ok := f.requested.Get(p.hash[:]); ok && r.at.Equal(p.at) {
+				if i := slices.Index(r.alternates, peer); i >= 0 {
+					f.removeAlternate(r, i)
+				}
+			}
+		}
+	}
 }
 
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {

@@ -84,6 +84,7 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
+	HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	GetBlobs(blobhashes []common.Hash) []PoolBlobBundle
@@ -648,13 +649,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 		return generation == p.stateGeneration, nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
-		// Retryable failures may clear before the discarded pool row is removed.
-		switch reason {
-		case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
-			return false, nil
-		default:
-			return true, nil
-		}
+		return !refetchableDiscard(reason), nil
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
@@ -679,6 +674,60 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 		}
 	}
 	return unknownHashes, err
+}
+
+// refetchableDiscard reports a discard another body can undo: a retryable failure (a nonce gap, frame validation) can
+// clear before the discarded pool row is removed, and a blob txn's hash does not cover its sidecar, so one peer's bad
+// sidecar says nothing about the txn.
+func refetchableDiscard(reason txpoolcfg.DiscardReason) bool {
+	switch reason {
+	case txpoolcfg.NonceTooDistant, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged,
+		txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.UnmatchedBlobTxExt:
+		return true
+	}
+	return false
+}
+
+// HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation;
+// a discarded txn is neither.
+func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		hash, hashS := hashes[i:i+32], string(hashes[i:i+32])
+		_, inQueue := p.unprocessedRemoteByHash[hashS]
+		_, simulating := p.remoteFrames.pending[hashS] // a frame leaves the queue before its simulation ends
+		if inQueue || simulating {
+			queued = append(queued, hash...)
+			continue
+		}
+		_, inPool := p.byHash[hashS]
+		_, mined := p.minedBlobTxnsByHash[hashS]
+		if inPool || mined {
+			held = append(held, hash...)
+			continue
+		}
+		if generation, rejected := p.frameRejections.Get(hashS); rejected {
+			if generation == p.stateGeneration { // a refetched body would be dropped as known
+				held = append(held, hash...)
+			}
+			continue
+		}
+		if reason, discarded := p.discardReasonsLRU.Get(hashS); discarded {
+			if !refetchableDiscard(reason) { // a refetched body would be dropped as known
+				held = append(held, hash...)
+			}
+			continue
+		}
+		has, err := tx.Has(kv.PoolTransaction, hash)
+		if err != nil {
+			return held, queued, err
+		}
+		if has {
+			held = append(held, hash...)
+		}
+	}
+	return held, queued, nil
 }
 
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {
