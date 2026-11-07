@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -152,4 +153,21 @@ func TestVersionedAccountView_GetCode_ReviveComposesConsistently(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, txCode, code, "revived code")
 	require.Equal(t, crypto.Keccak256Hash(code), view.GetCodeHash().Value(), "code/codehash consistency")
+}
+
+// A view of an account with no address cell answers from the seeded origin, without a base read.
+func TestVersionMapViewServesAccountWithoutAddressCellFromOrigin(t *testing.T) {
+	a := accounts.InternAddress(common.HexToAddress("0xc0ba5f"))
+	acc := accounts.NewAccount()
+	acc.Nonce = 3
+	acc.Balance = *uint256.NewInt(100)
+	reader := &countingAccountReader{staticAccountReader: staticAccountReader{addr: a, acc: &acc}}
+	vm := NewVersionMap(nil)
+	SeedOrigin(vm, a, &acc)
+
+	got, ok, _ := vm.View(2, reader).GetAccount(a)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), got.Nonce)
+	require.Equal(t, *uint256.NewInt(100), got.Balance)
+	require.Zero(t, reader.reads, "the stored origin answers without a base read")
 }

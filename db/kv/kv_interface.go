@@ -920,6 +920,9 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 //DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 //DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
+// ErrPrefetchIncomplete reports a batch prefetch that stopped with key lookups still pending.
+var ErrPrefetchIncomplete = errors.New("batch prefetch stopped with lookups pending")
+
 // ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
 // the latest value per key, so no historical answer exists in memory. Overlay read views treat it as
 // a miss and fall through to their backing transaction; every other reader error stays fatal.

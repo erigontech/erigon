@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -2305,4 +2307,33 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 	}
 	e.mu.RUnlock()
 	<-done
+}
+
+// An account's Root is derived by commitment, not part of the versioned value, so completing
+// an Address cell with an account that differs only in Root is not a one-value-per-version violation.
+func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	addr := getAddress(57)
+	vm := NewVersionMap(nil)
+	ver := Version{TxIndex: 5, Incarnation: 1}
+
+	published := newWriteSet(&VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
+		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash},
+	})
+	vm.FlushVersionedWrites(published, false)
+
+	zeroRoot := newWriteSet(&VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
+		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash},
+	})
+	require.NotPanics(t, func() { vm.MarkWritesComplete(zeroRoot) })
+}
+
+// TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
+// registers only up to that size, and every version-map read returns one.
+func TestReadResultFitsInRegisters(t *testing.T) {
+	require.LessOrEqual(t, reflect.TypeFor[ReadResult]().NumField(), 4)
 }
