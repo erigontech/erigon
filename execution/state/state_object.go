@@ -380,7 +380,7 @@ func (so *stateObject) printTrie() {
 }
 
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
-	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited)
+	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited, so.db.versionedWrites.balanceDeleted(so.address))
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}

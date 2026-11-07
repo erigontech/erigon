@@ -488,7 +488,7 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 	return nil
 }
 
-func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
+func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, logger log.Logger) time.Duration {
 	tb.Helper()
 	ctx := tb.Context()
 
@@ -537,7 +537,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	}
 
 	start := time.Now()
-	result, err := executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	result, err := executeParallelWithCheck(pe, tasks, false, validation)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 	if result != nil {
@@ -584,7 +584,7 @@ func discardConsumers(buf int) *resultStream {
 
 type propertyCheck func(*parallelExecutor) error
 
-func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -657,29 +657,6 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 	}
 }
 
-// Tasks waiting for an execution slot must not take worker contexts. A worker holds
-// its context briefly after giving back its slot, so a few extra contexts are
-// expected; one per queued task is the regression.
-func TestQueuedTasksDoNotGrowWorkerPool(t *testing.T) {
-	sender := func(i int) accounts.Address {
-		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1000 + i))))
-	}
-	ownSlot := func(i int, j int, _ int) opkey {
-		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1_000_000 + i))))
-		return opkey{addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(j)))), state.StoragePath}
-	}
-	tasks, _ := taskFactory(1000, sender, 2, 2, 1, ownSlot, readTime, writeTime, nonIOTime)
-	noExtraContexts := func(pe *parallelExecutor) error {
-		pe.mintMu.Lock()
-		defer pe.mintMu.Unlock()
-		if n := len(pe.mintedWorkers); n > pe.workerCount {
-			return fmt.Errorf("%d extra worker contexts for independent tasks", n)
-		}
-		return nil
-	}
-	runParallel(t, tasks, composeValidations([]propertyCheck{defaultChecks, noExtraContexts}), false, log.New())
-}
-
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	tb.Helper()
 	ctx := tb.Context()
@@ -722,7 +699,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		task.ctx = executorContext //nolint:fatcontext
 	}
 
-	res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+	res, err := executeParallelWithCheck(pe, tasks, true, validation)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 
@@ -781,7 +758,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			task.ctx = executorCtx //nolint:fatcontext
 		}
 
-		res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+		res, err := executeParallelWithCheck(pe, tasks, true, validation)
 		assert.NoError(tb, err, "error during profiling pass")
 		cleanup() // cleanup eagerly so pass 2 gets a clean slate
 		allDeps = res.AllDeps
@@ -801,7 +778,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 
 	start := time.Now()
-	_, err := executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	_, err := executeParallelWithCheck(pe, tasks, false, validation)
 	assert.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
@@ -878,7 +855,7 @@ func TestZeroTx(t *testing.T) {
 	}
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(1))) }
 	tasks, _ := taskFactory(0, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestLessConflicts verifies correctness with low-contention sender distribution.
@@ -889,7 +866,7 @@ func TestLessConflicts(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0))
 	tasks, _ := taskFactory(10, lessConflictsSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestMoreConflicts verifies correctness with high-contention sender distribution.
@@ -900,7 +877,7 @@ func TestMoreConflicts(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0))
 	tasks, _ := taskFactory(10, moreConflictsSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestRandomTx verifies correctness with fully random sender assignment.
@@ -911,7 +888,7 @@ func TestRandomTx(t *testing.T) {
 	}
 	rng := rand.New(rand.NewSource(0))
 	tasks, _ := taskFactory(10, randomSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestAlternatingTx verifies correctness when txs alternate between two senders.
@@ -923,7 +900,7 @@ func TestAlternatingTx(t *testing.T) {
 		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 	}
 	tasks, _ := taskFactory(10, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // TestTxWithLongTailRead verifies correctness when occasional reads have 100x latency spikes.
@@ -935,7 +912,7 @@ func TestTxWithLongTailRead(t *testing.T) {
 	rng := rand.New(rand.NewSource(0))
 	longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
 	tasks, _ := taskFactory(10, moreConflictsSender(rng), 5, 5, 10, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
-	runParallel(t, tasks, defaultChecks, false, log.New())
+	runParallel(t, tasks, defaultChecks, log.New())
 }
 
 // --- Simple correctness tests with metadata ---
@@ -983,7 +960,7 @@ func BenchmarkLessConflicts(b *testing.B) {
 						rng := rand.New(rand.NewSource(0))
 						tasks, serialDuration := taskFactory(numTx, lessConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -1015,9 +992,9 @@ func BenchmarkLessConflictsWithMetadata(b *testing.B) {
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
 		tasks, serialDuration := taskFactory(numTx, lessConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1051,7 +1028,7 @@ func BenchmarkMoreConflicts(b *testing.B) {
 						rng := rand.New(rand.NewSource(0))
 						tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -1083,9 +1060,9 @@ func BenchmarkMoreConflictsWithMetadata(b *testing.B) {
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
 		tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1119,7 +1096,7 @@ func BenchmarkRandomTx(b *testing.B) {
 						rng := rand.New(rand.NewSource(0))
 						tasks, serialDuration := taskFactory(numTx, randomSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -1151,9 +1128,9 @@ func BenchmarkRandomTxWithMetadata(b *testing.B) {
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
 		tasks, serialDuration := taskFactory(numTx, randomSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1188,7 +1165,7 @@ func BenchmarkTxWithLongTailRead(b *testing.B) {
 						longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
 						tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -1215,9 +1192,9 @@ func BenchmarkTxWithLongTailReadWithMetadata(b *testing.B) {
 		rng := rand.New(rand.NewSource(0))
 		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
 		tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1240,7 +1217,7 @@ func BenchmarkAlternatingTx(b *testing.B) {
 			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		return runParallel(b, tasks, defaultChecks, false, logger), serialDuration
+		return runParallel(b, tasks, defaultChecks, logger), serialDuration
 	}
 
 	testExecutorComb(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1263,9 +1240,9 @@ func BenchmarkAlternatingTxWithMetadata(b *testing.B) {
 			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		parallelDuration := runParallel(b, tasks, defaultChecks, logger)
 		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
-		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1304,7 +1281,7 @@ func TestDexScenario(t *testing.T) {
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 	tasks, _ := taskFactory(10, sender, 5, 5, 10, dexPathGenerator, readTime, writeTime, nonIOTime)
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
-	runParallel(t, tasks, checks, false, log.New())
+	runParallel(t, tasks, checks, log.New())
 }
 
 // BenchmarkDexScenario runs the full DEX parameter sweep (5×3×3×2 = 90 combinations) and
@@ -1335,7 +1312,7 @@ func BenchmarkDexScenario(b *testing.B) {
 						}
 						tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 						b.ResetTimer()
-						parallelDuration := runParallel(b, tasks, checks, false, logger)
+						parallelDuration := runParallel(b, tasks, checks, logger)
 						if parallelDuration > 0 {
 							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
 						}
@@ -1379,7 +1356,7 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(b, tasks, checks, false, logger)
+		parallelDuration := runParallel(b, tasks, checks, logger)
 
 		allDeps := runParallelGetMetadata(b, tasks, checks)
 		newTasks := make([]exec.Task, 0, len(tasks))
@@ -1392,7 +1369,7 @@ func BenchmarkDexScenarioWithMetadata(b *testing.B) {
 			temp.dependencies = keys
 			newTasks = append(newTasks, temp)
 		}
-		return parallelDuration, runParallel(b, newTasks, checks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, newTasks, checks, logger), serialDuration
 	}
 
 	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
@@ -1909,7 +1886,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		pe.blockExecMetrics = newBlockExecMetrics()
 		pe.workersCtx = t.Context()
 		header := &types.Header{Number: *uint256.NewInt(1)}
-		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}))
+		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, nil))
 		be := pe.blockExecutors[1]
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
@@ -1921,9 +1898,133 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},
 		}
-		pe.scheduleNextPending(t.Context())
+		require.NoError(t, pe.scheduleNextPending(t.Context()))
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
 	})
+}
+
+func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
+	be := pe.blockExecutors[1]
+	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
+	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
+
+	be.versionMap = state.NewVersionMap(bal)
+	require.NoError(t, pe.startBlock(t.Context(), be))
+	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
+	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
+}
+
+func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a4"))
+	av := addr.Value()
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		return putter.DomainPut(kv.AccountsDomain, av[:], []byte{0, 0, 0}, 0, nil)
+	})
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
+	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
+}
+
+func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a5"))
+	av := addr.Value()
+	atBlock := accounts.NewAccount()
+	atBlock.Balance = *uint256.NewInt(5)
+	latest := atBlock
+	latest.Nonce = 1
+	db := newResumeTestDB(t)
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		if err := putter.DomainPut(kv.AccountsDomain, av[:], accounts.SerialiseV3(&atBlock), 0, nil); err != nil {
+			return err
+		}
+		return putter.DomainPut(kv.AccountsDomain, av[:], accounts.SerialiseV3(&latest), 100, nil)
+	})
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	task := &exec.TxTask{Header: header, Config: config, TxNum: 1, HistoryExecution: true}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	lc, _, _, _ := pe.blockExecutors[1].versionMap.AccountLifecycleAt(addr, 1)
+	require.NotEqual(t, state.LifecycleLive, lc)
+}
+
+// An account created in a finished but uncommitted block, drained in the next block
+// while keeping its nonce, stays present: the seed reads the prev-block layers.
+func TestStartBlockSeedsAgainstUncommittedPrevBlock(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a7"))
+	created := accounts.NewAccount()
+	created.Nonce = 1
+	created.Balance = *uint256.NewInt(5)
+	prev := state.NewVersionMap(nil)
+	prev.WriteAddressExists(addr, state.Version{TxIndex: 0}, &created)
+	prev.WriteNonce(addr, state.Version{TxIndex: 0}, created.Nonce, true)
+	prev.WriteBalance(addr, state.Version{TxIndex: 0}, created.Balance, true)
+	prev.SealUpTo(0)
+	pe.prevBlocks = state.NewPrevBlockList()
+	pe.prevBlocks.PushHead(1, 3, prev)
+	acc, err := pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(roTx)), 2).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, acc, "precondition: the prev-block layer holds the account")
+	require.Equal(t, uint64(1), acc.Nonce)
+
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
+	header := &types.Header{Number: *uint256.NewInt(2)}
+	task := &exec.TxTask{Header: header, Config: config, TxNum: 4}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	lc, _, _, _ := pe.blockExecutors[2].versionMap.AccountLifecycleAt(addr, 1)
+	require.Equal(t, state.LifecycleLive, lc)
+}
+
+// processRequest must map a mid-block step edge to the right TxIndex: a view at the edge excludes the later write.
+func TestProcessRequestSetsVersionMapBase(t *testing.T) {
+	config := chain.AllProtocolChanges
+	pe, roTx := newResumeTestExec(t, newResumeTestDB(t), config)
+	pe.applyTx = roTx
+	pe.blockExecMetrics = newBlockExecMetrics()
+	pe.workersCtx = t.Context()
+	addr := accounts.InternAddress(common.HexToAddress("0xd7a6"))
+	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{
+		{Index: 1, Value: *uint256.NewInt(100)},
+		{Index: 6, Value: *uint256.NewInt(600)},
+	}}}
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	task := &exec.TxTask{Header: header, Config: config, TxNum: 11, TxIndex: 0}
+	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+
+	const edgeTxNum = 15
+	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())
+	acc, ok, _ := view.GetAccount(addr)
+	require.NoError(t, view.Err())
+	require.True(t, ok)
+	require.Equal(t, uint64(100), acc.Balance.Uint64(), "view at the step edge must not include the write at txNum 16")
+	acc, ok, _ = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
 }

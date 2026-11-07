@@ -339,11 +339,12 @@ func TestPayloadAttributesLoopDrainsStateFeedDuringStateWork(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("payload attributes loop blocked the state feed during state work")
 	}
+	headRoot.Store(latestRoot)
+	// SendHeadV2 drops the event for a full subscriber, and the block burst can leave the loop's buffer full.
+	require.Eventually(t, func() bool { return emitter.State().SendHeadV2(head) > 0 }, 5*time.Second, time.Millisecond)
 	events := make(chan *beaconevents.EventStream, 8)
 	subscription := emitter.State().Subscribe(events)
 	defer subscription.Unsubscribe()
-	headRoot.Store(latestRoot)
-	emitter.State().SendHeadV2(head)
 	release()
 
 	timeout := time.After(5 * time.Second)

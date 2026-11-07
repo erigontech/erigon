@@ -216,7 +216,7 @@ func TypeIdOf(govalue any) TypeId {
 	var gotype reflect.Type
 	var ok bool
 
-	if typeid, ok := govalue.(*GoTypeId); ok {
+	if typeid, isTypeId := govalue.(*GoTypeId); isTypeId {
 		return typeid
 	}
 

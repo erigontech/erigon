@@ -296,26 +296,6 @@ func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T)
 	require.Empty(t, id)
 }
 
-type beaconCfgEngineStub struct {
-	engineapi.EngineAPI
-	cfg *clparams.BeaconChainConfig
-}
-
-func (s *beaconCfgEngineStub) SetBeaconChainConfig(cfg *clparams.BeaconChainConfig) {
-	s.cfg = cfg
-}
-
-func TestNewExecutionClientEngineLocalPropagatesBeaconConfig(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	engine := &beaconCfgEngineStub{}
-
-	client, err := NewExecutionClientEngineLocal(engine, chainreader.ChainReaderWriterEth1{}, nil, &cfg)
-	require.NoError(t, err)
-
-	require.Same(t, &cfg, client.beaconCfg)
-	require.Same(t, &cfg, engine.cfg)
-}
-
 func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 

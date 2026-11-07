@@ -63,6 +63,12 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		return nil, nil, fmt.Errorf("nil block %d", blockNum)
 	}
 
+	if sidecar := b.BlockAccessListSidecar(); !dbg.IgnoreBAL && len(sidecar.BlockAccessList()) > 0 {
+		if err := sidecar.ValidateForHeader(b.GasLimit()); err != nil {
+			return nil, nil, fmt.Errorf("invalid block access list: %w", err)
+		}
+		return b, sidecar.BlockAccessList(), nil
+	}
 	blockBAL, err := blockAccessList(s.blockTx, b, blockNum)
 	if err != nil {
 		return nil, nil, err

@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // run is runTraced without the tracing code and with the fast path.
@@ -48,7 +47,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
 		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
@@ -209,6 +208,15 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
+					if y[0]&(y[0]-1) == 0 {
+						if n, ok := log2Exact(y); ok {
+							callContext.gas, callContext.savedPC = gasLeft, pc
+							y.Rsh(x, n)
+							gasLeft, pc = callContext.gas, callContext.savedPC
+							pc++
+							continue run
+						}
+					}
 					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Div(x, y)
 					gasLeft, pc = callContext.gas, callContext.savedPC
@@ -292,6 +300,13 @@ run:
 					gasLeft -= GasFastestStep
 					mStart, val := callContext.Stack.pop2()
 					callContext.Memory.Set32(mStart.Uint64(), val)
+					pc++
+					continue run
+				}
+			case PUSH0:
+				if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					callContext.Stack.pushRef().Clear()
 					pc++
 					continue run
 				}
@@ -666,13 +681,6 @@ run:
 						pc++
 						continue run
 					}
-				case PUSH0:
-					if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
-						gasLeft -= GasQuickStep
-						callContext.Stack.pushRef().Clear()
-						pc++
-						continue run
-					}
 				case PC:
 					if sLen < stackLimit && gasLeft >= GasQuickStep {
 						gasLeft -= GasQuickStep
@@ -764,6 +772,15 @@ run:
 						} else {
 							idx.Clear()
 						}
+						pc++
+						continue run
+					}
+				case CLZ:
+					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
+						gasLeft -= GasFastStep
+						x := callContext.Stack.peek()
+
+						x.SetUint64(256 - uint64(x.BitLen()))
 						pc++
 						continue run
 					}
@@ -916,13 +933,8 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 
@@ -973,7 +985,6 @@ var isColdOp = [256]bool{
 	CHAINID:        true,
 	BASEFEE:        true,
 	BLOBBASEFEE:    true,
-	PUSH0:          true,
 	PC:             true,
 	MSIZE:          true,
 	GAS:            true,
@@ -981,6 +992,7 @@ var isColdOp = [256]bool{
 	CODECOPY:       true,
 	RETURNDATACOPY: true,
 	BLOBHASH:       true,
+	CLZ:            true,
 	DUPN:           true,
 	SWAPN:          true,
 	EXCHANGE:       true,

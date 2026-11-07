@@ -102,7 +102,7 @@ func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint6
 	t.Helper()
 	empty, _ := snapcfg.KnownCfg(chainName)
 	require.Zero(t, empty.ExpectBlocks, "test chain must have no preverified set of its own")
-	t.Cleanup(func() { snapcfg.SetToml(chainName, []byte{}, false) })
+	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml(chainName, []byte{}, false)) })
 
 	toml := `"v1-000000-000500-headers.seg" = "aa"
 "v1-000000-000500-bodies.seg" = "bb"
@@ -110,7 +110,7 @@ func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint6
 	for _, line := range extraLines {
 		toml += line + "\n"
 	}
-	snapcfg.SetToml(chainName, []byte(toml), false)
+	require.NoError(t, snapcfg.SetToml(chainName, []byte(toml), false))
 
 	cfg, known := snapcfg.KnownCfg(chainName)
 	require.True(t, known)

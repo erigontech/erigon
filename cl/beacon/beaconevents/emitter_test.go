@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,4 +55,29 @@ func TestPayloadAttributesSubscriberTracking(t *testing.T) {
 
 	releaseSecond()
 	require.False(t, emitter.HasPayloadAttributesSubscribers())
+}
+
+func TestNotifyDataColumnStoredDoesNotBlockWhenFull(t *testing.T) {
+	emitter := NewEventEmitter()
+	for range dataColumnStoredBufferSize {
+		emitter.NotifyDataColumnStored(common.Hash{1})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		emitter.NotifyDataColumnStored(common.Hash{2})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("notification blocked on a full buffer")
+	}
+}
+
+func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
+	var emitter *EventEmitter
+	require.Nil(t, emitter.DataColumnStored())
+	emitter.NotifyDataColumnStored(common.Hash{1})
 }

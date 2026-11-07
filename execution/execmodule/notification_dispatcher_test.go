@@ -28,8 +28,10 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 type stateChangesCapture struct {
@@ -68,4 +70,53 @@ func TestDispatcherUsesSuppliedStateVersion(t *testing.T) {
 	))
 	require.NotNil(t, capture.batch)
 	require.Equal(t, projectedStateVersion, capture.batch.StateVersionId)
+}
+
+func TestDispatcherNotifiesAfterUnwindToGenesis(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
+	events := shards.NewEvents()
+	headers, unsubscribe := events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, log.New())
+	unwindPoint := uint64(0)
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, nil, 1, 1, &unwindPoint))
+
+	select {
+	case got := <-headers:
+		require.Len(t, got, 1)
+	default:
+		t.Fatal("header after genesis unwind was not announced")
+	}
+}
+
+func TestDispatcherCapsHeadersAfterDeepUnwind(t *testing.T) {
+	_, tx := temporaltest.NewTestTx(t)
+	for blockNum := uint64(1); blockNum <= 1_500; blockNum++ {
+		header := &types.Header{Number: *uint256.NewInt(blockNum)}
+		require.NoError(t, rawdb.WriteHeader(tx, header))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), blockNum))
+	}
+	events := shards.NewEvents()
+	headers, unsubscribe := events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, log.New())
+	unwindPoint := uint64(0)
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, nil, 2_000, 1_500, &unwindPoint))
+
+	select {
+	case got := <-headers:
+		require.Len(t, got, 1_024)
+		var first, last types.Header
+		require.NoError(t, rlp.DecodeBytes(got[0], &first))
+		require.NoError(t, rlp.DecodeBytes(got[len(got)-1], &last))
+		require.Equal(t, uint64(477), first.Number.Uint64())
+		require.Equal(t, uint64(1_500), last.Number.Uint64())
+	default:
+		t.Fatal("headers after deep unwind were not announced")
+	}
 }

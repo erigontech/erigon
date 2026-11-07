@@ -209,6 +209,16 @@ func headerHeapSize(h *types.Header) int64 {
 	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
 }
 
+// shareCodeByHash lets a replay read committed code from the node's code store. A store keyed
+// by codeHash cannot mix snapshots: the hash itself comes from the replay's own tx.
+func (api *BaseAPI) shareCodeByHash(ibs *state.IntraBlockState) {
+	if src, ok := api.stateCache.(interface{ CodeByHash() state.CodeByHash }); ok {
+		if store := src.CodeByHash(); store != nil {
+			ibs.SetCodeByHash(store)
+		}
+	}
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
@@ -429,23 +439,6 @@ func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, n
 	return api.headerByHashAndNumber(ctx, tx, hash, number)
 }
 
-func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.NumberU64(), nil
-		}
-	}
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
-	if err != nil {
-		return 0, err
-	}
-
-	if number == nil {
-		return 0, errors.New("header number not found")
-	}
-	return *number, nil
-}
-
 // canonicalHeaderByNumberOrHash resolves the selector and header through tx.
 // It never selects an overlay, so callers can keep dependent reads on one view.
 func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
@@ -502,6 +495,41 @@ const defaultUnsettledPreMergeTTL = time.Second
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
+
+// checkTxIndex accepts positions from 0 through txCount and the -1 whole-block sentinel.
+// Position txCount is after the last user transaction, before the final system transaction.
+func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
+	if txIndex < -1 || txIndex > txCount {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNum)}
+	}
+	return nil
+}
+
+// checkTxIndexInBlock validates an index and returns the txNum of the block's
+// initial system transaction. User transaction zero has pre-state at minTxNum+1.
+func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
+	if txIndex < -1 {
+		return 0, checkTxIndex(blockNum, txIndex, 0)
+	}
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if !hasMin || !hasMax || maxTxNum <= minTxNum {
+		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
+	}
+	txCount := int(maxTxNum-minTxNum) - 1
+	return minTxNum, checkTxIndex(blockNum, txIndex, txCount)
+}
 
 // checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
