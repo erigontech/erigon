@@ -183,7 +183,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
 			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 1_000_000}
 			txnGasUsage, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
-				uint256.NewInt(0), common.Hash{}, 0, ibs, 0, nil, &tracersConfig.TraceConfig{Tracer: &name},
+				uint256.NewInt(0), common.Hash{}, 0, ibs, nil, nil, &tracersConfig.TraceConfig{Tracer: &name},
 				chain.AllProtocolChanges, jsonstream.New(io.Discard), time.Second, nil)
 			require.Equal(t, 1, calls)
 			require.Equal(t, received, txnGasUsage)
@@ -206,19 +206,22 @@ func TestTraceTxCompletionV2(t *testing.T) {
 }
 
 // TestTraceTxGasFromBlock: a message that takes its gas from the block runs
-// with the gas the block has left before it, others with their limit.
+// with the gas the block has left before it and fails when none is left;
+// others run with their limit.
 func TestTraceTxGasFromBlock(t *testing.T) {
 	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 	for _, tc := range []struct {
 		name         string
 		fromBlock    bool
-		blockGasLeft uint64
+		blockGasLeft *uint64
 		used         uint64
+		err          error
 	}{
-		{name: "gas from the block", fromBlock: true, blockGasLeft: 60_000, used: 60_000},
+		{name: "gas from the block", fromBlock: true, blockGasLeft: common.NewUint64(60_000), used: 60_000},
+		{name: "block spent", fromBlock: true, blockGasLeft: common.NewUint64(0), err: protocol.ErrIntrinsicGas},
 		{name: "outside a block", fromBlock: true, used: 100_000},
-		{name: "own limit", blockGasLeft: 60_000, used: 100_000},
+		{name: "own limit", blockGasLeft: common.NewUint64(60_000), used: 100_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
@@ -232,6 +235,10 @@ func TestTraceTxGasFromBlock(t *testing.T) {
 			usage, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
 				uint256.NewInt(0), common.Hash{}, 0, ibs, tc.blockGasLeft, nil, nil,
 				chain.TestChainOsakaConfig, jsonstream.New(io.Discard), time.Second, nil)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tc.used, usage.BlockExecutionGasUsed)
 		})
@@ -393,7 +400,7 @@ func BenchmarkTraceTxAccountReads(b *testing.B) {
 					b.Fatal(err)
 				}
 				_, err := TraceTx(b.Context(), nil, txn, msg, blockCtx, protocol.NewEVMTxContext(msg),
-					uint256.NewInt(0), common.Hash{}, 0, ibs, 0, nil, config, chain.TestChainOsakaConfig,
+					uint256.NewInt(0), common.Hash{}, 0, ibs, nil, nil, config, chain.TestChainOsakaConfig,
 					jsonstream.New(io.Discard), time.Minute, nil)
 				if err != nil {
 					b.Fatal(err)

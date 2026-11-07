@@ -38,13 +38,16 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	execprotocol "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -224,6 +227,73 @@ func TestTraceBlockGasFromBlock(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTraceBlockGasFromBlockSpent checks that debug_traceBlock fails a type-0x76
+// transaction when state overrides make the transactions before it spend the
+// whole block, rather than running it with its limit.
+func TestTraceBlockGasFromBlockSpent(t *testing.T) {
+	m, l2, built := systemTxAfter(t, refunder, nil)
+	execChain := deriver.NewExecChain(m.ExecModule, m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig)
+	chainID := m.ChainConfig.ChainID
+	burner := common.Address{0xb0}
+	var txs []types.Transaction
+	// Each within the transaction gas cap, together the block's limit.
+	for i, gas := range []uint64{l2.BlockGasLimit / 2, l2.BlockGasLimit - l2.BlockGasLimit/2} {
+		user, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: uint64(1 + i), GasLimit: gas, To: &burner},
+			ChainID:  *chainID,
+			FeeCap:   *uint256.NewInt(100 * common.GWei),
+		}, *types.LatestSignerForChainID(chainID), derivertest.UserKey)
+		require.NoError(t, err)
+		txs = append(txs, user)
+	}
+	nonce, err := execChain.Nonce(t.Context(), 1, protocol.SystemAddress)
+	require.NoError(t, err)
+	sys, err := systemtx.New(protocol.SystemTx{ChainID: chainID.Uint64(), Nonce: nonce, To: protocol.RollupXEEZL2Address})
+	require.NoError(t, err)
+	parent := built.Block.HeaderNoCopy()
+	second, err := execChain.Extend(t.Context(), parent, deriver.HeaderInputs{
+		Number:     2,
+		ParentHash: parent.Hash(),
+		Time:       parent.Time + l2.BlockInterval,
+		Extra:      []byte{},
+		GasLimit:   l2.BlockGasLimit,
+	}, append(txs, sys), common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	require.Len(t, second.Receipts, 3)
+
+	// The trace's gas differs from the header's, which the assert-mode check compares.
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+	api := jsonrpc.NewPrivateDebugAPI(
+		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+		m.DB, nil, &rpccfg.DebugApiConfig{})
+	// JUMPDEST PUSH1 0 JUMP: the user transactions burn their limits.
+	loop := hexutil.Bytes{byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.JUMP)}
+	tracer := "callTracer"
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	require.NoError(t, api.TraceBlockByNumber(t.Context(), rpc.BlockNumber(2), &tracersConfig.TraceConfig{
+		Tracer:         &tracer,
+		StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(burner): {Code: &loop}},
+	}, stream))
+	require.NoError(t, stream.Flush())
+	var traces []struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			GasUsed hexutil.Uint64 `json:"gasUsed"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &traces), buf.String())
+	require.Len(t, traces, 3)
+	require.Nil(t, traces[0].Error)
+	require.Nil(t, traces[1].Error)
+	require.Equal(t, l2.BlockGasLimit, uint64(traces[0].Result.GasUsed+traces[1].Result.GasUsed))
+	require.NotNil(t, traces[2].Error, buf.String())
+	require.Contains(t, traces[2].Error.Message, execprotocol.ErrIntrinsicGas.Error())
 }
 
 // traceBlockGasUsed returns the gas debug_traceBlockByNumber reports for each
