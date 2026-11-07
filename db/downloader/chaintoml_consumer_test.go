@@ -425,6 +425,21 @@ func TestVerifyChainTomlReportsChangedInputs(t *testing.T) {
 	d.acquireChainToml(t.Context(), network, ns)
 	d.verifyChainToml(t.Context(), network, ns)
 	require.Equal(t, 3, strings.Count(logs.String(), "hash mismatch"), "returning to verify mode must compare again")
+
+	manifest.Drop()
+	peerHash = strings.Repeat("d", 40)
+	require.NoError(t, SaveChainToml(test.dirs.Snap, BuildTomlFromMap(map[string]string{name: peerHash})))
+	mi = buildTestMetainfo(t, test.dirs.Snap, ChainTomlFileName)
+	manifest, err = d.torrentClient.AddTorrent(&mi)
+	require.NoError(t, err)
+	require.True(t, manifest.Complete().Bool())
+	ns.nodes[0] = makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: mi.HashInfoBytes()})
+
+	d.verifyChainToml(t.Context(), network, ns)
+	require.Equal(t, 4, strings.Count(logs.String(), "hash mismatch"), "a changed peer manifest must be compared with the unchanged local registry")
+	require.Contains(t, logs.String(), "peer="+peerHash)
+	d.verifyChainToml(t.Context(), network, ns)
+	require.Equal(t, 4, strings.Count(logs.String(), "hash mismatch"), "repeating the new peer manifest must not repeat warnings")
 }
 
 func TestAcquireChainTomlReusesCacheAfterLocalChanges(t *testing.T) {
