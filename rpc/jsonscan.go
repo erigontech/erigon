@@ -106,6 +106,42 @@ func scanJSONValue(data []byte, i int) int {
 	}
 }
 
+// jsonKeyIs reports whether the object key raw, as written between its quotes, decodes to
+// name, which holds only ASCII letters. It unescapes while it compares, so it allocates nothing.
+func jsonKeyIs(raw []byte, name string) bool {
+	for len(raw) > 0 {
+		c, n := raw[0], 1
+		if c == '\\' {
+			// Only a \u escape below 0x80 can spell a letter.
+			c, n = 0, 2
+			if raw[1] == 'u' && len(raw) >= 6 {
+				v := 0
+				for _, h := range raw[2:6] {
+					v = v<<4 | hexDigit(h)
+				}
+				c, n = byte(min(v, 0x80)), 6
+			}
+		}
+		if len(name) == 0 || c != name[0] {
+			return false
+		}
+		raw, name = raw[n:], name[1:]
+	}
+	return len(name) == 0
+}
+
+func hexDigit(c byte) int {
+	switch {
+	case '0' <= c && c <= '9':
+		return int(c - '0')
+	case 'a' <= c && c <= 'f':
+		return int(c-'a') + 10
+	case 'A' <= c && c <= 'F':
+		return int(c-'A') + 10
+	}
+	return 0
+}
+
 // forEachJSONField calls fn with the key and raw value of every member of the
 // JSON object in data. Nothing is called if data does not hold an object.
 func forEachJSONField(data []byte, fn func(key, value []byte)) {
