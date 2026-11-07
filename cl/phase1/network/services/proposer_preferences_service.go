@@ -64,7 +64,7 @@ func NewProposerPreferencesService(
 		ethClock:          ethClock,
 		beaconCfg:         beaconCfg,
 		epbsPool:          epbsPool,
-		now:               time.Now,
+		now:               ethClock.Now,
 		emitters:          emitters,
 		validationViews:   newProposerPreferencesViewCache(),
 	}

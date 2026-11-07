@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
@@ -146,6 +147,48 @@ func TestNewPayloadV5BoundsBALAllocations(t *testing.T) {
 	require.NotNil(t, status.ValidationError)
 	require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
+}
+
+func TestNewPayloadBoundsDerivedBlobHashAllocations(t *testing.T) {
+	const hashCount = 128 * 1024
+	hashes := make([]common.Hash, hashCount)
+	for i := range hashes {
+		hashes[i][0] = kzg.BlobCommitmentVersionKZG
+	}
+	tx := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			// Excess transaction gas prevents asynchronous sender recovery during measurement.
+			CommonTx: types.CommonTx{GasLimit: 21_001, To: &common.Address{0x01}},
+		},
+		BlobVersionedHashes: hashes,
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&encoded))
+	payload := &engine_types.ExecutionPayload{
+		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
+		Timestamp:     1,
+		GasLimit:      21_000,
+		Transactions:  []hexutil.Bytes{encoded.Bytes()},
+		Withdrawals:   types.Withdrawals{},
+		BlobGasUsed:   new(hexutil.Uint64),
+		ExcessBlobGas: new(hexutil.Uint64),
+	}
+	srv := newTestEngineServer(prePragueChainConfig(), true)
+	ctx := t.Context()
+	measure := func(derive bool) uint64 {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive)
+		runtime.ReadMemStats(&after)
+		require.NoError(t, err)
+		require.Equal(t, engine_types.InvalidStatus, status.Status)
+		require.EqualError(t, status.ValidationError.Error(), "invalid block hash")
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	measure(false)
+	withoutDerivation, withDerivation := measure(false), measure(true)
+	// Decoding and hashing allocate in both paths; derivation must not add another full hash list.
+	require.Less(t, withDerivation, withoutDerivation+uint64(hashCount*len(common.Hash{})/2))
 }
 
 func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
@@ -719,6 +762,20 @@ func TestGetBlobsV4(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetBlobsV4UsesPoolCells(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 1)
+	_, _, poolCells := getBlobsV4Fixture(t, 2)
+	bundle.Cells = (*[goethkzg.CellsPerExtBlob]*goethkzg.Cell)(poolCells)
+	client := newGetBlobsV4Client(t, blobGetterMap{hash: bundle})
+	var result []struct {
+		BlobCells []hexutil.Bytes `json:"blob_cells"`
+	}
+	require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, hexutil.Bytes(hexutil.MustDecodeHex("0x01000000000000000000000000000000"))))
+	require.Len(t, result, 1)
+	require.Len(t, result[0].BlobCells, 1)
+	require.Equal(t, hexutil.Bytes(poolCells[0][:]), result[0].BlobCells[0], "served cell 0 must be the pool's, not recomputed from the blob")
 }
 
 func TestGetBlobsV4FastJSON(t *testing.T) {

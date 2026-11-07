@@ -62,9 +62,10 @@ var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload en
 var ErrExecutionPayloadEnvelopePersistenceFailed = errors.New("execution payload envelope persistence failed")
 
 var (
-	ErrInvalidExecutionPayloadEnvelope          = errors.New("invalid execution payload envelope")
-	ErrExecutionPayloadEnvelopeStateUnavailable = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
-	errPendingEnvelopeAgeBounded                = errors.New("pending execution payload envelope is age bounded")
+	ErrInvalidExecutionPayloadEnvelope           = errors.New("invalid execution payload envelope")
+	ErrExecutionPayloadEnvelopeStateUnavailable  = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
+	ErrExecutionPayloadEnvelopeStateReplayFailed = fmt.Errorf("%w: execution payload envelope state replay failed", ErrIgnore)
+	errPendingEnvelopeAgeBounded                 = errors.New("pending execution payload envelope is age bounded")
 )
 
 var blsVerify = bls.Verify
@@ -904,6 +905,9 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		defer f.mu.RUnlock()
 		block, ok := f.forkGraph.GetBlock(root)
 		if !ok || block == nil || block.Block == nil {
+			if f.forkGraph.IsBlockInvalid(root) {
+				return nil, false, fmt.Errorf("beacon block %v failed validation", root)
+			}
 			return nil, false, fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
 		}
 		finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
@@ -931,7 +935,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 			defer func() { <-validation }()
 			blockState, err := f.forkGraph.ReplayState(root)
 			if err != nil {
-				return fmt.Errorf("%w: beacon block state %v could not be replayed: %w", ErrIgnore, root, err)
+				return fmt.Errorf("%w: beacon block state %v: %w", ErrExecutionPayloadEnvelopeStateReplayFailed, root, err)
 			}
 			if blockState == nil {
 				return fmt.Errorf("%w: beacon block state %v is unavailable", ErrExecutionPayloadEnvelopeStateUnavailable, root)
@@ -1353,9 +1357,12 @@ func (f *ForkChoiceStore) ExecutionPayloadReceivedBefore(blockRoot common.Hash, 
 	return ok && arrival.receivedAt.Before(deadline)
 }
 
-// ExecutionPayloadApplyInFlight reports an envelope for blockRoot that passed its signature check
-// and is still being applied; it stops counting when the apply returns, applied or rejected.
+// ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature check
+// with the apply still running.
 func (f *ForkChoiceStore) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	if f.payloadPreparation.HasPendingEnvelope(blockRoot) {
+		return true
+	}
 	f.envelopeAppliesMu.Lock()
 	defer f.envelopeAppliesMu.Unlock()
 	return f.envelopeApplies[blockRoot] > 0

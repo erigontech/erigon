@@ -1081,7 +1081,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							pe.Lock()
 							delete(pe.blockExecutors, br.BlockNum)
 							pe.Unlock()
-							pe.scheduleNextPending(ctx)
+							if err := pe.scheduleNextPending(ctx); err != nil {
+								return err
+							}
 						}
 					}
 				default:
@@ -1204,7 +1206,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if startCatchup {
 					sizeCutPending = true
 				}
-				pe.scheduleNextPending(ctx)
+				if err := pe.scheduleNextPending(ctx); err != nil {
+					return err
+				}
 			}
 
 			// No need to wait for the apply loop before scheduling the next block: its
@@ -1219,8 +1223,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// the exec loop (single-writer); lazily installed on first apply otherwise.
 				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
-				blockExecutor.execStarted = time.Now()
-				blockExecutor.scheduleExecution(ctx, pe)
+				if err := pe.startBlock(ctx, blockExecutor); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1275,6 +1280,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		}
 
 		executor.tasks = append(executor.tasks, t)
+		if len(executor.tasks) == 1 {
+			v := t.Version()
+			executor.versionMap.SetBaseTxNum(v.TxNum - uint64(v.TxIndex) - 1)
+		}
 		executor.results = append(executor.results, nil)
 		executor.execFailed = append(executor.execFailed, 0)
 
@@ -1352,10 +1361,28 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		scheduleable.execStarted = time.Now()
-		scheduleable.scheduleExecution(ctx, pe)
+		return pe.startBlock(ctx, scheduleable)
 	}
 
+	return nil
+}
+
+func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
+	if be.execStarted.IsZero() && be.versionMap.HasBAL {
+		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
+		if first := be.tasks[0]; first.IsHistoric() {
+			reader = state.NewHistoryReaderV3WithSharedDomains(pe.applyTx, pe.domainsRead(), first.Version().TxNum)
+		}
+		base := pe.prevBlockBase(reader, be.blockNum)
+		if err := be.versionMap.SeedEmptyRemovals(
+			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
+			pe.cfg.chainConfig.Aura != nil,
+			base); err != nil {
+			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
+		}
+	}
+	be.execStarted = time.Now()
+	be.scheduleExecution(ctx, pe)
 	return nil
 }
 
@@ -1513,11 +1540,6 @@ func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string
 	return nil
 }
 
-// scheduleNextPending starts the lowest-numbered block still queued in
-// pe.blockExecutors. Called after a completed block is removed so a block enqueued
-// by processRequest while the slot was busy gets scheduled — processRequest itself
-// only schedules when the map was empty at insert time, so without this a block
-// enqueued mid-flight would orphan in the map and never be validated.
 func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	if !be.execStarted.IsZero() {
 		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
@@ -1525,11 +1547,16 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	}
 }
 
-func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
+// scheduleNextPending starts the lowest-numbered block still queued in
+// pe.blockExecutors. Called after a completed block is removed so a block enqueued
+// by processRequest while the slot was busy gets scheduled — processRequest itself
+// only schedules when the map was empty at insert time, so without this a block
+// enqueued mid-flight would orphan in the map and never be validated.
+func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
 		pe.Unlock()
-		return
+		return nil
 	}
 	var nextNum uint64
 	first := true
@@ -1543,10 +1570,9 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 	pe.Unlock()
 	if next == nil || !next.execStarted.IsZero() {
 		// Already running (or scheduled).
-		return
+		return nil
 	}
-	next.execStarted = time.Now()
-	next.scheduleExecution(ctx, pe)
+	return pe.startBlock(ctx, next)
 }
 
 // processSingleResult routes one worker result to its block executor's
@@ -1687,6 +1713,7 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
+	versionMap            *state.VersionMap
 	rules                 *chain.Rules
 	// balTxs carries the sealed reads and writes of txs before the block's final one,
 	// so the apply loop builds the block access list while the block runs.
@@ -2015,7 +2042,10 @@ func (result *execResult) calcFees(
 	}
 	coinbaseCodeHash := accounts.EmptyCodeHash
 	if cw, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
-		coinbaseHasCodeHashWrite = true
+		// Only a real contract signal: deployed code (non-empty) or a removed
+		// contract's code (ValueDeleted). An empty-codehash write from account
+		// creation — e.g. a self-destruct beneficiary funding a new coinbase — is not.
+		coinbaseHasCodeHashWrite = cw.Deletes() || !cw.Val.IsEmpty()
 		coinbaseCodeHash = cw.Val
 	}
 	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
@@ -2047,19 +2077,18 @@ func (result *execResult) calcFees(
 		if nw, ok := result.TxOut.GetNonce(burntAddr); ok {
 			burntNonce = nw.Val
 		}
-		if _, ok := result.TxOut.GetCodeHash(burntAddr); ok {
-			burntHasCodeHashWrite = true
+		if cw, ok := result.TxOut.GetCodeHash(burntAddr); ok {
+			burntHasCodeHashWrite = cw.Deletes() || !cw.Val.IsEmpty()
 		}
 		if _, ok := result.TxOut.GetCreateContract(burntAddr); ok {
 			burntCreatedContract = true
 		}
+		// An EIP-161 touched-empty removal now carries a SelfDestruct marker too, so the
+		// marker alone no longer proves a contract. The base code (pre-tx) is the real
+		// signal: only a contract had code to SELFDESTRUCT.
 		burntWasContract = !burntEmptyCodeHash || burntHasCodeHashWrite || burntCreatedContract
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
-	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
-	// DeleteAccount also emits SelfDestructPath=true for EIP-161 empty-removal of
-	// a touched EOA coinbase, where the delayed tip must still be credited (it
-	// re-creates the account) to match serial.
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	// A contract coinbase self-destructed with no same-tx re-create is net-absent:
@@ -2088,9 +2117,7 @@ func (result *execResult) calcFees(
 	// destruct (burnCoinbaseTip), which removes the account regardless of a non-zero
 	// residual from a later same-tx credit. Emit the removal so the deletion verdict
 	// rides the write-set directly — otherwise WriteSet.Merge copies this fee phase's
-	// live balance over the worker's ValueDeleted and the deletion survives only because
-	// calc_state re-derives it (EIP-161 empty-removal). Matching serial, which removes
-	// the destroyed account.
+	// live balance over the worker's ValueDeleted and the deletion is lost.
 	coinbaseNetDeleted := cbOverride && cbBalanceDeleted && (newCoinbaseBalance.IsZero() || burnCoinbaseTip)
 	// Pre-EIP-161 the fee touch creates and persists the coinbase even at a zero tip, so a
 	// later CALL sees it as existing (no new-account gas). EIP-161+ prunes the empty touch
@@ -2115,21 +2142,28 @@ func (result *execResult) calcFees(
 
 	addWrites := &state.WriteSet{}
 	if coinbaseNetDeleted || coinbaseEmptied {
-		addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+		if coinbaseWasContract {
+			addWrites.SetContractRemoval(result.Coinbase, taskVersion)
+		} else {
+			addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+		}
 	}
 	if burntEmptied || burntNetDeleted {
-		addWrites.SetEmptyRemoval(burntAddr, taskVersion)
-	}
-	// The worker's EIP-161 removal of a codeless coinbase is undone by a positive tip:
-	// serial credits the tip before the tx's empty-account sweep, so the account and its
-	// storage survive.
-	if coinbaseSelfdestructed && !coinbaseWasContract && !newCoinbaseBalance.IsZero() {
-		addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
-			WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
-		})
+		if burntWasContract {
+			addWrites.SetContractRemoval(burntAddr, taskVersion)
+		} else {
+			addWrites.SetEmptyRemoval(burntAddr, taskVersion)
+		}
 	}
 	if emitCoinbase {
 		{
+			// A fee credit revives an EOA coinbase a worker removed (EIP-161); retract the
+			// removal. A genuine contract self-destruct keeps its wipe.
+			if coinbaseSelfdestructed && !coinbaseWasContract {
+				addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
+					WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
+				})
+			}
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
@@ -2188,17 +2222,32 @@ func (result *execResult) calcFees(
 					Val: addrAcc.CodeHash,
 				})
 			}
+			// A fee credit reviving the coinbase leaves a stale pre-destruct nonce in the
+			// version-map floor; shadow it with the revived nonce so per-path commitment
+			// doesn't resurrect it. Skipped on a BAL block, where the nonce reset is not an
+			// access-list entry and emitting one would diverge from the sealed map.
+			if !chainRules.IsAmsterdam {
+				if fn, fres, fok := vm.ReadNonce(result.Coinbase, txIndex); fok && fres.Status() != state.MVReadResultNone && fn != addrAcc.Nonce {
+					addWrites.SetNonce(result.Coinbase, &state.VersionedWrite[uint64]{
+						WriteHeader: state.WriteHeader{
+							Address: result.Coinbase,
+							Path:    state.NoncePath,
+							Version: taskVersion,
+						},
+						Val: addrAcc.Nonce,
+					})
+				}
+			}
 		}
 	}
-	// The worker's EIP-161 removal of a codeless burnt recipient is undone by the
-	// base-fee credit: serial credits the fee before the tx's empty-account sweep,
-	// so the account and its storage survive. Mirrors the coinbase revival above.
-	if hasBurnt && burntSelfdestructed && !burntWasContract && !newBurntBalance.IsZero() {
-		addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
-			WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
-		})
-	}
 	if emitBurnt {
+		// Retract a worker's EIP-161 removal of the burnt recipient that this fee credit
+		// revives (see the coinbase case above).
+		if burntSelfdestructed && !burntWasContract {
+			addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+				WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.SelfDestructPath, Version: taskVersion},
+			})
+		}
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2216,6 +2265,9 @@ func (result *execResult) calcFees(
 			burntAddrAcc.CodeHash = burntAcc.CodeHash
 		} else {
 			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
+			if !burntNetDestructed {
+				burntAddrAcc.Nonce = burntNonce
+			}
 		}
 		addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
 			WriteHeader: state.WriteHeader{
@@ -2225,6 +2277,14 @@ func (result *execResult) calcFees(
 			},
 			Val: burntAddrAcc,
 		})
+		if !chainRules.IsAmsterdam {
+			if fn, fres, fok := vm.ReadNonce(burntAddr, txIndex); fok && fres.Status() != state.MVReadResultNone && fn != burntAddrAcc.Nonce {
+				addWrites.SetNonce(burntAddr, &state.VersionedWrite[uint64]{
+					WriteHeader: state.WriteHeader{Address: burntAddr, Path: state.NoncePath, Version: taskVersion},
+					Val:         burntAddrAcc.Nonce,
+				})
+			}
+		}
 	}
 
 	return addWrites, nil
@@ -2439,6 +2499,12 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
 		r.SetBlock(ev.version.BlockNum)
 	}
+	// A history reader at the task's own txNum already holds the writes of the block's earlier
+	// tasks, which the version map supplies; reading where the block's first task starts keeps
+	// the origins it seeds the same for every task.
+	if h, ok := state.HistoryReaderOf(ibs.StateReader()); ok {
+		h.SetTxNum(ev.version.TxNum - uint64(ev.index))
+	}
 	ibs.SetVersion(ev.version.Incarnation)
 	return nil
 }
@@ -2606,6 +2672,8 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+	versionMap := state.NewVersionMap(accessList)
+	versionMap.SeedAddresses()
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -2613,7 +2681,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		stats:               map[int]ExecutionStat{},
 		finalizedResults:    map[int]*execResult{},
 		blockIO:             &state.VersionedIO{},
-		versionMap:          state.NewVersionMap(accessList),
+		versionMap:          versionMap,
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
@@ -2864,13 +2932,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			dirty := be.revalidate[tx]
 			if dirty || dbg.AssertEnabled {
-				if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-					func(rv, wv state.Version) state.VersionValidity {
-						if rv != wv {
-							return state.VersionInvalid
-						}
-						return state.VersionValid
-					}, false, "") != state.VersionValid {
+				if !be.validateNow(txVersion.TxIndex) {
 					if !dirty {
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
@@ -3060,13 +3122,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 			continue
 		}
 		txVersion := txResult.Task.Version()
-		if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-			func(rv, wv state.Version) state.VersionValidity {
-				if rv != wv {
-					return state.VersionInvalid
-				}
-				return state.VersionValid
-			}, false, "") == state.VersionValid {
+		if be.validateNow(txVersion.TxIndex) {
 			continue
 		}
 		be.cntValidationFail++
@@ -3109,6 +3165,16 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return slices.Sorted(maps.Keys(set))
 }
 
+func (be *blockExecutor) validateNow(txIdx int) bool {
+	return be.versionMap.ValidateVersion(txIdx, be.blockIO,
+		func(rv, wv state.Version) state.VersionValidity {
+			if rv != wv {
+				return state.VersionInvalid
+			}
+			return state.VersionValid
+		}, false, "") == state.VersionValid
+}
+
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
 // contiguous validated-but-not-finalized prefix, then validates the dependency-ready
 // txs out of order, committing each or cascading a re-validation of successors on
@@ -3134,17 +3200,9 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			// Re-validate against the CURRENT versionMap, not the worker's verdict: a
-			// predecessor may have changed or sealed since (including an in-flight
-			// Validated cell the reader early-broke on), so trusting the stale verdict
-			// would commit against a value that has moved.
-			valid := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(rv, wv state.Version) state.VersionValidity {
-					if rv != wv {
-						return state.VersionInvalid
-					}
-					return state.VersionValid
-				}, false, "") == state.VersionValid
+			// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
+			// write stamp does not imply an unchanged read set.
+			valid := be.validateNow(txVersion.TxIndex)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3339,6 +3397,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
+			applyResult.versionMap = be.versionMap
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
@@ -3529,6 +3588,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txNum:      txTask.Version().TxNum,
 				rules:      lastResult.Rules(),
 				writes:     finalizeWrites,
+				versionMap: be.versionMap,
 				logs:       blockEndLogs,
 				isFinalize: true,
 			}, false); err != nil {
@@ -3536,9 +3596,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Block fully finalized: every tx sealed, block-end writes in the versionMap.
-		// Publish it as an overlay so the next block reads its writes before apply
-		// drains them to sd.mem; dropped on commit.
 		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 
 		be.result = &blockResult{

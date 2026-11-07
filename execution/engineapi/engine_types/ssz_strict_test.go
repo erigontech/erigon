@@ -50,7 +50,7 @@ func TestPayloadAttributesStrictSchemaCoverage(t *testing.T) {
 	for version := clparams.BellatrixVersion; version <= clparams.GloasVersion; version++ {
 		t.Run(version.String(), func(t *testing.T) {
 			attributes := NewPayloadAttributesSSZ(version)
-			fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+			fields := payloadAttributesDecodeFields{withdrawals: NewWithdrawalList(nil)}
 			schema := attributes.decodeSSZSchema(&fields)
 			if version >= clparams.CapellaVersion {
 				schema = append(schema, (*cltypes.Withdrawal)(nil))
@@ -129,6 +129,43 @@ func TestExecutionPayloadDecodeSSZStrictRoundTrip(t *testing.T) {
 				require.Equal(t, encoded, reencoded)
 			})
 		}
+	}
+}
+
+func TestExecutionPayloadDecodeSSZAboveConsensusTransactionLimit(t *testing.T) {
+	const version = clparams.GloasVersion
+	transaction := make(hexutil.Bytes, (15<<20)+1)
+	transaction[0], transaction[len(transaction)-1] = 0x01, 0x02
+	payload := NewExecutionPayloadSSZ(version)
+	payload.Transactions = []hexutil.Bytes{transaction}
+	encoded, err := payload.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		name            string
+		decode          func(*ExecutionPayload, []byte, int) error
+		decodeConsensus func(*cltypes.Eth1Block, []byte, int) error
+	}{
+		{
+			name:            "regular",
+			decode:          (*ExecutionPayload).DecodeSSZ,
+			decodeConsensus: (*cltypes.Eth1Block).DecodeSSZ,
+		},
+		{
+			name:            "strict",
+			decode:          (*ExecutionPayload).DecodeSSZStrict,
+			decodeConsensus: (*cltypes.Eth1Block).DecodeSSZStrict,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decoded := NewExecutionPayloadSSZ(version)
+			require.NoError(t, test.decode(decoded, encoded, int(version)))
+			require.Equal(t, payload.Transactions, decoded.Transactions)
+
+			block := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
+			err := test.decodeConsensus(block, encoded, int(version))
+			require.ErrorIs(t, err, commonssz.ErrTooBigList)
+		})
 	}
 }
 

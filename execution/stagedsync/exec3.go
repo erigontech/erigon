@@ -801,7 +801,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					EvmBlockContext: blockContext,
 					Withdrawals:     b.Withdrawals(),
 					// use history reader instead of state reader to catch up to the tx where we left off
-					HistoryExecution: lastFrozenTxNum > 0 && inputTxNum <= lastFrozenTxNum,
+					// Every task of a block that starts at or before the last frozen txNum reads history, so all of them
+					// seed origins from one pinned base. The serial executor keeps the per-tx condition: it skips
+					// ApplyStateWrites for historic tasks, so this one would drop a crossing block's suffix writes.
+					HistoryExecution: lastFrozenTxNum > 0 && blockStartTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
 					Trace:            dbg.TraceTx(blockNum, txIndex),
