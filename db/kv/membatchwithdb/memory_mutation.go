@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -45,16 +46,14 @@ type DomainReader interface {
 }
 
 type MemoryMutation struct {
-	// mu protects concurrent access to the mutation's maps and backing tx.
-	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
-	// ClearTable, UpdateTxn) acquire Lock. Cursor-based methods are NOT
-	// protected and must only be called single-threaded (under the semaphore).
-	// Read views created via NewReadView share this pointer so they synchronize
-	// with the parent's writers.
+	// mu coordinates overlay writes and access to the backing transaction.
+	// Read views share it, but use their own backing transactions.
+	// Cursor positions and lifetimes are not protected by this mutex.
 	mu               *sync.RWMutex
 	memTx            kv.RwTx
 	memDb            kv.RwDB
 	deletedEntries   map[string]map[string]struct{}
+	hasDeletions     *atomic.Bool // Shared by read views; set under mu before either deletion map changes.
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
 	readTx           kv.Tx
@@ -84,6 +83,7 @@ func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 		memDb:          memDB,
 		memTx:          mem,
 		deletedEntries: make(map[string]map[string]struct{}),
+		hasDeletions:   &atomic.Bool{},
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
 	}, nil
@@ -110,6 +110,7 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 		memDb:          tmpDB,
 		memTx:          memTx,
 		deletedEntries: make(map[string]map[string]struct{}),
+		hasDeletions:   &atomic.Bool{},
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
 	}, nil
@@ -609,6 +610,7 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 	defer m.mu.Unlock()
 	t, ok := m.deletedEntries[table]
 	if !ok {
+		m.hasDeletions.Store(true)
 		t = make(map[string]struct{})
 		m.deletedEntries[table] = t
 	}
@@ -621,6 +623,7 @@ func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
 	defer m.mu.Unlock()
 	t, ok := m.deletedDups[table]
 	if !ok {
+		m.hasDeletions.Store(true)
 		t = map[string]map[string]struct{}{}
 		m.deletedDups[table] = t
 	}
@@ -1197,6 +1200,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		memTx:          m.memTx,
 		memDb:          nil, // caller doesn't own the memDb
 		deletedEntries: m.deletedEntries,
+		hasDeletions:   m.hasDeletions,
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
 		readTx:         tx,

@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 
@@ -39,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -617,6 +620,85 @@ func TestBlockStorage(t *testing.T) {
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
+}
+
+type bodyReadHook struct {
+	kv.Getter
+	afterRead func()
+}
+
+func (g bodyReadHook) GetOne(table string, key []byte) ([]byte, error) {
+	value, err := g.Getter.GetOne(table, key)
+	if err == nil && table == kv.BlockBody && value != nil {
+		g.afterRead()
+	}
+	return value, err
+}
+
+func TestReadBodyDuringOverlayPurge(t *testing.T) {
+	for _, reader := range []string{"raw", "decoded"} {
+		for _, sibling := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/sibling=%t", reader, sibling), func(t *testing.T) {
+				_, tx := temporaltest.NewTestTx(t)
+				overlay, err := membatchwithdb.NewMemoryBatch(tx)
+				require.NoError(t, err)
+				defer overlay.Close()
+				rejectedHash := common.Hash{1}
+				txn := types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), 21000, uint256.NewInt(1), nil)
+				rawTxn, err := rlp.EncodeToBytes(txn)
+				require.NoError(t, err)
+				_, err = rawdb.WriteRawBody(overlay, rejectedHash, 1, &types.RawBody{Transactions: [][]byte{rawTxn}})
+				require.NoError(t, err)
+				if sibling {
+					txn := types.NewTransaction(2, common.Address{2}, uint256.NewInt(2), 21000, uint256.NewInt(1), nil)
+					rawTxn, err := rlp.EncodeToBytes(txn)
+					require.NoError(t, err)
+					_, err = rawdb.WriteRawBody(overlay, common.Hash{2}, 1, &types.RawBody{Transactions: [][]byte{rawTxn}})
+					require.NoError(t, err)
+				}
+				view := bodyReadHook{
+					Getter: overlay.NewReadView(tx),
+					afterRead: func() {
+						require.NoError(t, rawdb.DeleteBlock(overlay, rejectedHash, 1))
+					},
+				}
+				if reader == "raw" {
+					body, err := rawdb.ReadRawBody(view, rejectedHash, 1)
+					require.NoError(t, err)
+					require.Nil(t, body)
+				} else {
+					body, err := rawdb.ReadBodyWithTransactions(view, rejectedHash, 1)
+					require.NoError(t, err)
+					require.Nil(t, body)
+				}
+			})
+		}
+	}
+}
+
+func TestDeleteBlockRejectsInvalidTransactionRange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		base  types.BaseTxnID
+		count uint32
+	}{
+		{name: "zero count", base: 10},
+		{name: "missing system transaction", base: 10, count: 1},
+		{name: "overflow", base: math.MaxUint64 - 1, count: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			hash := common.Hash{1}
+			require.NoError(t, rawdb.WriteBodyForStorage(tx, hash, 1, &types.BodyForStorage{
+				BaseTxnID: tc.base,
+				TxCount:   tc.count,
+			}))
+			require.Error(t, rawdb.DeleteBlock(tx, hash, 1))
+			exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(1, hash))
+			require.NoError(t, err)
+			require.True(t, exists)
+		})
+	}
 }
 
 // Tests that partial block contents don't get reassembled into full blocks.

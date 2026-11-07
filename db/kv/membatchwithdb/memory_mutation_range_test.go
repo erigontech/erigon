@@ -183,13 +183,12 @@ func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 	require.Equal(t, []string{"AAAA", "CAAA", "CCAA"}, keys)
 }
 
-func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
+func TestReadViewIterationIsSafeAgainstConcurrentDelete(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbNonDupSort(t, rwTx)
 	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
-	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
 
 	view := overlay.NewReadView(rwTx)
 
@@ -199,6 +198,10 @@ func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
+		if err := overlay.Delete(kv.HeaderNumber, []byte("CBAA")); err != nil {
+			writeErr = err
+			return
+		}
 		for i := range rounds {
 			if err := overlay.Delete(kv.HeaderNumber, []byte(fmt.Sprintf("E%03d", i))); err != nil {
 				writeErr = err
@@ -209,6 +212,10 @@ func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range rounds {
+			if err := view.ForAmount(kv.HeaderNumber, nil, 4, func(_, _ []byte) error { return nil }); err != nil {
+				readErr = err
+				return
+			}
 			it, err := view.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				readErr = err

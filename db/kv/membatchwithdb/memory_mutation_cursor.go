@@ -57,6 +57,11 @@ func (m *memoryMutationCursor) isTableCleared() bool {
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
+	if !m.mutation.hasDeletions.Load() {
+		return false
+	}
+	m.mutation.mu.RLock()
+	defer m.mutation.mu.RUnlock()
 	if m.pureDupSort {
 		return m.mutation.isDupDeleted(m.table, key, value)
 	}

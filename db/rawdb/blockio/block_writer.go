@@ -77,10 +77,7 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 
 var mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
 
-// PruneBlocks - [1, to) old blocks after moving it to snapshots.
-// keeps genesis in db
-// doesn't change sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+// PruneBlocks removes old block data as described by [rawdb.PruneBlocks].
 func (w *BlockWriter) PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
