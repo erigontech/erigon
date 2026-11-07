@@ -10,7 +10,7 @@ import "sync"
 // The maps are read-only once listed, so reads need no coordination; the mutex
 // guards only the list links against concurrent PushHead / RemoveTail.
 type PrevBlockList struct {
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	head *prevBlockNode // newest finished block
 	tail *prevBlockNode // oldest not-yet-committed block
 }
@@ -29,8 +29,8 @@ func NewPrevBlockList() *PrevBlockList { return &PrevBlockList{} }
 // when the list is empty, so the commit path can assert it is dropping the block
 // it just committed rather than a wrong overlay on a push/remove desync.
 func (l *PrevBlockList) TailBlockNum() (uint64, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	if l.tail == nil {
 		return 0, false
 	}
@@ -72,8 +72,8 @@ func (l *PrevBlockList) RemoveTail() {
 // (oldest→newest) so a layered reader wraps the newest outermost. The current
 // block's own map is never included.
 func (l *PrevBlockList) Before(blockNum uint64) []*VersionMap {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	var out []*VersionMap
 	for node := l.tail; node != nil; node = node.newer {
 		if node.blockNum < blockNum {
@@ -88,8 +88,8 @@ func (l *PrevBlockList) Before(blockNum uint64) []*VersionMap {
 // is the txNum-keyed selection (matching the per-tx apply): a reader positioned
 // at txNum sees every finished-but-uncommitted block up to that point.
 func (l *PrevBlockList) BeforeTxNum(txNum uint64) []*VersionMap {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	var out []*VersionMap
 	for node := l.tail; node != nil; node = node.newer {
 		if node.endTxNum < txNum {

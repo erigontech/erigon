@@ -371,7 +371,7 @@ func TestGetHeadOnceDiscardsSupersededCheckpoint(t *testing.T) {
 	stale := store.justifiedCheckpoint.Load().(solid.Checkpoint)
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: stale.Epoch + 1, Root: stale.Root})
 
-	_, _, ok, err := store.getHeadOnce(nil, stale)
+	_, _, ok, err := store.getHeadOnce(nil, stale, false)
 	require.NoError(t, err)
 	require.False(t, ok, "a superseded checkpoint must not produce a head")
 

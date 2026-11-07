@@ -139,21 +139,6 @@ func TestRederiveBlockAccessListReportsRecoveredPanic(t *testing.T) {
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
 
-// TestRederiveBlockAccessListRefusesAccountAbstractionTx pins that a RIP-7560
-// transaction, which the live executor runs on its own path, is reported as the
-// node's failure: the replay cannot judge it.
-func TestRederiveBlockAccessListRefusesAccountAbstractionTx(t *testing.T) {
-	t.Parallel()
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-	header := &types.Header{Number: *uint256.NewInt(5), GasLimit: 10_000_000, Difficulty: *uint256.NewInt(1)}
-	txns := types.Transactions{&types.AccountAbstractionTransaction{ChainID: uint256.NewInt(1), GasLimit: 100_000, Tip: new(uint256.Int), FeeCap: new(uint256.Int)}}
-	_, err := RederiveBlockAccessList(context.Background(), chain.TestChainBerlinConfig, ethash.NewFaker(), nil, noHeader, header, txns, nil, nil, ibs, log.New())
-	require.Error(t, err)
-	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-}
-
 // TestRederiveBlockAccessListReportsMissingHeader pins that an ancestor header
 // lookup that finds nothing is reported as the node's failure: BLOCKHASH would
 // otherwise read a zero hash.

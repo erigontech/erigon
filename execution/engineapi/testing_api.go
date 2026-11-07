@@ -25,7 +25,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -56,7 +55,10 @@ type TestingAPI interface {
 	//
 	// transactions: nil  → draw from mempool (normal builder behaviour)
 	//               []   → build an empty block (mempool bypassed, no txs)
-	//               [...] → build a block containing exactly these transactions (strict nonce check)
+	//               [...] → build from these transactions, subject to execution checks
+	//
+	// Account nonce prechecks cover the ordinary prefix and the first frame transaction's
+	// legacy nonce. Keyed sequences and all later nonces are checked during execution.
 	BuildBlockV1(ctx context.Context, parentHash common.Hash, payloadAttributes *engine_types.PayloadAttributes, transactions *[]hexutil.Bytes, extraData *hexutil.Bytes) (*engine_types.GetPayloadResponse, error)
 
 	// CommitBlockV1 builds a block on top of the current canonical head, inserts it into the
@@ -84,7 +86,7 @@ func NewTestingImpl(server *EngineServer, logger log.Logger, db kv.TemporalRoDB)
 
 // decodeTxnProvider decodes raw transactions into a TxnProvider.
 // Returns nil if transactions is nil (mempool path).
-// Opens a single temporal DB transaction for all nonce lookups to avoid per-sender overhead.
+// Opens a single temporal DB transaction for all account nonce lookups to avoid per-sender overhead.
 func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hexutil.Bytes, blockNumber, timestamp uint64) (txnprovider.TxnProvider, error) {
 	if transactions == nil {
 		return nil, nil
@@ -108,6 +110,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 	decoded := make([]types.Transaction, 0, len(*transactions))
 	signer := types.MakeSigner(t.server.config, blockNumber, timestamp)
 	expectedNonce := make(map[accounts.Address]uint64, len(*transactions))
+	checkAccountNonce := true
 	for i, rawTx := range *transactions {
 		tx, err := types.DecodeTransaction(rawTx)
 		if err != nil {
@@ -118,6 +121,20 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction %d: cannot recover sender: %v", i, err)}
 		}
 		tx.SetSender(sender)
+		decoded = append(decoded, tx)
+		if !checkAccountNonce {
+			continue
+		}
+		if frame, ok := tx.(*types.FrameTransaction); ok {
+			// Frame code can advance the sender's or another called account's nonce
+			// through CREATE. Check this transaction's initial legacy nonce, then
+			// leave later nonce checks for all senders to execution.
+			checkAccountNonce = false
+			if !frame.UsesLegacyNonce() {
+				// Keyed sequences use nonce-manager storage, independently of account nonces.
+				continue
+			}
+		}
 		if _, seen := expectedNonce[sender]; !seen {
 			var stateNonce uint64
 			if reader != nil {
@@ -140,7 +157,6 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, &rpc.CustomError{Code: rpc.ErrCodeDefault, Message: fmt.Sprintf("nonce too low: address %v, tx: %d state: %d", sender.Value(), got, want)}
 		}
 		expectedNonce[sender]++
-		decoded = append(decoded, tx)
 	}
 	return &staticTxnProvider{txns: decoded}, nil
 }
@@ -435,18 +451,24 @@ func (t *testingImpl) assembleTestingBlock(
 	return &assembled, version, nil
 }
 
-// staticTxnProvider is a TxnProvider that yields a fixed transaction list exactly once,
-// then returns nil on every subsequent call. Used only by the testing_ namespace.
+// staticTxnProvider keeps a fixed transaction list for the testing_ namespace.
+// The builder's filter tracks yielded hashes; removing a hash allows a retry once
+// execution closes a nonce gap, so the list must remain available across calls.
 type staticTxnProvider struct {
 	txns []types.Transaction
-	done atomic.Bool
 }
 
-func (s *staticTxnProvider) ProvideTxns(_ context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	if !s.done.CompareAndSwap(false, true) {
-		return nil, nil
+func (s *staticTxnProvider) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	o := txnprovider.ApplyProvideOptions(opts...)
+	var txns []types.Transaction
+	for _, tx := range s.txns {
+		if len(txns) == o.Amount {
+			break
+		}
+		if o.TxnIdsFilter != nil && !o.TxnIdsFilter.Add(tx.Hash()) {
+			continue
+		}
+		txns = append(txns, tx)
 	}
-	txns := s.txns
-	s.txns = nil // release for GC after handing off
 	return txns, nil
 }
