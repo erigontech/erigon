@@ -211,7 +211,7 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 	}
 
 	dbg.Exec3Parallel = false
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	ethconfig.Defaults.Sync.ExecWorkerCount = 16
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
