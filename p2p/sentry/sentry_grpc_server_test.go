@@ -1727,3 +1727,43 @@ func TestPeerInfo_AsyncAfterRemoveReleasesBytes(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
 }
+
+func runPeerOnOneMsg(t *testing.T, version uint, code uint64, subscribed bool) *p2p.PeerError {
+	t.Helper()
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	rw := NewMockMsgReadWriter()
+	require.NoError(t, rw.WriteMsg(p2p.Msg{Code: code, Size: 1, Payload: bytes.NewReader([]byte{0xc0})}))
+	rw.WriteToReadBuffer(rw.ReadAllWritten())
+	return runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: version},
+		rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) {},
+		func(sentryproto.MessageId) bool { return subscribed }, log.Root())
+}
+
+// Every code an eth version defines keeps the peer; only an undefined in-range code kicks it.
+// The run ends on the empty read buffer, so a kept peer returns a receive error.
+func TestRunPeer_EveryDefinedMessageCodeKeepsPeer(t *testing.T) {
+	for version, codes := range eth.ToProto {
+		for code := range codes {
+			if code == eth.StatusMsg { // a second status breaks the handshake rule, not an unknown code
+				continue
+			}
+			for _, subscribed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("eth%d/0x%02x/subscribed=%t", version, code, subscribed), func(t *testing.T) {
+					peerErr := runPeerOnOneMsg(t, version, code, subscribed)
+					require.NotNil(t, peerErr)
+					require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code, peerErr.Error())
+				})
+			}
+		}
+		for code := uint64(0); code < eth.ProtocolLengths[version]; code++ {
+			if _, defined := codes[code]; defined || code == eth.StatusMsg {
+				continue
+			}
+			t.Run(fmt.Sprintf("eth%d/0x%02x/undefined", version, code), func(t *testing.T) {
+				peerErr := runPeerOnOneMsg(t, version, code, true)
+				require.NotNil(t, peerErr)
+				require.Equal(t, p2p.PeerErrorInvalidMessageCode, peerErr.Code)
+			})
+		}
+	}
+}
