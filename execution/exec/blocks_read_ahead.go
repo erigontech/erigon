@@ -2,8 +2,12 @@ package exec
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
+	"math"
+	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -376,7 +380,38 @@ func makeBALWarmupPlan(bal types.BlockAccessList, workers int) ([]balWarmupTask,
 			tasks = append(tasks, balWarmupTask{accountIndex: uint32(accountIndex), slotFrom: uint32(slotFrom), slotTo: uint32(min(slotFrom+balWarmupStorageChunkSize, slots))})
 		}
 	}
+	if warmFirstUse {
+		first := make([]uint32, len(bal))
+		for i := range bal {
+			first[i] = balFirstChangeIndex(&bal[i])
+		}
+		slices.SortStableFunc(tasks, func(a, b balWarmupTask) int { return cmp.Compare(first[a.accountIndex], first[b.accountIndex]) })
+	}
 	return tasks, min(workers, len(tasks))
+}
+
+// warmFirstUse is a probe knob: BAL_WARM_FIRST_USE=1 warms accounts in the order the block's txs first write them,
+// so the committer, which reads them in tx order, finds them cached.
+var warmFirstUse = os.Getenv("BAL_WARM_FIRST_USE") == "1"
+
+// balFirstChangeIndex is the first tx index that changes the account; read-only accounts sort last.
+func balFirstChangeIndex(a *types.AccountChanges) uint32 {
+	first := uint32(math.MaxUint32)
+	for _, c := range a.BalanceChanges {
+		first = min(first, c.Index)
+	}
+	for _, c := range a.NonceChanges {
+		first = min(first, c.Index)
+	}
+	for _, c := range a.CodeChanges {
+		first = min(first, c.Index)
+	}
+	for _, sc := range a.StorageChanges {
+		for _, c := range sc.Changes {
+			first = min(first, c.Index)
+		}
+	}
+	return first
 }
 
 func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address]struct{} {
