@@ -221,8 +221,7 @@ type latestPrefetcher interface {
 }
 
 const (
-	prefetchFlatDepth = 8 // trie levels read as one flat batch before the walk checks branches
-	prefetchPar       = 4 // read txs one prefetch step spreads its keys over
+	prefetchPar = 4 // read txs one prefetch step spreads its keys over
 )
 
 type rawBranchReader interface {
@@ -669,3 +668,11 @@ var (
 	pfBudgetPages = func() int64 { n, _ := strconv.Atoi(os.Getenv("PF_BUDGET_MB")); return int64(n) * 256 }()
 	pfPages       atomic.Int64
 )
+
+// prefetchFlatDepth is the trie depth read as one flat batch before the walk checks branches; probe knob PF_FLAT_DEPTH.
+var prefetchFlatDepth = func() int {
+	if n, err := strconv.Atoi(os.Getenv("PF_FLAT_DEPTH")); err == nil && n >= 0 {
+		return n
+	}
+	return 8
+}()
