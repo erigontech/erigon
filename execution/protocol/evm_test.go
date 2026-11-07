@@ -50,3 +50,26 @@ func TestGetHashFnAnswersZeroForALaterBlock(t *testing.T) {
 		})
 	}
 }
+
+// A lookup that finds no ancestor header has failed; any hash it answered would be made up.
+func TestGetHashFnFailsOnAMissingHeader(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(10)}
+	getHash := GetHashFn(header, func(common.Hash, uint64) (*types.Header, error) { return nil, nil })
+	_, err := getHash(5)
+	require.ErrorContains(t, err, "not found")
+}
+
+// The walk moves one block down per lookup, so a header for another number fails the lookup.
+func TestGetHashFnFailsOnAHeaderOfAnotherNumber(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(10)}
+	lookups := 0
+	getHash := GetHashFn(header, func(common.Hash, uint64) (*types.Header, error) {
+		lookups++
+		if lookups > 1 {
+			t.Fatal("the lookup went on after a header of another number")
+		}
+		return &types.Header{}, nil
+	})
+	_, err := getHash(5)
+	require.ErrorContains(t, err, "has number 0, want 9")
+}
