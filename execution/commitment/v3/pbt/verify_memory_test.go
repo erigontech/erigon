@@ -18,13 +18,17 @@ package pbt
 
 import (
 	"bytes"
+	"context"
+	"runtime"
+	"sort"
 	"sync/atomic"
 	"testing"
-
-	"github.com/stretchr/testify/require"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/stretchr/testify/require"
 )
 
 type pbinVerifyMemoryContext struct {
@@ -62,4 +66,113 @@ func TestPBinVerifierWithoutRecordsDoesNotAllocateBucketKeyIndex(t *testing.T) {
 	verifier := trie.newVerifier()
 	require.NoError(t, verifier.verify())
 	require.Nil(t, verifier.verifiedBucketKeys)
+}
+
+type pbinRangeContext struct {
+	commitment.PatriciaContext
+	records   map[string][]byte
+	emitted   *atomic.Uint64
+	afterEmit func(uint64, uint64)
+}
+
+func (c *pbinRangeContext) ReadVerifyRange(from, to []byte, emit func([]byte, []byte) error) (uint64, error) {
+	keys := make([]string, 0, len(c.records))
+	for key := range c.records {
+		if bytes.Compare([]byte(key), from) >= 0 && bytes.Compare([]byte(key), to) < 0 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	var count, size uint64
+	for _, key := range keys {
+		data := bytes.Clone(c.records[key])
+		if err := emit([]byte(key), data); err != nil {
+			return count, err
+		}
+		count++
+		size += uint64(len(key) + len(data))
+		if c.emitted != nil {
+			c.emitted.Add(1)
+		}
+		if c.afterEmit != nil {
+			c.afterEmit(count, size)
+		}
+	}
+	return count, nil
+}
+
+func TestPBinReleasedTaskRowsUnreachable(t *testing.T) {
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	base := &trieTestContext{records: corpus.snapshot}
+	verifier := NewTrie(base).newVerifier()
+	root, err := verifier.loadRoot()
+	require.NoError(t, err)
+	var paths []eip8297.Bitpath
+	require.NoError(t, verifier.collectChainPaths(root.row, &paths, make(map[string]struct{})))
+	require.NotEmpty(t, paths)
+	stats := new(VerifyStats)
+	verifier.SetVerifyStats(stats)
+	require.NoError(t, verifier.verifyChains(t.Context(), 2, func(context.Context) (commitment.PatriciaContext, func()) {
+		return &pbinRangeContext{PatriciaContext: base, records: corpus.snapshot}, nil
+	}))
+	require.Greater(t, len(verifier.verifiedChains), 2)
+	require.Equal(t, stats.TaskRowsLoaded.Load(), stats.TaskRowsReleased.Load())
+	require.Zero(t, stats.LiveRows.Load())
+
+	released := NewTrie(base).newVerifier()
+	released.ctx = &pbinRangeContext{PatriciaContext: base, records: corpus.snapshot}
+	var finalized atomic.Uint64
+	require.NoError(t, released.loadVerifyRows(paths[0]))
+	for _, data := range released.verifyRows {
+		counter := &finalized
+		runtime.SetFinalizer(&data[0], func(*byte) { counter.Add(1) })
+	}
+	emitted := uint64(len(released.verifyRows))
+	released.releaseVerifyRows()
+	require.Positive(t, emitted)
+	for range 10 {
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+	}
+	retained := emitted - finalized.Load()
+	runtime.KeepAlive(released)
+	require.Zero(t, retained, "released task row buffers remain reachable: retained=%d, emitted=%d, finalized=%d, rows_live=%d", retained, emitted, finalized.Load(), stats.LiveRows.Load())
+}
+
+func TestPBinLiveRowsDuringLoad(t *testing.T) {
+	const (
+		holdChunkBytes = 1 << 20
+		rowValueBytes  = 1 << 19
+	)
+	corpus := newParallelRoundCorpus(t, parallelRoundTestShape)
+	base := &trieTestContext{records: corpus.snapshot}
+	verifier := NewTrie(base).newVerifier()
+	root, err := verifier.loadRoot()
+	require.NoError(t, err)
+	var paths []eip8297.Bitpath
+	require.NoError(t, verifier.collectChainPaths(root.row, &paths, make(map[string]struct{})))
+	require.NotEmpty(t, paths)
+	stats := new(VerifyStats)
+	verifier.SetVerifyStats(stats)
+	records := make(map[string][]byte)
+	for key := range corpus.snapshot {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		if err == nil && path.BitLen >= paths[0].BitLen && path.HasPrefix(&paths[0]) {
+			records[key] = make([]byte, rowValueBytes)
+		}
+	}
+	var actualRows, actualBytes, liveRows, liveBytes uint64
+	verifier.ctx = &pbinRangeContext{PatriciaContext: base, records: records, afterEmit: func(rows, size uint64) {
+		actualRows, actualBytes = rows, size
+		liveRows, liveBytes = stats.LiveRows.Load(), stats.LiveBytes.Load()
+	}}
+	require.NoError(t, verifier.loadVerifyRows(paths[0]))
+	defer verifier.releaseVerifyRows()
+	require.Positive(t, actualRows)
+	require.Greater(t, actualBytes, uint64(holdChunkBytes))
+	require.Equal(t, actualRows, verifier.verifyTaskRows)
+	require.Less(t, actualRows-liveRows, uint64(holdChunkBytes/rowValueBytes), "during range load: rows_live=%d, retained_rows=%d; bytes_live=%d, retained_bytes=%d", liveRows, actualRows, liveBytes, actualBytes)
+	require.Less(t, actualBytes-liveBytes, uint64(holdChunkBytes), "during range load: rows_live=%d, retained_rows=%d; bytes_live=%d, retained_bytes=%d", liveRows, actualRows, liveBytes, actualBytes)
+	require.Equal(t, verifier.verifyTaskRows, stats.LiveRows.Load())
+	require.Equal(t, verifier.verifyTaskBytes, stats.LiveBytes.Load())
 }

@@ -1638,6 +1638,76 @@ func (a *Aggregator) MergeLoop(ctx context.Context) error {
 	return a.mergeLoop(ctx)
 }
 
+func (a *Aggregator) MergePBinRange(ctx context.Context, domain kv.Domain, from, to uint64) error {
+	if a == nil {
+		return errors.New("pbin merge: nil aggregator")
+	}
+	if domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain {
+		return fmt.Errorf("pbin merge: invalid domain %s", domain)
+	}
+	if a.isDomainFrozen(domain) {
+		return fmt.Errorf("pbin merge: commitment domain %s is frozen", domain)
+	}
+	if a.CommitmentDomainStopped(domain) {
+		return fmt.Errorf("pbin merge: commitment domain %s is stopped", domain)
+	}
+	if from >= to {
+		return fmt.Errorf("pbin merge: invalid range %d-%d", from, to)
+	}
+	stepSize := a.StepSize()
+	if stepSize == 0 || from%stepSize != 0 || to%stepSize != 0 {
+		return fmt.Errorf("pbin merge: range %d-%d is not aligned to step size %d", from, to, stepSize)
+	}
+	if !a.background.TryAdd() {
+		return errors.New("pbin merge: aggregator is closing")
+	}
+	defer a.background.Done()
+	if !a.mergingFiles.CompareAndSwap(false, true) {
+		return errors.New("pbin merge: another merge is running")
+	}
+	defer a.mergingFiles.Store(false)
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
+	ranges := &Ranges{}
+	ranges.domain[domain] = NewDomainRanges(domain, *NewMergeRange(domain.String(), true, from, to), HistoryRanges{}, a.StepSize())
+	at := a.BeginFilesRo()
+	defer at.Close()
+	files, err := at.filesInRange(ranges)
+	if err != nil {
+		return err
+	}
+	selected := slices.Clone(files.DomainFiles(domain))
+	slices.SortFunc(selected, func(left, right *FilesItem) int {
+		if left.startTxNum < right.startTxNum {
+			return -1
+		}
+		if left.startTxNum > right.startTxNum {
+			return 1
+		}
+		return 0
+	})
+	next := from
+	for _, file := range selected {
+		if file.startTxNum != next {
+			return fmt.Errorf("pbin merge: files do not tile range %d-%d at txNum %d", from, to, next)
+		}
+		next = file.endTxNum
+	}
+	if next != to {
+		return fmt.Errorf("pbin merge: files do not tile range %d-%d; ended at txNum %d", from, to, next)
+	}
+	if len(selected) == 1 && selected[0].startTxNum == from && selected[0].endTxNum == to {
+		return nil
+	}
+	in, err := at.mergeFiles(ctx, files, ranges)
+	if err != nil {
+		in.Close()
+		return err
+	}
+	a.integrateMergedDirtyFiles(in)
+	return nil
+}
+
 func (a *Aggregator) mergeLoop(ctx context.Context) (err error) {
 	if dbg.NoMerge() || !a.mergingFiles.CompareAndSwap(false, true) {
 		return nil // currently merging or merge is prohibited
@@ -3128,6 +3198,18 @@ func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Dom
 
 func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
+}
+
+func (at *AggregatorRoTx) DebugRangeLatestCount(tx kv.Tx, domain kv.Domain) (uint64, uint64, error) {
+	return at.d[domain].DebugRangeLatestCount(tx)
+}
+
+func (at *AggregatorRoTx) DebugRangeLatestWithOffsets(tx kv.Tx, domain kv.Domain, from, to []byte, limit int, fileOffsets []uint64) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestWithOffsets(tx, from, to, limit, fileOffsets)
+}
+
+func (at *AggregatorRoTx) DebugRangeLatestVerifyData(tx kv.Tx, domain kv.Domain, rootKey []byte, upperBits int16) (map[uint64][]uint64, []uint64, map[string][]byte, error) {
+	return at.d[domain].DebugRangeLatestVerifyData(tx, rootKey, upperBits)
 }
 
 // DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,

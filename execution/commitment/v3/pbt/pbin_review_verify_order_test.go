@@ -52,7 +52,7 @@ func TestPBinReviewVerifyErrorOrder(t *testing.T) {
 	root, err := probe.loadRoot()
 	require.NoError(t, err)
 	var paths []eip8297.Bitpath
-	require.NoError(t, probe.collectChainPaths(root.row, &paths))
+	require.NoError(t, probe.collectChainPaths(root.row, &paths, make(map[string]struct{})))
 	require.Greater(t, len(paths), 1)
 	first, err := rowKeyForPath(&paths[0])
 	require.NoError(t, err)

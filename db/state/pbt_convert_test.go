@@ -23,6 +23,7 @@ import (
 	"sort"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -224,12 +225,18 @@ func TestVerifyPBinDomainReportsProgress(t *testing.T) {
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
 	previousHandler := log.Root().GetHandler()
+	previousInterval := state.PBTProgressInterval
 	var logs bytes.Buffer
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
-	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+	state.PBTProgressInterval = time.Nanosecond
+	t.Cleanup(func() {
+		log.Root().SetHandler(previousHandler)
+		state.PBTProgressInterval = previousInterval
+	})
 	_, err = state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.Contains(t, logs.String(), "PBT verification progress")
+	require.NotContains(t, logs.String(), `done=1 `)
 }
 
 func selectPBinConvertHash(t *testing.T) {
@@ -252,6 +259,45 @@ func selectPBinBinOnlyHash(t *testing.T) {
 
 func writePBinConvertState(t *testing.T, db kv.TemporalRwDB) {
 	writePBinConvertStateN(t, db, 2)
+}
+
+func writePBinConvertStateManyStorageSlots(t *testing.T, db kv.TemporalRwDB) {
+	t.Helper()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer domains.Close()
+	address := make([]byte, length.Addr)
+	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	previous, _, err := domains.GetLatest(kv.AccountsDomain, tx, address)
+	require.NoError(t, err)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, previous))
+	slotKey := func(slotIndex uint64) []byte {
+		slot := make([]byte, length.Hash)
+		binary.BigEndian.PutUint64(slot[length.Hash-8:], slotIndex)
+		return slot
+	}
+	firstGroup := eip8297.TreeKeyStorage(address, slotKey(eip8297.HeaderStorageSlots))[1+length.Hash] >> 4
+	secondGroup := uint64(1)
+	for ; eip8297.TreeKeyStorage(address, slotKey(secondGroup*256+eip8297.HeaderStorageSlots))[1+length.Hash]>>4 == firstGroup; secondGroup++ {
+	}
+	put := func(slotIndex uint64) {
+		slot := append(bytes.Clone(address), slotKey(slotIndex)...)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{byte(slotIndex)}, 1, nil))
+	}
+	for slotIndex := uint64(eip8297.HeaderStorageSlots); slotIndex < 256; slotIndex++ {
+		put(slotIndex)
+	}
+	for slotIndex := secondGroup*256 + eip8297.HeaderStorageSlots; slotIndex < secondGroup*256+eip8297.HeaderStorageSlots+4; slotIndex++ {
+		put(slotIndex)
+	}
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
 }
 
 func writePBinConvertStateN(t *testing.T, db kv.TemporalRwDB, count int) {

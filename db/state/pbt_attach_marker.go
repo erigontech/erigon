@@ -27,8 +27,11 @@ import (
 const PBTAttachMarkerFileName = "attach-pbt.in-progress.json"
 
 type PBTAttachMarker struct {
-	PublishedPath string            `json:"published_path"`
-	Settings      *ErigonDBSettings `json:"settings"`
+	PublishedPath  string            `json:"published_path"`
+	ManifestBlake3 string            `json:"manifest_blake3,omitempty"`
+	NodeHexRoot    string            `json:"node_hex_root,omitempty"`
+	HeaderRoot     string            `json:"header_root,omitempty"`
+	Settings       *ErigonDBSettings `json:"settings"`
 }
 
 func PBTAttachMarkerPath(dirs datadir.Dirs) string {

@@ -18,10 +18,10 @@ package state_test
 
 import (
 	"bytes"
+	"regexp"
+	"strings"
 	"testing"
-
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -35,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 const pbinLeafStreamStepSize = uint64(8)
@@ -297,4 +299,47 @@ func writePBinLeafStreamRange(t *testing.T, db kv.TemporalRwDB, fromTxNum, toTxN
 	}
 	require.NoError(t, sd.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())
+}
+
+func TestPBinLeafProgressAllocatedBytes(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	writePBinLeafStreamRange(t, db, 0, 2*pbinLeafStreamStepSize, []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1},
+		{address: pbinLeafStreamAddress(0x55), nonce: 2, balance: 2},
+	})
+	require.NoError(t, agg.BuildFiles(db, 2*pbinLeafStreamStepSize, unboundedFinalityCtx))
+	previousInterval := state.PBTProgressInterval
+	state.PBTProgressInterval = time.Nanosecond
+	t.Cleanup(func() { state.PBTProgressInterval = previousInterval })
+	previousHandler := log.Root().GetHandler()
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat())))
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	leaves := 0
+	require.NoError(t, state.ForEachPBinLeafWithWorkers(t.Context(), at, nil, true, 16, func(state.PBinLeaf) error {
+		leaves++
+		return nil
+	}))
+	require.Positive(t, leaves)
+	donePattern := regexp.MustCompile(`done=(\d+)`)
+	bytesPattern := regexp.MustCompile(`etl_a_buffer_bytes=(\d+)`)
+	samples := 0
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if !strings.Contains(line, `phase="source leaf walk"`) {
+			continue
+		}
+		done, allocated := donePattern.FindStringSubmatch(line), bytesPattern.FindStringSubmatch(line)
+		if len(done) != 2 || done[1] == "0" {
+			continue
+		}
+		samples++
+		if len(allocated) == 2 && allocated[1] == "0" {
+			t.Errorf("source walk done=%s reports etl_a_buffer_bytes=0 after collecting nonzero leaves; want allocated bytes > 0", done[1])
+			break
+		}
+	}
+	require.Positive(t, samples, "must observe a source walk sample after collecting leaves")
 }

@@ -158,6 +158,34 @@ func BenchmarkMergeSortFiles(b *testing.B) {
 	}
 }
 
+func BenchmarkMergeInBackgroundSmallRows(b *testing.B) {
+	logger := log.New()
+	const count = 100_000
+	keys := make([][]byte, count)
+	vals := make([][]byte, count)
+	for i := range count {
+		keys[i] = make([]byte, 32)
+		binary.BigEndian.PutUint64(keys[i], uint64(i)*6364136223846793005)
+		vals[i] = make([]byte, 32)
+	}
+	tmpdir := b.TempDir()
+	b.ReportAllocs()
+	for b.Loop() {
+		c := NewCollector("bench", tmpdir, NewSortableBuffer(256*datasize.KB), logger).MergeInBackground(true)
+		for i := range count {
+			if err := c.Collect(keys[i], vals[i]); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
+			return nil
+		}, TransformArgs{}); err != nil {
+			b.Fatal(err)
+		}
+		c.Close()
+	}
+}
+
 func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
