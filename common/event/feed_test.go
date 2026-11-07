@@ -539,3 +539,41 @@ func TestFeedTrySendOrFailRacesUnsubscribe(t *testing.T) {
 		<-done
 	}
 }
+
+func TestFeedTrySendOrFailReportsEveryLagButKeepsOnePending(t *testing.T) {
+	var feed Feed
+	sub := feed.Subscribe(make(chan int))
+	defer sub.Unsubscribe()
+
+	feed.TrySendOrFail(1)
+	if err := <-sub.Err(); !errors.Is(err, ErrSubscriberLagged) {
+		t.Fatalf("first lag: got %v", err)
+	}
+	feed.TrySendOrFail(2)
+	select {
+	case err := <-sub.Err():
+		if !errors.Is(err, ErrSubscriberLagged) {
+			t.Fatalf("second lag: got %v", err)
+		}
+	default:
+		t.Fatal("a lag after the first one was read is not reported")
+	}
+
+	completed := make(chan struct{})
+	go func() {
+		feed.TrySendOrFail(3)
+		feed.TrySendOrFail(4)
+		close(completed)
+	}()
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("a pending lag report blocked the send")
+	}
+	<-sub.Err()
+	select {
+	case err := <-sub.Err():
+		t.Fatalf("two misses left two reports: %v", err)
+	default:
+	}
+}

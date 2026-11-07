@@ -83,24 +83,42 @@ func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
 	emitter.NotifyDataColumnStored(common.Hash{1})
 }
 
-func TestHeadEventsReportAFullSubscriber(t *testing.T) {
-	for name, send := range map[string]func(*stateFeed) int{
-		"head":    func(f *stateFeed) int { return f.TrySendHead(&HeadData{}) },
-		"head_v2": func(f *stateFeed) int { return f.SendHeadV2(&HeadV2Data{}) },
+// head and head_v2 report a dropped event only on their own feeds, to subscribers of that topic. The state feed, which
+// carries every topic, drops them silently: its subscribers may not have asked for them.
+func TestHeadEventsReportAFullSubscriberOnlyOnTheirOwnFeed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		subscribe func(*stateFeed, chan *EventStream) ethevent.Subscription
+		send      func(*stateFeed) int
+	}{
+		"head": {
+			subscribe: (*stateFeed).SubscribeHead,
+			send:      func(f *stateFeed) int { return f.TrySendHead(&HeadData{}) },
+		},
+		"head_v2": {
+			subscribe: (*stateFeed).SubscribeHeadV2,
+			send:      func(f *stateFeed) int { return f.SendHeadV2(&HeadV2Data{}) },
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newStateFeed()
-			ch := make(chan *EventStream, 1)
-			sub := f.Subscribe(ch)
-			defer sub.Unsubscribe()
-			require.Equal(t, 1, f.SendBlock(&BlockData{}))
+			topic := make(chan *EventStream)
+			topicSub := tc.subscribe(f, topic)
+			defer topicSub.Unsubscribe()
+			all := make(chan *EventStream)
+			allSub := f.Subscribe(all)
+			defer allSub.Unsubscribe()
 
-			require.Zero(t, send(f))
+			require.Zero(t, tc.send(f))
 			select {
-			case err := <-sub.Err():
+			case err := <-topicSub.Err():
 				require.ErrorIs(t, err, ethevent.ErrSubscriberLagged)
 			default:
-				t.Fatal("head event dropped without telling the subscriber")
+				t.Fatal("head event dropped without telling its subscriber")
+			}
+			select {
+			case err := <-allSub.Err():
+				t.Fatalf("state feed subscriber told about a head event it may not want: %v", err)
+			default:
 			}
 		})
 	}

@@ -36,8 +36,8 @@ import (
 func (a *ApiHandler) StartPayloadAttributes(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	events := make(chan *beaconevents.EventStream, 128)
-	subscription := a.emitters.State().Subscribe(events)
-	// Feed sends wait for every subscriber, so state work runs off the receiving goroutine.
+	subscription := a.emitters.State().SubscribeHeadV2(events)
+	// head_v2 is sent without waiting for subscribers, so state work runs off the receiving goroutine to keep up.
 	wake := make(chan struct{}, 1)
 	notify := func() {
 		select {
@@ -61,10 +61,8 @@ func (a *ApiHandler) StartPayloadAttributes(ctx context.Context) <-chan struct{}
 				}
 				// The dropped event may have been a head change.
 				notify()
-			case event := <-events:
-				if event.Event == beaconevents.StateHeadV2 {
-					notify()
-				}
+			case <-events:
+				notify()
 			case <-decision.C:
 				notify()
 				decision.Reset(a.untilPayloadDecision())

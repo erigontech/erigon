@@ -466,9 +466,9 @@ func TestPayloadAttributesEventDropsHeadChangedBeforePublication(t *testing.T) {
 	require.Empty(t, events)
 }
 
-// A missed head event may have been a head change, so the loop publishes payload attributes for the lag alone.
-func TestPayloadAttributesLoopPublishesAfterAMissedHeadEvent(t *testing.T) {
-	headState, handler, _, _ := setupEmptyGloasHead(t)
+// A missed head_v2 event must not stop the loop: it stays subscribed and keeps taking head changes.
+func TestPayloadAttributesLoopSurvivesAMissedHeadEvent(t *testing.T) {
+	headState, handler, _, parentRoot := setupEmptyGloasHead(t)
 	mockSlotClock(t, handler, headState.Slot()+1)
 	emitter := beaconevents.NewEventEmitter()
 	handler.emitters = emitter
@@ -479,25 +479,15 @@ func TestPayloadAttributesLoopPublishesAfterAMissedHeadEvent(t *testing.T) {
 		cancel()
 		<-done
 	}()
-	// The observer has room for every flooded event, so only the loop can lag. The loop ignores legacy head events,
-	// so the lag is the only thing that can make it publish. On one P the flooding goroutine runs until preempted, far
-	// longer than filling the loop's buffer takes, so the loop cannot keep up.
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	const limit = 1 << 16
-	events := make(chan *beaconevents.EventStream, limit+1)
-	subscription := emitter.State().Subscribe(events)
-	defer subscription.Unsubscribe()
-	floodUntilLagged(t, emitter, 2, limit)
-
-	timeout := time.After(5 * time.Second)
-	for {
-		select {
-		case event := <-events:
-			if event.Event == beaconevents.StatePayloadAttributes {
-				return
-			}
-		case <-timeout:
-			t.Fatal("payload attributes event was not emitted after a missed head event")
-		}
+	head := &beaconevents.HeadV2Data{
+		Version: "gloas",
+		Data:    beaconevents.HeadV2Content{Slot: headState.Slot(), Block: parentRoot, PayloadStatus: "empty"},
 	}
+	// The loop is the only head_v2 subscriber. On one P the flooding goroutine runs until preempted, far longer than
+	// filling the loop's buffer takes, so the loop cannot keep up.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	floodUntilLagged(t, func() int { return emitter.State().SendHeadV2(head) }, 1, 1<<16)
+
+	require.Eventually(t, func() bool { return emitter.State().SendHeadV2(head) == 1 }, 5*time.Second, time.Millisecond,
+		"the loop stopped taking head_v2 events after missing one")
 }
