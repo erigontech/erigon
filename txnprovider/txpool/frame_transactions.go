@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
 	"slices"
 	"sort"
 	"time"
@@ -512,11 +511,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	blockTime := head.BlockTime
 	// Expiry uses the same block time as validation.
 	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
-	var pendingSlot uint64
-	hasPendingSlot := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
-	if hasPendingSlot {
-		pendingSlot = *head.SlotNumber + 1
-	}
+	pendingSlot, slotErr := protocol.FrameValidationSlot(head.SlotNumber)
+	hasPendingSlot := head.SlotNumber != nil && slotErr == nil
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -601,20 +597,16 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			}
 		}
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
-			for _, key := range frame.NonceKeys {
-				if _, ok := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]; ok {
-					affected = true
-					break
-				}
-			}
+			affected = slices.ContainsFunc(frame.NonceKeys, func(key uint256.Int) bool {
+				_, changed := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]
+				return changed
+			})
 		}
 		if !affected && len(rootSlots) > 0 {
-			for _, ref := range previous.RecentRoots {
-				if _, ok := rootSlots[ref.StorageKey]; ok {
-					affected = true
-					break
-				}
-			}
+			affected = slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+				_, changed := rootSlots[ref.StorageKey]
+				return changed
+			})
 		}
 		if !affected {
 			continue
