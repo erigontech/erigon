@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -478,7 +479,9 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	var cold coldState
 	if mmap.NewProbe() != nil {
 		group.Go(func() error {
-			prefetchBALCommitment(ctx, db, trieKeys())
+			if os.Getenv("PF_TRIE_OFF") != "1" { // probe: skip only the trie batch prefetch
+				prefetchBALCommitment(ctx, db, trieKeys())
+			}
 			return nil
 		})
 		cold = stateKeysCold(ctx, db, bal)
