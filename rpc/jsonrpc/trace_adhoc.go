@@ -1048,10 +1048,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
@@ -1080,7 +1076,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}

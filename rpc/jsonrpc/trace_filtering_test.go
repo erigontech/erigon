@@ -188,14 +188,11 @@ func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, block, "block %d not found", blockNum)
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	require.NoError(t, err)
-
 	// Far past the last real transaction in the block, so TxnByIdxInBlock
 	// finds the body but no matching entry in kv.EthTx and returns ok=false.
 	unresolvedTxIndex := len(block.Transactions()) + 1_000_000
 
-	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, chainConfig, nil)
+	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, nil)
 	require.Error(t, err)
 }
 

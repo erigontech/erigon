@@ -80,10 +80,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
@@ -114,7 +110,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1053,7 +1049,6 @@ func (api *TraceAPIImpl) callTransaction(
 	traceTypes []string,
 	txIndex int,
 	gasBailOut bool,
-	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
 	blockNumber := header.Number.Uint64()
@@ -1063,11 +1058,6 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	engine := api.engine()
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
-	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-		return nil, err
-	}
-	rules := blockCtx.Rules(cfg)
 	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
@@ -1080,6 +1070,8 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 
+	// History holds the block's opening system calls; re-running them would
+	// cache what they read at block start, stale once doCall moves to txIndex.
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -1092,16 +1084,6 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
-
-	logger := log.New("trace_filtering")
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, err
-	}
 
 	// The engine's per-transaction rule reads the transaction's neighbours.
 	var blockTxs types.Transactions
