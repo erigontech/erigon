@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -94,6 +95,17 @@ func TestBatchPrefetcher_StopsAtBudget(t *testing.T) {
 	_, err := p.Next(ctx)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return feed.pulled.Load() == 5 }, 5*time.Second, time.Millisecond)
+}
+
+func TestBatchSize_CountsBlockAccessList(t *testing.T) {
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	plain := batchSize([]*types.Block{types.NewBlockWithHeader(header, nil)})
+	bal := types.BlockAccessList{types.AccountChanges{Address: common.HexToAddress("0x01")}}
+	sidecar := types.NewBlockAccessListSidecar(bal)
+	raw, err := sidecar.Bytes()
+	require.NoError(t, err)
+	withBAL := batchSize([]*types.Block{types.NewBlockWithHeader(header, sidecar)})
+	require.Equal(t, plain+int64(len(raw)), withBAL)
 }
 
 func TestBatchPrefetcher_BatchLargerThanBudgetStillDelivered(t *testing.T) {

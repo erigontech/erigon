@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type batchFeed interface {
@@ -35,7 +36,8 @@ type prefetchedBatch struct {
 }
 
 // batchPrefetcher keeps pulling batches from the feed while the consumer executes
-// the previous chunk, holding at most budget bytes of downloaded blocks.
+// the previous chunk. budget is a soft cap on the encoded size of queued batches:
+// one more batch waits for room, and a batch larger than budget still goes through.
 type batchPrefetcher struct {
 	ch     chan prefetchedBatch
 	budget *semaphore.Weighted
@@ -55,11 +57,7 @@ func (p *batchPrefetcher) run(ctx context.Context, feed batchFeed, budget int64)
 	defer close(p.ch)
 	for {
 		batch, err := feed.Next(ctx)
-		var size int64
-		for _, b := range batch.Blocks {
-			size += int64(b.Size())
-		}
-		weight := min(max(size, 1), budget)
+		weight := min(max(batchSize(batch.Blocks), 1), budget)
 		if p.budget.Acquire(ctx, weight) != nil {
 			return
 		}
@@ -72,6 +70,17 @@ func (p *batchPrefetcher) run(ctx context.Context, feed batchFeed, budget int64)
 			return
 		}
 	}
+}
+
+func batchSize(blocks []*types.Block) int64 {
+	var size int64
+	for _, b := range blocks {
+		size += int64(b.Size())
+		if raw, err := b.BlockAccessListSidecar().Bytes(); err == nil {
+			size += int64(len(raw))
+		}
+	}
+	return size
 }
 
 func (p *batchPrefetcher) Next(ctx context.Context) (p2p.BlockBatchResult, error) {
