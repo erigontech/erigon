@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/node/components/storage/validation"
@@ -77,6 +78,21 @@ func TestProductionIndexBuilder_StateSaltNotYetPresentPauses(t *testing.T) {
 
 	err := b.BuildMissedIndices(context.Background(), nil)
 	require.ErrorIs(t, err, validation.ErrPause)
+}
+
+// A bootstrap scan reaches the index builder long before the segments it would
+// index have finished downloading. That failure resolves itself exactly as the
+// salt's does, and counting it toward quarantine strands the file for good:
+// a quarantined file never advances, so the post-Indexed gate never fires.
+func TestProductionIndexBuilder_SegmentsNotYetDownloadedPauses(t *testing.T) {
+	b := &productionIndexBuilder{
+		blockRetire: stubBlockRetire{err: fmt.Errorf("%w: segments max=0, indices max=0, download ready=false",
+			snapshotsync.ErrSegmentsNotReady)},
+	}
+
+	err := b.BuildMissedIndices(context.Background(), nil)
+	require.ErrorIs(t, err, validation.ErrPause,
+		"a scan that ran before the segments arrived must not count toward quarantine")
 }
 
 func TestProductionIndexBuilder_RealFailureIsNotAPause(t *testing.T) {

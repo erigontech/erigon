@@ -1805,6 +1805,11 @@ type snapshotNotifier interface {
 	OnNewSnapshot()
 }
 
+// ErrSegmentsNotReady reports that the segments this scan would index have not
+// all arrived yet. During bootstrap that is the normal state for a while, so a
+// caller that retries makes progress where one that treats it as final does not.
+var ErrSegmentsNotReady = errors.New("not all snapshot segments are available")
+
 func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
 		if s.SegmentsMax() == 0 {
@@ -1816,8 +1821,8 @@ func (s *BaseRoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix stri
 		return nil
 	}
 	if !s.SegmentsReady() {
-		return fmt.Errorf("not all snapshot segments are available: segments max=%d, indices max=%d, download ready=%t",
-			s.SegmentsMax(), s.IndicesMax(), s.DownloadReady())
+		return fmt.Errorf("%w: segments max=%d, indices max=%d, download ready=%t",
+			ErrSegmentsNotReady, s.SegmentsMax(), s.IndicesMax(), s.DownloadReady())
 	}
 
 	// wait for Downloader service to download all expected snapshots

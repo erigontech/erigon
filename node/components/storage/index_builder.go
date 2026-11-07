@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -123,11 +124,15 @@ func (b *productionIndexBuilder) BuildMissedIndices(ctx context.Context, primary
 }
 
 // asPause marks the build failures that resolve themselves, so the driver
-// retries the file instead of counting it toward quarantine. Each salt arrives
-// as a file of its own during bootstrap, and a scan that runs before it does
-// fails for every file at once.
+// retries the file instead of counting it toward quarantine. A bootstrap scan
+// runs before the inputs it needs have all arrived — each salt lands as a file
+// of its own, and the segments are still downloading — and it fails for every
+// file at once, so treating those as final strands the whole set.
 func asPause(err error) error {
-	if errors.Is(err, snaptype.ErrSaltNotFound) || errors.Is(err, state.ErrStateSaltNotFound) {
+	switch {
+	case errors.Is(err, snaptype.ErrSaltNotFound),
+		errors.Is(err, state.ErrStateSaltNotFound),
+		errors.Is(err, snapshotsync.ErrSegmentsNotReady):
 		return fmt.Errorf("%w: %w", validation.ErrPause, err)
 	}
 	return err
