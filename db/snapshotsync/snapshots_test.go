@@ -351,6 +351,41 @@ func TestMergeFailureKeepsSamePathInput(t *testing.T) {
 	require.Contains(t, seeded, headerInfo.Path)
 }
 
+// A same-range input with an older segment version shares the output's index names, and building the output's index
+// replaces that file: after a failed merge the input must not be left with the removed output's index.
+func TestMergeAbortDropsTheBuiltIndexOfASameRangeInput(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	output := snaptype.BeaconBlocks.FileInfo(dir, 0, 20_000)
+	require.NotEqual(version.V1_0, output.Version, "the input needs an older version than the output")
+	createTestSegmentOnlyFile(t, 0, 20_000, snaptype.CaplinEnums.BeaconBlocks, dir, version.V1_0, logger)
+	idxPath := filepath.Join(dir, snaptype.BeaconBlocks.IdxFileNames(0, 20_000)[0])
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{KeyCount: 1, BucketSize: 10, TmpDir: dir, IndexFile: idxPath, LeafSize: 8}, logger)
+	require.NoError(err)
+	idx.DisableFsync()
+	require.NoError(idx.AddKey([]byte{1}, 0))
+	require.NoError(idx.Build(t.Context()))
+	idx.Close()
+	inputIdx, err := os.ReadFile(idxPath)
+	require.NoError(err)
+
+	types := []snaptype.Type{snaptype.BeaconBlocks}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype.BeaconBlocks, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	s.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+		return BeaconSimpleIdx(ctx, info, salt, tmpDir, p, lvl, logger)
+	}))
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+	injected := errors.New("injected")
+	require.ErrorIs(merger.Merge(t.Context(), s, types, []Range{NewRange(0, 20_000)}, dir, true, func([]string) error { return injected }, nil), injected)
+
+	if kept, err := os.ReadFile(idxPath); err == nil {
+		require.Equal(inputIdx, kept, "the input's index path holds the removed output's index")
+	}
+}
+
 func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
 	dir := t.TempDir()
 	info := snaptype2.Transactions.FileInfo(dir, 0, 500_000)
@@ -362,7 +397,7 @@ func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
 		require.NoError(t, os.WriteFile(f, nil, 0o644))
 	}
 
-	removeMergedFiles(info, nil)
+	removeMergedFiles(info, nil, false)
 
 	for _, f := range files {
 		require.NoFileExists(t, f)
