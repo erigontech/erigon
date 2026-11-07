@@ -36,7 +36,52 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/shards"
 )
+
+func TestUnwindExecutionStageNotifications(t *testing.T) {
+	for _, mode := range []stages.Mode{stages.ModeApplyingBlocks, stages.ModeForkValidation} {
+		t.Run(mode.String(), func(t *testing.T) {
+			ctx, logger := t.Context(), log.New()
+			db, tx := temporaltest.NewTestTx(t)
+			br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+			require.NoError(t, err)
+			defer doms.Close()
+
+			const head = uint64(2)
+			key := dbutils.GenerateStoragePlainKey(common.Address{1}, common.Hash{2})
+			for block := uint64(0); block <= head; block++ {
+				header := makeHeader(block, common.Hash{})
+				require.NoError(t, rawdb.WriteHeader(tx, header))
+				require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), block))
+				require.NoError(t, rawdbv3.TxNums.Append(tx, block, 2*block+1))
+				cs := &changeset.StateChangeSet{}
+				if block == head {
+					doms.SetChangesetAccumulator(cs)
+					doms.SetTxNum(2 * block)
+					require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, key, []byte{1}, 2*block, nil))
+				}
+				require.NoError(t, changeset.WriteDiffSet(tx, block, header.Hash(), cs))
+			}
+			accumulator := shards.NewAccumulator()
+			cfg := ExecuteBlockCfg{blockReader: br, stateStream: true, notifications: &shards.Notifications{Accumulator: accumulator}}
+			s := &StageState{ID: stages.Execution, BlockNumber: head, State: &Sync{mode: mode}}
+			u := &UnwindState{ID: stages.Execution, UnwindPoint: 1, CurrentBlockNumber: head}
+			require.NoError(t, UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger))
+			value, _, err := doms.GetLatest(kv.StorageDomain, tx, key)
+			require.NoError(t, err)
+			require.Empty(t, value, "both pipeline modes must unwind the state")
+			if mode == stages.ModeForkValidation {
+				require.Empty(t, accumulator.Changes(), "speculative unwinds must not be announced")
+			} else {
+				require.Len(t, accumulator.Changes(), 1)
+				require.Len(t, accumulator.Changes()[0].Changes, 1)
+				require.Len(t, accumulator.Changes()[0].Changes[0].StorageChanges, 1)
+			}
+		})
+	}
+}
 
 // Pins that the unwind early-return (u.UnwindPoint >= s.BlockNumber) prunes
 // uncommitted overlay writes above committed progress (s.BlockNumber) — the
@@ -176,6 +221,56 @@ func makeHeader(number uint64, root common.Hash) *types.Header {
 		Number:     *uint256.NewInt(number),
 		Root:       root,
 		Difficulty: *uint256.NewInt(1),
+	}
+}
+
+func TestUnwindExec3RequiresExecutedDiffsets(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		stored  []uint64
+		wantErr bool
+	}{
+		{"all_missing", nil, true},
+		{"executed_tip_missing", []uint64{1}, true},
+		{"unexecuted_tail", []uint64{1, 2}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			logger := log.New()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+			br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+			tx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+			require.NoError(t, err)
+			defer doms.Close()
+			for number := uint64(0); number <= 3; number++ {
+				header := makeHeader(number, common.Hash{1})
+				require.NoError(t, rawdb.WriteHeader(tx, header))
+				require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+				require.NoError(t, rawdbv3.TxNums.Append(tx, number, number*3+2))
+			}
+			for _, number := range test.stored {
+				cs := &changeset.StateChangeSet{}
+				address := common.Address{1}
+				cs.Diffs[kv.AccountsDomain].DomainUpdate(address[:], kv.Step(0), nil)
+				require.NoError(t, changeset.WriteDiffSet(tx, number, makeHeader(number, common.Hash{1}).Hash(), cs))
+			}
+			doms.SetTxNum(8)
+			err = unwindExec3(
+				&UnwindState{ID: stages.Execution, UnwindPoint: 0, CurrentBlockNumber: 3},
+				&StageState{ID: stages.Execution, BlockNumber: 2}, doms, tx, ctx,
+				ExecuteBlockCfg{blockReader: br}, nil, logger,
+			)
+			if test.wantErr {
+				require.ErrorContains(t, err, "missing diffset for executed block 2")
+				require.Equal(t, uint64(8), doms.TxNum(), "a failed unwind must not move the state boundary")
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, uint64(3), doms.TxNum())
+			}
+		})
 	}
 }
 

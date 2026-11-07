@@ -1,0 +1,38 @@
+name: Consensus reorg recovery
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reorg:
+    if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-kurtosis
+        with:
+          version: '1.22.2'
+      - name: Build Erigon
+        run: docker build -t test/erigon:current --build-arg BINARIES=erigon .
+      - name: Partition, heal and restart
+        run: make test-reorg-devnet
+      - name: Collect enclave logs
+        if: always()
+        continue-on-error: true
+        run: kurtosis enclave dump unwind-reorg ./reorg-logs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: reorg-devnet-logs
+          path: reorg-logs
+      - name: Remove test enclave
+        if: always()
+        run: kurtosis enclave rm -f unwind-reorg

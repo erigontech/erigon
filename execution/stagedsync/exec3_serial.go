@@ -48,9 +48,7 @@ type serialExecutor struct {
 	// so the caller can log real commitment counters instead of a zero value.
 	commitProgress atomic.Pointer[commitment.CommitProgress]
 
-	// accumulator for the current block; set at StartChange and used by the
-	// block-end stateWriter so that AuRa system-call nonce changes are
-	// included in the txpool state-diff batch.
+	// The worker and block-end writer must report into the same notification batch.
 	accumulator *shards.Accumulator
 }
 
@@ -79,6 +77,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
 ) (*types.Header, kv.TemporalRwTx, error) {
+	se.accumulator = accumulator
 	if err := se.resetWorkers(ctx, se.rs, se.applyTx); err != nil {
 		return nil, rwTx, err
 	}
@@ -151,7 +150,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return se.getHeader(ctx, hash, number)
 		}), se.cfg.engine, se.cfg.author, se.cfg.chainConfig)
 
-		se.accumulator = accumulator // keep in sync for executeBlock's stateWriter
 		if accumulator != nil {
 			txs, err := se.cfg.blockReader.RawTransactions(context.Background(), se.applyTx, b.NumberU64(), b.NumberU64())
 			if err != nil {
@@ -351,7 +349,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 		}
 	}
 
-	return se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
+	return se.worker.ResetState(rs, se.applyTx, nil, nil, se.accumulator)
 }
 
 func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool) (cont bool, err error) {
@@ -530,20 +528,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
 				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
-			if se.cfg.badBlockHalt {
-				return false, err
-			}
-
-			if se.u != nil {
-				unwindReason := ExecUnwind
-				if errors.Is(err, rules.ErrInvalidBlock) {
-					unwindReason = BadBlock(txTask.Header.Hash(), err)
-				}
-				if err := se.u.UnwindTo(txTask.BlockNumber()-1, unwindReason, se.applyTx); err != nil {
-					return false, err
-				}
-			}
-
+			// The caller discards failed execution. A pending unwind would carry
+			// this block's error into the next forkchoice; see renderExecOutcome.
 			return false, err
 		}
 

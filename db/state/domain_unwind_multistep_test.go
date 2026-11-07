@@ -155,3 +155,35 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 	require.Equal(t, wantSum, gotSum, "sum key must match ground truth at the unwind target")
 	require.Equal(t, gotSum, computed, "invariant: sum of ring values must equal the sum key after unwind")
 }
+
+func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		for _, firstCut := range []uint64{20, 32, 34} {
+			t.Run(fmt.Sprintf("%s/cut_%d", cfg.Name, firstCut), func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				view := d.beginForTests()
+				defer view.Close()
+				writer := view.NewWriter(db)
+				defer writer.Close()
+				key := []byte("key")
+				require.NoError(t, writer.PutWithPrev(key, []byte{1}, 2, nil))
+				writer.diff = &kv.DomainDiff{}
+				require.NoError(t, writer.PutWithPrev(key, []byte{2}, 34, []byte{1}))
+				diffs := writer.diff.GetDiffSet()
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				// The second unwind has no diff for this key: it did not change in that range.
+				require.NoError(t, view.unwind(t.Context(), tx, firstCut/16, firstCut, diffs))
+				require.NoError(t, view.unwind(t.Context(), tx, 0, 10, nil))
+				writer.diff = nil
+				require.NoError(t, writer.PutWithPrev(key, []byte{3}, 12, []byte{1}))
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				value, _, _, err := view.GetLatest(key, tx)
+				require.NoError(t, err)
+				require.Equal(t, []byte{3}, value)
+			})
+		}
+	}
+}

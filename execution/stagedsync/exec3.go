@@ -367,7 +367,6 @@ func execV3Serial(ctx context.Context,
 			cfg:               cfg,
 			rs:                rs,
 			doms:              doms,
-			u:                 u,
 			isForkValidation:  isForkValidation,
 			isApplyingBlocks:  isApplyingBlocks,
 			applyTx:           applyTx,
@@ -491,7 +490,6 @@ type txExecutor struct {
 	cfg              ExecuteBlockCfg
 	rs               *state.StateV3Buffered
 	doms             *execctx.SharedDomains
-	u                Unwinder
 	isForkValidation bool
 	isApplyingBlocks bool
 	applyTx          kv.TemporalTx

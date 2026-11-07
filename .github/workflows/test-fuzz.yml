@@ -188,11 +188,45 @@ jobs:
         with:
           clean-fuzzcache: 'false'
 
+  reorg:
+    if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-erigon
+        with:
+          build-cache-extra-key: reorg-schedules
+      - name: Run seeded reorg schedules
+        env:
+          ERIGON_REORG_SEED: ${{ github.run_id }}
+          ERIGON_REORG_CASES: '100'
+        run: go test ./execution/engineapi -run '^TestEngineApiReorgSchedules$' -count=1 -timeout=45m -v 2>&1 | tee reorg-schedules.log
+      - name: Record failure
+        if: failure()
+        run: |
+          mkdir -p fuzz-failure
+          printf 'engine-reorg\texecution/engineapi\tTestEngineApiReorgSchedules\tno-reproducer\n' > fuzz-failure/engine-reorg.tsv
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: reorg-schedules-log
+          path: reorg-schedules.log
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: fuzz-failure-engine-reorg
+          path: fuzz-failure/engine-reorg.tsv
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
   notify:
-    needs: [fuzz]
+    needs: [fuzz, reorg]
     # Only alert on scheduled failures: manual/dispatch runs are watched by
     # whoever triggered them. `always()` lets this run despite `fuzz` failing.
-    if: ${{ always() && needs.fuzz.result == 'failure' && github.event_name == 'schedule' }}
+    if: ${{ always() && contains(needs.*.result, 'failure') && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -86,7 +86,7 @@ func NewPipelineExecutor(
 // ValidationNotifications returns the notifications object used by the
 // validation pipeline. The ForkValidator uses this as extendingForkNotifications
 // so that state changes accumulated during ValidateBlock are available for
-// MergeExtendingFork to copy to the main accumulator.
+// MergeExtendingFork to append to the main accumulator.
 func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
 	return pe.validationNotifications
 }
@@ -110,6 +110,14 @@ func (pe *PipelineExecutor) UnwindTo(unwindPoint uint64, reason stagedsync.Unwin
 // RunUnwind executes a pending unwind on the main pipeline.
 func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	return pe.sync.RunUnwind(sd, tx)
+}
+
+// UnwindForValidation keeps speculative progress and notifications off the main pipeline.
+func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64) error {
+	if err := pe.validationSync.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+		return err
+	}
+	return pe.validationSync.RunUnwind(sd, tx)
 }
 
 // RunPrune executes pruning on the main pipeline.

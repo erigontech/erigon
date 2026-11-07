@@ -459,7 +459,7 @@ func (a *Aggregator) ConfigureDomains() error {
 
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
-	if !dd.Enabled || !a.d[dependency].Enabled {
+	if !dd.Enabled.Load() || !a.d[dependency].Enabled.Load() {
 		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
@@ -481,7 +481,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
-	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || !dd.Enabled {
+	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || !dd.Enabled.Load() {
 		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
@@ -660,7 +660,7 @@ func (a *Aggregator) openFolder() error {
 
 	eg, ctx := errgroup.WithContext(a.ctx)
 	for id, d := range a.d {
-		if !d.Enabled {
+		if !d.Enabled.Load() {
 			continue
 		}
 
@@ -670,7 +670,7 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for id, ii := range standaloneIIs {
-		if !ii.Enabled {
+		if !ii.Enabled.Load() {
 			continue
 		}
 		eg.Go(func() (err error) {
@@ -770,7 +770,7 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Enabled = true }
+func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Enabled.Store(true) }
 
 func (a *Aggregator) setBuildAccessorsWorkers(i int) {
 	a.workers.trySet(func() {
@@ -1070,7 +1070,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	for id, d := range a.d {
-		if !d.Enabled {
+		if !d.Enabled.Load() {
 			continue
 		}
 
@@ -1104,7 +1104,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	}
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled {
+		if !ii.Enabled.Load() {
 			continue
 		}
 
@@ -1806,13 +1806,13 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 
 	ceiling := uint64(math.MaxUint64)
 	for id, d := range a.d {
-		if d == nil || !d.Enabled || a.unalignedDomain[id] {
+		if d == nil || !d.Enabled.Load() || a.unalignedDomain[id] {
 			continue
 		}
 		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
 	}
 	for id, ii := range a.standaloneIIs() {
-		if ii == nil || !ii.Enabled || a.unalignedIdx[id] {
+		if ii == nil || !ii.Enabled.Load() || a.unalignedIdx[id] {
 			continue
 		}
 		ceiling = _min(ceiling, ii.dirtyFilesEndTxNumMinimax())
@@ -1949,7 +1949,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if !d.d.Enabled.Load() {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
@@ -1997,7 +1997,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	for id, ii := range at.standaloneIIs() {
-		if !ii.ii.Enabled {
+		if !ii.ii.Enabled.Load() {
 			continue
 		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -2041,7 +2041,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if !at.d[id].d.Enabled {
+		if !at.d[id].d.Enabled.Load() {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -2078,7 +2078,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	}
 
 	for id, rng := range r.invertedIndex {
-		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled {
+		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled.Load() {
 			continue
 		}
 
@@ -2114,14 +2114,14 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		if !d.Enabled {
+		if !d.Enabled.Load() {
 			continue
 		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.standaloneIIs() {
-		if !ii.Enabled {
+		if !ii.Enabled.Load() {
 			continue
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
@@ -2147,7 +2147,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	var deleted []string
 	var retired []*FilesItem
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if !d.d.Enabled.Load() {
 			continue
 		}
 		var names []string
@@ -2161,7 +2161,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 		retired = append(retired, r...)
 	}
 	for id, ii := range at.standaloneIIs() {
-		if !ii.ii.Enabled {
+		if !ii.ii.Enabled.Load() {
 			continue
 		}
 		var names []string
@@ -2205,6 +2205,25 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 	return finished
 }
 
+func (at *AggregatorRoTx) firstStepToBuild(tx kv.Tx) (kv.Step, error) {
+	step := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
+	// An interrupted build can leave a domain without files while the state
+	// domains advance. Resume at its pending DB data, not at the state frontier.
+	for _, d := range at.d {
+		if !d.d.Enabled.Load() || d.FirstStepNotInFiles() >= step {
+			continue
+		}
+		first, err := kv.FirstKey(tx, d.ht.h.KeysTable)
+		if err != nil {
+			return 0, err
+		}
+		if len(first) > 0 {
+			step = min(step, max(d.FirstStepNotInFiles(), kv.Step(binary.BigEndian.Uint64(first)/at.StepSize())))
+		}
+	}
+	return step, nil
+}
+
 // Returns a channel which is closed when aggregation is done and whether it started.
 func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, doMerge bool, finalityCtx kv.FinalityContext) (chan struct{}, bool) {
 	fin := make(chan struct{})
@@ -2233,8 +2252,6 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		return fin, false
 	}
 
-	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 
@@ -2248,6 +2265,19 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 				return //nolint
 			}
 			defer a.snapshotBuildSema.Release(1)
+		}
+
+		var step, nextStateStep kv.Step
+		if err := db.View(a.ctx, func(tx kv.Tx) (err error) {
+			at := a.BeginFilesRo()
+			defer at.Close()
+			nextStateStep = kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
+			step, err = at.firstStepToBuild(tx)
+			return err
+		}); err != nil {
+			a.logger.Warn("[snapshots] first step to build", "err", err)
+			close(fin)
+			return
 		}
 
 		lastInDB := max(
@@ -2288,22 +2318,10 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			return
 		}
 
-		// Gap detection: refuse to build when MDBX's earliest history entry lies
-		// strictly above `step` AND we already have snapshot files below `step`.
-		// In that case iterating [step, lastInDB) would collate empty ranges for
-		// the gap steps, producing header-only .kv files. A subsequent merge
-		// combines those with the existing earlier files and yields a composite
-		// whose advertised step range is larger than its actual data coverage —
-		// silent, permanent state corruption.
-		//
-		// The `step > 0` clause is what distinguishes this from a legitimate
-		// empty step on a fresh datadir (no earlier files exist, so there's
-		// nothing to merge with and no corruption path). The bug only lives on
-		// datadirs where the preverified snapshot set stops below MDBX's
-		// minimum step. `minStepInDB` returns 0 for both "no keys" and "first
-		// key at step 0"; either way a zero can't exceed a positive `step`, so
-		// we don't need to disambiguate.
-		if step > 0 {
+		// Check the state-file boundary, even when a lagging domain resumes earlier.
+		// A gap here would produce empty files that falsely claim state coverage;
+		// an empty initial step is allowed when no state files exist.
+		if nextStateStep > 0 {
 			var firstInDB kv.Step
 			if err := db.View(a.ctx, func(tx kv.Tx) error {
 				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
@@ -2316,10 +2334,10 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}); err != nil {
 				a.logger.Warn("[snapshots] gap-detection", "err", err)
 			}
-			if firstInDB > step {
+			if firstInDB > nextStateStep {
 				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
-					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
-					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
+					"step", step, "nextStateStep", nextStateStep, "firstInDB", firstInDB, "lastInDB", lastInDB,
+					"hint", "MDBX history starts above the end of the state snapshots; building here would create empty step files and a merge would silently drop state. "+
 						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
 						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 				close(fin)
@@ -2482,7 +2500,7 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 	for _, dt := range at.d {
-		if dt == nil || !dt.d.Enabled {
+		if dt == nil || !dt.d.Enabled.Load() {
 			continue
 		}
 		if err := dt.checkFilesDBGap(tx); err != nil {
@@ -2490,7 +2508,7 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		}
 	}
 	for _, iit := range at.iis {
-		if iit == nil || !iit.ii.Enabled {
+		if iit == nil || !iit.ii.Enabled.Load() {
 			continue
 		}
 		if err := iit.checkFilesDBGap(tx); err != nil {

@@ -215,7 +215,7 @@ func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
 	}
 }
 
-func (r *RecentReceipts) CopyAndReset(target *RecentReceipts) {
+func (r *RecentReceipts) MoveEntriesTo(target *RecentReceipts) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for blockNum, receipts := range r.receipts {

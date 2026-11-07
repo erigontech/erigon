@@ -467,7 +467,7 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 }
 
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
-	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
+	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled.Load())
 }
 
 // openList - main method to open list of files.
@@ -496,7 +496,7 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 }
 
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if !d.Enabled {
+	if !d.Enabled.Load() {
 		return nil, nil
 	}
 	return d.openList(ctx, *r)
@@ -900,7 +900,7 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 //     directory). The in-memory static handles are closed in the !integrate case so they do
 //     not leak; the files themselves remain on disk in dstDir.
 func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string, integrate bool) error {
-	if !d.Enabled || stepFrom == stepTo {
+	if !d.Enabled.Load() || stepFrom == stepTo {
 		return nil
 	}
 	wal := batch.domainWriters[d.Name]
@@ -935,7 +935,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 // In contrast to collate function collateETL puts contents of wal into file.
 // dstDir overrides the output directory; empty means d.dirs.SnapDomain.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
-	if !d.Enabled {
+	if !d.Enabled.Load() {
 		return Collation{}, err
 	}
 	started := time.Now()
@@ -1028,7 +1028,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
-	if !d.Enabled {
+	if !d.Enabled.Load() {
 		return Collation{}, nil
 	}
 
@@ -1145,7 +1145,7 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string) (StaticFiles, error) {
-	if !d.Enabled {
+	if !d.Enabled.Load() {
 		return StaticFiles{}, nil
 	}
 	mxRunningFilesBuilding.Inc()
@@ -1245,7 +1245,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if !d.Enabled {
+	if !d.Enabled.Load() {
 		return StaticFiles{}, nil
 	}
 
@@ -1529,7 +1529,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 }
 
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	if !d.Enabled {
+	if !d.Enabled.Load() {
 		return
 	}
 	if txNumFrom == txNumTo {
@@ -1568,67 +1568,50 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return err
 	}
 	defer valsCursor.Close()
-	// Revert keys using diff entries.
-	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	//
-	// DomainEntryDiff.Value semantics:
-	//   - nil            → "different step" — prev value lives at another step, skip the restore
-	//                       (only produced by legacy V0 changesets where valueLen==0 deserializes as nil)
-	//   - []byte{}       → "no previous value" — key was absent before this step, so write an
-	//                       empty tombstone to prevent getLatestFromDb falling through to files
-	//                       (which have no concept of deletions) and returning stale data
-	//   - non-empty      → restore the actual previous value
+	// Fully discarded steps need only deletion: their preceding versions remain
+	// in MDBX or files. Restoring at a different step would create a version that
+	// surviving changesets cannot remove during a later unwind.
+	// Only the partially retained step needs its overwritten value restored.
 	unwindStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
 
-	for i := range domainDiffs {
-		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
-		key := common.ToBytesZeroCopy(keyStr)
-		if dt.d.LargeValues {
-			// Delete the entry at the write step
+	for _, diff := range domainDiffs {
+		key := common.ToBytesZeroCopy(diff.Key)
+		stepBytes, fullKey := key[len(key)-8:], key[:len(key)-8]
+		if d.LargeValues {
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
 				return err
 			}
-			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-			if value != nil {
-				// key aliases the diff's immutable string, and dropping its trailing
-				// step leaves exactly the 8 bytes of spare capacity the append needs,
-				// so appending in place would rewrite that string. Build a new key.
-				unwindKey := make([]byte, 0, len(key))
-				unwindKey = append(unwindKey, key[:len(key)-8]...)
-				unwindKey = append(unwindKey, unwindStepBytes...)
-				if err := rwTx.Put(d.ValuesTable, unwindKey, value); err != nil {
-					return err
-				}
+		} else {
+			valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
+			if err != nil {
+				return err
 			}
-			continue
-		}
-		stepBytes := key[len(key)-8:]
-		fullKey := key[:len(key)-8]
-		// Delete the current entry at the write step
-		valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
-		if err != nil {
-			return err
-		}
-		if len(valInDB) > 0 {
-			stepInDB := valInDB[:8]
-			if bytes.Equal(stepInDB, stepBytes) {
+			if len(valInDB) >= 8 && bytes.Equal(valInDB[:8], stepBytes) {
 				if err := valsCursor.DeleteCurrent(); err != nil {
 					return err
 				}
 			}
 		}
-
-		// A key changed at several steps in the range has one diff per step, sorted
-		// by key then descending step; only the lowest step's value is the value at
-		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
-		// DupSort table keeps several dups at the unwind step and getLatestFromDb
-		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
-		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
-		if value != nil && lastForKey {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil { //nolint:makezero
-				return err
-			}
+		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(stepBytes, unwindStepBytes) {
+			continue
+		}
+		// A value already supplied by an older version needs no new entry.
+		// Otherwise that entry could outlive the changesets of this step.
+		previous, _, _, err := dt.GetLatest(fullKey, rwTx)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(previous, diff.Value) {
+			continue
+		}
+		if d.LargeValues {
+			err = rwTx.Put(d.ValuesTable, key, diff.Value)
+		} else {
+			err = valsCursor.Put(fullKey, append(unwindStepBytes, diff.Value...)) //nolint:makezero
+		}
+		if err != nil {
+			return err
 		}
 	}
 	// Compare valsKV with prevSeenKeys
@@ -1786,7 +1769,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 }
 
 func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
-	if !dt.d.Enabled {
+	if !dt.d.Enabled.Load() {
 		return 0, false, nil
 	}
 	v, _, found, err := dt.getLatestFromDb(key, roTx, kv.NoStepBound)
@@ -1823,7 +1806,7 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if !dt.d.Enabled {
+	if !dt.d.Enabled.Load() {
 		return nil, false, nil
 	}
 
@@ -2057,7 +2040,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 }
 
 func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions) ([]byte, kv.Step, bool, error) {
-	if !dt.d.Enabled {
+	if !dt.d.Enabled.Load() {
 		return nil, 0, false, nil
 	}
 	metrics, start := opts.Metrics()

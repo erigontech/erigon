@@ -1327,7 +1327,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
 	logger := log.New()
 	db, ii := testDbAndInvertedIndex(t, 16, logger)
-	ii.Enabled = false
+	ii.Enabled.Store(false)
 	ctx := t.Context()
 
 	tx, err := db.BeginRw(ctx)

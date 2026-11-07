@@ -189,14 +189,14 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	accountChange.StorageChanges[j].Data = data
 }
 
-// CopyAndReset moves accumulated data from this instance into target, then resets this instance.
-func (a *Accumulator) CopyAndReset(target *Accumulator) {
-	target.changes = a.changes
-	a.changes = nil
-	target.latestChange = a.latestChange
-	a.latestChange = nil
-	target.accountChangeIndex = a.accountChangeIndex
-	a.accountChangeIndex = nil
-	target.storageChangeIndex = a.storageChangeIndex
-	a.storageChangeIndex = nil
+// AppendAndReset appends accumulated changes to target, then resets this instance.
+// Existing changes must stay before the appended changes, including any unwind.
+func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	if len(a.changes) > 0 {
+		target.changes = append(target.changes, a.changes...)
+		target.latestChange = &target.changes[len(target.changes)-1]
+		target.accountChangeIndex = a.accountChangeIndex
+		target.storageChangeIndex = a.storageChangeIndex
+	}
+	a.Reset(0)
 }

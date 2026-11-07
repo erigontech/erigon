@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -37,15 +38,17 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Every block above genesis calls logEmitter once, so each block has exactly one log.
 var logEmitter = common.Address{0xbb}
 
 type reorgSubscriptions struct {
-	headers  [][]byte
-	logs     []*notifications.LogNotification
-	receipts []*notifications.ReceiptNotification
+	headers      [][]byte
+	logs         []*notifications.LogNotification
+	receipts     []*notifications.ReceiptNotification
+	stateChanges *remoteproto.StateChangeBatch
 }
 
 func collectReorgSubscriptions(headers <-chan [][]byte, logs <-chan []*notifications.LogNotification, receipts <-chan []*notifications.ReceiptNotification) *reorgSubscriptions {
@@ -111,17 +114,17 @@ var reorgCases = []reorgCase{
 	{name: "NineBlockForkViaForkchoiceOnly", forkLen: 9, newPayload: false},
 }
 
-func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
+func newReorgChains(t *testing.T, canonicalLen, sideLen int, opts ...Option) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	m := New(t, WithGenesisSpec(&types.Genesis{
+	m := New(t, append([]Option{WithGenesisSpec(&types.Genesis{
 		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			sender:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 			logEmitter: {Code: []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00}}, // PUSH1 0 PUSH1 0 LOG0 STOP
 		},
-	}), WithKey(key))
+	}), WithKey(key)}, opts...)...)
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
 	sign := func(txn types.Transaction) types.Transaction {
@@ -149,7 +152,7 @@ func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester,
 	return m, canonical, side
 }
 
-func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Hash) {
+func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Hash) *remoteproto.StateChangeBatch {
 	batches := make(chan *remoteproto.StateChangeBatch, 16)
 	stream, err := m.stateChangesClient.StateChanges(t.Context(), &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
 	require.NoError(t, err)
@@ -162,7 +165,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 			batches <- batch
 		}
 	}()
-	return func(head common.Hash) {
+	return func(head common.Hash) *remoteproto.StateChangeBatch {
 		t.Helper()
 		deadline := time.After(10 * time.Second)
 		for {
@@ -170,7 +173,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 			case batch := <-batches:
 				last := batch.ChangeBatch[len(batch.ChangeBatch)-1]
 				if gointerfaces.ConvertH256ToHash(last.BlockHash) == head {
-					return
+					return batch
 				}
 			case <-deadline:
 				t.Fatalf("no state-change batch announced head %x", head)
@@ -223,9 +226,36 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(newHead.Hash())
+	batch := waitForBatchWithHead(newHead.Hash())
 
-	return oldHead, forkBlocks, collectReorgSubscriptions(headers, logs, receipts)
+	got = collectReorgSubscriptions(headers, logs, receipts)
+	got.stateChanges = batch
+	return oldHead, forkBlocks, got
+}
+
+func TestReorgPreservesUnwindStateChanges(t *testing.T) {
+	for _, tc := range reorgCases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldHead, forkBlocks, got := runReorg(t, tc)
+			changes := got.stateChanges.ChangeBatch
+			require.Len(t, changes, 1+len(forkBlocks))
+			require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
+			require.Equal(t, oldHead.ParentHash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[0].BlockHash)))
+			var unwound []common.Hash
+			for _, raw := range changes[0].Txs {
+				txn, err := types.DecodeTransaction(raw)
+				require.NoError(t, err)
+				unwound = append(unwound, txn.Hash())
+			}
+			for _, txn := range oldHead.Transactions() {
+				require.Contains(t, unwound, txn.Hash())
+			}
+			for i, block := range forkBlocks {
+				require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
+				require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
+			}
+		})
+	}
 }
 
 func TestReorgAnnouncesNewCanonicalHeaders(t *testing.T) {
@@ -238,6 +268,61 @@ func TestReorgAnnouncesNewCanonicalHeaders(t *testing.T) {
 			}
 			require.ElementsMatch(t, want, got.headerHashes(t), "newHeads subscribers were not told about the new canonical blocks")
 		})
+	}
+}
+
+func TestReorgRestoresUnminedTransactions(t *testing.T) {
+	for _, tc := range []reorgCase{
+		{name: "NewPayload", newPayload: true},
+		{name: "ForkchoiceOnly"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, canonical, side := newReorgChains(t, 2, 2, WithTxPool())
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+			require.NoError(t, m.WaitForTxPool(t.Context(), canonical.TopBlock.Hash()))
+			status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			if tc.newPayload {
+				validation, err := m.ValidateChain(t.Context(), side.TopBlock.Header())
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+			}
+			fcu, err := m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+			extraTransfer := canonical.TopBlock.Transactions()[1]
+			require.EventuallyWithT(t, func(check *assert.CollectT) {
+				var pending txpool.TxnsRlp
+				onTime, err := m.TxPool.PeekBest(t.Context(), 10, &pending, side.TopBlock.NumberU64())
+				require.NoError(check, err)
+				require.True(check, onTime)
+				require.Len(check, pending.Txns, 1)
+				require.Equal(check, extraTransfer.Hash(), pending.ParsedTxn[0].Hash())
+			}, time.Minute, time.Millisecond, "the reorged-out transfer must be selectable without resubmission")
+		})
+	}
+}
+
+func TestSideForkValidationDoesNotAnnounceUnwindForExtension(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 3, 2)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(canonical.Blocks[1].Hash())
+	require.Empty(t, m.Notifications.Accumulator.Changes())
+	status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := m.ValidateChain(t.Context(), side.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Empty(t, m.Notifications.Accumulator.Changes(), "validation must not change canonical notifications")
+
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[2:]))
+	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
+	for _, change := range batch.ChangeBatch {
+		require.Equal(t, remoteproto.Direction_FORWARD, change.Direction, "validation must not announce a canonical unwind")
 	}
 }
 
