@@ -39,6 +39,13 @@ type RecentReceipts struct {
 	mu          sync.Mutex
 }
 
+// BlockReceipts is one block's receipts with the transactions and header their notifications carry.
+type BlockReceipts struct {
+	Receipts types.Receipts
+	Txs      []types.Transaction
+	Header   *types.Header
+}
+
 func NewRecentReceipts(limit uint64) *RecentReceipts {
 	return &RecentReceipts{
 		receipts: make(map[uint64]types.Receipts, limit),
@@ -70,26 +77,54 @@ func (r *RecentReceipts) Snapshot() (restore func()) {
 	}
 }
 
-// NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to).
-func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64) {
+// Missing returns the blocks in [from,to) that have no cached receipts.
+func (r *RecentReceipts) Missing(from, to uint64) []uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var missing []uint64
+	for bn := from; bn < to; bn++ {
+		if _, ok := r.receipts[bn]; !ok {
+			missing = append(missing, bn)
+		}
+	}
+	return missing
+}
+
+// evictBefore drops blocks more than limit below from; caller holds r.mu.
+func (r *RecentReceipts) evictBefore(from uint64) {
+	for bn := range r.receipts {
+		if bn+r.limit < from {
+			delete(r.receipts, bn)
+			delete(r.txs, bn)
+			delete(r.headers, bn)
+		}
+	}
+}
+
+// block returns block bn's receipts from the cache, else from loaded; caller holds r.mu.
+func (r *RecentReceipts) block(bn uint64, loaded map[uint64]BlockReceipts) (BlockReceipts, bool) {
+	if receipts, ok := r.receipts[bn]; ok {
+		return BlockReceipts{Receipts: receipts, Txs: r.txs[bn], Header: r.headers[bn]}, true
+	}
+	b, ok := loaded[bn]
+	return b, ok
+}
+
+// NotifyLogs sends moved-aside logs as removed, then added logs in ascending block order for [from,to),
+// taking a block missing from the cache from loaded.
+func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, loaded map[uint64]BlockReceipts) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	defer func() { r.removedLogs = nil }()
 	if !n.HasLogSubscriptions() {
 		return
 	}
+	r.evictBefore(from)
 	reply := r.removedLogs
-	for _, bn := range slices.Sorted(maps.Keys(r.receipts)) {
-		if bn+r.limit < from { // evict old
-			delete(r.receipts, bn)
-			delete(r.txs, bn)
-			delete(r.headers, bn)
-			continue
+	for bn := from; bn < to; bn++ {
+		if b, ok := r.block(bn, loaded); ok {
+			reply = append(reply, logNotifications(b.Receipts, b.Header, false)...)
 		}
-		if bn < from || bn >= to {
-			continue
-		}
-		reply = append(reply, logNotifications(r.receipts[bn], r.headers[bn], false)...)
 	}
 	if len(reply) > 0 {
 		n.OnLogs(reply)
@@ -168,30 +203,21 @@ func (r *RecentReceipts) Add(receipts types.Receipts, txs []types.Transaction, h
 	}
 }
 
-// NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to).
-func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64) {
+// NotifyReceipts sends added receipts in one batch, in ascending block order for [from,to), taking a block
+// missing from the cache from loaded.
+func (r *RecentReceipts) NotifyReceipts(n ChainEventNotifier, from, to uint64, loaded map[uint64]BlockReceipts) {
 	if !n.HasReceiptSubscriptions() {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.evictBefore(from)
 	var reply []*ReceiptNotification
-	for _, blockNum := range slices.Sorted(maps.Keys(r.receipts)) {
-		if blockNum+r.limit < from { // evict old
-			delete(r.receipts, blockNum)
-			delete(r.txs, blockNum)
-			delete(r.headers, blockNum)
-			continue
-		}
-		if blockNum < from || blockNum >= to {
-			continue
-		}
-
-		receipts := r.receipts[blockNum]
-		txs := r.txs[blockNum]
-		header := r.headers[blockNum]
-		if len(receipts) == 0 || len(txs) == 0 || header == nil {
+	for blockNum := from; blockNum < to; blockNum++ {
+		b, ok := r.block(blockNum, loaded)
+		receipts, txs, header := b.Receipts, b.Txs, b.Header
+		if !ok || len(receipts) == 0 || len(txs) == 0 || header == nil {
 			continue
 		}
 
