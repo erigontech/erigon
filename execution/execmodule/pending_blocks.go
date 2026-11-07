@@ -106,6 +106,43 @@ func (e *ExecModule) swapSideBlocks(side map[common.Hash]pendingBlock, retained 
 	e.swapRetainedBlocks(retained)
 }
 
+type sideBlocksState struct {
+	pending  map[common.Hash]pendingBlock
+	retained *membatchwithdb.MemoryMutation
+	context  *execctx.SharedDomains
+}
+
+func (e *ExecModule) swapSideBlocksForForkChoice(side map[common.Hash]pendingBlock, retained *membatchwithdb.MemoryMutation) sideBlocksState {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	old := sideBlocksState{
+		pending:  e.pendingBlocks,
+		retained: e.retainedBlocks,
+		context:  e.currentContext,
+	}
+	e.pendingBlocks = side
+	e.retainedBlocks = retained
+	e.currentContext = nil
+	return old
+}
+
+func (e *ExecModule) restoreSideBlocksForForkChoice(old sideBlocksState) {
+	e.lock.Lock()
+	e.pendingBlocks = old.pending
+	e.retainedBlocks = old.retained
+	e.currentContext = old.context
+	e.lock.Unlock()
+}
+
+func (s sideBlocksState) close() {
+	if s.retained != nil {
+		s.retained.Close()
+	}
+	if s.context != nil {
+		s.context.Close()
+	}
+}
+
 func sideBlocksToRetain(pending map[common.Hash]pendingBlock, committed []common.Hash, finalized uint64) map[common.Hash]pendingBlock {
 	side := maps.Clone(pending)
 	for _, hash := range committed {

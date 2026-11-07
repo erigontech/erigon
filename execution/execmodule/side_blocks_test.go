@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -92,6 +93,9 @@ func TestForkChoiceCommitFailureKeepsRetainedSideBlock(t *testing.T) {
 
 	db, ok := m.DB.(*temporal.DB)
 	require.True(t, ok)
+	agg, ok := db.Agg().(*dbstate.Aggregator)
+	require.True(t, ok)
+	agg.WaitForFiles()
 	failingDB := &failOnceCommitDB{RwDB: db.InternalDB()}
 	failingDB.fail.Store(true)
 	db.RwDB = failingDB
@@ -107,6 +111,45 @@ func TestForkChoiceCommitFailureKeepsRetainedSideBlock(t *testing.T) {
 
 	updateForkChoiceTo(t, m, side)
 	requireCanonicalWithTransactions(t, m, side)
+}
+
+func TestForkChoiceGettersSeePublishedHead(t *testing.T) {
+	var m *execmoduletester.ExecModuleTester
+	var key *ecdsa.PrivateKey
+	var child *types.Block
+	var armed atomic.Bool
+	type observation struct {
+		header       *types.Header
+		headerErr    error
+		canonical    bool
+		canonicalErr error
+	}
+	observed := make(chan observation, 1)
+	m, key, _ = newMetricsTester(t, execmoduletester.WithStateTransitionObserver(func(ctx context.Context, point execmodule.StateTransitionPoint) {
+		if point != execmodule.StateTransitionOverlayPublished || !armed.CompareAndSwap(true, false) {
+			return
+		}
+		header, headerErr := m.ExecModule.CurrentHeader(ctx)
+		canonical, canonicalErr := m.ExecModule.IsCanonicalHash(ctx, child.Hash())
+		observed <- observation{header: header, headerErr: headerErr, canonical: canonical, canonicalErr: canonicalErr}
+	}))
+	m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
+	chain, err := m.GenerateChain(2, sendTo(t, m, key, common.Address{0x0c}, 1))
+	require.NoError(t, err)
+	base, child := chain.Blocks[0], chain.Blocks[1]
+	insertAndValidateBlocks(t, m, base)
+	updateForkChoiceTo(t, m, base)
+	insertAndValidateBlocks(t, m, child)
+	armed.Store(true)
+
+	result, err := m.UpdateForkChoice(t.Context(), child.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	resultObservation := <-observed
+	require.NoError(t, resultObservation.headerErr)
+	require.Equal(t, child.Hash(), resultObservation.header.Hash())
+	require.NoError(t, resultObservation.canonicalErr)
+	require.True(t, resultObservation.canonical)
 }
 
 func TestValidateChildOfRetainedSideBlock(t *testing.T) {
@@ -291,6 +334,7 @@ func TestAdoptedSideBlockRemainsVisibleDuringForkChoice(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			m, key, _ := newMetricsTester(t)
+			m.ExecModule.SetPublishedSD(m.Notifications.Events.LatestSD)
 			side := generateTransferBlocks(t, m, key, 1, 0x0b)[0]
 			canonical := generateTransferBlocks(t, m, key, 1, 0x0a)[0]
 			insertAndValidateBlocks(t, m, side, canonical)
