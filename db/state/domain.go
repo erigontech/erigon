@@ -1827,6 +1827,10 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, nil
 	}
 
+	if e2LatestOnly && dt.name != kv.CommitmentDomain {
+		v, _, ok, err := dt.GetLatest(key, roTx)
+		return v, ok && v != nil, err
+	}
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {
 		return nil, false, err
@@ -2423,3 +2427,6 @@ func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endT
 		return txNum, v, nil
 	}), nil
 }
+
+// e2LatestOnly is a probe knob: E2_LATEST_ONLY=1 makes GetAsOf skip HistorySeek and read latest. Bound only, not correct.
+var e2LatestOnly = os.Getenv("E2_LATEST_ONLY") == "1"

@@ -226,6 +226,7 @@ type IntraBlockState struct {
 	addrCache   *addressCache
 	internOps   uint32
 	addrOps     uint32
+	e1          map[e1Key]uint256.Int
 }
 
 type sdProbeEntry struct {
@@ -341,6 +342,7 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
+	ibs.e1 = nil
 	clear(ibs.nilAccounts)
 	ibs.lastCode = accounts.Code{}
 	for _, so := range ibs.stateObjects {
@@ -991,7 +993,15 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if e1On {
+		if v, ok := ibs.e1Get(addr, key); ok {
+			return v, nil
+		}
+	}
 	versionedValue, source, _, err := readState(ibs, addr, key)
+	if e1On && err == nil {
+		ibs.e1Put(addr, key, versionedValue)
+	}
 
 	if dbg.TraceTransactionIO && (ibs.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
 		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, key, versionedValue.Hex()[2:])
@@ -1738,6 +1748,9 @@ func (ibs *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
+	if e1On {
+		ibs.e1Put(addr, key, value)
+	}
 	return ibs.setState(addr, key, value, false)
 }
 

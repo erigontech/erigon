@@ -152,7 +152,7 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, m
 		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
 	}
 	addr, slot := callContext.Address(), callContext.peekStorageKey(evm)
-	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {
+	if evm.IntraBlockState().E1Warm(addr, slot) || evm.IntraBlockState().SlotKnownWarm(addr, slot) {
 		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
 	}
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(addr, slot); slotMod {
