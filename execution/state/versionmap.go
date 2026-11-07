@@ -301,8 +301,13 @@ type writeStamps struct {
 func (vm *VersionMap) InitStamps(lastTxIndex int) {
 	n := lastTxIndex + 2
 	vm.stamps = &writeStamps{n: n, inflight: make([]atomic.Int32, n+1), last: make([]atomic.Uint64, n+1)}
-	vm.specRuns = make([]atomic.Pointer[SpecRun], n)
+	vm.InitSpecRuns(lastTxIndex)
 	vm.writeSeq.Store(1)
+}
+
+// InitSpecRuns makes room for the speculative runs of txs up to lastTxIndex; without it SetSpecRun keeps nothing.
+func (vm *VersionMap) InitSpecRuns(lastTxIndex int) {
+	vm.specRuns = make([]atomic.Pointer[SpecRun], lastTxIndex+2)
 }
 
 func (vm *VersionMap) WriteSeq() uint64 { return vm.writeSeq.Load() }

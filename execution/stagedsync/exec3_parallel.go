@@ -3681,6 +3681,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
+		be.versionMap.InitSpecRuns(be.tasks[len(be.tasks)-1].Version().TxIndex)
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
