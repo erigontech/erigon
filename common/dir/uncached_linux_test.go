@@ -31,20 +31,36 @@ import (
 )
 
 func dontCacheSupported(t *testing.T, dir string) bool {
+	return probeDontCacheSupported(t, dir, unix.Pwritev2)
+}
+
+type pwritev2Func func(int, [][]byte, int64, int) (int, error)
+
+func probeDontCacheSupported(t *testing.T, dir string, write pwritev2Func) bool {
 	f, err := os.CreateTemp(dir, "probe-")
 	require.NoError(t, err)
 	defer f.Close()
 	for {
-		_, err = unix.Pwritev2(int(f.Fd()), [][]byte{make([]byte, os.Getpagesize())}, 0, unix.RWF_DONTCACHE)
+		_, err = write(int(f.Fd()), [][]byte{make([]byte, os.Getpagesize())}, 0, unix.RWF_DONTCACHE)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
-		if errors.Is(err, unix.EOPNOTSUPP) {
-			t.Logf("page cache residency check did not run: RWF_DONTCACHE is unsupported on %s", dir)
+		if err != nil {
+			t.Logf("page cache residency check did not run: RWF_DONTCACHE probe on %s returned %v", dir, err)
 			return false
 		}
-		require.NoError(t, err)
 		return true
+	}
+}
+
+func TestDontCacheSupportedTreatsProbeErrorsAsUnsupported(t *testing.T) {
+	for _, probeErr := range []error{unix.EOPNOTSUPP, unix.ENOSYS, unix.EPERM} {
+		t.Run(probeErr.Error(), func(t *testing.T) {
+			supported := probeDontCacheSupported(t, t.TempDir(), func(int, [][]byte, int64, int) (int, error) {
+				return 0, probeErr
+			})
+			require.False(t, supported)
+		})
 	}
 }
 
