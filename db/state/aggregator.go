@@ -2267,10 +2267,11 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		var step kv.Step
+		var step, nextStateStep kv.Step
 		if err := db.View(a.ctx, func(tx kv.Tx) (err error) {
 			at := a.BeginFilesRo()
 			defer at.Close()
+			nextStateStep = kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
 			step, err = at.firstStepToBuild(tx)
 			return err
 		}); err != nil {
@@ -2317,22 +2318,10 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			return
 		}
 
-		// Gap detection: refuse to build when MDBX's earliest history entry lies
-		// strictly above `step` AND we already have snapshot files below `step`.
-		// In that case iterating [step, lastInDB) would collate empty ranges for
-		// the gap steps, producing header-only .kv files. A subsequent merge
-		// combines those with the existing earlier files and yields a composite
-		// whose advertised step range is larger than its actual data coverage —
-		// silent, permanent state corruption.
-		//
-		// The `step > 0` clause is what distinguishes this from a legitimate
-		// empty step on a fresh datadir (no earlier files exist, so there's
-		// nothing to merge with and no corruption path). The bug only lives on
-		// datadirs where the preverified snapshot set stops below MDBX's
-		// minimum step. `minStepInDB` returns 0 for both "no keys" and "first
-		// key at step 0"; either way a zero can't exceed a positive `step`, so
-		// we don't need to disambiguate.
-		if step > 0 {
+		// Check the state-file boundary, even when a lagging domain resumes earlier.
+		// A gap here would produce empty files that falsely claim state coverage;
+		// an empty initial step is allowed when no state files exist.
+		if nextStateStep > 0 {
 			var firstInDB kv.Step
 			if err := db.View(a.ctx, func(tx kv.Tx) error {
 				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
@@ -2345,10 +2334,10 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}); err != nil {
 				a.logger.Warn("[snapshots] gap-detection", "err", err)
 			}
-			if firstInDB > step {
+			if firstInDB > nextStateStep {
 				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
-					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
-					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
+					"step", step, "nextStateStep", nextStateStep, "firstInDB", firstInDB, "lastInDB", lastInDB,
+					"hint", "MDBX history starts above the end of the state snapshots; building here would create empty step files and a merge would silently drop state. "+
 						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
 						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 				close(fin)
