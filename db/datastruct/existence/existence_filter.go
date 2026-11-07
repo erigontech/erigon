@@ -24,12 +24,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/mmap"
-
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 )
 
@@ -65,22 +64,43 @@ func (b *Filter) AddHash(hash uint64) error {
 	return b.fuseWriterSharded.AddHash(hash)
 }
 
-// ContainsHashProbe is ContainsHash with pr touching the fuse filter pages it reads.
-func (b *Filter) ContainsHashProbe(hashedKey uint64, pr *mmap.Probe) bool {
-	if b.empty {
+// InMem reports whether a lookup reads only heap memory; a mapped filter reads file pages.
+func (b *Filter) InMem() bool {
+	switch {
+	case b.empty:
 		return true
+	case b.fuseReaderSharded != nil:
+		return b.fuseReaderSharded.InMem()
+	case b.fuseReader != nil:
+		return b.fuseReader.InMem()
 	}
-	if b.fuseReaderSharded != nil {
+	return true // the bloom filter is heap-allocated
+}
+
+// ContainsHashProbe is ContainsHash with pr touching the filter pages it reads, for a mapped filter.
+func (b *Filter) ContainsHashProbe(hashedKey uint64, pr *mmap.Probe) bool {
+	switch {
+	case b.empty:
+		return true
+	case b.fuseReaderSharded != nil:
 		return b.fuseReaderSharded.ContainsHashProbe(hashedKey, pr)
-	}
-	if b.fuseReader != nil {
+	case b.fuseReader != nil:
 		return b.fuseReader.ContainsHashProbe(hashedKey, pr)
 	}
 	return b.filter.ContainsHash(hashedKey)
 }
 
 func (b *Filter) ContainsHash(hashedKey uint64) bool {
-	return b.ContainsHashProbe(hashedKey, nil)
+	if b.empty {
+		return true
+	}
+	if b.fuseReaderSharded != nil {
+		return b.fuseReaderSharded.ContainsHash(hashedKey)
+	}
+	if b.fuseReader != nil {
+		return b.fuseReader.ContainsHash(hashedKey)
+	}
+	return b.filter.ContainsHash(hashedKey)
 }
 
 func (b *Filter) Contains(v hash.Hash64) bool {
