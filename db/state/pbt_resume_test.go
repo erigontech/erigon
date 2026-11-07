@@ -102,6 +102,63 @@ func TestMergePBinRangeRejectsUnalignedAndUntiledRanges(t *testing.T) {
 	})
 }
 
+func TestMergePBinRangeRejectsFrozenAndStoppedDomains(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		freeze bool
+	}{
+		{name: "frozen", freeze: true},
+		{name: "stopped"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selectPBinLeafStreamHash(t)
+			db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+			writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1}})
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+			agg.WaitForFiles()
+			convertPBinAt(t, db, agg, pbinLeafStreamStepSize)
+			agg.WaitForFiles()
+			before := agg.BeginFilesRo()
+			beforePaths := before.Files(kv.CommitmentDomain).Fullpaths()
+			before.Close()
+			if test.freeze {
+				require.NoError(t, state.WriteErigonDBSettings(agg.Dirs(), &state.ErigonDBSettings{StepSize: pbinLeafStreamStepSize, StepsInFrozenFile: 64}))
+				require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, 1))
+			} else {
+				agg.StopCommitmentDomain(kv.CommitmentDomain)
+			}
+			require.Error(t, agg.MergePBinRange(t.Context(), kv.CommitmentDomain, 0, pbinLeafStreamStepSize))
+			after := agg.BeginFilesRo()
+			require.Equal(t, beforePaths, after.Files(kv.CommitmentDomain).Fullpaths())
+			after.Close()
+		})
+	}
+}
+
+func TestMergePBinRangeKeepsSingleCoveringFile(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{address: pbinLeafStreamAddress(0x11), nonce: 1, balance: 1}})
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	convertPBinAt(t, db, agg, pbinLeafStreamStepSize)
+	agg.WaitForFiles()
+	before := agg.BeginFilesRo()
+	files := before.Files(kv.CommitmentDomain)
+	require.Len(t, files, 1)
+	path := files[0].Fullpath()
+	before.Close()
+	beforeInfo, err := os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, agg.MergePBinRange(t.Context(), kv.CommitmentDomain, 0, pbinLeafStreamStepSize))
+	after := agg.BeginFilesRo()
+	require.Equal(t, []string{path}, after.Files(kv.CommitmentDomain).Fullpaths())
+	after.Close()
+	afterInfo, err := os.Stat(path)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(beforeInfo, afterInfo))
+}
+
 func convertPBin(t *testing.T, sourceDB kv.TemporalRwDB, sourceAgg *state.Aggregator, targetDB kv.TemporalRwDB, targetAgg *state.Aggregator, endTxNum uint64, configure func(*state.PBinConvertOptions)) common.Hash {
 	t.Helper()
 	sourceTx, err := sourceDB.BeginTemporalRo(t.Context())

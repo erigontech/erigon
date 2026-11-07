@@ -275,8 +275,14 @@ func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	if !ok {
 		return common.Hash{}, fmt.Errorf("pbin verification: trie does not support verification")
 	}
+	var verifiedRows uint64
 	if progressTrie, ok := trie.(interface{ SetVerifyProgress(func([]byte)) }); ok {
-		progressTrie.SetVerifyProgress(func([]byte) { progress.Add(1) })
+		progressTrie.SetVerifyProgress(func([]byte) {
+			verifiedRows++
+			if verifiedRows%4096 == 0 {
+				progress.Add(4096)
+			}
+		})
 		defer progressTrie.SetVerifyProgress(nil)
 	}
 	if statsTrie, ok := trie.(interface{ SetVerifyStats(*pbt.VerifyStats) }); ok {
@@ -285,7 +291,11 @@ func verifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	}
 	factory, release := commitmentCtx.VerificationContextFactory(tx)
 	defer release()
-	if verifyErr := verifier.VerifyContext(ctx, cfg.PBinWorkersOrDefault(), factory); verifyErr != nil {
+	verifyErr := verifier.VerifyContext(ctx, cfg.PBinWorkersOrDefault(), factory)
+	if remainder := verifiedRows % 4096; remainder != 0 {
+		progress.Add(remainder)
+	}
+	if verifyErr != nil {
 		return common.Hash{}, verifyErr
 	}
 	root, err := trie.RootHash()

@@ -23,6 +23,7 @@ import (
 	"sort"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -224,12 +225,18 @@ func TestVerifyPBinDomainReportsProgress(t *testing.T) {
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
 	previousHandler := log.Root().GetHandler()
+	previousInterval := state.PBTProgressInterval
 	var logs bytes.Buffer
 	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
-	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+	state.PBTProgressInterval = time.Nanosecond
+	t.Cleanup(func() {
+		log.Root().SetHandler(previousHandler)
+		state.PBTProgressInterval = previousInterval
+	})
 	_, err = state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.Contains(t, logs.String(), "PBT verification progress")
+	require.NotContains(t, logs.String(), `done=1 `)
 }
 
 func selectPBinConvertHash(t *testing.T) {

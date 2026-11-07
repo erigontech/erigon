@@ -1645,6 +1645,12 @@ func (a *Aggregator) MergePBinRange(ctx context.Context, domain kv.Domain, from,
 	if domain != kv.CommitmentDomain && domain != kv.CommitmentBinDomain {
 		return fmt.Errorf("pbin merge: invalid domain %s", domain)
 	}
+	if a.isDomainFrozen(domain) {
+		return fmt.Errorf("pbin merge: commitment domain %s is frozen", domain)
+	}
+	if a.CommitmentDomainStopped(domain) {
+		return fmt.Errorf("pbin merge: commitment domain %s is stopped", domain)
+	}
 	if from >= to {
 		return fmt.Errorf("pbin merge: invalid range %d-%d", from, to)
 	}
@@ -1689,6 +1695,9 @@ func (a *Aggregator) MergePBinRange(ctx context.Context, domain kv.Domain, from,
 	}
 	if next != to {
 		return fmt.Errorf("pbin merge: files do not tile range %d-%d; ended at txNum %d", from, to, next)
+	}
+	if len(selected) == 1 && selected[0].startTxNum == from && selected[0].endTxNum == to {
+		return nil
 	}
 	in, err := at.mergeFiles(ctx, files, ranges)
 	if err != nil {

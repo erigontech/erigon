@@ -75,9 +75,10 @@ func TestPBinResumeLeavesMatchesSourceState(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	t.Cleanup(at.Close)
+	baseEnd := 2*pbinLeafStreamStepSize + 1
 	var hasSpanningSourceFile bool
 	for _, file := range at.Files(kv.AccountsDomain) {
-		if strings.HasSuffix(file.Fullpath(), ".kv") && file.StartRootNum() < 2 && file.EndRootNum() > 2 {
+		if strings.HasSuffix(file.Fullpath(), ".kv") && file.StartRootNum() > 0 && file.StartRootNum() < baseEnd && file.EndRootNum() > baseEnd {
 			hasSpanningSourceFile = true
 		}
 	}
@@ -115,6 +116,39 @@ func TestPBinResumeLeavesMatchesSourceState(t *testing.T) {
 	require.Contains(t, resumed, string(eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey)))
 	require.NotContains(t, resumed, string(eip8297.TreeKeyAccount(addressB, eip8297.BasicDataLeafKey)))
 	require.Contains(t, resumed, string(eip8297.TreeKeyCodeChunk(crypto.Keccak256Hash(code), 0)))
+}
+
+func TestPBinResumeLeavesKeepsShortStorageSlotsDistinct(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	address := pbinLeafStreamAddress(0x11)
+	slotOne := []byte{1}
+	slot256 := []byte{1, 0}
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{address: address, nonce: 1, balance: 1}})
+	writePBinLeafStreamRange(t, db, pbinLeafStreamStepSize, 2*pbinLeafStreamStepSize, []pbinLeafStreamAccount{{
+		address: address,
+		nonce:   2,
+		balance: 2,
+		slots:   map[string][]byte{string(slotOne): {0x11}, string(slot256): {0x22}},
+	}})
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	at := agg.BeginFilesRo()
+	t.Cleanup(at.Close)
+	got := make(map[string][]byte)
+	require.NoError(t, state.PBinResumeLeaves(t.Context(), at, state.PBinResumeOptions{
+		BaseTxNum:   pbinLeafStreamStepSize,
+		SourceTxNum: 2 * pbinLeafStreamStepSize,
+		Workers:     2,
+		PostCancun:  true,
+	}, func(leaf state.PBinLeaf) error {
+		got[string(leaf.Key)] = bytes.Clone(leaf.Value)
+		return nil
+	}))
+	wantOne := eip8297.EncodeStorageValue([]byte{0x11})
+	want256 := eip8297.EncodeStorageValue([]byte{0x22})
+	require.Equal(t, wantOne[:], got[string(eip8297.TreeKeyStorage(address, slotOne))])
+	require.Equal(t, want256[:], got[string(eip8297.TreeKeyStorage(address, slot256))])
 }
 
 func TestPBinResumeLeavesSkipsFileEndingAtBase(t *testing.T) {

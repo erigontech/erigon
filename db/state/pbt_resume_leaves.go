@@ -231,9 +231,8 @@ func pbinResumeWalkRange(ctx context.Context, at *AggregatorRoTx, addressRange p
 		}
 		reader.storageAliases = make(map[string][]byte, len(storageReadSlots))
 		for _, slot := range storageReadSlots {
-			padded := make([]byte, eip8297.ValueLength)
-			copy(padded, slot)
-			normalizedKey := append(append([]byte(nil), address...), padded...)
+			slot32 := eip8297.RightAlign32(slot)
+			normalizedKey := append(append([]byte(nil), address...), slot32[:]...)
 			rawKey := append(append([]byte(nil), address...), slot...)
 			reader.storageAliases[string(normalizedKey)] = rawKey
 		}

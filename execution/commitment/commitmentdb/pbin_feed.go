@@ -105,9 +105,10 @@ func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wip
 	account.Slots = make([]commitment.PBinFeedSlot, 0, len(slotKeys))
 	slices.SortFunc(slotKeys, bytes.Compare)
 	for _, slot := range slotKeys {
+		slot32 := eip8297.RightAlign32(slot)
 		composite := make([]byte, length.Addr+length.Hash)
 		copy(composite, address)
-		copy(composite[length.Addr:], slot)
+		copy(composite[length.Addr:], slot32[:])
 		value, _, err := reader.Read(kv.StorageDomain, composite, 1)
 		if err != nil {
 			return commitment.PBinFeedAccount{}, err
