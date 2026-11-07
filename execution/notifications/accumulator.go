@@ -70,7 +70,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, p
 	if c != nil {
 		c.SendStateChanges(ctx, batch.ToProtoBatch())
 	}
-	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
+	a.Reset(0)
 }
 
 func (a *Accumulator) SetStateID(stateID uint64) {
@@ -201,16 +201,15 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 	accountChange.StorageChanges[j].Data = data
 }
 
-// CopyAndReset moves accumulated data from this instance into target, then resets this instance.
-func (a *Accumulator) CopyAndReset(target *Accumulator) {
-	target.changes = a.changes
-	a.changes = nil
+// AppendAndReset appends accumulated changes to target, then resets this instance.
+// Existing changes must stay before the appended changes, including any unwind.
+func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	if len(a.changes) > 0 {
+		target.changes = append(target.changes, a.changes...)
+		target.latestChange = &target.changes[len(target.changes)-1]
+		target.accountChangeIndex = a.accountChangeIndex
+		target.storageChangeIndex = a.storageChangeIndex
+	}
 	target.stateChangesIncomplete = target.stateChangesIncomplete || a.stateChangesIncomplete
-	a.stateChangesIncomplete = false
-	target.latestChange = a.latestChange
-	a.latestChange = nil
-	target.accountChangeIndex = a.accountChangeIndex
-	a.accountChangeIndex = nil
-	target.storageChangeIndex = a.storageChangeIndex
-	a.storageChangeIndex = nil
+	a.Reset(0)
 }

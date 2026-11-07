@@ -45,7 +45,7 @@ func TestAccumulatorSlotNumber(t *testing.T) {
 	}
 }
 
-func TestAccumulatorCopyIncompleteChanges(t *testing.T) {
+func TestAccumulatorAppendIncompleteChanges(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		source     bool
@@ -66,11 +66,40 @@ func TestAccumulatorCopyIncompleteChanges(t *testing.T) {
 			if tc.target {
 				target.MarkIncomplete()
 			}
-			source.CopyAndReset(target)
+			source.AppendAndReset(target)
 			require.Equal(t, tc.incomplete, target.stateChangesIncomplete)
 			require.False(t, source.stateChangesIncomplete)
 			target.Reset(0)
 			require.False(t, target.stateChangesIncomplete)
+		})
+	}
+}
+
+func TestAccumulatorAppendPreservesChanges(t *testing.T) {
+	for _, name := range []string{"empty source", "nonempty source"} {
+		t.Run(name, func(t *testing.T) {
+			source, target := NewAccumulator(), NewAccumulator()
+			address, slot := common.Address{1}, common.Hash{2}
+			target.StartChange(&types.Header{Time: 1}, nil, true)
+			target.ChangeStorage(address, 0, slot, []byte{1})
+			if name == "nonempty source" {
+				source.StartChange(&types.Header{Time: 2}, nil, false)
+				source.ChangeStorage(address, 0, slot, []byte{2})
+			}
+			want := append([]StateChange(nil), target.Changes()...)
+			want = append(want, source.Changes()...)
+			source.AppendAndReset(target)
+			require.Equal(t, want, target.Changes())
+			require.Empty(t, source.Changes())
+
+			target.ChangeStorage(address, 0, slot, []byte{3})
+			target.ChangeAccount(address, 0, []byte{4})
+			target.ChangeStorage(common.Address{5}, 0, slot, []byte{6})
+			last := target.Changes()[len(target.Changes())-1]
+			require.Len(t, last.Changes, 2)
+			require.Equal(t, []byte{4}, last.Changes[0].Data)
+			require.Len(t, last.Changes[0].StorageChanges, 1)
+			require.Equal(t, []byte{3}, last.Changes[0].StorageChanges[0].Data)
 		})
 	}
 }

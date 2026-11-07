@@ -52,10 +52,13 @@ func TestUnwindStateNotificationCompleteness(t *testing.T) {
 		depth      uint64
 		stream     bool
 		incomplete bool
+		mode       stages.Mode
 	}{
-		{"within stream limit", 999, true, false},
-		{"at stream limit", 1_000, true, true},
-		{"stream disabled", 1, false, true},
+		{"within stream limit", 999, true, false, stages.ModeApplyingBlocks},
+		{"at stream limit", 1_000, true, true, stages.ModeApplyingBlocks},
+		{"stream disabled", 1, false, true, stages.ModeApplyingBlocks},
+		{"validation with streaming", 1, true, false, stages.ModeForkValidation},
+		{"validation without streaming", 1, false, false, stages.ModeForkValidation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, logger := t.Context(), log.New()
@@ -83,7 +86,7 @@ func TestUnwindStateNotificationCompleteness(t *testing.T) {
 			}
 			accumulator := shards.NewAccumulator()
 			cfg := ExecuteBlockCfg{blockReader: br, stateStream: tc.stream, notifications: &shards.Notifications{Accumulator: accumulator}}
-			s := &StageState{ID: stages.Execution, BlockNumber: head}
+			s := &StageState{ID: stages.Execution, BlockNumber: head, State: &Sync{mode: tc.mode}}
 			u := &UnwindState{ID: stages.Execution, UnwindPoint: unwindTo, CurrentBlockNumber: head}
 			require.NoError(t, UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger))
 			value, _, err := doms.GetLatest(kv.StorageDomain, tx, key)
@@ -97,7 +100,9 @@ func TestUnwindStateNotificationCompleteness(t *testing.T) {
 			accumulator.SendAndReset(ctx, capture, 1, 1, 1_000_000, 0)
 			require.NotNil(t, capture.batch)
 			require.Equal(t, tc.incomplete, capture.batch.StateChangesIncomplete)
-			if !tc.incomplete {
+			if tc.mode == stages.ModeForkValidation {
+				require.Len(t, capture.batch.ChangeBatch, 1, "speculative unwinds must not be announced")
+			} else if !tc.incomplete {
 				require.Len(t, capture.batch.ChangeBatch[0].Changes, 1)
 				require.Len(t, capture.batch.ChangeBatch[0].Changes[0].StorageChanges, 1)
 			}

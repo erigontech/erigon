@@ -87,6 +87,8 @@ const (
 	maxFrameValidationStateGas     = 500_000
 )
 
+var errFrameValidationPrefix = errors.New("unrecognized frame validation prefix")
+
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
 // ValidateFrameTransactionPrefix checks public-pool structure and gas budgets
@@ -156,15 +158,14 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 // Restricting this prefix bounds unpaid validation work; later execution frames
 // are not simulated.
 func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error) {
-	invalid := errors.New("unrecognized frame validation prefix")
 	if len(tx.Frames) == 0 {
-		return framePrefix{}, invalid
+		return framePrefix{}, errFrameValidationPrefix
 	}
 	prefix := framePrefix{deploymentFrame: -1, recentRootFrame: -1}
 	i := 0
 	if f := &tx.Frames[0]; f.IsExpiryVerifier() {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
-			return framePrefix{}, invalid
+			return framePrefix{}, errFrameValidationPrefix
 		}
 		prefix.deadline = binary.BigEndian.Uint64(f.Data)
 		i++
@@ -173,7 +174,7 @@ func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error)
 		f := &tx.Frames[i]
 		if f.IsRecentRootVerifier() {
 			if !f.Value.IsZero() || f.Limits.State != 0 {
-				return framePrefix{}, invalid
+				return framePrefix{}, errFrameValidationPrefix
 			}
 			const maxReferences = 16
 			if size := len(f.Data); size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
@@ -188,21 +189,21 @@ func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error)
 		i++
 	}
 	if i >= len(tx.Frames) {
-		return framePrefix{}, invalid
+		return framePrefix{}, errFrameValidationPrefix
 	}
 	verify := &tx.Frames[i]
 	if verify.Mode != types.FrameVerify || verify.ResolvedTarget(tx.SenderAddress) != tx.SenderAddress {
-		return framePrefix{}, invalid
+		return framePrefix{}, errFrameValidationPrefix
 	}
 	switch verify.Flags {
 	case types.FrameApproveBoth:
 	case types.FrameApproveExecution:
 		i++
 		if i >= len(tx.Frames) || tx.Frames[i].Mode != types.FrameVerify || tx.Frames[i].Flags != types.FrameApprovePayment {
-			return framePrefix{}, invalid
+			return framePrefix{}, errFrameValidationPrefix
 		}
 	default:
-		return framePrefix{}, invalid
+		return framePrefix{}, errFrameValidationPrefix
 	}
 	prefix.paymentFrame = i
 	var execution, state uint64
@@ -215,7 +216,7 @@ func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error)
 	for j, frame := range tx.Frames {
 		if j > prefix.paymentFrame {
 			if frame.Mode == types.FrameVerify {
-				return framePrefix{}, invalid
+				return framePrefix{}, errFrameValidationPrefix
 			}
 			continue
 		}

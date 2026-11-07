@@ -2039,6 +2039,34 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 	}
 }
 
+func TestFramePoolIncompleteNotifications(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Empty(t, frame.frameValidation.RecentRoots)
+
+	backend.valid, backend.calls = false, nil
+	backend.onValidate = func() {
+		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool, "park before simulation")
+	}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0)
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Empty(t, backend.calls)
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls)
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Empty(t, pool.frameReservations)
+}
+
 func TestFramePoolKeyedNonceIsNotAccountNonce(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	var txns TxnSlots

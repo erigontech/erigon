@@ -510,14 +510,13 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		return nil
 	}
 	blockTime := head.BlockTime
-	// Expiry and pending-fork checks use the same block time as validation.
+	// Expiry uses the same block time as validation.
 	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	var pendingSlot uint64
 	hasPendingSlot := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
 	if hasPendingSlot {
 		pendingSlot = *head.SlotNumber + 1
 	}
-	pendingIsBogota := p.chainConfig.IsBogota(pendingTime)
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -556,9 +555,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
 		if len(previous.RecentRoots) > 0 {
-			affected = affected || changes.StateChangesIncomplete
 			invalidRoots := activationUnwound || !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
 				return !ref.ValidAt(pendingSlot)
 			})
@@ -567,7 +565,6 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 				continue
 			}
-			affected = affected || !pendingIsBogota
 		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.

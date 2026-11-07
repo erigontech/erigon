@@ -148,8 +148,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
-	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
-	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(recentReceipts)
+	fv.extendingForkNotifications.Accumulator.AppendAndReset(accumulator)
+	fv.extendingForkNotifications.RecentReceipts.MoveEntriesTo(recentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
