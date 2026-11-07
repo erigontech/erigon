@@ -439,6 +439,26 @@ func TestEstimateGasStateOverrideMovedPrecompile(t *testing.T) {
 	require.Greater(t, uint64(gas), params.TxGas+params.EcrecoverGas)
 }
 
+// A precompile keeps running when its override sets neither code nor a move.
+func TestCallStateOverrideKeepsPrecompile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	identity := common.HexToAddress("0x0000000000000000000000000000000000000004")
+	echo := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
+	balance := (*hexutil.U256)(uint256.NewInt(1))
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	out, err := api.Call(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &identity, Data: &echo}, &latest, &ethapi.StateOverrides{
+		accounts.InternAddress(identity): {Balance: &balance},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, echo, out)
+}
+
 // TestEstimateGasCallDataFieldDoesNotChangeEstimate verifies that the same
 // calldata estimates the same whether it arrives as "input" or as "data".
 // Input wins in ToMessage, so keying the plain-transfer shortcut on args.Data
