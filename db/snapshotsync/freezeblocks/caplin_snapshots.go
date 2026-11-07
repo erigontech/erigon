@@ -583,6 +583,7 @@ func (s *CaplinSnapshots) RetireBlobsBelow(floor uint64, onDelete func([]string)
 	visible := len(view.BlobSidecars())
 	view.Close()
 	if dirty != visible {
+		s.logger.Debug("Skipping blob retirement while dirty and visible segment counts differ", "dirty", dirty, "visible", visible)
 		return false, nil
 	}
 	return s.RetireFilesBelow(snaptype.BlobSidecars, min(floor+1, s.FrozenBlobs()), onDelete)

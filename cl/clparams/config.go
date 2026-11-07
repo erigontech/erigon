@@ -146,6 +146,10 @@ func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
 }
 
+func MinBlobRetentionFloor(fromSlot, serveFloor uint64) uint64 {
+	return min(fromSlot, serveFloor)
+}
+
 // BlobRetentionFloor returns the lowest slot whose blob sidecars are kept at currentSlot.
 // A bounded archive never drops below the spec serving window.
 func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSlot uint64) uint64 {
@@ -154,7 +158,7 @@ func (c CaplinConfig) BlobRetentionFloor(beaconCfg *BeaconChainConfig, currentSl
 	}
 	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
 	if c.ArchiveBlobs {
-		return min(c.BlobsArchiveFromSlot, serveFloor)
+		return MinBlobRetentionFloor(c.BlobsArchiveFromSlot, serveFloor)
 	}
 	return serveFloor
 }

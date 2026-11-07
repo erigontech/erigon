@@ -399,6 +399,31 @@ func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
 	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }
 
+func TestCaplinBlobArchiveFromSlotSetsArchiveConfig(t *testing.T) {
+	parse := func(args ...string) ethconfig.Config {
+		blocks, blobs, fromSlot := CaplinArchiveBlocksFlag, CaplinArchiveBlobsFlag, CaplinArchiveBlobsFromSlotFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&blocks, &blobs, &fromSlot},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg
+	}
+
+	cfg := parse("--caplin.blobs-archive-from-slot=0")
+	require.True(t, cfg.CaplinConfig.ArchiveBlobs)
+	require.Zero(t, cfg.CaplinConfig.BlobsArchiveFromSlot)
+
+	cfg = parse("--caplin.blobs-archive-from-slot=12345")
+	require.True(t, cfg.CaplinConfig.ArchiveBlocks)
+	require.True(t, cfg.CaplinConfig.ArchiveBlobs)
+	require.Equal(t, uint64(12345), cfg.CaplinConfig.BlobsArchiveFromSlot)
+}
+
 func TestCaplinIPBlockLimitFlagsReachConfig(t *testing.T) {
 	parse := func(args ...string) ethconfig.Config {
 		disable, trusted := CaplinIPBlockLimitsDisableFlag, CaplinIPBlockLimitsTrustedCIDRsFlag

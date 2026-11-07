@@ -1092,12 +1092,12 @@ var (
 	}
 	CaplinArchiveBlobsFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-archive",
-		Usage: "sets whether backfilling is enabled for caplin",
+		Usage: "sets whether backfilling is enabled for caplin; changing an existing datadir from a bounded archive to plain --caplin.blobs-archive, or removing the bound, does not fetch dropped history: backfill stops at FrozenBlobs and SyncSnapshots is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable",
 		Value: false,
 	}
 	CaplinArchiveBlobsFromSlotFlag = cli.Uint64Flag{
 		Name:  "caplin.blobs-archive-from-slot",
-		Usage: "keep blob sidecars from this beacon slot (implies --caplin.blobs-archive); first sync filters snapshots by slot and spec serving window; with --caplin.custom-config or --caplin.custom-genesis downloads all, then prunes; newest blob snapshot always kept; 0 keeps all since Deneb",
+		Usage: "keep blob sidecars from this beacon slot (implies --caplin.blobs-archive); also enables ArchiveBlocks, so every beacon block since genesis is downloaded and kept and only blob sidecars are bounded; first sync filters snapshots by slot and spec serving window; with --caplin.custom-config or --caplin.custom-genesis downloads all, then prunes; newest blob snapshot always kept; 0 keeps all since Deneb; changing an existing datadir from a bounded archive to plain --caplin.blobs-archive, or removing the bound, does not fetch dropped history: backfill stops at FrozenBlobs and SyncSnapshots is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable",
 		Value: 0,
 	}
 	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{

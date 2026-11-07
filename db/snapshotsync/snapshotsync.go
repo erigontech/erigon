@@ -139,14 +139,14 @@ func (r BlobRetention) downloadFloor(items snapcfg.PreverifiedItems) (uint64, er
 	return floor, nil
 }
 
-// blobSegmentBelow reports whether a blob sidecar segment ends at or before floor,
-// so it holds nothing a bounded blob archive keeps.
 // skipBlobDownload reports whether a preverified file is a blob segment or index the node does
 // not download: every one when blobs are not archived, else those below floor.
 func skipBlobDownload(name string, blobs bool, floor uint64) bool {
 	return isBlobSidecarFile(name) && (!blobs || blobSegmentBelow(name, floor))
 }
 
+// blobSegmentBelow reports whether a blob sidecar segment ends at or before floor,
+// so it holds nothing a bounded blob archive keeps.
 func blobSegmentBelow(name string, floor uint64) bool {
 	if floor == 0 {
 		return false
@@ -574,12 +574,16 @@ func SyncSnapshots(
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
-		blobFloor, err := blobRetention.downloadFloor(preverifiedBlockSnapshots.Items)
-		if err != nil {
-			return err
-		}
-		if blobs && blobFloor > 0 {
-			log.Info(fmt.Sprintf("[%s] Filtering old blob sidecar segments", logPrefix), "fromSlot", blobRetention.FromSlot, "floor", blobFloor)
+		blobFloor := uint64(0)
+		if !headerchain && blobs && caplin != NoCaplin {
+			var err error
+			blobFloor, err = blobRetention.downloadFloor(preverifiedBlockSnapshots.Items)
+			if err != nil {
+				return err
+			}
+			if blobFloor > 0 {
+				log.Info(fmt.Sprintf("[%s] Filtering old blob sidecar segments", logPrefix), "fromSlot", blobRetention.FromSlot, "floor", blobFloor)
+			}
 		}
 
 		// build all download requests

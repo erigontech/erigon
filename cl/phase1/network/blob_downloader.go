@@ -393,7 +393,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		retentionSlot := b.ethClock.GetCurrentSlot()
 		blobRetentionFloor = b.beaconCfg.BlobSidecarServeRangeStartSlot(retentionSlot)
 		if b.archiveBlobs {
-			blobRetentionFloor = min(blobRetentionFloor, b.archiveFromSlot)
+			blobRetentionFloor = clparams.MinBlobRetentionFloor(b.archiveFromSlot, blobRetentionFloor)
 		} else {
 			fuluRetentionFloor = b.beaconCfg.DataColumnSidecarServeRangeStartSlot(retentionSlot)
 		}
