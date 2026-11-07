@@ -25,6 +25,8 @@ jobs:
           persist-credentials: false
 
       - name: Compare protocol commits
+        # pipefail: a failed curl must take the unreachable branch.
+        shell: bash
         run: |
           pinned=$(sed -nE 's/^const ProtocolCommit = "([0-9a-f]{40})"$/\1/p' eez/internal/testfixtures/testfixtures.go)
           [ -n "$pinned" ] || { echo "::error::no ProtocolCommit in eez/internal/testfixtures/testfixtures.go"; exit 1; }
