@@ -146,8 +146,7 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
-	flushes                 atomic.Uint64 // committed flushNoFsync runs
-	stateBlockHash          common.Hash   // Head of the pool's state view; pins frame validation to the same block
+	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -331,6 +330,15 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	defer coreTx.Rollback()
 
+	var poolTx kv.Tx
+	if p.poolDB != nil {
+		poolTx, err = p.poolDB.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer poolTx.Rollback()
+	}
+
 	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
 	// Gaps >10 min are ignored: they indicate the node was paused, restarted, or fast-syncing
 	// (during fast-sync the txpool receives block batches with large wall-clock gaps between
@@ -355,7 +363,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	frames, err := p.applyBlockUpdate(ctx, stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView)
+	frames, err := p.applyBlockUpdate(stateChanges, unwindTxns, unwindBlobTxns, minedTxns, cacheView, poolTx)
 	if err != nil {
 		return err
 	}
@@ -364,17 +372,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 // applyBlockUpdate applies the announced state under the pool lock and returns
 // revalidation work that needs frame simulation after releasing it.
-func (p *TxPool) applyBlockUpdate(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots,
-	cacheView kvcache.CacheView,
+func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots,
+	cacheView kvcache.CacheView, poolTx kv.Tx,
 ) (frames frameRevalidationBatch, err error) {
-	poolTx, err := p.beginRoThenLock(ctx)
-	if err != nil {
-		return frames, err
-	}
+	p.lock.Lock()
 	defer p.lock.Unlock()
-	if poolTx != nil {
-		defer poolTx.Rollback()
-	}
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
@@ -458,7 +460,7 @@ func (p *TxPool) applyBlockUpdate(ctx context.Context, stateChanges *remoteproto
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(poolTx, minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return frames, err
 	}
 
@@ -2224,7 +2226,7 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 const minedBlobReorgDepth = 64
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
 	// Remove blobs of finalized blocks, and of blocks too deep to reorg.
 	for b, mts := range p.minedBlobTxnsByBlock {
@@ -2248,25 +2250,6 @@ func (p *TxPool) processMinedFinalizedBlobs(poolTx kv.Tx, minedTxns []*TxnSlot, 
 		// Mined txns arrive without blobs; the pooled or an earlier cached copy still has them.
 		if pooled, ok := p.byHash[hash]; ok {
 			txn = pooled.TxnSlot
-			// A flushed txn keeps its Rlp only in the db row, which the next flush deletes.
-			if txn.Rlp == nil && poolTx != nil {
-				rlp, _, _, err := p.getRlpLocked(poolTx, txn.IDHash[:])
-				if err != nil {
-					return err
-				}
-				if rlp != nil {
-					// A fresh parse points the blobs into the new buffer, so the flushed one can be freed.
-					parseCtx := NewTxnParseContext(p.chainID)
-					parseCtx.WithSender(false)
-					fresh := &TxnSlot{}
-					if _, err := parseCtx.ParseTransaction(bytes.Clone(rlp), 0, fresh, nil, false, true, nil); err != nil {
-						p.logger.Warn("[txpool] processMinedFinalizedBlobs: parseTransaction", "hash", hex.EncodeToString(txn.IDHash[:]), "err", err)
-					} else {
-						fresh.SenderID, fresh.Traced = txn.SenderID, txn.Traced
-						txn = fresh
-					}
-				}
-			}
 		} else if queued, ok := p.unprocessedRemoteByHash[hash]; ok {
 			full := *queued
 			full.SenderID, full.Traced = txn.SenderID, txn.Traced
@@ -2844,29 +2827,6 @@ func (p *TxPool) Run(ctx context.Context) error {
 	}
 }
 
-// beginRoThenLock opens a pool read tx and then takes p.lock, the order every other caller uses. It
-// retries when a flush commits in between, because the flush clears the Rlp of pooled slots and the
-// older snapshot does not have the rows it wrote. Without a pool DB it only takes the lock and returns a nil tx.
-func (p *TxPool) beginRoThenLock(ctx context.Context) (kv.Tx, error) {
-	if p.poolDB == nil {
-		p.lock.Lock()
-		return nil, nil
-	}
-	for {
-		flushes := p.flushes.Load()
-		tx, err := p.poolDB.BeginRo(ctx) //nolint:gocritic // The caller owns Rollback.
-		if err != nil {
-			return nil, err
-		}
-		p.lock.Lock()
-		if p.flushes.Load() == flushes {
-			return tx, nil
-		}
-		p.lock.Unlock()
-		tx.Rollback()
-	}
-}
-
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -2884,7 +2844,6 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
-	p.flushes.Add(1)
 	return written, nil
 }
 
@@ -2980,7 +2939,10 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 				return err
 			}
 		}
-		metaTx.TxnSlot.Rlp = nil
+		// Blobs alias Rlp, so keeping it costs no memory and lets a mined blob txn return on unwind.
+		if !metaTx.TxnSlot.HasBlobs() {
+			metaTx.TxnSlot.Rlp = nil
+		}
 	}
 
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
@@ -3132,7 +3094,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
 			continue
 		}
-		txn.Rlp = nil // means that we don't need store it in db anymore
+		if !txn.HasBlobs() {
+			txn.Rlp = nil // means that we don't need store it in db anymore
+		}
 		restored.Append(txn, addr[:], false)
 	}
 

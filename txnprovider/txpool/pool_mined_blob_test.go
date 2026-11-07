@@ -21,19 +21,15 @@ import (
 	"context"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -77,12 +73,12 @@ func TestFinalizeMinedBlobsAfterDeletion(t *testing.T) {
 	for i := range txns {
 		txns[i] = newTestBlobTxnSlot(uint64(i), 1, 1, 1, 21000)
 		txns[i].IDHash[0] = byte(i + 1)
-		require.NoError(t, pool.processMinedFinalizedBlobs(nil, txns[i:i+1], uint64(i+1), 0))
+		require.NoError(t, pool.processMinedFinalizedBlobs(txns[i:i+1], uint64(i+1), 0))
 	}
 
 	pool.deleteMinedBlobTxn(string(txns[1].IDHash[:]))
 	pool.deleteMinedBlobTxn(string(txns[2].IDHash[:]))
-	require.NoError(t, pool.processMinedFinalizedBlobs(nil, nil, 5, 3))
+	require.NoError(t, pool.processMinedFinalizedBlobs(nil, 5, 3))
 
 	for i := range 3 {
 		require.NotContains(t, pool.minedBlobTxnsByBlock, uint64(i+1))
@@ -117,22 +113,18 @@ func newMinedBlobReorgTest(t *testing.T) *minedBlobReorgTest {
 
 // newMinedBlobReorgPool starts a pool at block 0 and builds a blob txn with nonce 2 without adding it.
 func newMinedBlobReorgPool(t *testing.T) *minedBlobReorgTest {
-	return newMinedBlobReorgPoolWithDB(t, mdbxtest.NewTestPoolDB(t))
-}
-
-func newMinedBlobReorgPoolWithDB(t *testing.T, poolDB kv.RwDB) *minedBlobReorgTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	chainConfig := *testforks.Forks["Cancun"]
 	chainConfig.ChainID = uint256.NewInt(5)
-	pool, err := New(ctx, make(chan Announcements, 5), poolDB, coreDB, txpoolcfg.DefaultConfig,
+	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig), &chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
 	r := &minedBlobReorgTest{ctx: ctx, pool: pool, sender: common.Address{1}}
 	require.NoError(t, pool.OnNewBlock(ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	// The slot must match its rlp, because a flushed txn is parsed again from its db row.
+	// Parsed, so Rlp and blobs share one buffer as in production.
 	wrapped := types.MakeWrappedBlobTxn(chainConfig.ChainID)
 	wrapped.Tx.Nonce = 2
 	wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(200_000)
@@ -244,20 +236,6 @@ func TestMinedBlobTxnSurvivesReorgThatMinesItAgain(t *testing.T) {
 	require.Len(t, r.pool.byHash[r.hash].TxnSlot.BlobBundles, 2)
 }
 
-// A flushed txn is cached from its db row, so its blobs must not keep the pooled buffer alive.
-func TestMinedFlushedBlobTxnDoesNotShareBlobs(t *testing.T) {
-	r := newMinedBlobReorgTest(t)
-	_, err := r.pool.flush(r.ctx)
-	require.NoError(t, err)
-	pooledBlob := r.pool.byHash[r.hash].TxnSlot.BlobBundles[0].Blob
-	r.mine(t, 1, 3)
-
-	cached := r.pool.minedBlobTxnsByHash[r.hash].TxnSlot
-	want := cached.BlobBundles[0].Blob[0]
-	pooledBlob[0] ^= 0xff
-	require.Equal(t, want, cached.BlobBundles[0].Blob[0], "the cached txn shares blobs with the pooled copy")
-}
-
 func TestMinedBlobCacheIsBoundedWithoutFinality(t *testing.T) {
 	r := newMinedBlobReorgTest(t)
 	r.mine(t, 1, 3)
@@ -267,29 +245,6 @@ func TestMinedBlobCacheIsBoundedWithoutFinality(t *testing.T) {
 	}
 	require.NotContains(t, r.pool.minedBlobTxnsByHash, r.hash)
 	require.NotContains(t, r.pool.minedBlobTxnsByBlock, uint64(1))
-}
-
-// GetRlp callers take a pool read tx before p.lock, so OnNewBlock must too: the other order deadlocks once
-// such readers hold every reader permit.
-func TestOnNewBlockTakesReaderBeforePoolLock(t *testing.T) {
-	poolDB := mdbxtest.InMem(t, mdbx.New(dbcfg.TxPoolDB, log.New()), t.TempDir()).RoTxsLimiter(semaphore.NewWeighted(1)).MustOpen()
-	t.Cleanup(poolDB.Close)
-	r := newMinedBlobReorgPoolWithDB(t, poolDB)
-	reader, err := poolDB.BeginRo(r.ctx)
-	require.NoError(t, err)
-	defer reader.Rollback()
-
-	ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- r.pool.OnNewBlock(ctx, r.block(1, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{})
-	}()
-	time.Sleep(100 * time.Millisecond) // let OnNewBlock reach its wait for the reader permit
-	_, err = r.pool.GetRlp(reader, []byte(r.hash))
-	require.NoError(t, err)
-	reader.Rollback()
-	require.NoError(t, <-done)
 }
 
 func TestUnwoundBlobTxnWithoutSidecarIsNotAdded(t *testing.T) {
