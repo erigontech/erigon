@@ -87,7 +87,7 @@ GLOBL jda5b<>(SB), RODATA|NOPTR, $16
 // func jumpdestBitmapSSE4(code *byte, steps int, tab *byte, out *uint64) (entry int)
 TEXT ·jumpdestBitmapSSE4(SB), NOSPLIT, $0-40
 	MOVQ code+0(FP), SI
-	MOVQ steps+8(FP), CX
+	MOVQ steps+8(FP), R14
 	MOVQ tab+16(FP), BX
 	MOVQ out+24(FP), DI
 	MOVOU jda10<>(SB), X10
@@ -100,16 +100,24 @@ TEXT ·jumpdestBitmapSSE4(SB), NOSPLIT, $0-40
 
 loop:
 	MOVOU 0(SI), X4
+	MOVOU 16(SI), X9
 	MOVOU X4, X0
 	PCMPEQB jda5b<>(SB), X0
 	PMOVMSKB X0, R12
-	VECTOR(X4, X1, X2, X3, X5)
-	MOVOU 16(SI), X9
 	MOVOU X9, X0
 	PCMPEQB jda5b<>(SB), X0
 	PMOVMSKB X0, R13
 	SHLL $16, R13
 	ORL  R13, R12               // JUMPDEST bytes
+
+	// A step without PUSH opcodes needs no analysis: every byte from the entry on is an instruction.
+	MOVOU X4, X0
+	PMAXSB X9, X0
+	PCMPGTB X11, X0             // PUSH1..PUSH32: the only bytes > 0x5f as int8
+	PTEST  X0, X0
+	JZ   pushfree
+
+	VECTOR(X4, X1, X2, X3, X5)
 	VECTOR(X9, X6, X7, X8, X5)
 
 	MOVOU X1, 0(BX)   // TA
@@ -144,11 +152,21 @@ loop:
 	MOVL AX, 0(DI)
 	MOVBQZX -80(BX)(R8*1), R8   // e = PT[e]
 
+next:
 	ADDQ $32, SI
 	ADDQ $4, DI
-	DECQ CX
+	DECQ R14
 	JNZ  loop
 
 	SUBQ $0x80, R8
 	MOVQ R8, entry+32(FP)
 	RET
+
+pushfree:
+	LEAQ -0x80(R8), CX
+	MOVQ $-1, AX
+	SHLQ CX, AX
+	ANDL AX, R12
+	MOVL R12, 0(DI)
+	MOVQ $0x80, R8
+	JMP  next

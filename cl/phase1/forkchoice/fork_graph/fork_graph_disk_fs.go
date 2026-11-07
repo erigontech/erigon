@@ -121,6 +121,12 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+	slot := bs.Slot()
+	if blockRoot == f.lastDumpedRoot && slot == f.lastDumpedSlot {
+		return nil
+	}
+	f.lastDumpedRoot, f.lastDumpedSlot = common.Hash{}, 0
+	done := false
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
@@ -132,7 +138,13 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	if err != nil {
 		return err
 	}
-	defer dumpedFile.Close()
+	defer func() {
+		err = errors.Join(err, dumpedFile.Close())
+		if done && err == nil {
+			f.lastDumpedRoot = blockRoot
+			f.lastDumpedSlot = slot
+		}
+	}()
 
 	sw := snappypool.Writer(dumpedFile)
 	defer snappypool.PutWriter(sw)
@@ -173,11 +185,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		return err
 	}
 
-	if err = dumpedFile.Sync(); err != nil {
-		log.Error("failed to sync dumped file", "err", err)
-		return
-	}
-
+	done = true
 	return
 }
 
@@ -205,8 +213,8 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	if !f.retainedBlock(blockRoot) {
 		return nil, ErrStateNotFound
 	}
-	f.stateDumpLock.Lock()
-	defer f.stateDumpLock.Unlock()
+	f.envelopeMu.Lock()
+	defer f.envelopeMu.Unlock()
 	return f.readEnvelopeFromDiskLocked(blockRoot)
 }
 
@@ -262,12 +270,12 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		corrupt = true
 		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, clparams.MaxChunkSize, blockRoot)
 	}
-	if envelopeLength > uint64(cap(f.sszBuffer)) {
-		f.sszBuffer = make([]byte, envelopeLength)
+	if envelopeLength > uint64(cap(f.envelopeSSZBuffer)) {
+		f.envelopeSSZBuffer = make([]byte, envelopeLength)
 	} else {
-		f.sszBuffer = f.sszBuffer[:envelopeLength]
+		f.envelopeSSZBuffer = f.envelopeSSZBuffer[:envelopeLength]
 	}
-	n, err := io.ReadFull(sr, f.sszBuffer)
+	n, err := io.ReadFull(sr, f.envelopeSSZBuffer)
 	if err != nil {
 		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
@@ -283,7 +291,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(f.beaconCfg, version),
 	}
-	if err = envelope.DecodeSSZStrict(f.sszBuffer, int(version)); err != nil {
+	if err = envelope.DecodeSSZStrict(f.envelopeSSZBuffer, int(version)); err != nil {
 		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}
@@ -354,8 +362,8 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	if blockRoot != f.anchorRoot && isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
 		return fmt.Errorf("cannot dump envelope for pruned block root %x at slot %d", blockRoot, header.Slot)
 	}
-	f.stateDumpLock.Lock()
-	defer f.stateDumpLock.Unlock()
+	f.envelopeMu.Lock()
+	defer f.envelopeMu.Unlock()
 
 	// Populate in-memory cache on successful write
 	defer func() {
@@ -367,12 +375,12 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	}()
 
 	// Encode the envelope
-	f.sszBuffer, err = envelope.EncodeSSZ(f.sszBuffer[:0])
+	f.envelopeSSZBuffer, err = envelope.EncodeSSZ(f.envelopeSSZBuffer[:0])
 	if err != nil {
 		return
 	}
-	if uint64(len(f.sszBuffer)) > clparams.MaxChunkSize {
-		return fmt.Errorf("cannot persist envelope: length %d exceeds max %d", len(f.sszBuffer), clparams.MaxChunkSize)
+	if uint64(len(f.envelopeSSZBuffer)) > clparams.MaxChunkSize {
+		return fmt.Errorf("cannot persist envelope: length %d exceeds max %d", len(f.envelopeSSZBuffer), clparams.MaxChunkSize)
 	}
 
 	filename := getEnvelopeFilename(blockRoot)
@@ -396,7 +404,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	err = func() error {
 		defer snappypool.PutWriter(sw)
 		length := make([]byte, 8)
-		binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
+		binary.BigEndian.PutUint64(length, uint64(len(f.envelopeSSZBuffer)))
 		if _, writeErr := sw.Write([]byte{byte(envelope.Message.Payload.Version())}); writeErr != nil {
 			log.Error("failed to write envelope version", "err", writeErr)
 			return writeErr
@@ -405,7 +413,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 			log.Error("failed to write length", "err", writeErr)
 			return writeErr
 		}
-		if _, writeErr := sw.Write(f.sszBuffer); writeErr != nil {
+		if _, writeErr := sw.Write(f.envelopeSSZBuffer); writeErr != nil {
 			log.Error("failed to write ssz buffer", "err", writeErr)
 			return writeErr
 		}
@@ -419,10 +427,6 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return err
 	}
 
-	if err = dumpedFile.Sync(); err != nil {
-		log.Error("failed to sync dumped file", "err", err)
-		return
-	}
 	if err = dumpedFile.Close(); err != nil {
 		closed = true
 		return

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -30,7 +31,8 @@ import (
 const sleepForSlotHeadPollInterval = 200 * time.Millisecond
 
 type sleepForSlotForkChoice interface {
-	gloasHeadReader
+	GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error)
+	GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool)
 	RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64)
 }
 
@@ -45,8 +47,9 @@ type sleepForSlotClock interface {
 }
 
 type sleepForSlotWake struct {
-	root common.Hash
-	at   time.Time
+	root          common.Hash
+	executionHead common.Hash
+	at            time.Time
 }
 
 // A head that the ForkChoice stage did not materialize (it failed, or the head moved away and back) may wake the
@@ -61,6 +64,7 @@ func waitForNextSlotOrHeadChange(
 	syncedData sleepForSlotSyncedData,
 	clock sleepForSlotClock,
 	lastWake sleepForSlotWake,
+	lastExecutionHead common.Hash,
 ) (sleepForSlotWake, bool, error) {
 	nextSlotTime := clock.GetSlotTime(nextSlot)
 	timer := time.NewTimer(time.Until(nextSlotTime))
@@ -84,7 +88,7 @@ func waitForNextSlotOrHeadChange(
 				return sleepForSlotWake{}, false, nil
 			}
 			currentSlot := clock.GetCurrentSlot()
-			head, headSlot, err := forkChoice.GetHead(nil)
+			head, headSlot, err := forkChoice.GetHeadNode()
 			select {
 			case <-ctx.Done():
 				return sleepForSlotWake{}, false, ctx.Err()
@@ -96,8 +100,19 @@ func waitForNextSlotOrHeadChange(
 			if err != nil {
 				continue
 			}
-			if head != syncedData.HeadRoot() && (head != lastWake.root || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
-				return sleepForSlotWake{root: head, at: time.Now()}, true, nil
+			executionHead, ready := forkChoice.GetExecutionHead(head)
+			// Both fork-choice reads can block past cancellation or the slot boundary.
+			select {
+			case <-ctx.Done():
+				return sleepForSlotWake{}, false, ctx.Err()
+			default:
+			}
+			if !time.Now().Before(nextSlotTime) {
+				return sleepForSlotWake{}, false, nil
+			}
+			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
+			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
+				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
 			}
 			// The head's envelope decides whether the next proposer builds on a full or empty parent.
 			minRetrySlot := headSlot

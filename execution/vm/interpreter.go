@@ -57,12 +57,23 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
+type addressWordIndex uint8
+
+const (
+	addressWordSelf addressWordIndex = iota
+	addressWordOrigin
+	addressWordCaller
+	addressWordCoinbase
+	addressWordCount
+)
+
 // CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
 	savedPC           uint64 // run's pc across an out-of-line call
 	stateGas          uint64
 	stateGasSpill     uint64
+	frameContext      *state.FrameContext
 	newAccountCharged bool
 	input             []byte
 	Memory            Memory
@@ -80,13 +91,20 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
+	// mulmodModulus is the last full-width MULMOD modulus and mulmodReciprocal its
+	// reciprocal: a contract reduces many products by one modulus.
+	mulmodModulus    uint256.Int
+	mulmodReciprocal [5]uint64
+
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
-	Contract Contract
-	create   createGasPreparation
-	slots    frameSlots
-	Stack    Stack
+	Contract        Contract
+	create          createGasPreparation
+	slots           frameSlots
+	Stack           Stack
+	addressWords    [addressWordCount]uint256.Int
+	addressWordsSet [addressWordCount]bool
 }
 
 // maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
@@ -161,7 +179,7 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 // peekAddress, to keep the two peek functions inside the inlining budget.
 // Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
-	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
+	ctx.cachedKey = evm.intraBlockState.InternStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
 	return ctx.cachedKey
 }
@@ -176,7 +194,7 @@ func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 }
 
 func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
-	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
+	ctx.cachedAddr = evm.intraBlockState.InternAddress(ctx.Stack.peek())
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }
@@ -200,7 +218,9 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	ctx.gas = gas.Execution
 	ctx.stateGas = gas.State
 	ctx.stateGasSpill = 0
+	ctx.frameContext = evm.FrameContext
 	ctx.newAccountCharged = false
+	ctx.addressWordsSet = [addressWordCount]bool{}
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -210,6 +230,7 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 // frame takes it without the pool; the spare is not tied to the depth that left
 // it. The outermost frame returns both contexts to the pool.
 func (evm *EVM) putCallContext(ctx *CallContext) {
+	ctx.frameContext = nil
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
 	ctx.cacheGen = 0
@@ -241,6 +262,18 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 }
 
 func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	if ctx.frameContext != nil && t == mdgas.StateGas {
+		// All EVM calls within a transaction frame share its state-gas budget.
+		// State charges cannot borrow execution gas or use a per-call reservoir.
+		old := ctx.Gas()
+		if !ctx.frameContext.ChargeStateGas(gas) {
+			return false
+		}
+		if reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(old, ctx.Gas(), reason)
+		}
+		return true
+	}
 	remaining, stateSpill, ok := useMdGas(ctx.Gas(), gas, t, tracer, reason)
 	if ok {
 		ctx.gas = remaining.Execution
@@ -253,6 +286,9 @@ func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.
 // mergeChildStateGas takes over the child's state-gas spill, then absorbs state
 // gas the child left in the reservoir, up to the spill available in this frame.
 func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
+	if ctx.frameContext != nil {
+		return
+	}
 	ctx.stateGasSpill += childSpill
 	misplaced := min(ctx.stateGas, ctx.stateGasSpill)
 	if misplaced == 0 {
@@ -271,6 +307,14 @@ func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Ho
 }
 
 func (ctx *CallContext) refillStateGas(amount uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
+	if ctx.frameContext != nil {
+		old := ctx.Gas()
+		ctx.frameContext.RefillStateGas(amount)
+		if reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(old, ctx.Gas(), reason)
+		}
+		return
+	}
 	remaining := ctx.Gas()
 	gasTracing := reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook()
 	var old mdgas.MdGas
@@ -341,6 +385,9 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 }
 
 func (ctx *CallContext) Gas() mdgas.MdGas {
+	if ctx.frameContext != nil {
+		return mdgas.MdGas{Execution: ctx.gas, State: ctx.frameContext.StateGasLeft()}
+	}
 	return mdgas.MdGas{
 		Execution: ctx.gas,
 		State:     ctx.stateGas,
@@ -370,6 +417,9 @@ func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.H
 }
 
 func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
+	if ctx.frameContext != nil {
+		return
+	}
 	if ctx.stateGas == 0 {
 		return
 	}
@@ -387,7 +437,7 @@ func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
 func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
 	return mdgas.MdGas{
 		Execution: evm.CallGasTemp(),
-		State:     ctx.stateGas,
+		State:     ctx.Gas().State,
 	}
 }
 
@@ -404,6 +454,8 @@ func LookupInstructionSet(rules *chain.Rules) JumpTable {
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	var jt *JumpTable
 	switch {
+	case chainRules.IsBogota:
+		jt = &bogotaInstructionSet
 	case chainRules.IsAmsterdam:
 		jt = &amsterdamInstructionSet
 	case chainRules.IsOsaka:
@@ -532,7 +584,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// derived uniformly by evm.call/evm.create's defer from the final
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		gasUsed.State = int64(gas.State) - int64(callContext.Gas().State) + int64(callContext.stateGasSpill)
 		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
@@ -651,13 +703,8 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			if dynamicCost.State != 0 && !applyStateGas(callContext, dynamicCost.State) {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 		}
 

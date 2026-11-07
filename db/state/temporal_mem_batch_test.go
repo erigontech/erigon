@@ -54,18 +54,12 @@ func TestGetDiffsetCoversAllDomains(t *testing.T) {
 	}
 }
 
-// Pins the locking contract of the per-domain latestStateLocks: readers and
-// writers of different domains run concurrently while Unwind takes every
-// lock. Meaningful under -race; also checks unwind correctness afterwards.
 func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	t.Parallel()
 	sd := &TemporalMemBatch{
 		stepSize: 16,
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
 	}
 
 	const keysPerDomain = 200
@@ -116,9 +110,6 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 		stepSize: 16,
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
 	}
 	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
 
@@ -171,9 +162,6 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				storage:           btree2.NewMap[string, []dataWithTxNum](128),
 				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 				inMemHistoryReads: inMemHistoryReads,
-			}
-			for d := range sd.domains {
-				sd.domains[d] = map[string][]dataWithTxNum{}
 			}
 
 			// Each case is the FIRST write after the borrow, so the slot still holds

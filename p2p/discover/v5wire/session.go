@@ -39,6 +39,7 @@ const handshakeTimeout = time.Second
 type SessionCache struct {
 	sessions   lru.BasicLRU[sessionID, *session]
 	handshakes map[sessionID]*Whoareyou
+	sent       []sentHandshake // handshakes in the order they were sent, for GC
 	clock      mclock.Clock
 
 	// hooks for overriding randomness.
@@ -51,6 +52,12 @@ type SessionCache struct {
 type sessionID struct {
 	id   enode.ID
 	addr netip.AddrPort
+}
+
+// sentHandshake is an entry of the handshake send order.
+type sentHandshake struct {
+	key  sessionID
+	time mclock.AbsTime
 }
 
 // session contains session information
@@ -131,8 +138,10 @@ func (sc *SessionCache) getHandshake(id enode.ID, addr netip.AddrPort) *Whoareyo
 
 // storeSentHandshake stores the handshake challenge sent to the given remote node.
 func (sc *SessionCache) storeSentHandshake(id enode.ID, addr netip.AddrPort, challenge *Whoareyou) {
+	key := sessionID{id, addr}
 	challenge.sent = sc.clock.Now()
-	sc.handshakes[sessionID{id, addr}] = challenge
+	sc.handshakes[key] = challenge
+	sc.sent = append(sc.sent, sentHandshake{key, challenge.sent})
 }
 
 // deleteHandshake deletes handshake data for the given node.
@@ -140,12 +149,21 @@ func (sc *SessionCache) deleteHandshake(id enode.ID, addr netip.AddrPort) {
 	delete(sc.handshakes, sessionID{id, addr})
 }
 
-// handshakeGC deletes timed-out handshakes.
+// handshakeGC deletes timed-out handshakes. Handshakes are visited in the order
+// they were sent (the clock is monotonic), so only the timed-out ones are visited.
 func (sc *SessionCache) handshakeGC() {
 	deadline := sc.clock.Now().Add(-handshakeTimeout)
-	for key, challenge := range sc.handshakes {
-		if challenge.sent < deadline {
-			delete(sc.handshakes, key)
+	n := 0
+	for ; n < len(sc.sent) && sc.sent[n].time < deadline; n++ {
+		e := sc.sent[n]
+		if c := sc.handshakes[e.key]; c != nil && c.sent == e.time {
+			delete(sc.handshakes, e.key)
 		}
+		sc.sent[n] = sentHandshake{}
+	}
+	if n == len(sc.sent) {
+		sc.sent = nil
+	} else {
+		sc.sent = sc.sent[n:]
 	}
 }

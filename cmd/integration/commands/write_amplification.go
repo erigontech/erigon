@@ -69,7 +69,7 @@ go run ./cmd/integration write_amplification --datadir=/path/to/db --chain=mainn
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

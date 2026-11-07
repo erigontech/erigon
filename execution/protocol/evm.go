@@ -112,7 +112,8 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
-	refNumber := ref.Number.Uint64() - 1
+	blockNumber := ref.Number.Uint64()
+	refNumber := blockNumber - 1
 	refHash := ref.ParentHash
 	lastKnownNumber := refNumber
 	lastKnownHash := refHash
@@ -123,6 +124,9 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 	hashLookupCache.Add(refNumber, refHash)
 
 	return func(n uint64) (common.Hash, error) {
+		if n >= blockNumber {
+			return common.Hash{}, nil
+		}
 		hashLookupCacheLock.Lock()
 		defer hashLookupCacheLock.Unlock()
 
@@ -142,9 +146,6 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 		}
 
 		if n > lastKnownNumber {
-			if n > refNumber {
-				return common.Hash{}, fmt.Errorf("block number out of range: max=%d", refNumber)
-			}
 			lastKnownNumber = refNumber
 			lastKnownHash = refHash
 		}

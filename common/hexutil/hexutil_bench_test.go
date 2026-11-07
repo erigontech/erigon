@@ -17,7 +17,11 @@
 package hexutil
 
 import (
+	"fmt"
+	"math"
 	"math/big"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -32,4 +36,56 @@ func BenchmarkEncodeBig(b *testing.B) {
 			EncodeBig(bigint)
 		}
 	}
+}
+
+func BenchmarkAppendQuoted(b *testing.B) {
+	for _, n := range []int{20, 32, 64, 256, 1024} {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(i * 7)
+		}
+		dst := make([]byte, 0, QuotedLen(n))
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				dst = AppendQuoted(dst[:0], src)
+			}
+		})
+	}
+}
+
+func BenchmarkDecodeHex(b *testing.B) {
+	for _, n := range []int{20, 32, 64, 256, 1024, 110820} {
+		src := []byte(strings.Repeat("ab", n))
+		dst := make([]byte, n)
+		b.Run(strconv.Itoa(n)+"B", func(b *testing.B) {
+			b.SetBytes(int64(len(src)))
+			for i := 0; i < b.N; i++ {
+				if _, err := decodeHex(dst, src); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkAppendUint64(b *testing.B) {
+	values := []uint64{0, 3, 157, 0x1918bce, 1 << 40, math.MaxUint64}
+	buf := make([]byte, 0, 256)
+	b.Run("strconv", func(b *testing.B) {
+		for b.Loop() {
+			buf = buf[:0]
+			for _, v := range values {
+				buf = strconv.AppendUint(append(buf, "0x"...), v, 16)
+			}
+		}
+	})
+	b.Run("AppendUint64", func(b *testing.B) {
+		for b.Loop() {
+			buf = buf[:0]
+			for _, v := range values {
+				buf = AppendUint64(buf, v)
+			}
+		}
+	})
 }

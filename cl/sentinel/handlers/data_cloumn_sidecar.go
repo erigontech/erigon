@@ -271,13 +271,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 			break
 		}
 	}
-	if responseErr != nil {
-		return responseErr
-	}
-	if count == 0 {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
-	}
-	return nil
+	return responseErr
 }
 
 func dataColumnSidecarsRequestCost(slots, columns, maxSidecars uint64) int {

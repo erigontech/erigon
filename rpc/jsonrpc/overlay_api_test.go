@@ -17,7 +17,11 @@
 package jsonrpc
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -27,13 +31,17 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -153,12 +161,34 @@ func TestOverlayGetLogsReplaysFailedTxWithCodeOverride(t *testing.T) {
 	require.Len(t, logs, 2)
 	require.Equal(t, failedTarget, logs[0].Address, "originally failed transaction should be replayed under the code override and emit one log")
 	require.Equal(t, controlTarget, logs[1].Address, "positive-control transaction should emit one log")
+	require.Equal(t, []hexutil.Uint{0, 1}, []hexutil.Uint{logs[0].TxIndex, logs[1].TxIndex})
 }
 
-// Without overrides an originally failed txn must keep being skipped, even one
-// that would succeed on replay (the replay raises its gas limit to the gas cap,
-// so an out-of-gas failure would flip to success and emit a spurious log).
-func TestOverlayGetLogsSkipsFailedTxWithoutOverrides(t *testing.T) {
+// The rules parameter is optional: a request with state overrides and no rules must not crash.
+func TestOverlayGetLogsStateOverrideWithoutRules(t *testing.T) {
+	failedTarget := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	controlTarget := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	revertCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
+	logCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
+	setup := newOverlayGetLogsTestSetup(t, map[common.Address][]byte{
+		failedTarget:  revertCode,
+		controlTarget: logCode,
+	}, failedTarget, 100_000, controlTarget)
+
+	balance := (*hexutil.U256)(uint256.NewInt(1))
+	logs, err := setup.api.GetLogs(setup.m.Ctx, filters.FilterCriteria{
+		FromBlock: setup.blockNumber,
+		ToBlock:   setup.blockNumber,
+		Addresses: []common.Address{failedTarget, controlTarget},
+	}, &ethapi.StateOverrides{accounts.InternAddress(controlTarget): {Balance: &balance}}, nil)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, controlTarget, logs[0].Address)
+}
+
+// Raising an out-of-gas transaction's limit to the RPC cap would make it
+// succeed and emit a log that was absent from the original execution.
+func TestOverlayGetLogsPreservesFailedTxOutcome(t *testing.T) {
 	target := common.HexToAddress("0x00000000000000000000000000000000000000aa")
 	logCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
 
@@ -169,12 +199,373 @@ func TestOverlayGetLogsSkipsFailedTxWithoutOverrides(t *testing.T) {
 		ToBlock:   setup.blockNumber,
 		Addresses: []common.Address{target},
 	}, nil, setup.rules)
-	require.NoError(t, err, "nonce accounting after the skip must let the next txn of the same sender replay")
+	require.NoError(t, err, "nonce accounting after failure must let the next txn of the same sender replay")
 	require.Len(t, logs, 1, "only the successful control transaction should emit a log")
-	require.Equal(t, hexutil.Uint(1), logs[0].TxIndex, "the log must come from the control transaction, not from a gas-capped replay of the failed one")
+	require.Equal(t, hexutil.Uint(1), logs[0].TxIndex, "the log must come from the control transaction")
+}
+
+func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	successfulTarget, revertingTarget := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	balanceLog := program.New().Push(sender).Op(vm.BALANCE).Push0().Op(vm.MSTORE).
+		Push(32).Push0().Op(vm.LOG0).Bytes()
+	genesis := &types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			successfulTarget: {Code: balanceLog},
+			revertingTarget:  {Code: program.New().Push0().Push0().Op(vm.LOG0).Push0().Push0().Op(vm.REVERT).Bytes()},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &successfulTarget, Limits: mdgas.MdGas{Execution: 10_000, State: 5_000}},
+			{Mode: types.FrameSender, Target: &revertingTarget, Limits: mdgas.MdGas{Execution: 10_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddFailedTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	receipt := pack.Receipts[0][0]
+	require.Equal(t, types.ReceiptStatusFailed, receipt.Status)
+	require.Len(t, receipt.Logs, 1)
+	require.Equal(t, successfulTarget, receipt.Logs[0].Address)
+	_, _, limits, err := frameTx.GasLimits()
+	require.NoError(t, err)
+	require.Greater(t, limits.Execution, limits.State)
+
+	base := newBaseApiForTest(m)
+	blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
+	overrideBalance := (*hexutil.U256)(uint256.NewInt(1))
+	for _, tc := range []struct {
+		name      string
+		gasCap    uint64
+		overrides *ethapi.StateOverrides
+		wantData  []byte
+		wantErr   bool
+	}{
+		{name: "within cap", gasCap: 1_000_000},
+		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: true},
+		{name: "below execution budget", gasCap: limits.Execution - 1, wantErr: true},
+		{name: "at execution budget", gasCap: limits.Execution},
+		{name: "unlimited", gasCap: 0},
+		{name: "empty overrides", gasCap: limits.Execution, overrides: &ethapi.StateOverrides{}},
+		{
+			name: "underfunded balance override", gasCap: limits.Execution,
+			overrides: &ethapi.StateOverrides{accounts.InternAddress(sender): {Balance: &overrideBalance}},
+			wantData:  common.LeftPadBytes([]byte{1}, 32),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
+			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, tc.overrides, nil)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "exceeds the RPC gas cap")
+				require.Empty(t, logs)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, logs, 1)
+			require.Equal(t, successfulTarget, logs[0].Address)
+			wantData := tc.wantData
+			if wantData == nil {
+				wantData = receipt.Logs[0].Data
+			}
+			require.Equal(t, wantData, []byte(logs[0].Data))
+		})
+	}
+}
+
+func TestOverlayGetLogsPreservesOrdinaryFeesBeforeFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		failed bool
+	}{
+		{name: "successful"},
+		{name: "reverted", failed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			ordinaryTarget, frameTarget := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+			ordinaryCode := []byte{byte(vm.STOP)}
+			if tc.failed {
+				ordinaryCode = program.New().Push0().Push0().Op(vm.REVERT).Bytes()
+			}
+			balanceLog := program.New().Push(sender).Op(vm.BALANCE).Push0().Op(vm.MSTORE).
+				Push(32).Push0().Op(vm.LOG0).Bytes()
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:         {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					ordinaryTarget: {Code: ordinaryCode},
+					frameTarget:    {Code: balanceLog},
+				},
+			}), execmoduletester.WithKey(key))
+			ordinaryTx, err := types.SignTx(types.NewTransaction(
+				0, ordinaryTarget, new(uint256.Int), 40_000, uint256.NewInt(2), nil,
+			), *types.LatestSigner(cfg), key)
+			require.NoError(t, err)
+			frameTx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, Nonce: 1, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+				Frames: []types.Frame{
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+					{Mode: types.FrameSender, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 10_000}},
+				},
+				Signatures: []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1}},
+			}
+			hash := frameTx.SigningHash(nil)
+			sig, err := crypto.Sign(hash[:], key)
+			require.NoError(t, err)
+			frameTx.Signatures[0].Signature = append([]byte{sig[64]}, sig[:64]...)
+			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+				if tc.failed {
+					b.AddFailedTx(ordinaryTx)
+				} else {
+					b.AddTx(ordinaryTx)
+				}
+				b.AddTx(frameTx)
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			require.Len(t, pack.Receipts[0][1].Logs, 1)
+
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			blockNumber := new(big.Int).SetUint64(pack.Blocks[0].NumberU64())
+			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, nil, nil)
+			require.NoError(t, err)
+			require.Len(t, logs, 1)
+			require.Equal(t, pack.Receipts[0][1].Logs[0].Data, logs[0].Data)
+		})
+	}
+}
+
+func newOverlayGetLogsSingleLogSetup(t *testing.T) (overlayGetLogsTestSetup, filters.FilterCriteria) {
+	target := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	logCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
+	setup := newOverlayGetLogsTestSetup(t, map[common.Address][]byte{target: logCode}, target, 21_100, target)
+	return setup, filters.FilterCriteria{FromBlock: setup.blockNumber, ToBlock: setup.blockNumber, Addresses: []common.Address{target}}
+}
+
+func TestOverlayGetLogsOrdinaryGasCap(t *testing.T) {
+	setup, crit := newOverlayGetLogsSingleLogSetup(t)
+	balance := (*hexutil.U256)(uint256.NewInt(1))
+	for _, tc := range []struct {
+		name      string
+		gasCap    uint64
+		overrides *ethapi.StateOverrides
+		wantLogs  int
+		wantErr   bool
+	}{
+		{name: "below declared limit", gasCap: 99_999, wantErr: true},
+		{name: "at declared limit", gasCap: 100_000, wantLogs: 1},
+		{name: "unlimited", gasCap: 0, wantLogs: 1},
+		{name: "empty overrides", gasCap: 99_999, overrides: &ethapi.StateOverrides{}, wantErr: true},
+		{
+			name: "state override", gasCap: 99_999, wantLogs: 2,
+			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setup.api.GasCap = tc.gasCap
+			logs, err := setup.api.GetLogs(setup.m.Ctx, crit, tc.overrides, nil)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "exceeds the RPC gas cap")
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, logs, tc.wantLogs)
+		})
+	}
+}
+
+func TestOverlayGetLogsReturnsBlockReplayError(t *testing.T) {
+	setup, crit := newOverlayGetLogsSingleLogSetup(t)
+	overrides := ethapi.StateOverrides{
+		accounts.InternAddress(crit.Addresses[0]): {State: &map[common.Hash]common.Hash{}, StateDiff: &map[common.Hash]common.Hash{}},
+	}
+
+	_, err := setup.api.GetLogs(setup.m.Ctx, crit, &overrides, setup.rules)
+	require.ErrorContains(t, err, "has both 'state' and 'stateDiff'")
+}
+
+type failWorkerBeginDB struct {
+	kv.TemporalRoDB
+	begins atomic.Int32
+}
+
+func (db *failWorkerBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	if db.begins.Add(1) > 1 {
+		return nil, errors.New("worker begin failed")
+	}
+	return db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
+}
+
+func TestOverlayGetLogsReturnsWorkerBeginError(t *testing.T) {
+	setup, crit := newOverlayGetLogsSingleLogSetup(t)
+	setup.api.db = &failWorkerBeginDB{TemporalRoDB: setup.m.DB}
+
+	_, err := setup.api.GetLogs(setup.m.Ctx, crit, nil, setup.rules)
+	require.ErrorContains(t, err, "worker begin failed")
 }
 
 func TestCallConstructorReturnsOverlayError(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	base := newBaseApiForTest(m)
+	for _, tc := range []struct {
+		name   string
+		gasCap uint64
+	}{
+		{name: "limited", gasCap: 1_000_000},
+		{name: "unlimited", gasCap: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
+			code := hexutil.Bytes{byte(vm.INVALID)}
+			result, err := api.CallConstructor(m.Ctx, contractAddress, code)
+			require.Nil(t, result)
+			var invalidOpcode *vm.ErrInvalidOpCode
+			require.ErrorAs(t, err, &invalidOpcode)
+		})
+	}
+}
+
+func TestFrameCallConstructor(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender := common.HexToAddress("0x1000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	verifyOffset := 4 + len(create)
+	require.Less(t, verifyOffset, 256)
+	code := append([]byte{byte(vm.CALLDATASIZE), byte(vm.PUSH1), byte(verifyOffset), byte(vm.JUMPI)}, create...)
+	code = append(code, program.New().Op(vm.JUMPDEST).Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()...)
+	genesis := &types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: code}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameDefault, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Data: []byte{1}, Limits: mdgas.MdGas{Execution: 1_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	want := []byte{byte(vm.PUSH0), byte(vm.STOP)}
+	_, _, limits, err := frameTx.GasLimits()
+	require.NoError(t, err)
+	require.Greater(t, limits.State, limits.Execution)
+	for _, tc := range []struct {
+		name    string
+		gasCap  uint64
+		wantErr bool
+	}{
+		{name: "within cap", gasCap: 2_000_000},
+		{name: "below consumed gas", gasCap: pack.Receipts[0][0].GasUsed - 1, wantErr: true},
+		{name: "below state budget", gasCap: limits.State - 1, wantErr: true},
+		{name: "at state budget", gasCap: limits.State},
+		{name: "unlimited", gasCap: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
+			result, err := api.CallConstructor(m.Ctx, types.CreateAddress(sender, 0), program.New().ReturnData(want).Bytes())
+			if tc.wantErr {
+				require.ErrorContains(t, err, "exceeds the RPC gas cap")
+				require.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, result.Code)
+			require.Equal(t, hexutil.Bytes(want), *result.Code)
+		})
+	}
+}
+
+func TestFrameCallConstructorFeeAccounting(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, factory := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	const initialBalance = 1_000_000_000_000_000_000
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	// Skipping the fee debit takes the revert branch before CREATE.
+	code := program.New().Push(sender).Op(vm.BALANCE).Push(initialBalance).Op(vm.EQ)
+	revertJump := code.Size()
+	code.Push(0).Op(vm.JUMPI).Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP)
+	_, revertPC := code.Jumpdest()
+	require.Less(t, revertPC, uint64(256))
+	code.Bytes()[revertJump+1] = byte(revertPC)
+	code.Push0().Push0().Op(vm.REVERT)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(initialBalance),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			factory: {Code: code.Bytes()},
+		},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	want := []byte{byte(vm.PUSH0), byte(vm.STOP)}
+	result, err := api.CallConstructor(m.Ctx, types.CreateAddress(factory, 0), program.New().ReturnData(want).Bytes())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Code)
+	require.Equal(t, hexutil.Bytes(want), *result.Code)
+}
+
+func TestCallConstructorRejectsNonContract(t *testing.T) {
+	m, bankAddress, _, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(
+		base,
+		m.DB,
+		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
+		NewOtterscanAPI(base, m.DB, 25),
+	)
+	code := hexutil.Bytes{byte(vm.STOP)}
+	for _, addr := range []common.Address{bankAddress, common.HexToAddress("0xdead")} {
+		result, err := api.CallConstructor(m.Ctx, addr, code)
+		require.Nil(t, result)
+		require.Error(t, err)
+	}
+}
+
+func TestCallConstructorRequiresCode(t *testing.T) {
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 	base := newBaseApiForTest(m)
 	api := NewOverlayAPI(
@@ -183,9 +574,21 @@ func TestCallConstructorReturnsOverlayError(t *testing.T) {
 		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
 		NewOtterscanAPI(base, m.DB, 25),
 	)
-	code := hexutil.Bytes{byte(vm.INVALID)}
-	result, err := api.CallConstructor(m.Ctx, contractAddress, &code)
-	require.Nil(t, result)
-	var invalidOpcode *vm.ErrInvalidOpCode
-	require.ErrorAs(t, err, &invalidOpcode)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("overlay", api))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for name, params := range map[string][]any{
+		"omitted": {contractAddress},
+		"null":    {contractAddress, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", params...)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+		})
+	}
 }

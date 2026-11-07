@@ -36,12 +36,7 @@ func addTorrentPeerManagerTestTorrent(t *testing.T, client *torrent.Client, hash
 }
 
 func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
-	// Create a minimal torrent client.
-	cfg := torrent.NewDefaultClientConfig()
-	cfg.DataDir = t.TempDir()
-	cfg.ListenPort = 0
-	cfg.NoDHT = true
-	client, err := torrent.NewClient(cfg)
+	client, err := torrent.NewClient(newTestClientConfig(t, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,11 +76,7 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 }
 
 func TestTorrentPeerManager_NilNodeSource(t *testing.T) {
-	cfg := torrent.NewDefaultClientConfig()
-	cfg.DataDir = t.TempDir()
-	cfg.ListenPort = 0
-	cfg.NoDHT = true
-	client, err := torrent.NewClient(cfg)
+	client, err := torrent.NewClient(newTestClientConfig(t, t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}

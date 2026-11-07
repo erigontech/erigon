@@ -106,7 +106,7 @@ func NewFetch(
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
-		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
+		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired().WithPoolRules(),
 		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
@@ -227,7 +227,7 @@ func (f *Fetch) penalizePeer(ctx context.Context, sentryClient sentryproto.Sentr
 // protocol violation via the blob_versioned_hashes / BlobBundles count
 // mismatch below (blob txs must declare >=1 blob per EIP-4844).
 func (f *Fetch) checkBlobSidecar(slot *TxnSlot) error {
-	if slot == nil || slot.Txn == nil || slot.Txn.Type() != types.BlobTxType {
+	if slot == nil || slot.Txn == nil || (slot.Txn.Type() != types.BlobTxType && slot.Txn.GetBlobGas() == 0) {
 		return nil
 	}
 	blobHashes := slot.Txn.GetBlobHashes()
@@ -346,9 +346,15 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		return err
 	}
 
+	const (
+		maxBatchBytes    = 4 * 1024 * 1024
+		maxBatchMessages = 256
+	)
 	var (
-		batch     = make([]*sentryproto.InboundMessage, 0, 256)
-		batchLock sync.Mutex
+		batch      = make([]*sentryproto.InboundMessage, 0, maxBatchMessages)
+		batchBytes int
+		batchLock  sync.Mutex
+		flushLock  sync.Mutex
 	)
 
 	// LRU cache for deduplication - filters duplicates before they enter the batch
@@ -356,13 +362,19 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 	seenLRU, _ := maphash.NewLRU[struct{}](1024)
 
 	flushBatch := func() {
+		flushLock.Lock()
+		defer flushLock.Unlock()
+		if streamCtx.Err() != nil {
+			return
+		}
 		batchLock.Lock()
 		if len(batch) == 0 {
 			batchLock.Unlock()
 			return
 		}
 		toProcess := batch
-		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batch = make([]*sentryproto.InboundMessage, 0, maxBatchMessages)
+		batchBytes = 0
 		batchLock.Unlock()
 
 		if !f.pool.Started() {
@@ -430,18 +442,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return nil
 		}
 
-		// Skip duplicate tx-body messages (TRANSACTIONS_66, POOLED_TRANSACTIONS_66):
-		// blob-tx verification is the expensive work worth amortizing. We must NOT
-		// dedupe announcements (NEW_POOLED_TRANSACTION_HASHES_66/68) across peers —
-		// when one peer delivers a bad tx for an announced hash and gets kicked,
-		// the tx fetcher falls back to a different peer that announced the same
-		// hash, which only works if each peer's announcement is actually processed.
-		// Same-peer repeated announcements are not deduped here either: the
-		// dominant cost per announcement (a FilterKnownIdHashes call plus one
-		// GET_POOLED_TRANSACTIONS_66 per unknown hash) is self-limiting — once
-		// the pool has ingested the tx, FilterKnownIdHashes returns empty for
-		// all subsequent announcements. Per-peer announcement spam before that
-		// is a peer-reputation concern, not a fetcher dedup one.
+		// Deduplicate transaction bodies to avoid repeated blob verification.
+		// Keep announcements for peer fallback. Replies with cached bodies are still
+		// dropped before the pool can revalidate their transactions.
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if _, seen := seenLRU.Get(req.Data); seen {
@@ -454,7 +457,14 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 
 		batchLock.Lock()
+		full := len(batch) >= maxBatchMessages || batchBytes+len(req.Data) > maxBatchBytes
+		batchLock.Unlock()
+		if full {
+			flushBatch()
+		}
+		batchLock.Lock()
 		batch = append(batch, req)
+		batchBytes += len(req.Data)
 		batchLock.Unlock()
 	}
 }
@@ -770,7 +780,7 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: true, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -820,7 +830,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.TxType() == BlobTxnType {
+					if utx.Txn.GetBlobGas() != 0 {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)

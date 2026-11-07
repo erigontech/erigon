@@ -1251,14 +1251,8 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- batch.wait(ctx) }()
 
-	require.Never(func() bool {
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+	require.Never(func() bool { return len(done) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"wait must still be joining the parked seed tasks")
 
 	dropped := errors.New("caller went away during the join")
 	cancel(dropped)
@@ -1298,14 +1292,8 @@ func TestKeptLocalSeedingReportsDownloaderShutdown(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- batch.wait(t.Context()) }()
 
-	require.Never(func() bool {
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+	require.Never(func() bool { return len(done) > 0 }, 100*time.Millisecond, time.Millisecond,
+		"wait must still be joining the parked seed tasks")
 
 	d.stop()
 
@@ -1427,4 +1415,29 @@ func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
 	torrents := d.torrentClient.Torrents()
 	require.Len(torrents, 1)
 	require.Equal(segName, torrents[0].Name())
+}
+
+func TestGrpcServerRejectsNonLocalNames(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+
+	for _, name := range []string{"v1.0-000000-000500-headers.seg", "domain/v1.0-accounts.0-32.kv"} {
+		require.NoError(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
+	}
+	for _, name := range []string{"", "/abs/a.seg", "../a.seg", "domain/v1.0-a/../../../../x"} {
+		require.Error(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
+	}
+}
+
+func TestGrpcServerDeleteKeepsFilesOutsideSnapDir(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	victim := filepath.Join(filepath.Dir(test.dirs.Snap), "victim.seg.torrent")
+	require.NoError(t, os.WriteFile(victim, []byte("x"), 0o644))
+
+	_, err = grpcServer.Delete(t.Context(), &downloaderproto.DeleteRequest{Paths: []string{"../victim.seg"}})
+	require.Error(t, err)
+	require.FileExists(t, victim)
 }
