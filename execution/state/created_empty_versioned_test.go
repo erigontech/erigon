@@ -517,3 +517,30 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestCreatedSelfDestructEmpty(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xd0})
+	realSD := map[accounts.Address]struct{}{addr: {}}
+	writes := func(created bool, bal uint64) *WriteSet {
+		ws := &WriteSet{}
+		if created {
+			ws.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath}, Val: true})
+		}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(bal)})
+		return ws
+	}
+
+	empty, known := createdSelfDestructEmpty(writes(true, 0), realSD, addr)
+	require.True(t, known)
+	require.True(t, empty, "created, self-destructed, no balance left: removed")
+
+	empty, known = createdSelfDestructEmpty(writes(true, 7), realSD, addr)
+	require.True(t, known)
+	require.False(t, empty, "a balance left after the self-destruct keeps the account")
+
+	_, known = createdSelfDestructEmpty(writes(false, 0), realSD, addr)
+	require.False(t, known, "an account that existed before the tx needs the account view")
+
+	_, known = createdSelfDestructEmpty(writes(true, 0), nil, addr)
+	require.False(t, known, "without a real self-destruct the account view decides")
+}
