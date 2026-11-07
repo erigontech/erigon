@@ -74,6 +74,7 @@ type historyDownloader interface {
 	SetOnInitialGloasBlock(common.Hash, func(*cltypes.SignedBeaconBlock) error)
 	SetSlotToDownload(uint64)
 	SetThrottle(time.Duration)
+	GloasEnvelopeSignatureVerifiable(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) bool
 }
 
 type blobHistoryDownloader interface {
@@ -117,6 +118,30 @@ func elBackfillFinished(slot, elBlock, destinationSlot, destinationBlock uint64)
 		return true
 	}
 	return false
+}
+
+func writeDownloadedBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope, inSnapshots, signatureVerifiable bool) error {
+	if !inSnapshots {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+			return err
+		}
+	}
+	if block.Version() < clparams.GloasVersion || envelope == nil {
+		return nil
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if !inSnapshots {
+		if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
+			return err
+		}
+	}
+	if !signatureVerifiable {
+		return nil
+	}
+	return beacon_indicies.WriteExecutionPayloadEnvelopeSignatureIfAbsent(tx, block.Block.Slot, common.Hash(blockRoot), envelope.Signature)
 }
 
 // clampProgress derives (processed, total) for a backwards download, guarding the
@@ -183,10 +208,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Set up onNewBlock callback
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
+		signatureVerifiable := false
 		if blk != nil && blk.Version() >= clparams.GloasVersion && envelope != nil {
 			if err := network.ValidateDownloadedGloasEnvelope(cfg.beaconCfg, blk, envelope); err != nil {
 				return false, fmt.Errorf("invalid downloaded Gloas envelope: %w", err)
 			}
+			signatureVerifiable = cfg.downloader.GloasEnvelopeSignatureVerifiable(blk, envelope)
 		}
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
 		if err != nil {
@@ -217,23 +244,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
-		// Skip blocks that are already in the snapshots
-		if !isInCLSnapshots {
-			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, blk, true); err != nil {
-				return false, err
-			}
-			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks
-			// because the payload is in the envelope, not the block body. Write them here now
-			// that we have the envelope.
-			if blk.Version() >= clparams.GloasVersion && envelope != nil {
-				blockRoot, hashErr := blk.Block.HashSSZ()
-				if hashErr != nil {
-					return false, hashErr
-				}
-				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
-					return false, err
-				}
-			}
+		if err := writeDownloadedBlock(tx, blk, envelope, isInCLSnapshots, signatureVerifiable); err != nil {
+			return false, err
 		}
 		// we need to backfill an equivalent number of blobs to the blocks
 		hasDownloadEnoughForImmediateBlobsBackfilling := true

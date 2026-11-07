@@ -83,6 +83,31 @@ func TestFrameValidationRecentRoot(t *testing.T) {
 	}
 }
 
+func TestFrameValidationRecentRootAddressAsSender(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit=%t", explicit), func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			tx.SenderAddress = types.FrameRecentRootVerifier
+			sender := accounts.InternAddress(tx.SenderAddress)
+			require.NoError(t, evm.IntraBlockState().SetBalance(sender, *uint256.NewInt(10_000_000), tracing.BalanceChangeUnspecified))
+			require.NoError(t, evm.IntraBlockState().SetCode(sender, []byte{0x60, 3, 0x5f, 0x5f, 0xaa}, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}}
+			if explicit {
+				tx.Frames[0].Target = &tx.SenderAddress
+			}
+			validation, validationErr := ValidateFrameTransaction(evm, tx)
+			result, err := applyFrameTest(t, evm, tx)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			require.NoError(t, validationErr)
+			require.Empty(t, validation.RecentRoots)
+			refs, err := FrameTransactionRecentRoots(tx)
+			require.NoError(t, err)
+			require.Empty(t, refs)
+		})
+	}
+}
+
 func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 	for _, deploy := range []bool{false, true} {
 		for _, sponsored := range []bool{false, true} {
@@ -112,11 +137,11 @@ func TestFrameValidationRecentRootPrefixes(t *testing.T) {
 							payer := common.Address{9}
 							tx.Frames = append(tx.Frames, types.Frame{Mode: types.FrameVerify, Flags: types.FrameApprovePayment, Target: &payer})
 						}
-						prefix, err := frameValidationPrefix(tx)
+						prefix, err := parseFrameValidationPrefix(tx)
 						require.NoError(t, err)
-						require.Equal(t, rootIndex, prefix.recentRoot)
-						require.Equal(t, deployIndex, prefix.deploy)
-						require.Equal(t, len(tx.Frames)-1, prefix.end)
+						require.Equal(t, rootIndex, prefix.recentRootFrame)
+						require.Equal(t, deployIndex, prefix.deploymentFrame)
+						require.Equal(t, len(tx.Frames)-1, prefix.paymentFrame)
 					})
 				}
 			}
@@ -174,6 +199,9 @@ func TestFrameValidationRecentRootAge(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecentRootReferenceAgeOverflow(t *testing.T) {
 	ref := RecentRootReference{Slot: math.MaxUint64 - 1}
 	require.True(t, ref.ValidAt(math.MaxUint64))
 	require.False(t, ref.ValidAt(0))
@@ -209,10 +237,9 @@ func TestFrameValidationRecentRootCodeAndStorage(t *testing.T) {
 	}
 	t.Run("entry removed", func(t *testing.T) {
 		evm, tx := recentRootTestEnv(t)
-		refs, err := ParseRecentRootReferences(tx.Frames[0].Data)
-		require.NoError(t, err)
+		refs := recentRootReferences(tx.Frames[0].Data)
 		require.NoError(t, evm.IntraBlockState().SetState(accounts.InternAddress(types.FrameRecentRootVerifier), accounts.InternKey(refs[0].StorageKey), uint256.Int{}))
-		_, err = ValidateFrameTransaction(evm, tx)
+		_, err := ValidateFrameTransaction(evm, tx)
 		require.ErrorIs(t, err, vm.ErrExecutionReverted)
 	})
 }
@@ -248,7 +275,10 @@ func TestFrameValidationRecentRootGas(t *testing.T) {
 			}
 		})
 	}
-	_, tx = recentRootTestEnv(t)
+}
+
+func TestFrameValidationRecentRootGasBudget(t *testing.T) {
+	_, tx := recentRootTestEnv(t)
 	tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureArbitrary}}
 	tx.Frames[0].Limits.Execution = 100_000 - tx.Frames[1].Limits.Execution - tx.Signatures[0].VerificationGas()
 	require.NoError(t, ValidateFrameTransactionPrefix(tx))
@@ -269,8 +299,7 @@ func TestFrameValidationRecentRootMultipleTuples(t *testing.T) {
 				}
 				tx.Frames[0].Data = append(tx.Frames[0].Data, data...)
 			}
-			refs, err := ParseRecentRootReferences(tx.Frames[0].Data)
-			require.NoError(t, err)
+			refs := recentRootReferences(tx.Frames[0].Data)
 			count := 16
 			if duplicate {
 				count = 1

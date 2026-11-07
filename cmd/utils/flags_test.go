@@ -319,8 +319,14 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	t.Run("no-merge and no-prune set to true", func(t *testing.T) {
 		dbg.SetNoMerge(false)
 		dbg.SetNoPrune(false)
-		run("--exec.no-merge=true", "--exec.no-prune=true")
+		run("--exec.no-merge=true", "--debug.exec.no-prune=true")
 		require.True(t, dbg.NoMerge())
+		require.True(t, dbg.NoPrune())
+	})
+
+	t.Run("deprecated exec.no-prune alias still sets NoPrune", func(t *testing.T) {
+		dbg.SetNoPrune(false)
+		run("--exec.no-prune=true")
 		require.True(t, dbg.NoPrune())
 	})
 

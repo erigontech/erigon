@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -30,13 +31,16 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -82,15 +87,87 @@ func traceFrameRPC(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, name s
 	return out.Bytes()
 }
 
+func TestFrameTraceBlockAfterTracerError(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			target: {Code: program.New().Push0().Op(vm.CALLDATALOAD).Push0().Op(vm.SSTORE, vm.STOP).Bytes()},
+		},
+	}))
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		// Earlier writes must become the next transaction's original storage values,
+		// even when producing the earlier transaction's trace fails.
+		for nonce, value := range []uint64{1, 0} {
+			data := common.BigToHash(new(big.Int).SetUint64(value))
+			b.AddTx(&types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: uint64(nonce), SenderAddress: sender,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+				Frames: []types.Frame{
+					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+					{Mode: types.FrameSender, Target: &target, Data: data[:], Limits: mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}},
+				},
+			})
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newDebugApiForTest(m)
+	tracer := `{
+		fault: function() {},
+		result: function(ctx) {
+			if (ctx.txIndex === 0) throw new Error("trace result failed");
+			return {gasUsed: ctx.gasUsed, stateGasUsed: ctx.stateGasUsed};
+		}
+	}`
+	for _, versioned := range []bool{false, true} {
+		t.Run(map[bool]string{false: "materialized", true: "versioned"}[versioned], func(t *testing.T) {
+			previous := dbg.CallNoMaterialize
+			dbg.CallNoMaterialize = versioned
+			t.Cleanup(func() { dbg.CallNoMaterialize = previous })
+			var out bytes.Buffer
+			stream := jsonstream.New(&out)
+			require.NotPanics(t, func() {
+				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &config.TraceConfig{Tracer: &tracer}, stream))
+			})
+			require.NoError(t, stream.Flush())
+			var traces []struct {
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+				Result struct {
+					GasUsed      uint64 `json:"gasUsed"`
+					StateGasUsed uint64 `json:"stateGasUsed"`
+				} `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(out.Bytes(), &traces))
+			require.Len(t, traces, 2)
+			require.NotNil(t, traces[0].Error)
+			require.Contains(t, traces[0].Error.Message, "trace result failed")
+			require.Nil(t, traces[1].Error)
+			require.Equal(t, pack.Receipts[0][1].GasUsed, traces[1].Result.GasUsed)
+			require.Zero(t, traces[1].Result.StateGasUsed)
+		})
+	}
+}
+
 type frameCallTrace struct {
-	Type    string            `json:"type"`
-	From    common.Address    `json:"from"`
-	To      common.Address    `json:"to"`
-	Gas     hexutil.Uint64    `json:"gas"`
-	GasUsed hexutil.Uint64    `json:"gasUsed"`
-	Error   string            `json:"error"`
-	Calls   []frameCallTrace  `json:"calls"`
-	Logs    []json.RawMessage `json:"logs"`
+	Type         string            `json:"type"`
+	From         common.Address    `json:"from"`
+	To           common.Address    `json:"to"`
+	Gas          hexutil.Uint64    `json:"gas"`
+	StateGas     hexutil.Uint64    `json:"stateGasReservoir"`
+	GasUsed      hexutil.Uint64    `json:"gasUsed"`
+	StateGasUsed *hexutil.Int64    `json:"stateGasUsed"`
+	Error        string            `json:"error"`
+	Calls        []frameCallTrace  `json:"calls"`
+	Logs         []json.RawMessage `json:"logs"`
 }
 
 func TestFrameCallTracer(t *testing.T) {
@@ -105,7 +182,7 @@ func TestFrameCallTracer(t *testing.T) {
 	require.Len(t, trace.Calls, len(tx.Frames))
 	for i, frame := range tx.Frames {
 		require.Equal(t, frame.ResolvedTarget(tx.SenderAddress), trace.Calls[i].To)
-		require.EqualValues(t, frame.Limits.Total(), trace.Calls[i].Gas)
+		require.EqualValues(t, frame.Limits.Execution, trace.Calls[i].Gas)
 	}
 	require.Equal(t, "STATICCALL", trace.Calls[0].Type)
 	require.Equal(t, vm.FrameEntryPoint.Value(), trace.Calls[0].From)
@@ -194,10 +271,15 @@ func TestFrameCallTracerStateGas(t *testing.T) {
 	var trace frameCallTrace
 	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "callTracer", json.RawMessage(`{}`)), &trace))
 	require.Len(t, trace.Calls, 2)
-	require.EqualValues(t, tx.Frames[1].Limits.Total(), trace.Calls[1].Gas)
+	require.EqualValues(t, tx.GetGasLimit(), trace.Gas)
+	require.EqualValues(t, tx.Frames[1].Limits.Execution, trace.Calls[1].Gas)
+	require.EqualValues(t, tx.Frames[1].Limits.State, trace.Calls[1].StateGas)
+	require.NotNil(t, trace.Calls[1].StateGasUsed)
+	require.EqualValues(t, params.StateGasPerStorageSet, *trace.Calls[1].StateGasUsed)
 	intrinsic, _, _, err := tx.GasLimits()
 	require.NoError(t, err)
-	require.EqualValues(t, uint64(trace.GasUsed)-intrinsic-uint64(trace.Calls[0].GasUsed), trace.Calls[1].GasUsed)
+	executionUsed := intrinsic + uint64(trace.Calls[0].GasUsed) + uint64(trace.Calls[1].GasUsed)
+	require.EqualValues(t, executionUsed+uint64(*trace.Calls[1].StateGasUsed), trace.GasUsed)
 }
 
 func TestFrameCallTracerAtomicBatch(t *testing.T) {
@@ -260,6 +342,108 @@ func TestFramePrestateTracerKeyedNonce(t *testing.T) {
 	require.Equal(t, common.HexToHash("0x1"), trace[types.FrameNonceManager].Storage[slot])
 }
 
+func TestFramePrestateTracerRollback(t *testing.T) {
+	factory := common.HexToAddress("0x2000")
+	child := types.CreateAddress(factory, 0)
+	failure := common.HexToAddress("0x3000")
+	nestedFailure := common.HexToAddress("0x4000")
+	revertedDestruction := common.HexToAddress("0x5000")
+	destroy := types.Frame{Mode: types.FrameSender, Target: &child, Limits: mdgas.MdGas{Execution: 20_000}}
+	fail := types.Frame{Mode: types.FrameSender, Target: &failure, Limits: mdgas.MdGas{Execution: 10_000}}
+	batchDestroy := destroy
+	batchDestroy.Flags = types.FrameAtomicBatch
+	for _, tc := range []struct {
+		name          string
+		frames        []types.Frame
+		wantDestroyed bool
+	}{
+		{name: "no revert", frames: []types.Frame{destroy}, wantDestroyed: true},
+		{name: "revert before destruction", frames: []types.Frame{fail, destroy}, wantDestroyed: true},
+		{name: "revert after destruction", frames: []types.Frame{destroy, fail}, wantDestroyed: true},
+		{
+			name: "nested revert",
+			frames: []types.Frame{
+				{Mode: types.FrameSender, Target: &nestedFailure, Limits: mdgas.MdGas{Execution: 20_000}},
+				destroy,
+			},
+			wantDestroyed: true,
+		},
+		{
+			name: "reverted destruction",
+			frames: []types.Frame{
+				{Mode: types.FrameSender, Target: &revertedDestruction, Limits: mdgas.MdGas{Execution: 40_000}},
+			},
+		},
+		{name: "atomic batch rollback", frames: []types.Frame{batchDestroy, fail}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTraceTestEnv(t)
+			ibs := evm.IntraBlockState()
+			runtime := program.New().Push(tx.SenderAddress).Op(vm.SELFDESTRUCT).Bytes()
+			initCode := program.New().ReturnData(runtime).Bytes()
+			factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(failure), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(nestedFailure), program.New().Call(uint256.NewInt(5_000), failure, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(revertedDestruction), program.New().Call(uint256.NewInt(20_000), child, 0, 0, 0, 0, 0).Op(vm.POP).Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+			tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+			tx.Frames = append(tx.Frames, tc.frames...)
+			var diff struct {
+				Pre  map[common.Address]json.RawMessage `json:"pre"`
+				Post map[common.Address]json.RawMessage `json:"post"`
+			}
+			require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
+			destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
+			require.NoError(t, err)
+			require.Equal(t, tc.wantDestroyed, destroyed)
+			require.NotContains(t, diff.Pre, child)
+			if tc.wantDestroyed {
+				require.NotContains(t, diff.Post, child)
+			} else {
+				require.Contains(t, diff.Post, child)
+				var account struct {
+					Code  hexutil.Bytes `json:"code"`
+					Nonce uint64        `json:"nonce"`
+				}
+				require.NoError(t, json.Unmarshal(diff.Post[child], &account))
+				require.Equal(t, hexutil.Bytes(runtime), account.Code)
+				require.EqualValues(t, 1, account.Nonce)
+			}
+		})
+	}
+}
+
+func TestFramePrestateTracerRetainedBalance(t *testing.T) {
+	evm, tx := frameTraceTestEnv(t)
+	ibs := evm.IntraBlockState()
+	factory := common.HexToAddress("0x2000")
+	child := types.CreateAddress(factory, 0)
+	runtime := program.New().Push(1).Push0().Op(vm.SSTORE, vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
+	initCode := program.New().ReturnData(runtime).Bytes()
+	factoryCode := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP).Bytes()
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(factory), factoryCode, tracing.CodeChangeUnspecified))
+	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: 1_000_000}
+	tx.Frames = append(tx.Frames, types.Frame{
+		Mode: types.FrameSender, Target: &child, Value: uint256.Int{7},
+		Limits: mdgas.MdGas{Execution: 30_000, State: 100_000},
+	})
+	var diff struct {
+		Pre  map[common.Address]json.RawMessage `json:"pre"`
+		Post map[common.Address]json.RawMessage `json:"post"`
+	}
+	require.NoError(t, json.Unmarshal(traceFrameRPC(t, evm, tx, "prestateTracer", json.RawMessage(`{"diffMode":true}`)), &diff))
+	destroyed, err := ibs.HasSelfdestructed(accounts.InternAddress(child))
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	require.NoError(t, ibs.FinalizeTx(evm.ChainRules(), state.NewNoopWriter()))
+	balance, err := ibs.GetBalance(accounts.InternAddress(child))
+	require.NoError(t, err)
+	require.Equal(t, uint256.Int{7}, balance)
+	require.NotContains(t, diff.Pre, child)
+	require.Contains(t, diff.Post, child)
+	require.JSONEq(t, `{"balance":"0x7"}`, string(diff.Post[child]))
+}
+
 func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, traceVM bool) (*TraceCallResult, *types.Receipt) {
 	t.Helper()
 	result := &TraceCallResult{Trace: []*ParityTrace{}}
@@ -275,7 +459,7 @@ func traceParityFrame(t *testing.T, evm *vm.EVM, tx *types.FrameTransaction, tra
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
 	executed, err := protocol.ApplyMessage(evm, msg, protocol.NewGasPool(30_000_000, 0), true, false, nil)
 	require.NoError(t, err)
-	receipt := protocol.MakeReceipt(uint256.NewInt(1), common.Hash{}, msg, tx, executed.ReceiptGasUsed, executed, evm.IntraBlockState(), evm)
+	receipt := protocol.MakeReceipt(uint256.NewInt(1), common.Hash{}, tx, executed.ReceiptGasUsed, executed, evm.IntraBlockState(), evm)
 	tracer.EmitTxEnd(receipt, executed.TxnGasUsage, nil)
 	return result, receipt
 }
@@ -302,6 +486,54 @@ func TestFrameParityTracer(t *testing.T) {
 			require.NotEmpty(t, executed.Op)
 		}
 	}
+}
+
+// The proposed trace format makes the synthetic root discoverable through
+// toAddress: [ENTRY_POINT], even though it executes no entry-point code.
+// https://github.com/ethereum/execution-apis/pull/909
+func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {
+				Balance: big.NewInt(1_000_000_000_000_000_000),
+				Code:    program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(),
+			},
+			target: {Code: []byte{byte(vm.STOP)}},
+		},
+	}))
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
+		},
+	}
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	api := newTraceApiForTest(m)
+	traces, err := api.Transaction(m.Ctx, frameTx.Hash(), nil, nil)
+	require.NoError(t, err)
+	require.Len(t, traces, 3)
+	entryPoint := vm.FrameEntryPoint.Value()
+	require.Empty(t, traces[0].TraceAddress)
+	require.Equal(t, sender, traces[0].Action.(*CallTraceAction).From)
+	require.Equal(t, entryPoint, traces[0].Action.(*CallTraceAction).To)
+
+	blockNumber := rpc.BlockNumber(pack.Blocks[0].NumberU64())
+	stream := jsonstream.New(nil)
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{
+		FromBlock: &blockNumber, ToBlock: &blockNumber,
+		ToAddress: []*common.Address{&entryPoint},
+	}, nil, nil, stream))
+	want, err := jsonstream.Marshal(ParityTraces{traces[0]})
+	require.NoError(t, err)
+	require.JSONEq(t, string(want), string(stream.Buffer()))
 }
 
 func TestFrameParityTracerStackResults(t *testing.T) {
@@ -368,9 +600,12 @@ func TestFrameParityTracerStateGas(t *testing.T) {
 	tx.Frames[1].Limits = mdgas.MdGas{Execution: 100_000, State: params.StateGasPerStorageSet}
 	result, receipt := traceParityFrame(t, evm, tx, true)
 	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.GetGasLimit())), result.Trace[0].Action.(*CallTraceAction).Gas)
+	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.GasUsed)), result.Trace[0].Result.(*TraceResult).GasUsed)
 	child := result.Trace[2]
-	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.Frames[1].Limits.Total())), child.Action.(*CallTraceAction).Gas)
-	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Total())), child.Result.(*TraceResult).GasUsed)
+	require.Equal(t, hexutil.U256(*uint256.NewInt(tx.Frames[1].Limits.Execution)), child.Action.(*CallTraceAction).Gas)
+	require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Execution)), child.Result.(*TraceResult).GasUsed)
+	require.NotNil(t, child.Result.(*TraceResult).StateGasUsed)
+	require.EqualValues(t, params.StateGasPerStorageSet, *child.Result.(*TraceResult).StateGasUsed)
 }
 
 func TestFrameParityTracerFailedFrame(t *testing.T) {
@@ -411,7 +646,7 @@ func TestFrameParityTracerFailedFrame(t *testing.T) {
 					require.IsType(t, &TraceResult{}, frame.Result)
 					reverted := frame.Result.(*TraceResult)
 					require.Equal(t, hexutil.Bytes(tc.output), reverted.Output)
-					require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Total())), reverted.GasUsed)
+					require.Equal(t, (*hexutil.U256)(uint256.NewInt(receipt.FrameReceipts[1].GasUsed.Execution)), reverted.GasUsed)
 				}
 			})
 		}

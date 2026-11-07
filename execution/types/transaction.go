@@ -432,6 +432,7 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	authorities      *atomic.Pointer[RecoveredAuthorities]
 	dynamicFeeArgs   bool
 	frameTransaction *FrameTransaction
 
@@ -481,6 +482,35 @@ func (m *Message) Nonce() uint64                   { return m.nonce }
 func (m *Message) Data() []byte                    { return m.data }
 func (m *Message) AccessList() AccessList          { return m.accessList }
 func (m *Message) Authorizations() []Authorization { return m.authorizations }
+
+// RecoveredAuthorities is the authorization list the block pre-pass recovers for the message's tx, waiting for a
+// list it started, or nil when it has not started.
+func (m *Message) RecoveredAuthorities() *RecoveredAuthorities {
+	if m.authorities == nil {
+		return nil
+	}
+	r := m.authorities.Load()
+	if r != nil {
+		<-r.done
+	}
+	return r
+}
+
+// Authorities is RecoveredAuthorities, recovering and publishing the list here when the pre-pass has not
+// started it, so re-executions and the pre-pass reuse it. Nil for a message without a tx's list.
+func (m *Message) Authorities(chainID *uint256.Int) *RecoveredAuthorities {
+	if r := m.RecoveredAuthorities(); r != nil || m.authorities == nil {
+		return r
+	}
+	r := &RecoveredAuthorities{done: make(chan struct{})}
+	if m.authorities.CompareAndSwap(nil, r) {
+		r.Signers, r.Errs = RecoverSigners(m.authorizations, chainID)
+		close(r.done)
+		return r
+	}
+	return m.RecoveredAuthorities()
+}
+
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }

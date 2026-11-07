@@ -531,7 +531,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		} else {
 			c.HttpCompression = true
 		}
-		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression)
+		c.HttpCompressionLoopback = ctx.Bool(utils.HttpCompressionLoopbackFlag.Name)
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression, "http.compression.loopback", c.HttpCompressionLoopback)
 	} else {
 		c.HttpCompression = false
 	}
@@ -585,11 +586,10 @@ func setPrivateApi(ctx *cli.Command, cfg *nodecfg.Config) {
 		certFile := ctx.String(utils.TLSCertFlag.Name)
 		keyFile := ctx.String(utils.TLSKeyFlag.Name)
 		if certFile == "" {
-			log.Warn("Could not establish TLS grpc: missing certificate")
-			return
-		} else if keyFile == "" {
-			log.Warn("Could not establish TLS grpc: missing key file")
-			return
+			utils.Fatalf("--%s requires --%s", utils.TLSFlag.Name, utils.TLSCertFlag.Name)
+		}
+		if keyFile == "" {
+			utils.Fatalf("--%s requires --%s", utils.TLSFlag.Name, utils.TLSKeyFlag.Name)
 		}
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile

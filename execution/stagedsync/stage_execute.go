@@ -573,7 +573,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	}
 
 	var accumulator *shards.Accumulator
-	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+	// Fork choice announces the canonical unwind if the validated fork is adopted.
+	notify := s.SyncMode() != stages.ModeForkValidation
+	if notify && cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
 
 		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, rwTx, u.UnwindPoint)
@@ -595,6 +597,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 			return err
 		}
 		accumulator.StartChange(header, txs, true)
+	} else if notify && cfg.notifications != nil && cfg.notifications.Accumulator != nil {
+		cfg.notifications.Accumulator.MarkIncomplete()
 	}
 
 	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {

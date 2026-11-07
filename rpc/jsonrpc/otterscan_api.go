@@ -178,6 +178,8 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 		return nil, err
 	}
 	defer ibs.Close()
+	transactions.VersionedCallState(ibs)
+	api.shareCodeByHash(ibs)
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, rules, signer, block, int(txIndex))
 	if err != nil {

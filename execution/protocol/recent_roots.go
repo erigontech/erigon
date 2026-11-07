@@ -18,7 +18,6 @@ package protocol
 
 import (
 	"encoding/binary"
-	"errors"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -27,8 +26,8 @@ import (
 )
 
 const (
-	RecentRootLength    = 8192
-	recentRootTupleSize = 72
+	RecentRootHistorySlots = 8192
+	recentRootTupleSize    = 72
 )
 
 // RecentRootCode is the ordinary contract runtime required by the public pool:
@@ -40,8 +39,8 @@ var (
 	recentRootStorageDomain = crypto.Keccak256Hash([]byte("RECENT_ROOT_STORAGE"))
 )
 
-// RecentRootReference records a storage dependency and the referenced slot.
-// It is usable only at later slots and expires at Slot + RecentRootLength;
+// RecentRootReference records the (storage_key, entry_hash) dependency required by
+// EIP-8272. It is usable only at later slots and expires at Slot + RecentRootHistorySlots;
 // keeping Slot avoids storing an expiry that can overflow uint64.
 type RecentRootReference struct {
 	StorageKey common.Hash
@@ -50,45 +49,34 @@ type RecentRootReference struct {
 }
 
 func (r RecentRootReference) ValidAt(slot uint64) bool {
-	return r.Slot < slot && slot-r.Slot < RecentRootLength
+	return r.Slot < slot && slot-r.Slot < RecentRootHistorySlots
 }
 
 // FrameTransactionRecentRoots uses the validation prefix, so approval frames
 // targeting the verifier address do not become recent-root dependencies.
 func FrameTransactionRecentRoots(tx *types.FrameTransaction) ([]RecentRootReference, error) {
-	prefix, err := frameValidationPrefix(tx)
+	prefix, err := parseFrameValidationPrefix(tx)
 	if err != nil {
 		return nil, err
 	}
-	if prefix.recentRoot < 0 {
+	if prefix.recentRootFrame < 0 {
 		return nil, nil
 	}
-	return ParseRecentRootReferences(tx.Frames[prefix.recentRoot].Data)
+	return recentRootReferences(tx.Frames[prefix.recentRootFrame].Data), nil
 }
 
-func validateRecentRootDataLength(size int) error {
-	const maxReferences = 16
-	if size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
-		return errors.New("invalid recent root data length")
-	}
-	return nil
-}
-
-func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
-	if err := validateRecentRootDataLength(len(data)); err != nil {
-		return nil, err
-	}
+// recentRootReferences expects data whose length has been checked by parseFrameValidationPrefix.
+func recentRootReferences(data []byte) []RecentRootReference {
 	refs := make([]RecentRootReference, 0, len(data)/recentRootTupleSize)
 	var entryData [32 + recentRootTupleSize]byte
 	var storageData [32 + 32 + 8]byte
 	copy(entryData[:], recentRootEntryDomain[:])
 	copy(storageData[:], recentRootStorageDomain[:])
-	for len(data) != 0 {
-		tuple := data[:recentRootTupleSize]
+	for tuple := range slices.Chunk(data, recentRootTupleSize) {
 		slot := binary.BigEndian.Uint64(tuple[32:40])
 		copy(entryData[32:], tuple)
 		copy(storageData[32:64], tuple[:32])
-		binary.BigEndian.PutUint64(storageData[64:], slot%RecentRootLength)
+		binary.BigEndian.PutUint64(storageData[64:], slot%RecentRootHistorySlots)
 		ref := RecentRootReference{
 			StorageKey: crypto.Keccak256Hash(storageData[:]),
 			EntryHash:  crypto.Keccak256Hash(entryData[:]),
@@ -98,7 +86,6 @@ func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
 		if !slices.Contains(refs, ref) {
 			refs = append(refs, ref)
 		}
-		data = data[recentRootTupleSize:]
 	}
-	return refs, nil
+	return refs
 }

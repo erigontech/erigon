@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/holiman/uint256"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -45,8 +47,9 @@ type frameReservation struct {
 }
 
 type frameValidationResult struct {
-	validation *protocol.FrameValidation
-	reason     txpoolcfg.DiscardReason
+	validation  *protocol.FrameValidation
+	reason      txpoolcfg.DiscardReason
+	headChanged bool
 }
 
 // frameValidationBatch keeps simulation results tied to the state they used.
@@ -56,24 +59,77 @@ type frameValidationBatch struct {
 	results    map[*TxnSlot]frameValidationResult
 }
 
-// frameBlockUpdate is the validation work left after applying a block update
-// under the pool lock. The backend work runs only after that lock is released.
-type frameBlockUpdate struct {
+// frameRevalidationBatch ties parked entries to the pool's state view while
+// their backend validation runs outside the pool lock.
+type frameRevalidationBatch struct {
 	generation uint64
 	blockHash  common.Hash
 	parked     []*metaTxn
-	unwound    TxnSlots
 }
 
 var errFrameStateChanged = errors.New("frame validation state changed")
 
-// One deadline covers the whole batch, including waits for the simulation gate.
-// A fresh timeout per transaction would let large batches hold up admission.
+// Each admission or revalidation batch shares one deadline, including waits for
+// the simulation gate or a newer pool head, so the limit does not grow with the batch size.
+// The remote worker admits one transaction per batch; waiting in its queue
+// does not consume that transaction's deadline. Startup restoration uses one
+// frame per batch so earlier frames cannot exhaust later budgets.
 const frameValidationTimeout = 5 * time.Second
 
 func (tx *TxnSlot) hasKeyedNonce() bool {
 	frame, ok := tx.Txn.(*types.FrameTransaction)
 	return ok && !frame.UsesLegacyNonce()
+}
+
+// Restore frames before ordinary transactions so their parked entries protect
+// nonce successors until validation finishes outside the pool lock.
+// The caller must hold the pool lock to read the local transaction history.
+func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
+	for i, txn := range txns.Txns {
+		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
+		if txn.TxType() == FrameTxnType {
+			frames.Append(txn, txns.Senders.At(i), isLocal)
+		} else {
+			ordinary.Append(txn, txns.Senders.At(i), isLocal)
+		}
+	}
+	return ordinary, frames
+}
+
+// Restored frames have no current validation or payer reservation. Keep them
+// indexed but unselectable until revalidation succeeds; a backend failure must
+// not lose transactions we already held. The caller holds the pool lock.
+func (p *TxPool) restoreFramesLocked(blockNum uint64, txns TxnSlots) (parked []*metaTxn) {
+	var announcements Announcements
+	cells := make(blobCells)
+	for i, txn := range txns.Txns {
+		if p.byHash[string(txn.IDHash[:])] != nil {
+			continue
+		}
+		sender, isLocal := txns.Senders.AddressAt(i), txns.IsLocal[i]
+		txn.SenderID, txn.Traced = p.senders.getOrCreateID(sender, p.logger)
+		reason := p.validateFrame(txn, isLocal)
+		if reason == txpoolcfg.Success && txn.HasBlobs() {
+			reason = p.validateBlobTxn(txn, isLocal, cells)
+		}
+		if reason == txpoolcfg.Success {
+			txn.frameValidation = nil
+			mt := newMetaTxn(txn, isLocal, blockNum)
+			if reason = p.addLocked(mt, &announcements, cells); reason == txpoolcfg.NotSet {
+				p.senderLastActivity[txn.SenderID] = blockNum
+				p.frameAccountsToRefresh[sender] = struct{}{}
+				parked = append(parked, mt)
+				continue
+			}
+		}
+		p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: txn.IDHash, SenderID: txn.SenderID}, false, 0))
+	}
+	return parked
+}
+
+func (p *TxPool) hasParkedLegacyFrame(senderID uint64) bool {
+	frame := p.all.senderIDFrameTxn[senderID]
+	return frame != nil && !frame.keyedNonce && frame.currentSubPool == 0
 }
 
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
@@ -104,13 +160,27 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 // prepareFrames checks pool policy under the lock, then simulates against the
 // captured head without holding the lock. applyFrameValidation checks the state
 // generation under the lock before these results can be used for admission.
-func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidationBatch {
+func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots, waitForHead bool) frameValidationBatch {
 	if !slices.ContainsFunc(txns.Txns, func(txn *TxnSlot) bool { return txn.TxType() == FrameTxnType }) {
 		return frameValidationBatch{}
 	}
+	batch, stateBlockHash := p.precheckFrames(txns)
+	for _, txn := range txns.Txns {
+		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
+			result = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
+			batch.results[txn] = result
+			if waitForHead && result.headChanged && p.waitForFrameStateChange(ctx, batch.generation) {
+				break
+			}
+		}
+	}
+	return batch
+}
+
+func (p *TxPool) precheckFrames(txns TxnSlots) (frameValidationBatch, common.Hash) {
 	p.lock.Lock()
+	defer p.lock.Unlock()
 	batch := frameValidationBatch{generation: p.stateGeneration, results: make(map[*TxnSlot]frameValidationResult)}
-	stateBlockHash := p.stateBlockHash
 	for i, txn := range txns.Txns {
 		if txn.TxType() != FrameTxnType {
 			continue
@@ -121,13 +191,25 @@ func (p *TxPool) prepareFrames(ctx context.Context, txns TxnSlots) frameValidati
 		}
 		batch.results[txn] = frameValidationResult{reason: p.validateFrame(txn, txns.IsLocal[i])}
 	}
-	p.lock.Unlock()
-	for _, txn := range txns.Txns {
-		if result, ok := batch.results[txn]; ok && result.reason == txpoolcfg.Success {
-			batch.results[txn] = p.simulateFrameResult(ctx, txn, batch.generation, stateBlockHash)
-		}
+	return batch, p.stateBlockHash
+}
+
+// Execution can publish a head before the pool receives its notification. Wait
+// for a new generation, including same-height reorgs, without polling the backend.
+func (p *TxPool) waitForFrameStateChange(ctx context.Context, generation uint64) bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	// Serialize cancellation with Wait so its wakeup cannot be lost.
+	stop := context.AfterFunc(ctx, func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast()
+		p.lock.Unlock()
+	})
+	defer stop()
+	for generation == p.stateGeneration && ctx.Err() == nil {
+		p.lastSeenCond.Wait()
 	}
-	return batch
+	return generation != p.stateGeneration
 }
 
 // applyFrameValidation requires the pool lock. Stale results trigger another
@@ -155,7 +237,11 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 			result = frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
 		}
 		if result.reason == txpoolcfg.Success {
-			txn.frameValidation = result.validation
+			// A pooled slot's validation must match its active reservation.
+			// Revalidation updates both together; duplicate admission must preserve them.
+			if pooled := p.byHash[string(txn.IDHash[:])]; pooled == nil || pooled.TxnSlot != txn {
+				txn.frameValidation = result.validation
+			}
 			continue
 		}
 		reasons[i] = result.reason
@@ -169,10 +255,10 @@ func (p *TxPool) applyFrameValidation(ctx context.Context, txns TxnSlots, batch 
 func (p *TxPool) simulateFrameResult(ctx context.Context, txn *TxnSlot, generation uint64, stateBlockHash common.Hash) frameValidationResult {
 	validation, err := p.simulateFrame(ctx, txn, generation, stateBlockHash)
 	if err != nil {
-		// Backend failures do not establish invalidity. A retryable per-transaction
-		// discard lets the rest of the batch or block update continue.
+		// Backend failures do not establish invalidity. New submissions may retry
+		// a head mismatch; admitted transactions remain parked.
 		p.logger.Debug("[txpool] Frame validation unavailable", "hash", txn.IDHash, "err", err)
-		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable}
+		return frameValidationResult{reason: txpoolcfg.FrameValidationUnavailable, headChanged: status.Code(err) == codes.Aborted}
 	}
 	if validation == nil {
 		return frameValidationResult{reason: txpoolcfg.InvalidFrame}
@@ -224,32 +310,35 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		p.lock.Unlock()
 		return nil, nil
 	}
-	if len(reply.Payer) != 20 || len(reply.MaxCost) > 32 || len(reply.PayerBalance) > 32 {
+	if reply.Payer.GetHi() == nil ||
+		reply.MaxCost.GetHi() == nil || reply.MaxCost.GetLo() == nil ||
+		reply.PayerBalance.GetHi() == nil || reply.PayerBalance.GetLo() == nil {
 		return nil, errors.New("invalid frame validation reply")
 	}
-	v := &protocol.FrameValidation{Payer: common.BytesToAddress(reply.Payer), Paymaster: reply.Paymaster, Deadline: reply.Deadline}
-	v.MaxCost.SetBytes(reply.MaxCost)
-	v.PayerBalance.SetBytes(reply.PayerBalance)
+	v := &protocol.FrameValidation{
+		Payer: gointerfaces.ConvertH160toAddress(reply.Payer), Paymaster: reply.Paymaster, Deadline: reply.Deadline,
+		MaxCost: *gointerfaces.ConvertH256ToUint256Int(reply.MaxCost), PayerBalance: *gointerfaces.ConvertH256ToUint256Int(reply.PayerBalance),
+	}
 	v.Dependencies = make([]common.Address, 0, len(reply.Dependencies)+2)
 	v.Dependencies = append(v.Dependencies, txn.Txn.(*types.FrameTransaction).SenderAddress, v.Payer)
 	for _, dependency := range reply.Dependencies {
-		if len(dependency) != 20 {
+		if dependency.GetHi() == nil {
 			return nil, errors.New("invalid frame validation dependency")
 		}
-		v.Dependencies = append(v.Dependencies, common.BytesToAddress(dependency))
+		v.Dependencies = append(v.Dependencies, gointerfaces.ConvertH160toAddress(dependency))
 	}
 	for _, dependency := range reply.CreationNonces {
-		if dependency == nil || len(dependency.Address) != 20 || dependency.MinNonce > dependency.MaxNonce {
+		if dependency == nil || dependency.Address.GetHi() == nil || dependency.MinNonce > dependency.MaxNonce {
 			return nil, errors.New("invalid frame creation nonce dependency")
 		}
-		address := common.BytesToAddress(dependency.Address)
+		address := gointerfaces.ConvertH160toAddress(dependency.Address)
 		v.Dependencies = append(v.Dependencies, address)
 		v.CreationNonces = append(v.CreationNonces, protocol.FrameCreationNonce{
 			Address: address, MinNonce: dependency.MinNonce, MaxNonce: dependency.MaxNonce,
 		})
 	}
 	// Root storage references are derived locally from frame calldata. The RPC
-	// reply supplies the verifier's account dependency.
+	// reply records the verifier address so code changes also trigger revalidation.
 	v.RecentRoots, err = protocol.FrameTransactionRecentRoots(txn.Txn.(*types.FrameTransaction))
 	if err != nil {
 		return nil, err
@@ -257,13 +346,20 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 	return v, nil
 }
 
-// checkFrameAdmission checks sender exclusivity and payer reservations under the
-// pool lock, after simulation has established the transaction's payer and cost.
+// checkFrameAdmission checks sender exclusivity and any payer reservation under
+// the pool lock. Restored frames remain parked without a validation result.
 func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.DiscardReason {
 	v := txn.frameValidation
-	pendingFrame := p.all.senderIDFrameTxn[txn.SenderID]
-	if v == nil || pendingFrame != nil && pendingFrame != found {
+	pooledFrame := p.all.senderIDFrameTxn[txn.SenderID]
+	if pooledFrame != nil && pooledFrame != found {
 		return txpoolcfg.InvalidFrame
+	}
+	if v == nil {
+		// A restored candidate cannot displace an admitted transaction before validation.
+		if found != nil {
+			return txpoolcfg.NotReplaced
+		}
+		return txpoolcfg.NotSet
 	}
 	return p.checkFrameReservation(v, found)
 }
@@ -308,6 +404,46 @@ func (p *TxPool) checkFrameReservation(v *protocol.FrameValidation, previous *me
 	return txpoolcfg.NotSet
 }
 
+// Blocked nonce chains may exceed the queued limit, and parked frames are
+// outside the sub-pools. Both still count toward total capacity.
+func (p *TxPool) enforceTotalCapacity(pendingBaseFee uint64) {
+	excess := len(p.byHash) - p.pending.limit - p.baseFee.limit - p.queued.limit
+	if excess <= 0 {
+		return
+	}
+	var parked []*metaTxn
+	for _, mt := range p.all.senderIDFrameTxn {
+		if mt.currentSubPool == 0 {
+			parked = append(parked, mt)
+		}
+	}
+	fee := *uint256.NewInt(pendingBaseFee)
+	sort.Slice(parked, func(i, j int) bool { return parked[i].worse(parked[j], fee) })
+	for excess > 0 && len(parked) > 0 {
+		worst := parked[0]
+		for _, candidate := range []*metaTxn{p.pending.Worst(), p.baseFee.Worst(), p.queued.Worst()} {
+			if candidate != nil && candidate.worse(worst, fee) {
+				worst = candidate
+			}
+		}
+		reason := txpoolcfg.QueuedPoolOverflow
+		switch worst.currentSubPool {
+		case PendingSubPool:
+			reason = txpoolcfg.PendingPoolOverflow
+		case BaseFeeSubPool:
+			reason = txpoolcfg.BaseFeePoolOverflow
+		}
+		if worst.currentSubPool == 0 {
+			parked = parked[1:]
+		} else {
+			p.removeFromSubPool(worst, "total pool overflow")
+			p.frameAccountsToRefresh[p.senders.senderID2Addr[worst.TxnSlot.SenderID]] = struct{}{}
+		}
+		p.discardLocked(worst, reason)
+		excess--
+	}
+}
+
 func (p *TxPool) reserveFrame(v *protocol.FrameValidation) {
 	if v == nil {
 		return
@@ -321,7 +457,7 @@ func (p *TxPool) reserveFrame(v *protocol.FrameValidation) {
 		r.paymasters++
 	}
 	p.frameReservations[v.Payer] = r
-	p.frameBalanceChanges[v.Payer] = struct{}{}
+	p.frameAccountsToRefresh[v.Payer] = struct{}{}
 }
 
 func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
@@ -338,18 +474,18 @@ func (p *TxPool) releaseFrame(v *protocol.FrameValidation) {
 	} else {
 		p.frameReservations[v.Payer] = r
 	}
-	p.frameBalanceChanges[v.Payer] = struct{}{}
+	p.frameAccountsToRefresh[v.Payer] = struct{}{}
 }
 
-// Reservation changes can affect another sender's ordinary transactions. Defer
-// their eligibility update until promotion has a current state view and no
-// sender-index iteration is in progress.
-func (p *TxPool) refreshFramePayers(cacheView kvcache.CacheView) error {
-	for len(p.frameBalanceChanges) > 0 {
-		for payer := range p.frameBalanceChanges {
-			senderID, ok := p.senders.getID(payer)
+// Frame removal and payer reservations can change ordinary transaction eligibility.
+// Defer refreshes until promotion has a current state view and no sender-index
+// iteration is in progress.
+func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
+	for len(p.frameAccountsToRefresh) > 0 {
+		for address := range p.frameAccountsToRefresh {
+			senderID, ok := p.senders.getID(address)
 			if !ok || !p.all.hasTxns(senderID) {
-				delete(p.frameBalanceChanges, payer)
+				delete(p.frameAccountsToRefresh, address)
 				continue
 			}
 			nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
@@ -365,11 +501,18 @@ func (p *TxPool) refreshFramePayers(cacheView kvcache.CacheView) error {
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
+	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
+	headIsBogota := p.chainConfig.IsBogota(head.BlockTime)
+	activationUnwound := p.headIsBogota && !headIsBogota
+	p.headIsBogota = headIsBogota
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
-	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
 	blockTime := head.BlockTime
+	// Expiry uses the same block time as validation.
+	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
+	pendingSlot, slotErr := protocol.FrameValidationSlot(head.SlotNumber)
+	hasPendingSlot := head.SlotNumber != nil && slotErr == nil
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -398,35 +541,30 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			}
 		}
 	}
-	var pending []*metaTxn
+	var parked []*metaTxn
 	for _, mt := range p.all.senderIDFrameTxn {
 		previous := mt.TxnSlot.frameValidation
+		if previous == nil {
+			parked = append(parked, mt)
+			continue
+		}
 		frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
 		if len(previous.RecentRoots) > 0 {
-			valid := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
-			if valid {
-				for _, ref := range previous.RecentRoots {
-					if !ref.ValidAt(*head.SlotNumber + 1) {
-						valid = false
-						break
-					}
-				}
-			}
-			if !valid {
-				p.removeFromSubPool(mt, "recent root outside slot window")
+			invalidRoots := activationUnwound || !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+				return !ref.ValidAt(pendingSlot)
+			})
+			if invalidRoots {
+				p.removeFromSubPool(mt, "recent root no longer usable")
 				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 				continue
 			}
-			// A pre-fork head may still produce a post-fork payload. Recheck
-			// activation through simulation using the same rules as admission.
-			affected = affected || !p.chainConfig.IsBogota(blockTime)
 		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
-		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < blockTime {
+		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < pendingTime {
 			p.removeFromSubPool(mt, "frame expired")
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 			continue
@@ -459,42 +597,46 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			}
 		}
 		if !affected && keyedNonce && len(nonceSlots) > 0 {
-			for _, key := range frame.NonceKeys {
-				if _, ok := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]; ok {
-					affected = true
-					break
-				}
-			}
+			affected = slices.ContainsFunc(frame.NonceKeys, func(key uint256.Int) bool {
+				_, changed := nonceSlots[types.FrameNonceSlot(frame.SenderAddress, key)]
+				return changed
+			})
 		}
 		if !affected && len(rootSlots) > 0 {
-			for _, ref := range previous.RecentRoots {
-				if _, ok := rootSlots[ref.StorageKey]; ok {
-					affected = true
-					break
-				}
-			}
+			affected = slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+				_, changed := rootSlots[ref.StorageKey]
+				return changed
+			})
 		}
 		if !affected {
 			continue
 		}
-		// Keep the reservation and nonce index, but prevent selection or promotion
-		// until validation against the new state completes.
+		// Keep the reservation and nonce index while validation is pending. Legacy-nonce
+		// successors must also stop being selectable until their predecessor is usable.
 		p.removeFromSubPool(mt, "frame validation pending")
-		pending = append(pending, mt)
+		if !keyedNonce {
+			p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
+		}
+		parked = append(parked, mt)
 	}
-	return pending
+	return parked
 }
 
 // revalidateFrames simulates parked transactions outside the pool lock. Results
 // apply only while both the state generation and the pooled entry still match.
-func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, generation uint64, stateBlockHash common.Hash) error {
-	if len(pending) == 0 {
+func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, generation uint64, stateBlockHash common.Hash) error {
+	if len(parked) == 0 {
 		return nil
 	}
 	validationCtx, cancel := context.WithTimeout(ctx, frameValidationTimeout)
 	defer cancel()
-	for _, mt := range pending {
+	for _, mt := range parked {
 		result := p.simulateFrameResult(validationCtx, mt.TxnSlot, generation, stateBlockHash)
+		if result.reason == txpoolcfg.FrameValidationUnavailable {
+			// Keep admitted transactions parked. The next block update retries
+			// them even without further dependency changes.
+			continue
+		}
 		p.lock.Lock()
 		if generation != p.stateGeneration {
 			// The newer block update also picks up parked transactions.
@@ -511,12 +653,12 @@ func (p *TxPool) revalidateFrames(ctx context.Context, pending []*metaTxn, gener
 			mt.TxnSlot.frameValidation = validation
 			p.reserveFrame(validation)
 			p.queued.Add(mt, "frame revalidated", p.logger)
-		} else {
-			reason := txpoolcfg.FrameStateChanged
-			if result.reason == txpoolcfg.FrameValidationUnavailable {
-				reason = result.reason
+			frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
+			if frame.UsesLegacyNonce() {
+				p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
 			}
-			p.discardLocked(mt, reason)
+		} else {
+			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 		}
 		p.lock.Unlock()
 	}

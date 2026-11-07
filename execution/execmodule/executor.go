@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -82,10 +83,8 @@ func NewPipelineExecutor(
 	}
 }
 
-// ValidationNotifications returns the notifications object used by the
-// validation pipeline. The ForkValidator uses this as extendingForkNotifications
-// so that state changes accumulated during ValidateBlock are available for
-// MergeExtendingFork to copy to the main accumulator.
+// ValidationNotifications returns notifications collected during fork validation.
+// On adoption, state changes are appended after pending canonical unwind changes.
 func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
 	return pe.validationNotifications
 }
@@ -109,6 +108,14 @@ func (pe *PipelineExecutor) UnwindTo(unwindPoint uint64, reason stagedsync.Unwin
 // RunUnwind executes a pending unwind on the main pipeline.
 func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	return pe.sync.RunUnwind(sd, tx)
+}
+
+// UnwindForValidation keeps speculative progress and notifications off the main pipeline.
+func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64) error {
+	if err := pe.validationSync.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+		return err
+	}
+	return pe.validationSync.RunUnwind(sd, tx)
 }
 
 // RunPrune executes pruning on the main pipeline.
@@ -366,7 +373,7 @@ func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.Tempo
 	if err := stageloop.StateStep(chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, stageloop.ErrStateStepHasMoreWork) {
 			pe.logger.Debug("Could not validate block", "err", err)
-		} else {
+		} else if !commonerrors.IsOnlyCanceled(err) {
 			pe.logger.Warn("Could not validate block", "err", err)
 		}
 		return err

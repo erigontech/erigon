@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -304,6 +305,50 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
+	t.Parallel()
+
+	cfg := prePragueChainConfig()
+	header := makeParentHeader(1001)
+	header.ParentHash = common.Hash{0x1}
+	blobHashes := make([]common.Hash, cfg.GetMaxBlobsPerBlock(header.Time)+1)
+	for i := range blobHashes {
+		blobHashes[i] = common.Hash{kzg.BlobCommitmentVersionKZG, byte(i)}
+	}
+	txs := types.Transactions{&types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{0x1}},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(1),
+		},
+		MaxFeePerBlobGas:    *uint256.NewInt(1),
+		BlobVersionedHashes: blobHashes,
+	}}
+	header.UncleHash = empty.UncleHash
+	header.TxHash = types.DeriveSha(txs)
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	header.BlobGasUsed = new(uint64)
+	header.ExcessBlobGas = new(uint64)
+	header.ParentBeaconBlockRoot = &common.Hash{}
+	block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	downloader.ReportBadHeader(header.ParentHash, common.Hash{}, "invalid block")
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	status, err := srv.NewPayloadV3(t.Context(), payload, blobHashes, header.ParentBeaconBlockRoot)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, status.LatestValidHash)
 }
 
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
@@ -676,6 +721,20 @@ func TestGetBlobsV4(t *testing.T) {
 	}
 }
 
+func TestGetBlobsV4UsesPoolCells(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 1)
+	_, _, poolCells := getBlobsV4Fixture(t, 2)
+	bundle.Cells = (*[goethkzg.CellsPerExtBlob]*goethkzg.Cell)(poolCells)
+	client := newGetBlobsV4Client(t, blobGetterMap{hash: bundle})
+	var result []struct {
+		BlobCells []hexutil.Bytes `json:"blob_cells"`
+	}
+	require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, hexutil.Bytes(hexutil.MustDecodeHex("0x01000000000000000000000000000000"))))
+	require.Len(t, result, 1)
+	require.Len(t, result[0].BlobCells, 1)
+	require.Equal(t, hexutil.Bytes(poolCells[0][:]), result[0].BlobCells[0], "served cell 0 must be the pool's, not recomputed from the blob")
+}
+
 func TestGetBlobsV4FastJSON(t *testing.T) {
 	hash, bundle, _ := getBlobsV4Fixture(t, 1)
 	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
@@ -978,4 +1037,12 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 			require.Equal(t, 1, lookups)
 		})
 	}
+}
+
+func TestValidatedPayloadStatusAnswersSyncingWhenTooFarAway(t *testing.T) {
+	var e EngineServer
+	resp := e.validatedPayloadStatus(types.NewBlockWithHeader(&types.Header{}, nil), execmodule.ExecutionStatusTooFarAway, nil, common.Hash{})
+	require.Equal(t, engine_types.SyncingStatus, resp.Status)
+	require.Nil(t, resp.LatestValidHash)
+	require.Nil(t, resp.ValidationError)
 }

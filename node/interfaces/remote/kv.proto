@@ -61,6 +61,8 @@ service KV {
   rpc HistorySeek(HistorySeekReq) returns (HistorySeekReply);
 
   rpc IndexRange(IndexRangeReq) returns (IndexRangeReply);
+  // IndexJoin returns the timestamps that match every clause of the query; a clause matches the timestamps of any of its keys
+  rpc IndexJoin(IndexJoinReq) returns (IndexRangeReply);
   rpc HistoryRange(HistoryRangeReq) returns (Pairs);
   rpc RangeAsOf(RangeAsOfReq) returns (Pairs);
   rpc HistoryStartFrom(HistoryStartFromReq) returns (HistoryStartFromReply);
@@ -143,6 +145,9 @@ message StateChangeBatch {
   uint64 block_gas_limit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
   uint64 finalized_block = 5;
   uint64 pending_blob_fee_per_gas = 6;  // Base Blob Fee for the next block to be produced
+  // State changes may be missing from this batch or earlier deliveries.
+  // Absent entries do not imply unchanged state.
+  bool state_changes_incomplete = 7;
 }
 
 // StateChange - changes done by 1 block or by 1 unwind
@@ -251,6 +256,29 @@ message IndexRangeReply  {
   repeated uint64 timestamps = 1; //TODO: it can be a bitmap
 
   string next_page_token = 2;
+}
+
+message IndexJoinKey {
+  string table = 1;
+  bytes k = 2;
+}
+
+message IndexJoinClause {
+  repeated IndexJoinKey keys = 1;
+}
+
+message IndexJoinReq {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // query params
+  repeated IndexJoinClause clauses = 2;
+  sint64 from_ts = 3;    // -1 means Inf
+  sint64 to_ts = 4;      // -1 means Inf
+  bool order_ascend = 5;
+
+  // pagination params
+  int32 page_size = 6;    // <= 0 means server will choose
+  string page_token = 7;
 }
 
 message HistoryRangeReq {

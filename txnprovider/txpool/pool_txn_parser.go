@@ -205,7 +205,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		p = dataPos + dataLen
 	default:
 		// Typed tx without envelope: type byte at pos, followed by RLP list
-		listPos, listLen, err := rlp.ParseList(payload, pos+1)
+		var listPos, listLen int
+		listPos, listLen, err = rlp.ParseList(payload, pos+1)
 		if err != nil {
 			return 0, fmt.Errorf("%w: typed tx list: %s", ErrParseTxn, err) //nolint
 		}
@@ -215,19 +216,21 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 	// Step 2: Validate RLP if configured.
 	if ctx.validateRlp != nil {
-		if err := ctx.validateRlp(txBytes); err != nil {
+		err = ctx.validateRlp(txBytes)
+		if err != nil {
 			return 0, err
 		}
 	}
 
 	// Step 3: Decode the transaction using standard types.
-	// Parse type-3 and frame wrappers separately to keep large blob data zero-copy.
-	// Only the inner transaction body goes through the standard decoder.
+	// Parse type-3 and frame wrappers separately. Only the inner transaction body
+	// goes through the standard decoder.
 	var txn types.Transaction
 	var innerTxBytes []byte // only set for wrapped blob txns
 	wrapped := !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs
 	if !legacy && txBytes[0] == FrameTxnType && wrappedWithBlobs {
-		bodyPos, bodyLen, err := rlp.ParseList(txBytes, 1)
+		var bodyPos, bodyLen int
+		bodyPos, bodyLen, err = rlp.ParseList(txBytes, 1)
 		if err != nil || bodyLen == 0 {
 			return 0, fmt.Errorf("%w: invalid frame transaction body", ErrParseTxn)
 		}
@@ -235,7 +238,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 	if wrapped {
 		// Structure: type_byte || rlp([ rlp(tx_body), [wrapper_version], blobs, commitments, proofs ])
-		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
+		var wrapperListPos, wrapperListLen int
+		wrapperListPos, wrapperListLen, err = rlp.ParseList(txBytes, 1)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob wrapper list: %s", ErrParseTxn, err) //nolint
 		}
@@ -244,7 +248,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 
 		// Parse the inner tx_payload_body (first element of the wrapper list).
-		innerBodyPos, innerBodyLen, err := rlp.ParseList(txBytes, wrapperListPos)
+		var innerBodyPos, innerBodyLen int
+		innerBodyPos, innerBodyLen, err = rlp.ParseList(txBytes, wrapperListPos)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob tx body in wrapper: %s", ErrParseTxn, err) //nolint
 		}
@@ -263,13 +268,24 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
+		// The hash covers only the inner tx, so a known txn is rejected before its blobs are copied.
+		slot.IDHash = crypto.Keccak256Hash(innerTxBytes)
+		if validateHash != nil {
+			err = validateHash(slot.IDHash[:])
+			if err != nil {
+				return p, err
+			}
+		}
+		// Blobs outlive the payload (often a whole p2p message), so they must not alias it.
+		txBytes = bytes.Clone(txBytes)
 
 		// Now parse the remaining wrapper elements: [wrapper_version], blobs, commitments, proofs.
 		wp := innerBodyPos + innerBodyLen // position after inner tx body
 
 		// Check for optional wrapper_version byte.
 		proofsPerBlob := 1
-		_, dvLen, err := rlp.ParseString(txBytes, wp)
+		var dvLen int
+		_, dvLen, err = rlp.ParseString(txBytes, wp)
 		if err == nil && dvLen == 1 {
 			if txBytes[wp] != 0x01 {
 				return 0, fmt.Errorf("%w: invalid wrapper version: expected 1, got %d", ErrParseTxn, txBytes[wp])
@@ -282,8 +298,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: frame blobs require a nonempty version 1 wrapper", ErrParseTxn)
 		}
 
-		// Parse blobs list (zero-copy: slices point into original payload).
-		blobListPos, blobListLen, err := rlp.ParseList(txBytes, wp)
+		// Parse blobs list (slices point into the cloned txBytes).
+		var blobListPos, blobListLen int
+		blobListPos, blobListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
 		}
@@ -305,7 +322,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		wp = blobPos
 
 		// Parse commitments list.
-		commitListPos, commitListLen, err := rlp.ParseList(txBytes, wp)
+		var commitListPos, commitListLen int
+		commitListPos, commitListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: commitments len: %s", ErrParseTxn, err) //nolint
 		}
@@ -334,7 +352,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		wp = commitPos
 
 		// Parse proofs list.
-		proofListPos, proofListLen, err := rlp.ParseList(txBytes, wp)
+		var proofListPos, proofListLen int
+		proofListPos, proofListLen, err = rlp.ParseList(txBytes, wp)
 		if err != nil {
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
@@ -386,25 +405,24 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 5: Store the decoded transaction and compute hash.
 	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
-	// Wrapped transactions include the type byte and inner body in the hash, but no sidecar.
+	// Wrapped transactions were hashed in step 3, over the type byte and inner body.
 	slot.Txn = txn
 	slot.AuthAndNonces = nil
-	hashInput := txBytes
-	if innerTxBytes != nil {
-		hashInput = innerTxBytes
-	}
-	slot.IDHash = crypto.Keccak256Hash(hashInput)
-
-	if validateHash != nil {
-		if err := validateHash(slot.IDHash[:]); err != nil {
-			return p, err
+	if innerTxBytes == nil {
+		slot.IDHash = crypto.Keccak256Hash(txBytes)
+		if validateHash != nil {
+			err = validateHash(slot.IDHash[:])
+			if err != nil {
+				return p, err
+			}
 		}
 	}
 
 	if frame, ok := txn.(*types.FrameTransaction); ok {
 		if ctx.poolRules {
 			if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
-				return 0, fmt.Errorf("%w: %w", ErrParseTxn, err)
+				// Gossip skips policy rejections; RPC still reports an invalid transaction.
+				return p, fmt.Errorf("%w: %w: %w", ErrRejected, ErrParseTxn, err)
 			}
 		}
 		if err := frame.Validate(); err != nil {
@@ -429,9 +447,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
 			signer = ctx.malleableSigner
 		}
-		addr, err := txn.Sender(*signer)
-		if err != nil {
-			return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
+		addr, senderErr := txn.Sender(*signer)
+		if senderErr != nil {
+			return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, senderErr) //nolint
 		}
 		addrBytes := addr.Value()
 		copy(sender, addrBytes[:])
@@ -450,10 +468,12 @@ type PoolBlobBundle struct {
 	Commitment goethkzg.KZGCommitment
 	Blob       []byte
 	Proofs     []goethkzg.KZGProof // Can be 1 or more Proofs/CellProofs
+	Cells      *[goethkzg.CellsPerExtBlob]*goethkzg.Cell
 }
 
 // TxnSlot holds an unwrapped transaction and its pool metadata.
-// Txn must be non-nil except in the B-tree search sentinel, which uses SenderID and Nonce.
+// Txn must be non-nil except in the B-tree search sentinel (SenderID and Nonce)
+// and deletion records for rows rejected on reload (IDHash and SenderID).
 type TxnSlot struct {
 	Txn      types.Transaction // Sidecars for type-3 and frame transactions are stored in BlobBundles
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
@@ -469,7 +489,9 @@ type TxnSlot struct {
 	// Invalid tuples and authorizations for other chains are omitted.
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
-	AuthAndNonces   []AuthAndNonce
+	AuthAndNonces []AuthAndNonce
+	// A pooled frame without a validation result is restored and parked. It has
+	// no payer reservation until its first successful validation.
 	frameValidation *protocol.FrameValidation
 }
 

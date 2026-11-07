@@ -12,10 +12,10 @@
     "consumer_ref": "26ca88c91e988b52186ebe79061658d0dbff5fac"
   },
   "eest_stable": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v21.0.1/fixtures.tar.gz",
-    "sha256": "b9b14391ed1a625e4ca9a058c055d0eacd98a42b76c7a6127c640cdc2d3c9439",
-    "size": 999553432,
-    "ref": "tests@v21.0.1"
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v21.0.2/fixtures.tar.gz",
+    "sha256": "e2fa7ea2ea516459f9ab92284b2927892f318f4e1f78ca802cb05a6c3b479ed9",
+    "size": 939189561,
+    "ref": "tests@v21.0.2"
   },
   "eest_zkevm": {
     "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v21.0.0/fixtures_zkevm.tar.gz",

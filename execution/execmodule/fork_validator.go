@@ -165,8 +165,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
-	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
-	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
+	fv.extendingForkNotifications.Accumulator.AppendAndReset(target.Accumulator)
+	fv.extendingForkNotifications.RecentReceipts.MoveEntriesTo(target.RecentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
@@ -213,9 +213,15 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		return
 	}
 	if foundCanonical {
-		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
-		return
+		var executedTo uint64
+		if executedTo, criticalError = stages.GetStageProgress(tx, stages.Execution); criticalError != nil {
+			return
+		}
+		if executedTo >= number {
+			status = engine_types.ValidStatus
+			latestValidHash = header.Hash()
+			return
+		}
 	}
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
@@ -350,6 +356,19 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.Execution)
 
 		if criticalError != nil {
+			return
+		}
+		// No latestValidHash can be proven: the run also covered unexecuted canonical ancestors.
+		// A header failure executed nothing and rejects the payload itself.
+		if latestValidNumber+1 < headersChain[0].Number.Uint64() {
+			latestValidHash = common.Hash{}
+			fv.extendingForkHeadHash = common.Hash{}
+			fv.extendingForkNumber = 0
+			if errors.Is(validationError, rules.ErrInvalidHeader) {
+				status = engine_types.InvalidStatus
+				return
+			}
+			status, validationError = engine_types.AcceptedStatus, nil
 			return
 		}
 		var ok bool

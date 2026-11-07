@@ -224,8 +224,12 @@ func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
 	for _, typ := range append(snaptype.CaplinSnapshotTypes, snaptype.CaplinStateSnapshotTypes...) {
 		e := typ.Enum()
 		require.True(t, snaptype.IsCaplinType(e), typ.Name())
-		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 0), typ.Name())
-		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 1_000_000), typ.Name())
+		want := uint64(snaptype.CaplinMergeLimit)
+		if e == snaptype.CaplinEnums.BeaconBlocks {
+			want = snaptype.Erigon2MergeLimit
+		}
+		require.Equal(t, want, cfg.MergeLimit(e, 0), typ.Name())
+		require.Equal(t, want, cfg.MergeLimit(e, 1_000_000), typ.Name())
 	}
 
 	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, 0),
@@ -245,4 +249,8 @@ func TestTypedDropsNameWithoutExtensionAfterLastSeparator(t *testing.T) {
 			require.Empty(t, typed.Items)
 		})
 	}
+}
+
+func TestSetTomlRejectsMalformedToml(t *testing.T) {
+	require.Error(t, SetToml("mainnet", []byte("<html>not toml</html>"), false))
 }

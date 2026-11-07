@@ -528,7 +528,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
-				LatestValidHash: &latestValidHash,
+				LatestValidHash: latestValidOrNull(latestValidHash),
 			}, nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
@@ -694,7 +694,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			e.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
 		} else {
 			e.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
-			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash), ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
 		}
 	}
 
@@ -1161,14 +1161,24 @@ func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmod
 	}
 
 	resp := &engine_types.PayloadStatus{Status: convertGrpcStatusToEngineStatus(status)}
-	if resp.Status == engine_types.ValidStatus || resp.Status == engine_types.InvalidStatus {
+	switch resp.Status {
+	case engine_types.ValidStatus:
 		resp.LatestValidHash = &latestValidHash
+	case engine_types.InvalidStatus:
+		resp.LatestValidHash = latestValidOrNull(latestValidHash)
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 
 	return resp
+}
+
+func latestValidOrNull(h common.Hash) *common.Hash {
+	if h == (common.Hash{}) {
+		return nil
+	}
+	return &h
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {
@@ -1178,7 +1188,7 @@ func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_t
 	case execmodule.ExecutionStatusMissingSegment:
 		return engine_types.AcceptedStatus
 	case execmodule.ExecutionStatusTooFarAway:
-		return engine_types.AcceptedStatus
+		return engine_types.SyncingStatus
 	case execmodule.ExecutionStatusBadBlock:
 		return engine_types.InvalidStatus
 	case execmodule.ExecutionStatusBusy:
@@ -1268,7 +1278,7 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	if status == execmodule.ExecutionStatusMissingSegment && result.MissingHash != (common.Hash{}) {
 		if bad, lastValidHash, validationErr := e.blockDownloader.IsBadHeader(result.MissingHash); bad {
-			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash}
+			invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValidHash)}
 			if validationErr != "" {
 				invalid.ValidationError = engine_types.NewStringifiedErrorFromString(validationErr)
 			}
@@ -1285,7 +1295,17 @@ func (e *EngineServer) HandleForkChoice(
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("Invalid chain after execution")}, nil
+		// The executor reports its head, which is the last valid ancestor only when it is the parent.
+		var lastValid common.Hash
+		if result.LatestValidHash == header.ParentHash {
+			lastValid = header.ParentHash
+		}
+		e.blockDownloader.ReportBadHeader(headerHash, lastValid, result.ValidationError)
+		invalid := &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: latestValidOrNull(lastValid)}
+		if result.ValidationError != "" {
+			invalid.ValidationError = engine_types.NewStringifiedErrorFromString(result.ValidationError)
+		}
+		return invalid, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
@@ -1343,9 +1363,13 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 			if len(indices) == 0 {
 				continue
 			}
-			cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
-			if err != nil {
-				return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+			cells := bundle.Cells
+			if cells == nil {
+				computed, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+				if err != nil {
+					return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+				}
+				cells = &computed
 			}
 			for j, index := range indices {
 				cell := hexutil.Bytes(cells[index][:])

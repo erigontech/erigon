@@ -51,6 +51,7 @@ type IntraBlockState interface {
 	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
+	HasSelfdestructed(accounts.Address) (bool, error)
 	GetRefund() uint64
 }
 

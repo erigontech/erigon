@@ -18,17 +18,11 @@ package state_test
 
 import (
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -85,33 +79,5 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		agg.Close()
 	}
 
-	agg = testAgg(t, agg.Dirs(), stepSize, log.New())
-	db, err := temporal.New(db, agg, nil)
-	require.NoError(t, err)
-	defer db.Close()
-
-	rwTx, err := db.BeginRw(t.Context())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	buckets, err := rwTx.ListTables()
-	require.NoError(t, err)
-	for _, b := range buckets {
-		if strings.Contains(strings.ToLower(b), kv.CommitmentDomain.String()) {
-			require.NoError(t, rwTx.ClearTable(b))
-		}
-	}
-	require.NoError(t, rwTx.Commit())
-
-	for _, fn := range fPaths {
-		if strings.Contains(fn, kv.CommitmentDomain.String()) {
-			require.NoError(t, dir.RemoveFile(fn))
-		}
-	}
-	require.NoError(t, agg.OpenFolder(db))
-
-	finalRoot, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
-	require.NoError(t, err)
-	require.NotEmpty(t, finalRoot)
-	require.NotEqual(t, empty.RootHash[:], finalRoot)
-	require.Equal(t, rootInFiles, finalRoot)
+	rebuildCommitmentFromScratch(t, db, agg, rootInFiles, fPaths, false)
 }
