@@ -188,10 +188,11 @@ func TestEngineApiReorgSchedules(t *testing.T) {
 				case 1:
 					selectHead(target%len(branches), fork+(target/len(branches))%(suffixPokes+1))
 				case 2:
-					previous := branch
+					previousBranch, previousHead := branch, head
 					selectHead((branch+1)%len(branches), fork+target%(suffixPokes+1))
 					check()
-					selectHead(previous, head)
+					selectHead(previousBranch, previousHead)
+					assertCanonicalHead(ctx, t, eat, branches[previousBranch].payloads[previousHead])
 				case 3:
 					args.MockClState = eat.MockCl.State()
 					require.NoError(t, eat.Close())
