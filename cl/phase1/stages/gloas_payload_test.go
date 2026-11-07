@@ -1,6 +1,7 @@
 package stages
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,8 +28,11 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -1003,6 +1007,65 @@ func TestValidateDownloadedGloasEnvelopeRejectsBidMismatch(t *testing.T) {
 	require.ErrorContains(t, network2.ValidateDownloadedGloasEnvelope(cfg, block, env), "block hash mismatch")
 }
 
+func TestFetchParentEnvelopesKeepsValidEnvelopesWhenAnotherRootStaysInvalid(t *testing.T) {
+	cfg, st, bid, envelopeA, _ := validAnchorEnvelopeFixture(t, 1)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	blockA := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	blockA.Block.Slot = bid.Slot
+	blockA.Block.Body.GetSignedExecutionPayloadBid().Message = bid.Copy()
+	rootA, err := blockA.Block.HashSSZ()
+	require.NoError(t, err)
+	envelopeA.Message.BeaconBlockRoot = rootA
+
+	blockB := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	blockB.Block.Slot = bid.Slot
+	blockB.Block.ProposerIndex = 1
+	blockB.Block.Body.GetSignedExecutionPayloadBid().Message = bid.Copy()
+	rootB, err := blockB.Block.HashSSZ()
+	require.NoError(t, err)
+	encodedEnvelope, err := envelopeA.EncodeSSZ(nil)
+	require.NoError(t, err)
+	envelopeB := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	require.NoError(t, envelopeB.DecodeSSZ(encodedEnvelope, int(clparams.GloasVersion)))
+	envelopeB.Message.BeaconBlockRoot = rootB
+	bogusA := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	require.NoError(t, bogusA.DecodeSSZ(encodedEnvelope, int(clparams.GloasVersion)))
+	bogusA.Message.Payload.BlockHash[0] ^= 0xff
+	require.Error(t, network2.ValidateDownloadedGloasEnvelope(cfg, blockA, bogusA))
+	require.NoError(t, network2.ValidateDownloadedGloasEnvelope(cfg, blockB, envelopeB))
+
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, bogusA, digest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelopeB, digest[:]...))
+	store := newAnchorForkChoiceStore(t, cfg, st, nil)
+	stageCfg := &Cfg{
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{response: response.Bytes()}, cfg, clock),
+		beaconCfg:  cfg,
+		forkChoice: store,
+	}
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{rootA: blockA, rootB: blockB}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+
+	envelopes, _ := fetchParentEnvelopes(ctx, stageCfg, [][32]byte{rootA, rootB}, network2.NewEnvelopeBlockValidator(cfg, func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}))
+
+	require.Contains(t, envelopes, common.Hash(rootB))
+	require.NotContains(t, envelopes, common.Hash(rootA))
+}
+
 func TestAnchorEnvelopeMatches(t *testing.T) {
 	_, _, _, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 
@@ -1589,6 +1652,10 @@ func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error {
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 
+func (t *testExecutionEngine) GetHeaderByHash(context.Context, common.Hash) (*types.Header, error) {
+	return nil, nil
+}
+
 func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
 }
@@ -1600,6 +1667,10 @@ func (t *testExecutionEngine) GetBodiesByRange(context.Context, uint64, uint64) 
 }
 
 func (t *testExecutionEngine) GetBodiesByHashes(context.Context, []common.Hash) ([]*types.RawBody, error) {
+	return nil, nil
+}
+
+func (t *testExecutionEngine) GetPayloadBodiesByHash(context.Context, []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
 	return nil, nil
 }
 

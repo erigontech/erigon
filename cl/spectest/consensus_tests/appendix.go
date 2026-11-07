@@ -28,6 +28,7 @@ import (
 var TestFormats = spectest.Appendix{}
 
 func init() {
+	// The UnimplementedHandler entries under fork_choice, sync and networking are tracked in https://github.com/erigontech/erigon/issues/25698.
 	TestFormats.Add("bls").
 		With("aggregate_verify", &BlsAggregateVerify{}).
 		With("aggregate", spectest.UnimplementedHandler).
@@ -60,6 +61,7 @@ func init() {
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
 		With("get_head", &ForkChoice{}).
+		With("get_proposer_head", spectest.UnimplementedHandler).
 		With("on_block", &ForkChoice{}).
 		With("on_attestation", &ForkChoice{}).
 		With("on_payload_attestation_message", &ForkChoice{}).
@@ -115,12 +117,23 @@ func init() {
 	TestFormats.Add("ssz_generic").
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("sync").
-		With("", spectest.UnimplementedHandler)
+		With("optimistic", spectest.UnimplementedHandler)
 	TestFormats.Add("transition").
 		With("core", &TransitionCore{})
 	TestFormats.Add("networking").
 		WithFn("compute_columns_for_custody_group", TestComputeColumnsForCustodyGroup).
 		WithFn("get_custody_groups", TestGetCustodyGroups).
+		With("gossip_beacon_aggregate_and_proof", spectest.UnimplementedHandler).
+		With("gossip_beacon_attestation", spectest.UnimplementedHandler).
+		With("gossip_beacon_block", spectest.UnimplementedHandler).
+		With("gossip_blob_sidecar", spectest.UnimplementedHandler).
+		With("gossip_data_column_sidecar", spectest.UnimplementedHandler).
+		With("gossip_execution_payload_bid", spectest.UnimplementedHandler).
+		WithFn("gossip_execution_payload_envelope", gloasGossipHandler).
+		With("gossip_partial_data_column_sidecar", spectest.UnimplementedHandler).
+		WithFn("gossip_payload_attestation_message", gloasGossipHandler).
+		WithFn("gossip_proposer_preferences", gloasGossipHandler).
+		With("gossip_voluntary_exit", spectest.UnimplementedHandler).
 		WithFn("gossip_attester_slashing", gossipAttesterSlashingHandler).
 		WithFn("gossip_bls_to_execution_change", gossipBLSToExecutionChangeHandler).
 		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler).

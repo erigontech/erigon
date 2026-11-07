@@ -62,8 +62,17 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		collectExecution := shouldInsert && block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion
+		previousWrite := cfg.pendingBlockWrite
+		if err = processBlock(ctx, cfg, block, false); err != nil {
+			if cfg.pendingBlockWrite != nil {
+				// Forward sync skips NewPayload, so a new pending write must retain its
+				// collector insertion. A failed retry must keep the earlier write unchanged.
+				if collectExecution && cfg.pendingBlockWrite != previousWrite {
+					cfg.pendingBlockWrite.collectExecution = true
+				}
+				return newHighestBlockProcessed, fmt.Errorf("%w: persist accepted block: %w", network2.ErrUnattributableProcess, err)
+			}
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
 				if newHighestBlockProcessed == 0 {
@@ -131,7 +140,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot(), &cfg.savedFinalizedRoot); err != nil {
 						err = fmt.Errorf("failed to save finalized state: %w", err)
 						return
 					}
@@ -149,15 +158,14 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 					err = fmt.Errorf("failed to dump state: %w", err)
 					return
 				}
-				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot(), &cfg.savedFinalizedRoot); err != nil {
 					err = fmt.Errorf("failed to save finalized state: %w", err)
 					return
 				}
 			}
 		}
 
-		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
-		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
+		if !collectExecution {
 			continue
 		}
 		// Add the block to the block collector (pre-GLOAS only)
@@ -450,7 +458,9 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		} else {
 			// Fall back to P2P (root-specific request)
 			log.Info("[Caplin] HTTP anchor envelope unavailable or ahead of local anchor, trying P2P...", "anchorSlot", anchorSlot)
-			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
+			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot}, func(env *cltypes.SignedExecutionPayloadEnvelope) error {
+				return validateAnchorEnvelope(cfg.beaconCfg, anchorState, common.Hash(anchorRoot), bid, env)
+			}, nil)
 			if err != nil {
 				return fmt.Errorf("failed to request anchor envelope: %w", err)
 			}
@@ -508,7 +518,7 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 }
 
 func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if err := network2.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
+	if err := cltypes.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
 		return err
 	}
 	return verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot)

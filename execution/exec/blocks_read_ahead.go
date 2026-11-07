@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -44,6 +45,7 @@ type BlockReadAheader struct {
 	warmupGate   *semaphore.Weighted
 	warmupMu     sync.Mutex
 	cancelWarmup context.CancelFunc
+	warmupDone   chan struct{} // closed when the running warmup ends
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -104,6 +106,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view     cache.ReadView
+	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
@@ -117,13 +120,17 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	if !kv.UnderlyingTxIsWritable(ttx) {
+		getter.snapshot = frontier
+	}
+	return getter
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
-		readTxNum := step.LastTxNum(cpg.stepSize)
+		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
 			var codeHash common.Hash
@@ -167,6 +174,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	bra.warmupMu.Lock()
 	bra.cancelWarmup = cancel
 	bra.warmupMu.Unlock()
+	done := bra.markWarmupRunning()
 	var bal types.BlockAccessList
 	if header.HasNonEmptyBAL() {
 		balSidecar, ok := bra.bals.Get(blockHash)
@@ -187,6 +195,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	}
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer close(done)
 		defer cancel()
 		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
@@ -206,8 +215,10 @@ func (bra *BlockReadAheader) startWarmup(warm func()) bool {
 	if !bra.warmupGate.TryAcquire(1) {
 		return false
 	}
+	done := bra.markWarmupRunning()
 	go func() {
 		defer bra.warmupGate.Release(1)
+		defer close(done)
 		warm()
 	}()
 	return true
@@ -223,6 +234,28 @@ func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) 
 		return nil, err
 	}
 	return sync.OnceFunc(func() { bra.warmupGate.Release(1) }), nil
+}
+
+// WaitForRunningWarmup waits until no warmup is running, or until the context is cancelled.
+func (bra *BlockReadAheader) WaitForRunningWarmup(ctx context.Context) {
+	bra.warmupMu.Lock()
+	done := bra.warmupDone
+	bra.warmupMu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (bra *BlockReadAheader) markWarmupRunning() chan struct{} {
+	done := make(chan struct{})
+	bra.warmupMu.Lock()
+	bra.warmupDone = done
+	bra.warmupMu.Unlock()
+	return done
 }
 
 // WaitForWarmup waits until neither a warmup nor a suspension owns the permit,
@@ -374,13 +407,13 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var slot accounts.StorageKey
+		var slot common.Hash
 		if slotIndex < storageChanges {
-			slot = account.StorageChanges[slotIndex].Slot
+			slot = account.StorageChanges[slotIndex].Slot.Value()
 		} else {
-			slot = accounts.InternKey(account.StorageReads[slotIndex-storageChanges])
+			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
+		if _, _, err := stateReader.ReadAccountStorageByPlainKey(address, slot); err != nil {
 			return err
 		}
 	}
@@ -430,16 +463,57 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
-	var group errgroup.Group
-	group.Go(func() error {
-		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+	trieKeys := sync.OnceValue(func() [][]byte {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return balCommitmentWarmupKeys(bal)
 	})
+	var group errgroup.Group
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
-			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
+			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
+	var cold coldState
+	if mmap.NewProbe() != nil {
+		group.Go(func() error {
+			prefetchBALCommitment(ctx, db, trieKeys())
+			return nil
+		})
+		cold = stateKeysCold(ctx, db, bal)
+	}
+	group.Go(func() error {
+		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
+		if cold.any() {
+			var stripped bool
+			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
+				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
+			}
+		}
+		return bra.warmBALState(ctx, db, warm, warmTasks, codeMode, txCodeDestinations, warmWorkers)
+	})
 	return group.Wait()
+}
+
+// balAccounts returns the BAL without its storage changes and reads.
+func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
+	accs := make(types.BlockAccessList, len(bal))
+	for i := range bal {
+		accs[i] = bal[i]
+		accs[i].StorageChanges, accs[i].StorageReads = nil, nil
+	}
+	return accs
+}
+
+// perKeyWarmupBAL is the part of the BAL the per-key warmup reads after the batch. The batch only reads pages, so the
+// per-key warmup still fills the state cache, but not with the slots the batch read: a per-key read of them that
+// starts after the batch only competes with exec.
+func perKeyWarmupBAL(bal types.BlockAccessList, cold coldState, storageRead bool) (warm types.BlockAccessList, stripped bool) {
+	if cold.storage && storageRead {
+		return balAccounts(bal), true
+	}
+	return bal, false
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
@@ -552,7 +626,7 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 						if err := workerCtx.Err(); err != nil {
 							return err
 						}
-						if _, _, err := stateReader.ReadAccountStorage(addr, accounts.InternKey(slot)); err != nil {
+						if _, _, err := stateReader.ReadAccountStorageByPlainKey(addr, slot); err != nil {
 							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}
 					}
@@ -707,7 +781,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
 				if len(list.StorageKeys) > 0 {
 					for _, slot := range list.StorageKeys {
-						_, _, _ = stateReader.ReadAccountStorage(accounts.InternAddress(list.Address), accounts.InternKey(slot))
+						_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
 					}
 				}
 			}
