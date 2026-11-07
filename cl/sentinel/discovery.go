@@ -80,11 +80,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 	}
 
 	// Create a filter that matches any of our target subnets
-	iterator := s.listener.RandomNodes()
+	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	filteredIterator := enode.Filter(iterator, func(node *enode.Node) bool {
-		if !s.onOurFork(node) {
-			return false
-		}
 		var peerSubnets bitfield.Bitvector64
 		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
 			return false
@@ -201,6 +198,12 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		}
 	}
 	log.Debug("[Sentinel] Subnet peer search completed", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound)
+}
+
+// nodesOnOurFork passes on only the discovered nodes that advertise our current fork digest; every dial path takes
+// discovered nodes through it.
+func (s *Sentinel) nodesOnOurFork(it enode.Iterator) enode.Iterator {
+	return enode.Filter(it, s.onOurFork)
 }
 
 // onOurFork reports whether a discovered node advertises our current fork digest in its ENR. Discovery is shared by
@@ -537,7 +540,7 @@ func (s *Sentinel) listenForPeers() {
 		return
 	}
 
-	iterator := enode.Filter(s.listener.RandomNodes(), s.onOurFork)
+	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	defer iterator.Close()
 	for {
 		if err := s.ctx.Err(); err != nil {

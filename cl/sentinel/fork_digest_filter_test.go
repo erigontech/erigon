@@ -45,14 +45,20 @@ func discoveredNode(t *testing.T, eth2 []byte) *enode.Node {
 	return node
 }
 
-// Discovery is shared by every network; a node that does not advertise our fork digest fails the status handshake.
-func TestOnOurForkMatchesTheEnrForkDigest(t *testing.T) {
+// forkFilterSentinel is a sentinel whose current fork digest is 01020304.
+func forkFilterSentinel(t *testing.T) *Sentinel {
+	t.Helper()
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().CurrentForkDigest().Return(common.Bytes4{1, 2, 3, 4}, nil).AnyTimes()
 	cfg := &SentinelConfig{}
 	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	cfg.NetworkConfig = &networkConfig
-	s := &Sentinel{ethClock: clock, cfg: cfg}
+	return &Sentinel{ethClock: clock, cfg: cfg}
+}
+
+// Discovery is shared by every network; a node that does not advertise our fork digest fails the status handshake.
+func TestOnOurForkMatchesTheEnrForkDigest(t *testing.T) {
+	s := forkFilterSentinel(t)
 
 	forkID := []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 1} // digest, next fork version, next fork epoch
 	require.True(t, s.onOurFork(discoveredNode(t, forkID)))
@@ -60,4 +66,21 @@ func TestOnOurForkMatchesTheEnrForkDigest(t *testing.T) {
 	require.False(t, s.onOurFork(discoveredNode(t, other)), "another network or fork")
 	require.False(t, s.onOurFork(discoveredNode(t, nil)), "no eth2 entry, e.g. an execution layer node")
 	require.False(t, s.onOurFork(discoveredNode(t, forkID[:3])), "truncated eth2 entry")
+}
+
+// Both dial paths take discovered nodes through nodesOnOurFork; it passes on only the nodes of our fork, in order.
+func TestNodesOnOurForkYieldsOnlyOurFork(t *testing.T) {
+	s := forkFilterSentinel(t)
+	forkID := []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 1}
+	first, second := discoveredNode(t, forkID), discoveredNode(t, forkID)
+	nodes := []*enode.Node{discoveredNode(t, nil), first, discoveredNode(t, append([]byte{9, 9, 9, 9}, forkID[4:]...)), second}
+
+	it := s.nodesOnOurFork(enode.IterNodes(nodes))
+	defer it.Close()
+	var got []*enode.Node
+	for it.Next() {
+		got = append(got, it.Node())
+	}
+	require.Len(t, got, 2)
+	require.Equal(t, []enode.ID{first.ID(), second.ID()}, []enode.ID{got[0].ID(), got[1].ID()})
 }
