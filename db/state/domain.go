@@ -488,11 +488,11 @@ func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retir
 	return retired, nil
 }
 
-// protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
-//   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
-//   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
+// History files can survive an interrupted build before domain values are written.
+// An empty domain file set must cap coverage at zero, even though minimax treats it as unset.
 func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
-	d.closeFilesAfterStep(kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize))
+	endTxNum := min(d.dirtyFiles.EndTxNumMax(), d.dirtyFilesEndTxNumMinimax())
+	d.closeFilesAfterStep(kv.Step(endTxNum / d.stepSize))
 }
 
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {

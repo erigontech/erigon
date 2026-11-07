@@ -102,6 +102,8 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 			t.Cleanup(agg.Close)
 			require.NoError(t, agg.OpenFolder(db))
+			require.Zero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete receipt history must be closed before rebuilding")
+			require.Zero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len(), "incomplete receipt indices must be closed before rebuilding")
 			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 				at := agg.BeginFilesRo()
 				defer at.Close()
