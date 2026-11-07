@@ -77,8 +77,7 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 
-	// toSlot == CaplinMergeLimit: toSlot-fromSlot is not < blocksPerFile,
-	// so the loop reaches chooseSegmentEnd and dumpBeaconBlocksRange.
+	// toSlot == CaplinMergeLimit fills one segment, so the loop reaches dumpBeaconBlocksRange.
 	// Before the fix this panicked; now it returns an error (no snap dir / empty db).
 	var err error
 	require.NotPanics(t, func() {
@@ -738,6 +737,34 @@ func TestOpenListDirtyLockRace(t *testing.T) {
 			return nil
 		})
 	}
+	require.NoError(t, eg.Wait())
+}
+
+func TestIndexMissedConcurrentWithOpenFolder(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	files, err := snapshotsync.AllTypedSegments(dirs.Snap, sn.Types())
+	require.NoError(t, err)
+	list := make([]string, 0, len(files))
+	for i := range files {
+		_, fName := filepath.Split(files[i].Path)
+		list = append(list, fName)
+	}
+	require.NoError(t, sn.OpenList(list, true))
+
+	var eg errgroup.Group
+	eg.Go(func() error {
+		return sn.IndexMissed(t.Context(), "caplin", dirs.Tmp, nil, log.New())
+	})
+	eg.Go(func() error {
+		for range 200 {
+			_ = sn.OpenFolder()
+		}
+		return nil
+	})
 	require.NoError(t, eg.Wait())
 }
 

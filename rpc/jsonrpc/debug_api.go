@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"runtime/debug"
 
@@ -171,13 +172,15 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return StorageRangeResult{}, err
 	}
-
-	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, txIndex)
+	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, blockNumber, int(min(txIndex, math.MaxInt)))
 	if err != nil {
+		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNumber)}
+		}
 		return StorageRangeResult{}, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -605,16 +608,19 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
 		return nil, err
 	}
+	minTxNum, err := api.checkTxIndexInBlock(ctx, tx, *blockNumber, int(min(txIndex, math.MaxInt)))
+	if err != nil {
+		if _, ok := errors.AsType[*rpc.InvalidParamsError](err); ok {
+			err = &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, *blockNumber)}
+		}
+		return nil, err
+	}
 
 	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, *blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *blockNumber)
-	if err != nil {
-		return nil, err
-	}
 	ttx := tx
 	asOfTxNum := minTxNum + txIndex + 1
 	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)

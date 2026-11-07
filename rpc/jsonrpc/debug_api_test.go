@@ -1520,8 +1520,9 @@ func TestAccountAt(t *testing.T) {
 	})
 	t.Run("large transaction index", func(t *testing.T) {
 		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(t, err)
-		require.Equal(t, 42, int(result.Nonce))
+		var invalidParams *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &invalidParams)
+		require.Nil(t, result)
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -2183,6 +2184,15 @@ func TestCallRejectsTxIndexOutOfBlock(t *testing.T) {
 	require.NoError(t, debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{})))
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(txCount))}
 	require.NoError(t, debugApi.TraceCall(m.Ctx, calls[0], &block, config, jsonstream.New(&bytes.Buffer{})))
+
+	t.Run("debug_traceCallMany/negative_index_without_bounds", func(t *testing.T) {
+		require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+			return tx.Delete(kv.MaxTxNum, hexutil.EncodeTs(1))
+		}))
+		stateCtx := StateContext{BlockNumber: block, TransactionIndex: new(int(-2))}
+		err := debugApi.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, stateCtx, nil, jsonstream.New(&bytes.Buffer{}))
+		require.ErrorAs(t, err, &invalidParams)
+	})
 }
 
 func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
@@ -2198,4 +2208,33 @@ func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
 	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
 	require.ErrorAs(t, err, &invalidParams)
+}
+
+type recordingCodeStore map[string]int
+
+func (s recordingCodeStore) GetCodeByHash(h []byte) ([]byte, bool) {
+	s[string(h)]++
+	return nil, false
+}
+
+type codeSharingCache struct {
+	kvcache.Cache
+	store recordingCodeStore
+}
+
+func (c codeSharingCache) CodeByHash() state.CodeByHash { return c.store }
+
+func TestTraceBlockLooksUpSharedCodeByHash(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	cache := codeSharingCache{Cache: kvcache.New(kvcache.DefaultCoherentConfig), store: recordingCodeStore{}}
+	baseApi := NewBaseApi(nil, cache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	for n := rpc.BlockNumber(1); n <= rpc.BlockNumber(chain.Length()); n++ {
+		var buf bytes.Buffer
+		s := jsonstream.New(&buf)
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, n, &tracersConfig.TraceConfig{}, s))
+		require.NoError(t, s.Flush())
+	}
+	require.NotEmpty(t, cache.store, "a block replay must look committed code up in the shared store")
 }

@@ -387,12 +387,6 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					// last batch block is FULL or EMPTY, instead of guessing FULL.
 					reqCount := capRequestCount(reqSlot, count+1)
 
-					// Cap the request at the next fork epoch boundary. The Eth2 spec
-					// says peers SHOULD NOT serve blocks across fork boundaries in a
-					// single BeaconBlocksByRange response.
-					if f.beaconCfg != nil {
-						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed)
-					}
 					reqCount, completedReqCount := f.requestCountsAtCurrentSlot(reqSlot, reqCount)
 					if reqCount == 0 {
 						select {
@@ -884,60 +878,6 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, processCount i
 		}
 	}
 	return roots
-}
-
-// capAtForkBoundary ensures the range [reqSlot, reqSlot+reqCount) does not
-// cross a fork epoch boundary. Peers reject cross-fork range requests with
-// error code 3 (resource unavailable).
-//
-// When a boundary falls within the overlap region (reqSlot..highestSlotProcessed],
-// the overlap slots are already processed, so we advance reqSlot past the
-// boundary instead of capping — otherwise the downloader re-requests the same
-// already-processed slots and never makes progress.
-func (f *ForwardBeaconDownloader) capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed uint64) (uint64, uint64) {
-	reqCount = capRequestCount(reqSlot, reqCount)
-	slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
-	forkEpochs := []uint64{
-		f.beaconCfg.AltairForkEpoch,
-		f.beaconCfg.BellatrixForkEpoch,
-		f.beaconCfg.CapellaForkEpoch,
-		f.beaconCfg.DenebForkEpoch,
-		f.beaconCfg.ElectraForkEpoch,
-		f.beaconCfg.FuluForkEpoch,
-		f.beaconCfg.GloasForkEpoch,
-	}
-
-	var boundaries []uint64
-	for _, epoch := range forkEpochs {
-		if epoch == 0 || epoch == math.MaxUint64 {
-			continue
-		}
-		boundaries = append(boundaries, epoch*slotsPerEpoch)
-	}
-	slices.Sort(boundaries)
-
-	for _, boundarySlot := range boundaries {
-		if boundarySlot <= reqSlot {
-			continue
-		}
-		distance := boundarySlot - reqSlot
-		if distance >= reqCount {
-			break
-		}
-		// boundarySlot is in (reqSlot, endSlot).
-		if boundarySlot <= saturatingIncrement(highestSlotProcessed) {
-			// Already processed past this boundary — skip the pre-boundary
-			// overlap and start from the boundary so the request stays
-			// within a single fork.
-			reqSlot = boundarySlot
-			reqCount -= distance
-		} else {
-			// Haven't reached this boundary yet — cap the request here.
-			reqCount = distance
-			return reqSlot, reqCount
-		}
-	}
-	return reqSlot, reqCount
 }
 
 // fetchBlocksFromBeaconAPI fetches blocks from a beacon API endpoint as a fallback

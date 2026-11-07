@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/background"
@@ -14,10 +13,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -38,15 +37,15 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
-func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
+func (m *Merger) FindMergeRanges(currentRanges []Range, snapType snaptype.Enum) (toMerge []Range) {
 	cfg := m.snCfg
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
+		mergeLimit := cfg.MergeLimit(snapType, r.From())
 		if r.To()-r.From() >= mergeLimit {
 			continue
 		}
-		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, r.From()) {
+		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snapType, r.From()) {
 			if r.To()%span != 0 {
 				continue
 			}
@@ -54,6 +53,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 				break
 			}
 			aggFrom := r.To() - span
+			if aggFrom < currentRanges[0].From() {
+				continue
+			}
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
 			for i >= 0 && currentRanges[i].From() > aggFrom {
 				i--
@@ -65,9 +67,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	return toMerge
 }
 
-func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
+func (m *Merger) filesByRange(v *View, snapTypes []snaptype.Type, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
 	toMerge := map[snaptype.Enum][]*DirtySegment{}
-	for _, t := range v.s.types {
+	for _, t := range snapTypes {
 		toMerge[t.Enum()] = m.filesByRangeOfType(v, from, to, t)
 	}
 
@@ -88,6 +90,23 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
+// removeMergedFiles removes a merge output's files, except an index an input still uses: a same-range input with an
+// older segment version resolves to the output's index names.
+func removeMergedFiles(sn snaptype.FileInfo, inputs []*DirtySegment) {
+	_ = dir.RemoveFile(sn.Path)
+	_ = dir.RemoveFile(sn.Path + ".torrent")
+	for _, idx := range sn.Type.IdxFileNames(sn.From, sn.To) {
+		idxPath := filepath.Join(filepath.Dir(sn.Path), idx)
+		if slices.ContainsFunc(inputs, func(in *DirtySegment) bool {
+			return slices.ContainsFunc(in.indexes, func(x *recsplit.Index) bool { return x != nil && x.FilePath() == idxPath })
+		}) {
+			continue
+		}
+		_ = dir.RemoveFile(idxPath)
+		_ = dir.RemoveFile(idxPath + ".torrent")
+	}
+}
+
 func (m *Merger) mergeSubSegment(
 	ctx context.Context,
 	sn snaptype.FileInfo,
@@ -104,18 +123,7 @@ func (m *Merger) mergeSubSegment(
 		}
 		if err != nil {
 			newDirtySegment.close()
-			f := sn.Path
-			_ = dir.RemoveFile(f)
-			_ = dir.RemoveFile(f + ".torrent")
-			ext := filepath.Ext(f)
-			withoutExt := f[:len(f)-len(ext)]
-			_ = dir.RemoveFile(withoutExt + ".idx")
-			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-			isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-			if isTxnType {
-				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-			}
+			removeMergedFiles(sn, toMerge)
 		}
 	}()
 	if len(toMerge) == 0 {
@@ -216,7 +224,7 @@ func (m *Merger) Merge(
 		mergedFileNames = mergedFileNames[:0]
 		in = make(map[snaptype.Enum][]*DirtySegment)
 		out := make(map[snaptype.Enum][]*DirtySegment)
-		toMerge, err := m.filesByRange(v, r.From(), r.To())
+		toMerge, err := m.filesByRange(v, snapTypes, r.From(), r.To())
 		if err != nil {
 			return err
 		}
@@ -227,35 +235,68 @@ func (m *Merger) Merge(
 			out[snapType] = append(out[snapType], t...)
 		}
 
+		built := make([]*DirtySegment, 0, len(snapTypes))
+		outputs := make([]snaptype.FileInfo, 0, len(snapTypes))
+		var inputs []*DirtySegment
+		builtFileNames := make([]string, 0, len(snapTypes))
+		samePathTypes := make(map[snaptype.Enum]struct{})
+		abort := func() { // a later OpenFolder must not adopt the outputs of an unfinished range
+			for _, sn := range built {
+				sn.close()
+			}
+			if onDelete != nil {
+				_ = onDelete(ctx, slices.Clone(builtFileNames))
+			}
+			for i := range outputs {
+				removeMergedFiles(outputs[i], inputs)
+			}
+		}
 		for _, t := range snapTypes {
+			output := t.FileInfo(snapDir, r.From(), r.To())
+			if len(toMerge[t.Enum()]) == 1 && toMerge[t.Enum()][0].FilePath() == output.Path {
+				samePathTypes[t.Enum()] = struct{}{}
+				out[t.Enum()] = nil
+				mergedFileNames = append(mergedFileNames, toMerge[t.Enum()][0].FilePath())
+				continue
+			}
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
-				t.FileInfo(snapDir, r.From(), r.To()),
+				output,
 				toMerge[t.Enum()],
 				snapDir,
 				doIndex,
 				snapshots.IndexBuilder(t),
 			)
 			if err != nil {
+				abort()
 				return err
 			}
 			if in[t.Enum()] == nil {
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
 			}
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
-			mergedFileNames = append(mergedFileNames, newDirtySegment.FilePath())
+			built = append(built, newDirtySegment)
+			outputs = append(outputs, output)
+			inputs = append(inputs, toMerge[t.Enum()]...)
+			fileName := newDirtySegment.FilePath()
+			mergedFileNames = append(mergedFileNames, fileName)
+			builtFileNames = append(builtFileNames, fileName)
 		}
 
 		snapshots.LogStat("merge")
 
 		if onMerge != nil {
-			if err := onMerge(mergedFileNames); err != nil {
+			if err := onMerge(slices.Clone(mergedFileNames)); err != nil {
+				abort()
 				return err
 			}
 		}
 
 		toMergeFileNames := make([]string, 0, 16)
-		for _, segments := range toMerge {
+		for enum, segments := range toMerge {
+			if _, ok := samePathTypes[enum]; ok {
+				continue
+			}
 			for _, segment := range segments {
 				toMergeFileNames = append(toMergeFileNames, segment.FilePaths(snapDir)...)
 			}

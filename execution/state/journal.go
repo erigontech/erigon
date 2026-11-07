@@ -56,6 +56,10 @@ const (
 	kindAccessListAddAccount
 	kindAccessListAddSlot
 	kindTransientStorage
+	kindFrameApproval
+	kindFrameStateGas
+	kindFrameStorageOwner
+	kindFrameTransient
 	kindEnd // not a kind; bounds the range TestJournalDirtySymmetry must cover
 )
 
@@ -64,11 +68,14 @@ const (
 	flagSelfdestructPrev           uint8 = 1 << 1 // kindSelfdestruct: account had already selfdestructed
 	flagSelfdestructHadIncarnation uint8 = 1 << 2 // kindSelfdestruct: a versioned incarnation write predated the destruct
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
+	flagBalanceDeleted             uint8 = 1 << 4
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
 // kept out of line so the common entry stays small (see TestJournalEntrySize).
 type journalExtra struct {
+	frame                *FrameContext
+	prevTransient        transientStorage
 	prevObj              *stateObject         // kindResetObject: the cached object, nil if none
 	prevWrites           *createWriteSnapshot // kindResetObject
 	bi                   *BalanceIncrease     // kindBalanceIncreaseTransfer
@@ -192,7 +199,7 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 // selfdestructChangeVersioned records a self-destruct on the parallel path,
 // capturing the versioned balance/incarnation writes it overwrites so a revert
 // can restore them (see selfdestructChange.revert).
-func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int) {
+func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int, prevBalanceDeleted bool) {
 	flags := commitFlag(wasCommitted)
 	if prev {
 		flags |= flagSelfdestructPrev
@@ -203,14 +210,21 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 	e := journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, aux: prevIncarnation, flags: flags}
 	if hadBalance {
 		e.flags |= flagSelfdestructHadBalance
+		if prevBalanceDeleted {
+			e.flags |= flagBalanceDeleted
+		}
 		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
 	}
 	j.entries = append(j.entries, e)
 	j.dirties[account]++
 }
 
-func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: commitFlag(wasCommitted)})
+func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted, prevDeleted bool) {
+	flags := commitFlag(wasCommitted)
+	if prevDeleted {
+		flags |= flagBalanceDeleted
+	}
+	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: flags})
 	j.dirties[account]++
 }
 
@@ -276,6 +290,8 @@ func (je *journalEntry) dirtied() (accounts.Address, bool) {
 	switch je.kind {
 	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAccessListAddAccount, kindAccessListAddSlot:
 		return accounts.NilAddress, false
+	case kindFrameApproval, kindFrameStateGas, kindFrameStorageOwner, kindFrameTransient:
+		return accounts.NilAddress, false
 	case kindCreateObject, kindResetObject, kindSelfdestruct, kindBalance, kindBalanceIncrease, kindNonce, kindStorage, kindFakeStorage, kindCode, kindTouch:
 		return je.account, true
 	}
@@ -287,6 +303,24 @@ var ripemd = accounts.InternAddress(common.HexToAddress("00000000000000000000000
 // revert undoes the change recorded by this entry.
 func (je *journalEntry) revert(s *IntraBlockState) error {
 	switch je.kind {
+	case kindFrameTransient:
+		s.transientStorage = je.extra.prevTransient
+		return nil
+	case kindFrameApproval:
+		je.extra.frame.Payer = je.account
+		je.extra.frame.SenderApproved = je.flags != 0
+		return nil
+	case kindFrameStateGas:
+		je.extra.frame.Receipts[je.flags].GasUsed.State = je.aux
+		return nil
+	case kindFrameStorageOwner:
+		slot := frameStorageSlot{je.account, je.key}
+		if je.flags == 0 {
+			delete(je.extra.frame.storageOwners, slot)
+		} else {
+			je.extra.frame.storageOwners[slot] = je.flags
+		}
+		return nil
 	case kindCreateObject:
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.release()
@@ -347,7 +381,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			// it. Gating this on committed (which describes SelfDestructPath, not
 			// BalancePath) deleted balance writes that predated the snapshot.
 			if je.flags&flagSelfdestructHadBalance != 0 {
-				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned)
+				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned, je.flags&flagBalanceDeleted != 0)
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
@@ -382,7 +416,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
-				s.versionedWrites.updateBalance(je.account, je.value)
+				s.versionedWrites.updateBalance(je.account, je.value, je.flags&flagBalanceDeleted != 0)
 			}
 		}
 		return nil
@@ -516,7 +550,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {
-				s.versionedWrites.updateBalance(je.account, je.value)
+				s.versionedWrites.updateBalance(je.account, je.value, false)
 			}
 		}
 		return nil
