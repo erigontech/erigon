@@ -239,8 +239,8 @@ github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08 h1:w
 github.com/erigontech/evmone_precompiles v0.0.0-20261020072006-fc5972e25a08/go.mod h1:WQvAqmoairhdM5RFNFDKK9oT6dzuZEbWMJH+ZdRTjP0=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+DjblLuHBJradIg9KriKmtByjRvLqLhkVODibac=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
-github.com/erigontech/mdbx-go v0.43.0 h1:km4NnoGZ3zieFGWE9K1btMhRMnduZNybW7oebFg0ZWQ=
-github.com/erigontech/mdbx-go v0.43.0/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
+github.com/erigontech/mdbx-go v0.43.1 h1:0wCMZVU2COvRPZ5sjEX4H/1zLHpXsqSzH2yj7G9haS0=
+github.com/erigontech/mdbx-go v0.43.1/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
 github.com/erigontech/secp256k1 v1.4.1 h1:LnD0xscr390TAiVzpiRGvibkLbqk5o6+sDNKxJjzOh0=
 github.com/erigontech/secp256k1 v1.4.1/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
 github.com/fatih/color v1.19.0 h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=

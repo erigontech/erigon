@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -116,10 +117,13 @@ type commitmentCalculator struct {
 	touchedAccounts map[accounts.Address][]byte
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 	destructed      map[accounts.Address]struct{}
-	blockBase       state.StateReader
-	blockBaseVM     *state.VersionMap
-	baseAccounts    map[accounts.Address]*accounts.Account
-	baseErr         error
+	// wipedAt holds, per account, the tx index of the destruct whose subtree reset an
+	// earlier fold of this block emitted; a later fold must not wipe the slots written since.
+	wipedAt      map[accounts.Address]int
+	blockBase    state.StateReader
+	blockBaseVM  *state.VersionMap
+	baseAccounts map[accounts.Address]*accounts.Account
+	baseErr      error
 	// curVersionMap is the block currently being folded; compute reads it.
 	curVersionMap *state.VersionMap
 
@@ -440,8 +444,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// benign — both emit identical values at the same txNum.
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			// Checkpoint commitment at a mid-block step edge without advancing
-			// lastComputedBlock or resetting block flags — the block-end fold still
-			// needs the pre-edge dirty keys.
+			// lastComputedBlock or resetting block flags; the block-end fold then
+			// covers only the keys touched after the edge.
 			cc.compute(ctx, targetOf(&blockResult{BlockNum: r.blockNum, BlockHash: r.blockHash, lastTxNum: r.txNum}), computeMode{label: "step-boundary ", midBlock: true})
 		}
 
@@ -903,8 +907,12 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	// spans earlier blocks whose writes are not in curVersionMap; the view's base
 	// resolves those (and their seeded removals) through the prevBlocks chain.
 	cc.asOfReader.txNum = t.lastTxNum + 1
+	cc.asOfReader.cur, cc.asOfReader.curTxNum = cc.curVersionMap, t.lastTxNum
+	defer func() { cc.asOfReader.cur = nil }()
 	emitErr := cc.emit(cc.foldView(cc.curVersionMap, t.lastTxNum, cc.asOfReader.dr.StateReaderAt(cc.asOfReader.txNum)), cc.updates)
-	if !m.midBlock {
+	if m.midBlock {
+		cc.clearFoldedKeys()
+	} else {
 		cc.clearTouched()
 	}
 	if emitErr != nil {
@@ -1089,6 +1097,10 @@ type asOfStateReader struct {
 	dr *state.LayeredDomainReader
 
 	prefetched *branchPrefetcher
+	// cur layers the folding block's own writes up to curTxNum (accounts, storage and code): the trie
+	// also reads untouched siblings, and dr sees them only after the apply loop lands them in sd.mem.
+	cur      *state.VersionMap
+	curTxNum uint64
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1112,6 +1124,18 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 		}
 		return r.sd.GetLatest(d, r.roTx, plainKey)
 	}
+	if stepSize > 0 {
+		step = kv.Step(r.txNum / stepSize)
+	}
+	if r.cur != nil && (d == kv.AccountsDomain || d == kv.StorageDomain) {
+		enc, err = r.readFoldingBlock(d, plainKey)
+		return enc, step, err
+	}
+	if r.cur != nil && d == kv.CodeDomain {
+		if code, ok := r.cur.View(r.curTxNum, nil).GetCode(accounts.InternAddress(common.BytesToAddress(plainKey))); ok {
+			return code, step, nil
+		}
+	}
 	// Account/storage/code: the window layered over sd.mem + files.
 	enc, ok, err := r.dr.ReadDomain(d, plainKey, r.txNum)
 	if err != nil {
@@ -1119,9 +1143,6 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	}
 	if !ok {
 		enc = nil
-	}
-	if stepSize > 0 {
-		step = kv.Step(r.txNum / stepSize)
 	}
 	return enc, step, nil
 }
@@ -1153,6 +1174,22 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 	return r.clone(tx, nil)
 }
 
+func (r *asOfStateReader) readFoldingBlock(d kv.Domain, plainKey []byte) ([]byte, error) {
+	view := r.cur.View(r.curTxNum, r.dr.StateReaderAt(r.txNum))
+	if d == kv.AccountsDomain {
+		acc, ok, _ := view.GetAccount(accounts.InternAddress(common.BytesToAddress(plainKey)))
+		if !ok {
+			return nil, view.Err()
+		}
+		return accounts.SerialiseV3(&acc), view.Err()
+	}
+	val, ok := view.GetStorage(accounts.InternAddress(common.BytesToAddress(plainKey[:length.Addr])), accounts.InternKey(common.BytesToHash(plainKey[length.Addr:])))
+	if !ok || val.IsZero() {
+		return nil, view.Err()
+	}
+	return val.Bytes(), view.Err()
+}
+
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
 // accumulator carried by workerCtx, so a clone used during block assembly (where
 // trie-warmup runs concurrently) doesn't write the shared main accumulator.
@@ -1161,7 +1198,7 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 }
 
 func (r *asOfStateReader) clone(tx kv.TemporalTx, workerCtx context.Context) commitmentdb.StateReader {
-	reader := &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched}
+	reader := &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx), prefetched: r.prefetched, cur: r.cur, curTxNum: r.curTxNum}
 	if r.sd != nil && r.sd.GetCommitmentContext() != nil && r.sd.GetCommitmentContext().Trie().Variant() == commitment.VariantCommitmentV3 {
 		return ownedAsOfStateReader{reader}
 	}
