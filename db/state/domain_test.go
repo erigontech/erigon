@@ -3888,6 +3888,35 @@ func TestDomain_GetLatestValSize(t *testing.T) {
 	})
 }
 
+func TestDomain_FileCacheKeepsMissNotFound(t *testing.T) {
+	t.Parallel()
+	db, d, txs := filledDomain(t, log.New())
+	require.NoError(t, db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	}))
+	domainTx := d.beginForTests()
+	defer domainTx.Close()
+	roTx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	var missing [8]byte
+	binary.BigEndian.PutUint64(missing[:], 1000)
+	for range 2 {
+		_, found, _, _, err := domainTx.debugGetLatestFromFiles(missing[:], 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		_, found, err = domainTx.getLatestFromFilesValSize(missing[:], 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		_, step, found, err := domainTx.GetLatest(missing[:], roTx)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, step)
+	}
+}
+
 // TestDomainDisabledDiscardsWrites pins that Enabled=false is a real master
 // switch: a writer taken from a disabled domain must drop everything instead of
 // quietly collecting and flushing into the DB tables.
