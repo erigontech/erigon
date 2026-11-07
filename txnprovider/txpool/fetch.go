@@ -401,6 +401,9 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 		f.pending = append(deferred, f.pending...)
 	}
 	f.waiting = waiting
+	for peer, plan := range plans { // counted before the sends, so a reply that beats its send's return frees a slot
+		f.retriesOutstanding[peer] += len(plan.reqs)
+	}
 	f.requestedLock.Unlock()
 
 	// One goroutine per sentry, under one deadline, so a stalled sentry neither holds the others nor the next sweep
@@ -417,7 +420,9 @@ func (f *Fetch) requestFromAlternates(ctx context.Context, tx kv.Tx) {
 			for _, peer := range peers {
 				for _, hashes := range plans[peer].reqs {
 					unsent, at, n, err := f.requestPooledTxns(sendCtx, peer, hashes, sent)
-					f.retriesSent(peer, n)
+					if n == 0 {
+						f.releaseRetry(peer)
+					}
 					if err != nil {
 						f.logger.Debug("[txpool.fetch] request from alternate", "err", err)
 						if errors.Is(err, errPeerGone) {
@@ -578,18 +583,9 @@ func (f *Fetch) hasRetryRoom(r *fetchRequest) bool {
 	return slices.ContainsFunc(r.alternates, func(alt fetchPeer) bool { return f.retriesOutstanding[alt] < maxRetryRequestsPerPeer })
 }
 
-func (f *Fetch) retriesSent(peer fetchPeer, n int) {
-	if n == 0 {
-		return
-	}
-	f.requestedLock.Lock()
-	defer f.requestedLock.Unlock()
-	f.retriesOutstanding[peer] += n
-}
-
-// retryAnswered frees one of peer's retry slots on a PooledTransactions reply, which a peer sends for every
-// request it reads, so waiting requests may go to it again.
-func (f *Fetch) retryAnswered(peer fetchPeer) {
+// releaseRetry frees one of peer's retry slots: on a PooledTransactions reply, which a peer sends for every request
+// it reads, or for a retry that was not sent. Waiting requests may go to the peer again.
+func (f *Fetch) releaseRetry(peer fetchPeer) {
 	f.requestedLock.Lock()
 	defer f.requestedLock.Unlock()
 	if n := f.retriesOutstanding[peer]; n > 0 {
@@ -910,7 +906,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		// Keep announcements for peer fallback. Replies with cached bodies are still
 		// dropped before the pool can revalidate their transactions.
 		if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 {
-			f.retryAnswered(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}) // before dedup: replies to different requests can be identical
+			f.releaseRetry(fetchPeer{sentryClient, gointerfaces.ConvertH512ToHash(req.PeerId)}) // before dedup: replies to different requests can be identical
 		}
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66, sentryproto.MessageId_POOLED_TRANSACTIONS_66:

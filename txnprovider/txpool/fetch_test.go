@@ -1026,7 +1026,7 @@ func (a *announceFetchTest) announceSized(t *testing.T, peer [64]byte, size uint
 // answer delivers n PooledTransactions replies from peer.
 func (a *announceFetchTest) answer(peer [64]byte, n int) {
 	for range n {
-		a.fetch.retryAnswered(fetchPeer{a.sentryClient, peer})
+		a.fetch.releaseRetry(fetchPeer{a.sentryClient, peer})
 	}
 }
 
@@ -1535,6 +1535,18 @@ func TestBlockedFirstSendDoesNotStrandLaterChunks(t *testing.T) {
 	}, a.sentryClient)
 	r, ok := a.fetch.requested.Get(hashes[256][:])
 	require.False(t, ok && r.unsent, "the last chunk's hash must not stay unsent, or it never times out")
+}
+
+func TestReplyDuringTheRetrySendFreesItsSlot(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	hash, peerA, peerB := [32]byte{0xd8}, [64]byte{0xa}, [64]byte{0xb}
+	a.announce(t, peerA, hash)
+	a.announce(t, peerB, hash)
+	a.onSend = func() { a.answer(peerB, 1) } // B answers before SendMessageById returns
+	a.timeoutSweep()
+	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom)
+	require.Zero(t, a.fetch.retriesOutstanding[fetchPeer{a.sentryClient, peerB}], "an answered retry must not stay outstanding")
 }
 
 func TestNewAnnouncerOfAWaitingHashIsAskedAtOnce(t *testing.T) {
