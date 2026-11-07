@@ -1740,7 +1740,7 @@ func TestStateCache_FillDoorkeeperResetsWhenAQuarterIsSet(t *testing.T) {
 	for i := uint64(0); sc.fillDoor.Load() == door; i++ {
 		binary.BigEndian.PutUint64(key, i)
 		sc.fillSeenBefore(key)
-		require.Less(t, i, uint64(fillDoorWords*64), "the bitset was never replaced")
+		require.Less(t, i, uint64(1<<30), "the bitset was never replaced")
 	}
 	require.False(t, sc.fillSeenBefore(first), "a key marked before the reset is new again")
 }
