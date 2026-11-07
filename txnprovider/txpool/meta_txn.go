@@ -16,10 +16,27 @@
 
 package txpool
 
-import "github.com/holiman/uint256"
+import (
+	"math"
+
+	"github.com/holiman/uint256"
+)
+
+// blobFeeCap returns min(capSoFar, the txn's blob fee cap), saturated to uint64, or capSoFar for a txn without blobs.
+func blobFeeCap(slot *TxnSlot, capSoFar uint64) uint64 {
+	if !slot.HasBlobs() {
+		return capSoFar
+	}
+	c := slot.GetBlobFeeCap()
+	if !c.IsUint64() {
+		return capSoFar
+	}
+	return min(capSoFar, c.Uint64())
+}
 
 func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 	mt := &metaTxn{TxnSlot: slot, keyedNonce: slot.hasKeyedNonce(), worstIndex: -1, bestIndex: -1, timestamp: timestamp}
+	mt.minBlobFeeCap = math.MaxUint64 // set in onSenderStateChange
 	if isLocal {
 		mt.subPool = IsLocal
 	}
@@ -30,6 +47,7 @@ func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 type metaTxn struct {
 	TxnSlot                   *TxnSlot
 	minFeeCap                 uint256.Int
+	minBlobFeeCap             uint64 // lowest blob fee cap up to this txn in its sender's nonce chain; set in onSenderStateChange
 	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
 	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
 	minTip                    uint64
