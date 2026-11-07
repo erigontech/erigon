@@ -27,15 +27,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 type bundle struct {
@@ -1597,4 +1603,35 @@ func TestCheckCommitmentFileHasRootWithoutStateKey(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasState)
 	require.False(t, broken)
+}
+
+func TestPruneChangeSetsKeepsExecutionReorgWindow(t *testing.T) {
+	ctx := context.Background()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	key := func(blockNum uint64) []byte { return dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)}) }
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		if err := stages.SaveStageProgress(tx, stages.Senders, 1000); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(tx, stages.Execution, 200); err != nil {
+			return err
+		}
+		for _, blockNum := range []uint64{10, 149, 150, 200} {
+			if err := tx.Put(kv.ChangeSets3, key(blockNum), []byte{0x01}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.NoError(t, pruneChangeSets(ctx, db, 50, rawdbv3.TxNumsReader{}, log.New()))
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		for blockNum, want := range map[uint64]bool{10: false, 149: false, 150: true, 200: true} {
+			has, err := tx.Has(kv.ChangeSets3, key(blockNum))
+			require.NoError(t, err)
+			require.Equal(t, want, has, "block %d", blockNum)
+		}
+		return nil
+	}))
 }
