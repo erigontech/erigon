@@ -53,16 +53,11 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
-// ---------------------------------------------------------------------------
-// Minimal stub implementing execmodule.ExecutionModule for unit tests.
-// The methods called by BuildBlockV1 and CommitBlockV1 (GetHeader,
-// AssembleBlock, GetAssembledBlock, CurrentHeader, InsertBlocks,
-// ValidateChain, UpdateForkChoice, GetForkChoice) are wired to configurable
-// closures; everything else is a no-op that satisfies the interface.
-// ---------------------------------------------------------------------------
-
+// stubExecutionModule supplies default responses for ExecutionModule methods.
+// Tests can override individual methods by setting the corresponding callbacks.
 type stubExecutionModule struct {
 	getHeaderFunc          func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	getHeadersByRangeFunc  func(ctx context.Context, start, count uint64) ([]*types.Header, error)
 	headerNumberFunc       func(ctx context.Context, hash common.Hash) (*uint64, error)
 	assembleBlockFunc      func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc  func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
@@ -73,6 +68,8 @@ type stubExecutionModule struct {
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
+
+	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
 }
 
 var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
@@ -80,6 +77,13 @@ var _ execmodule.ExecutionModule = (*stubExecutionModule)(nil)
 func (s *stubExecutionModule) GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
 	if s.getHeaderFunc != nil {
 		return s.getHeaderFunc(ctx, blockHash, blockNumber)
+	}
+	return nil, nil
+}
+
+func (s *stubExecutionModule) GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error) {
+	if s.getHeadersByRangeFunc != nil {
+		return s.getHeadersByRangeFunc(ctx, start, count)
 	}
 	return nil, nil
 }
@@ -103,8 +107,6 @@ func (s *stubExecutionModule) AddSendersRecovery(blockHash common.Hash, recovery
 		s.addSendersRecoveryFunc(blockHash, recovery)
 	}
 }
-
-// --- No-op implementations for the rest of the interface ---
 
 func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
 	if s.insertBlocksFunc != nil {
@@ -157,7 +159,10 @@ func (s *stubExecutionModule) GetBodiesByHashes(_ context.Context, _ []common.Ha
 	return nil, nil
 }
 
-func (s *stubExecutionModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
+func (s *stubExecutionModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error) {
+	if s.getPayloadBodiesByHashFunc != nil {
+		return s.getPayloadBodiesByHashFunc(ctx, hashes)
+	}
 	return nil, nil
 }
 
