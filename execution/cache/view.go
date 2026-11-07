@@ -320,6 +320,15 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
 }
 
+// FillOnSecondMiss is Fill for a read whose key may never be read again: it fills only on the key's second miss,
+// so a key read once, the common case on a cold block, never pays the insert.
+func (v ReadView) FillOnSecondMiss(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
+	if v.c == nil || v.c.disableFills || v.frontier == nil || (domain != kv.CodeDomain && !v.c.fillSeenBefore(key)) {
+		return
+	}
+	v.Fill(domain, key, value, readTxNum)
+}
+
 // FillCode offers code to the cache and returns a copy the caller may keep.
 func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte {
 	stored := bytes.Clone(code)

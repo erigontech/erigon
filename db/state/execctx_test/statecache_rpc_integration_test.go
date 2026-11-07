@@ -128,9 +128,11 @@ func TestEmbeddedRPCViewOpenedAfterCommitCanFillStateCache(t *testing.T) {
 
 	missing := make([]byte, 20)
 	missing[0] = 0x02
-	got, err := rpcView.Get(missing)
-	require.NoError(t, err)
-	require.Empty(t, got)
+	for range 2 { // the second miss fills
+		got, err := rpcView.Get(missing)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
 	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
 	require.True(t, ok, "a fresh RPC transaction must retain fill authority after the published SharedDomains commits")
 }
@@ -589,9 +591,11 @@ func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
 	require.NoError(t, err)
 	defer readDomains.Close()
 	readDomains.BindStateCache(stateCache)
-	got, _, err := readDomains.GetLatest(kv.AccountsDomain, readTx, missingKey)
-	require.NoError(t, err)
-	require.Empty(t, got)
+	for range 2 { // the second miss fills
+		got, _, err := readDomains.GetLatest(kv.AccountsDomain, readTx, missingKey)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	}
 
 	cached, ok := stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
 	require.True(t, ok)
