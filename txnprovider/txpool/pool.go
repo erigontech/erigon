@@ -440,7 +440,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
-	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil, false)
+	_, unwindTxns, cells, err := p.validateTxns(&unwindTxns, cacheView, nil, nil, nil)
 	if err != nil {
 		return frames, err
 	}
@@ -1049,18 +1049,21 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 	return blobs
 }
 
-// batchUsage is what the already accepted txns of the same batch will add to the pool.
+// batchUsage is what the already accepted txns of a batch will add to the pool.
 type batchUsage struct {
-	senderTxns  int
-	senderBlobs uint64
+	senderTxns  map[uint64]int
+	senderBlobs map[uint64]uint64
 	totalBlobs  uint64
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
-	return p.validateTxWithCells(txn, isLocal, stateCache, nil, batchUsage{})
+	return p.validateTxWithCells(txn, isLocal, stateCache, nil, nil, p.all.get(txn.SenderID, txn.Nonce))
 }
 
-func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, batch batchUsage) (txpoolcfg.DiscardReason, error) {
+func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, batch *batchUsage, replaced *metaTxn) (txpoolcfg.DiscardReason, error) {
+	if batch == nil {
+		batch = &batchUsage{} // counts nothing: nil maps read as zero
+	}
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1176,8 +1179,8 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 
-	slots := p.all.count(txn.SenderID) + batch.senderTxns
-	if p.all.get(txn.SenderID, txn.Nonce) == nil {
+	slots := p.all.count(txn.SenderID) + batch.senderTxns[txn.SenderID]
+	if replaced == nil {
 		slots++ // a new nonce takes a slot; a replacement keeps the pooled txn's
 	}
 	if !isLocal && uint64(slots) > p.cfg.AccountSlots {
@@ -1223,7 +1226,7 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 	return txpoolcfg.Success, nil
 }
 
-func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCells, batch batchUsage) txpoolcfg.DiscardReason {
+func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCells, batch *batchUsage) txpoolcfg.DiscardReason {
 	if !p.isCancun() {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -1268,9 +1271,9 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, cellsByHash blobCel
 		}
 	}
 
-	if !isLocal && (p.all.blobCount(txn.SenderID)+batch.senderBlobs+uint64(blobCount)) > p.cfg.BlobSlots {
+	if !isLocal && (p.all.blobCount(txn.SenderID)+batch.senderBlobs[txn.SenderID]+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+batch.senderBlobs+uint64(blobCount), p.cfg.BlobSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+batch.senderBlobs[txn.SenderID]+uint64(blobCount), p.cfg.BlobSlots))
 		}
 		return txpoolcfg.BlobSlotsOverflow
 	}
@@ -1525,7 +1528,7 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &setCode, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, _, err = p.validateTxns(&setCode, view, nil, nil, false)
+		precheckReasons, goodTxns, _, err = p.validateTxns(&setCode, view, nil, nil, nil)
 		return err
 	})
 	if err != nil {
@@ -1546,9 +1549,8 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 // A remote KZG failure skips later txns from that peer; with nil sources,
 // it skips all later remote txns. Skipped txns keep NotSet and are not returned.
 // Non-nil sources must be index-aligned with txns.
-// countBatch counts the batch's earlier accepted txns against sender limits; unwound txns were already in a block and
-// do not count.
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, countBatch bool) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
+// A nil batch counts nothing, for txns that were already in a block.
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource, batch *batchUsage) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, cells blobCells, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {
 		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1571,18 +1573,12 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		return slices.Contains(kzgOffenders, sources[i].peerKey())
 	}
 
-	senderTxns := map[uint64]int{}
-	senderBlobs := map[uint64]uint64{}
-	var totalBlobs uint64
 	for i, txn := range txns.Txns {
 		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
 			continue
 		}
-		var batch batchUsage
-		if countBatch {
-			batch = batchUsage{senderTxns[txn.SenderID], senderBlobs[txn.SenderID], totalBlobs}
-		}
-		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, batch)
+		replaced := p.all.get(txn.SenderID, txn.Nonce)
+		reason, err := p.validateTxWithCells(txn, txns.IsLocal[i], stateCache, cells, batch, replaced)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
 				p.logger.Warn("[txpool] validateTxns: sender info", "err", err)
@@ -1593,15 +1589,16 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		}
 		if reason == txpoolcfg.Success {
 			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
-			blobs := uint64(len(txn.GetBlobHashes()))
-			// A replacement adds only its blobs over the pooled txn's, which the pool already counts.
-			if replaced := p.all.get(txn.SenderID, txn.Nonce); replaced != nil {
-				blobs -= min(blobs, uint64(len(replaced.TxnSlot.GetBlobHashes())))
-			} else {
-				senderTxns[txn.SenderID]++
+			if batch != nil {
+				blobs := uint64(len(txn.GetBlobHashes()))
+				if replaced == nil {
+					batch.senderTxns[txn.SenderID]++
+				} else { // a replacement adds only its blobs over the pooled txn's, which the pool already counts
+					blobs -= min(blobs, uint64(len(replaced.TxnSlot.GetBlobHashes())))
+				}
+				batch.senderBlobs[txn.SenderID] += blobs
+				batch.totalBlobs += blobs
 			}
-			senderBlobs[txn.SenderID] += blobs
-			totalBlobs += blobs
 			// Success here means no DiscardReason yet, so leave it NotSet
 			continue
 		}
@@ -1683,7 +1680,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 				return err
 			}
 			reasons = preparedReasons
-			validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources, true)
+			validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources, &batchUsage{senderTxns: map[uint64]int{}, senderBlobs: map[uint64]uint64{}})
 			if err != nil {
 				return err
 			}
@@ -3072,7 +3069,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		isLocalTx := immediate.IsLocal[i]
 		txn.SenderID, txn.Traced = p.senders.getOrCreateID(addr, p.logger)
 
-		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells, batchUsage{})
+		reason, err := p.validateTxWithCells(txn, isLocalTx, cacheView, cells, nil, p.all.get(txn.SenderID, txn.Nonce))
 		if err != nil {
 			return err
 		}
