@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
@@ -84,7 +85,7 @@ func BuildGenesisState(
 	elGenesisHash common.Hash,
 ) (*state.CachingBeaconState, []*bls.PrivateKey, error) {
 	if validatorCount == 0 {
-		return nil, nil, fmt.Errorf("validator count must be > 0")
+		return nil, nil, errors.New("validator count must be > 0")
 	}
 
 	// Derive BLS keys.
