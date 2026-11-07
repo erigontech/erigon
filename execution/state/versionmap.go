@@ -1454,6 +1454,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
+		defer e.mu.Unlock()
 		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
 		destructed := false
 		if sd, ok := writes.selfDestruct[addr]; ok {
@@ -1521,7 +1522,6 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
 			}
 		}
-		e.mu.Unlock()
 	})
 }
 
