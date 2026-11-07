@@ -256,7 +256,7 @@ test-all: test-filtered
 ## test-unwind:                       reorg, snapshot and crash recovery integration tests
 .PHONY: test-unwind
 test-unwind:
-	$(GO) test ./execution/engineapi ./execution/execmodule ./execution/stagedsync -run '(Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery)' -count=1 -timeout=20m $(GO_FLAGS)
+	$(GO) test ./execution/engineapi ./execution/execmodule ./execution/execmodule/execmoduletester ./execution/stagedsync -run '(Churn|Reorg|Unwind|Fork[Cc]hoice|F[Cc][Uu]|CrashRecovery|BranchRecovery)' -count=1 -timeout=20m $(GO_FLAGS)
 	$(GO) test ./db/state ./db/rawdb/rawtemporaldb -run '(TestDomain_.*(DeletedKeyNotResurrectedByFiles|Unwind)|TestAggregatorBuildResumesIncompleteStep|TestMinimumUnwindKeepsImmutableTransactions)' -count=1 -timeout=10m $(GO_FLAGS)
 
 KURTOSIS ?= kurtosis
@@ -264,7 +264,7 @@ REORG_ENCLAVE ?= unwind-reorg
 ## test-reorg-devnet:                  partition/heal real CLs using test/erigon:current
 .PHONY: test-reorg-devnet
 test-reorg-devnet:
-	$(KURTOSIS) run --privileged --enclave $(REORG_ENCLAVE) .github/workflows/kurtosis/reorg --args-file .github/workflows/kurtosis/reorg-bounce.io
+	$(KURTOSIS) run --privileged --enclave $(REORG_ENCLAVE) tools/kurtosis/reorg --args-file .github/workflows/kurtosis/reorg-bounce.io
 	KURTOSIS=$(KURTOSIS) python3 tools/test-reorg-devnet.py $(REORG_ENCLAVE)
 
 ## test-fixtures:                      download & verify all pinned test fixture tarballs
