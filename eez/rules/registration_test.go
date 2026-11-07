@@ -16,6 +16,9 @@
 package rules
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,8 +36,23 @@ import (
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
+// TestMain checks, before any test registers it, that the engine is not
+// registered on import.
+func TestMain(m *testing.M) {
+	if engineRegistered() {
+		fmt.Fprintln(os.Stderr, "eez rules engine registered before Register")
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
+func engineRegistered() (registered bool) {
+	defer func() { registered = recover() == nil }()
+	rulesconfig.CreateRulesEngineBareBones(context.Background(), networks.Devnet.Config, log.New())
+	return
+}
+
 func TestEngineSelectedForDevnet(t *testing.T) {
-	require.Panics(t, func() { rulesconfig.CreateRulesEngineBareBones(t.Context(), networks.Devnet.Config, log.New()) })
 	config.Register()
 	Register()
 	Register()

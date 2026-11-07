@@ -43,6 +43,8 @@ type Header struct {
 	Hash       common.Hash
 	ParentHash common.Hash
 	Time       uint64
+	// MixDigest is the block's mixHash, its prevRandao after the merge.
+	MixDigest common.Hash
 }
 
 // ChainReader is every L1 fact the follower reads: headers, the head and finality tags, logs and transactions.

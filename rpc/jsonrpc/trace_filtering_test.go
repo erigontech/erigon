@@ -153,7 +153,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, false /* noBaseFee */, nil, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, true /* blockReplay */, false /* noBaseFee */, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -188,14 +188,11 @@ func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, block, "block %d not found", blockNum)
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	require.NoError(t, err)
-
 	// Far past the last real transaction in the block, so TxnByIdxInBlock
 	// finds the body but no matching entry in kv.EthTx and returns ok=false.
 	unresolvedTxIndex := len(block.Transactions()) + 1_000_000
 
-	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, chainConfig, nil)
+	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, nil)
 	require.Error(t, err)
 }
 

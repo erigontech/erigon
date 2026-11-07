@@ -19,6 +19,7 @@ package chain
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -102,6 +103,10 @@ type Config struct {
 	// (Optional) FeeCollector is EEZ Rollup0's FEE_COLLECTOR: every amount Ethereum burns is
 	// credited to it instead. Ignored when BurntContract is set.
 	FeeCollector *common.Address `json:"feeCollector,omitempty"`
+
+	// (Optional) BaseFeeChangeDenominator replaces EIP-1559's
+	// BASE_FEE_MAX_CHANGE_DENOMINATOR of 8. It must be positive.
+	BaseFeeChangeDenominator *uint64 `json:"baseFeeChangeDenominator,omitempty"`
 
 	// (Optional) deposit contract of PoS chains
 	// See also EIP-6110: Supply validator deposits on chain
@@ -430,6 +435,15 @@ func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	return accounts.InternAddress(addr)
 }
 
+// GetBaseFeeChangeDenominator returns the EIP-1559 base fee change
+// denominator: BaseFeeChangeDenominator, or the standard 8.
+func (c *Config) GetBaseFeeChangeDenominator() uint64 {
+	if c.BaseFeeChangeDenominator == nil {
+		return params.BaseFeeChangeDenominator
+	}
+	return *c.BaseFeeChangeDenominator
+}
+
 func (c *Config) GetFeeCollector() accounts.Address {
 	if c.FeeCollector == nil {
 		return accounts.NilAddress
@@ -670,8 +684,12 @@ func (c *Config) SameTimestampForks(newcfg *Config) bool {
 	return true
 }
 
-// CheckConfigForkOrder checks that we don't "skip" any forks
+// CheckConfigForkOrder checks that we don't "skip" any forks, and that an
+// explicit BaseFeeChangeDenominator is positive.
 func (c *Config) CheckConfigForkOrder() error {
+	if c != nil && c.BaseFeeChangeDenominator != nil && *c.BaseFeeChangeDenominator == 0 {
+		return errors.New("baseFeeChangeDenominator must be positive")
+	}
 	if c != nil && c.ChainID != nil && c.ChainID.Uint64() == 77 {
 		return nil
 	}
@@ -739,6 +757,9 @@ func (c *Config) checkCompatibleBlocks(newcfg *Config, head uint64) *ConfigCompa
 	}
 	if c.IsSpuriousDragon(head) && !uint256Equal(c.ChainID, newcfg.ChainID) {
 		return newCompatError("EIP155 chain ID", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
+	}
+	if c.IsLondon(head) && c.GetBaseFeeChangeDenominator() != newcfg.GetBaseFeeChangeDenominator() {
+		return newCompatError("EIP-1559 base fee change denominator", c.LondonBlock, newcfg.LondonBlock)
 	}
 	if incompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
 		return newCompatError("Byzantium fork block", c.ByzantiumBlock, newcfg.ByzantiumBlock)

@@ -175,3 +175,24 @@ func TestUnsafeHeadRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, settled.Blocks[0].Hash(), fc.Hash())
 }
+
+// TestSequencerURLError checks that the sequencer client's failures, which
+// the follower logs on every tick, print its endpoint without the path and
+// query of its URL, where providers put API keys.
+func TestSequencerURLError(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	defer srv.Close()
+	s, err := follower.DialSequencer(t.Context(), srv.URL+"/v2/secret-key?apikey=secret", log.New())
+	require.NoError(t, err)
+	defer s.Close()
+	_, _, err = s.Head(t.Context())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+	require.ErrorContains(t, err, "x509")
+	_, err = s.BlockByNumber(t.Context(), 1)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+	_, err = follower.DialSequencer(t.Context(), srv.URL+"/v2/secret-key\n", log.New())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+}

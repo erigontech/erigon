@@ -48,6 +48,7 @@ type recordedHeader struct {
 	Hash       common.Hash    `json:"hash"`
 	ParentHash common.Hash    `json:"parentHash"`
 	Timestamp  hexutil.Uint64 `json:"timestamp"`
+	MixHash    common.Hash    `json:"mixHash,omitzero"`
 }
 
 type recordedTx struct {
@@ -57,11 +58,11 @@ type recordedTx struct {
 }
 
 func (h recordedHeader) header() l1.Header {
-	return l1.Header{Number: uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Time: uint64(h.Timestamp)}
+	return l1.Header{Number: uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Time: uint64(h.Timestamp), MixDigest: h.MixHash}
 }
 
 func recordHeader(h l1.Header) recordedHeader {
-	return recordedHeader{Number: hexutil.Uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Timestamp: hexutil.Uint64(h.Time)}
+	return recordedHeader{Number: hexutil.Uint64(h.Number), Hash: h.Hash, ParentHash: h.ParentHash, Timestamp: hexutil.Uint64(h.Time), MixHash: h.MixDigest}
 }
 
 // Load returns the chain recorded in dir. The canonical headers

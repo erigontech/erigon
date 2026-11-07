@@ -221,3 +221,23 @@ func TestIndexCovering(t *testing.T) {
 	_, ok = x.Covering(10)
 	require.False(t, ok, "not settled yet")
 }
+
+func TestIndexLost(t *testing.T) {
+	var x Index
+	require.False(t, x.Lost())
+	x.Seed(record(10, 1, 4))
+	require.True(t, x.Append(record(12, 2, 7)))
+	x.RetreatOnReorg(11)
+	require.False(t, x.Lost())
+	x.RetreatOnReorg(9)
+	require.True(t, x.Lost(), "the seed is gone")
+	x.Reset()
+	require.False(t, x.Lost())
+	require.Zero(t, x.Cursor())
+
+	x.Seed(record(12, 2, 7))
+	x.Seed(record(10, 1, 4))
+	require.Equal(t, uint64(4), x.Cursor())
+	_, ok := x.Covering(5)
+	require.False(t, ok, "a new seed replaces the previous one")
+}

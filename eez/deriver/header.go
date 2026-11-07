@@ -33,6 +33,9 @@ type HeaderInputs struct {
 	Coinbase   common.Address
 	Extra      []byte
 	GasLimit   uint64
+	// MixDigest is the prevRandao: zero under rollup0, the L1 seed under
+	// rollupX.
+	MixDigest common.Hash
 }
 
 // DeriveInputs returns the inputs of the block after parent that the span
@@ -52,5 +55,5 @@ func DeriveInputs(l2 *config.L2Config, parent *types.Header, span *da.Span, i in
 // Matches reports whether h carries these inputs.
 func (in *HeaderInputs) Matches(h *types.Header) bool {
 	return h.Number.Uint64() == in.Number && h.ParentHash == in.ParentHash && h.Time == in.Time &&
-		h.Coinbase == in.Coinbase && bytes.Equal(h.Extra, in.Extra) && h.GasLimit == in.GasLimit
+		h.Coinbase == in.Coinbase && bytes.Equal(h.Extra, in.Extra) && h.GasLimit == in.GasLimit && h.MixDigest == in.MixDigest
 }

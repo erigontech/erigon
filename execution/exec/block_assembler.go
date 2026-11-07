@@ -304,8 +304,15 @@ func (ba *BlockAssembler) AddTransactions(
 		// Snapshot cumulative gas so we can restore on tx failure.
 		gasSnapshot := *gasUsed
 
-		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
+		var postProcess func() error
+		if p, ok := ba.cfg.Engine.(rules.TxPostProcessor); ok {
+			postProcess = func() error {
+				// txn takes the spare slot AddTxn fills next; Txns is the assembler's own.
+				return p.PostProcessTx(chainConfig, ibs, append(current.Txns, txn), len(current.Txns))
+			}
+		}
+		receipt, err := protocol.ApplyTransactionPostProcessed(chainConfig, protocol.GetHashFn(header, getHeader),
+			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig, postProcess)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot
@@ -366,6 +373,16 @@ LOOP:
 			done = true
 			break
 		}
+
+		bound, err := protocol.BindTxGas(ba.cfg.Engine, ba.cfg.ChainConfig.IsAmsterdam(header.Time), txn, gasPool)
+		if err != nil {
+			if ba.cfg.Strict {
+				return nil, true, notIncluded(txn, err)
+			}
+			logger.Debug(fmt.Sprintf("[%s] Could not bind transaction gas", logPrefix), "hash", txn.Hash(), "err", err)
+			continue
+		}
+		txn = bound
 
 		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
 		if rlpSpacePostTxn < 0 && ba.cfg.Strict {

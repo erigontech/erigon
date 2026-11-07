@@ -2112,3 +2112,64 @@ func TestFinalizedBlockWritesReturnsStateReadError(t *testing.T) {
 	_, err := finalizedBlockWrites(ibs, &chain.Rules{IsSpuriousDragon: true}, 1)
 	require.ErrorIs(t, err, readErr)
 }
+
+// zeroingPostProcessor zeroes one balance.
+type zeroingPostProcessor struct{ addr accounts.Address }
+
+func (e zeroingPostProcessor) PostProcessTx(_ *chain.Config, ibs *state.IntraBlockState, _ types.Transactions, _ int) error {
+	return ibs.SetBalance(e.addr, uint256.Int{}, tracing.BalanceChangeUnspecified)
+}
+
+// TestPostProcessTxRecordsReplacedBalance checks that a post-processor's balance
+// write records the balance it replaces as read, also for a transaction that
+// read no balance itself, and keeps a read the transaction made.
+func TestPostProcessTxRecordsReplacedBalance(t *testing.T) {
+	burnt, sender := fAddr("burnt"), fAddr("sender")
+	balanceWrite := func(txIndex int, val uint64) *state.WriteSet {
+		ws := &state.WriteSet{}
+		ws.SetBalance(burnt, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: burnt, Path: state.BalancePath, Version: state.Version{BlockNum: 1, TxIndex: txIndex}},
+			Val:         *uint256.NewInt(val),
+		})
+		return ws
+	}
+	// The transaction's own read sees the earlier transaction's write.
+	own := state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.MapRead, Version: state.Version{BlockNum: 1, TxIndex: 0}}, Val: *uint256.NewInt(6)}
+	for _, tc := range []struct {
+		name string
+		own  bool
+	}{
+		{"unread", false},
+		{"read", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := newMapStateReader()
+			// A nonce keeps the zeroed account from EIP-161 removal.
+			reader.accounts[burnt] = &accounts.Account{Balance: *uint256.NewInt(5), Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+			be := newBlockExec(1, common.Hash{}, nil, nil, discardConsumers(1), false, nil)
+			version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 1}
+			// An earlier transaction leaves 6; the transaction's deferred fees credit 7 unread.
+			be.versionMap.FlushVersionedWrites(balanceWrite(0, 6), true, "")
+			be.versionMap.FlushVersionedWrites(balanceWrite(1, 7), false, "")
+			var reads state.ReadSet
+			reads.SetNonce(sender, state.VersionedRead[uint64]{Val: 1})
+			if tc.own {
+				reads.SetBalance(burnt, own)
+			}
+			be.blockIO.RecordReads(version, reads)
+			task := &exec.TxTask{TxNum: version.TxNum, TxIndex: version.TxIndex, Config: chain.TestChainOsakaConfig}
+
+			require.NoError(t, be.postProcessTx(zeroingPostProcessor{burnt}, 1, task, version, reader))
+			got := be.blockIO.ReadSet(version.TxIndex)
+			read, ok := got.GetBalance(burnt)
+			require.True(t, ok)
+			if tc.own {
+				require.Equal(t, own, read)
+			} else {
+				require.Equal(t, *uint256.NewInt(6), read.Val)
+			}
+			_, ok = got.GetNonce(sender)
+			require.True(t, ok)
+		})
+	}
+}

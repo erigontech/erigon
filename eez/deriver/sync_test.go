@@ -82,7 +82,7 @@ func loadWindow468(t *testing.T) *window468 {
 	return r
 }
 
-var ctx468 = protocol.SyncTxContext{ChainID: 6290, RollupID: 1}
+var ctx468 = protocol.SyncTxContext{ChainID: 6290, RollupID: 1, EEZL2: protocol.EEZL2Address}
 
 // TestSyncBlockWindow468 rebuilds the only recorded Sync block with system
 // transactions byte for byte: two outbound pairs and a delivery.
@@ -162,4 +162,32 @@ func TestResumeTxs(t *testing.T) {
 	txs, replay = ResumeTxs(other, settled, [][]byte{a}, nil)
 	require.True(t, replay, "a differing block is rebuilt even without new content")
 	require.Equal(t, [][]byte{a}, txs)
+}
+
+func TestResumeNativeTxs(t *testing.T) {
+	native := func(gas uint64) []byte {
+		enc, err := (&protocol.NativeTx{ChainID: 699169, SourceHash: common.Hash{7}, GasLimit: gas, To: protocol.RollupXEEZL2Address, Input: []byte{1}}).MarshalBinary()
+		require.NoError(t, err)
+		return enc
+	}
+	user := []byte{2}
+	entry, final, other := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	s := &protocol.Settlement{EntryState: entry, FinalState: final}
+	suffix := [][]byte{native(protocol.NativeTxGasCap), user}
+
+	_, replay, err := ResumeNativeTxs(final, s, [][]byte{user, native(1_000), user}, suffix)
+	require.NoError(t, err)
+	require.False(t, replay, "the settled block, its native gas limit bound to its position")
+
+	txs, replay, err := ResumeNativeTxs(entry, s, [][]byte{user}, suffix)
+	require.NoError(t, err)
+	require.True(t, replay)
+	require.Equal(t, append([][]byte{user}, suffix...), txs)
+
+	_, _, err = ResumeNativeTxs(final, s, [][]byte{user, user, user}, suffix)
+	require.ErrorIs(t, err, ErrResume, "the settled block ends with other transactions")
+	_, _, err = ResumeNativeTxs(final, s, [][]byte{user}, suffix)
+	require.ErrorIs(t, err, ErrResume, "the settled block is shorter than its suffix")
+	_, _, err = ResumeNativeTxs(other, s, [][]byte{user}, suffix)
+	require.ErrorIs(t, err, ErrResume)
 }

@@ -81,6 +81,8 @@ type node struct {
 	chain    *countingChain
 	follower *follower.Follower
 	dir      string
+	// logs holds the follower's log lines in logfmt.
+	logs *syncBuffer
 }
 
 func newNode(t *testing.T, reader l1.ChainReader) *node {
@@ -96,12 +98,13 @@ func (n *node) restart(t *testing.T, reader l1.ChainReader, chain deriver.Chain)
 	t.Helper()
 	cfg := testConfig
 	cfg.Dir = n.dir
+	logs := &syncBuffer{}
 	logger := log.New()
-	logger.SetHandler(log.DiscardHandler())
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(logs, log.LogfmtFormat())))
 	counting := &countingChain{Chain: chain}
 	f, err := follower.New(reader, counting, derivertest.Config(), cfg, logger)
 	require.NoError(t, err)
-	return &node{m: n.m, chain: counting, follower: f, dir: n.dir}
+	return &node{m: n.m, chain: counting, follower: f, dir: n.dir, logs: logs}
 }
 
 // requireBlocks waits for the node's chain to hold want.
@@ -136,7 +139,8 @@ func transfers(c *derivertest.Composer, n int) [][]byte {
 }
 
 // TestFollow boots from the registry's deploy block, follows new
-// settlements and L1 finality, and stops with its context.
+// settlements and L1 finality, and stops with its context. A restart keeps
+// the finalized block while L1 finality is below the checkpoint.
 func TestFollow(t *testing.T) {
 	c := derivertest.NewComposer(t)
 	first := c.Compose(nil,
@@ -177,6 +181,93 @@ func TestFollow(t *testing.T) {
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+
+	again := n.restart(t, c.L1, n.chain.Chain)
+	require.NoError(t, again.follower.Boot(t.Context()))
+	s := again.follower.Status()
+	require.Equal(t, uint64(2), s.Finalized)
+	require.Equal(t, uint64(3), s.Safe)
+	fc, err := n.m.ExecModule.GetForkChoice(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, first.Blocks[1].Hash(), fc.FinalizedHash)
+}
+
+// observing reports the follower's status on every log query.
+type observing struct {
+	l1.ChainReader
+	follower *follower.Follower
+	mu       sync.Mutex
+	seen     map[uint64]follower.Status
+}
+
+func (o *observing) Logs(ctx context.Context, from, to uint64, address common.Address, topics [][]common.Hash) ([]*types.Log, error) {
+	if f := o.follower; f != nil {
+		o.mu.Lock()
+		o.seen[from] = f.Status()
+		o.mu.Unlock()
+	}
+	return o.ChainReader.Logs(ctx, from, to, address, topics)
+}
+
+// TestStatusDuringCatchUp checks that the status and L1 finality follow
+// each scanned range of a catch-up, not only its end.
+func TestStatusDuringCatchUp(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	c.Post(derivertest.Posting{Batch: first})
+	second := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	l1Second := c.Post(derivertest.Posting{Batch: second}).Header.Number
+	require.NoError(t, c.L1.Finalize(l1Second))
+
+	reader := &observing{ChainReader: c.L1, seen: map[uint64]follower.Status{}}
+	_, chain := derivertest.NewL2(t)
+	cfg := testConfig
+	cfg.Dir = t.TempDir()
+	cfg.LogChunk = 1
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	f, err := follower.New(reader, chain, derivertest.Config(), cfg, logger)
+	require.NoError(t, err)
+	reader.follower = f
+	require.NoError(t, f.Boot(t.Context()))
+
+	during, ok := reader.seen[l1Second]
+	require.True(t, ok)
+	require.Equal(t, l1Second-1, during.L1Scanned)
+	require.Equal(t, uint64(1), during.Cursor)
+	require.Equal(t, l1Second, during.L1Finalized)
+	require.Equal(t, uint64(1), during.Finalized)
+	require.Equal(t, l1Second, f.Status().L1Scanned)
+	require.Equal(t, uint64(2), f.Status().Cursor)
+
+	// One range holding both batches: the status follows each L1 block.
+	_, l2 := derivertest.NewL2(t)
+	watched := &observingChain{Chain: l2}
+	cfg = testConfig
+	cfg.Dir = t.TempDir()
+	f, err = follower.New(c.L1, watched, derivertest.Config(), cfg, logger)
+	require.NoError(t, err)
+	watched.follower = f
+	require.NoError(t, f.Boot(t.Context()))
+	require.GreaterOrEqual(t, len(watched.seen), 2)
+	during = watched.seen[len(watched.seen)-1]
+	require.Equal(t, uint64(1), during.Cursor)
+	require.Less(t, during.L1Scanned, l1Second-1)
+	require.Equal(t, uint64(2), f.Status().Cursor)
+}
+
+// observingChain records the follower's status on every block it builds.
+type observingChain struct {
+	deriver.Chain
+	follower *follower.Follower
+	seen     []follower.Status
+}
+
+func (o *observingChain) Extend(ctx context.Context, parent *types.Header, in deriver.HeaderInputs, txs []types.Transaction, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
+	if o.follower != nil {
+		o.seen = append(o.seen, o.follower.Status())
+	}
+	return o.Chain.Extend(ctx, parent, in, txs, safe, finalized)
 }
 
 // tampered composes a block whose settlement the DA payload contradicts.
@@ -205,6 +296,7 @@ func TestHaltOnDivergence(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("follower did not halt")
 	}
+	require.Regexp(t, `lvl=crit msg="\[eez\] local chain diverged from L1" event=eez.deriver.state.diverged_post err=`, n.logs.String())
 
 	// A boot that meets the divergence halts too.
 	again := n.restart(t, c.L1, n.chain.Chain)
@@ -281,6 +373,8 @@ func TestRetryOnReorgedDivergence(t *testing.T) {
 	require.NoError(t, n.follower.Boot(t.Context()))
 	require.True(t, reader.used, "the stale logs were read")
 	n.requireBlocks(t, append(first.Blocks, replacement.Blocks...)...)
+	require.Contains(t, n.logs.String(), `lvl=warn msg="[eez] divergence on a reorged L1 block, rewinding"`)
+	require.NotContains(t, n.logs.String(), "lvl=crit")
 }
 
 // TestResume is T-DRV-4 on restart: a usable checkpoint resumes derivation
@@ -328,6 +422,38 @@ func TestResume(t *testing.T) {
 		require.Zero(t, again.chain.Built())
 		require.Equal(t, uint64(2), again.follower.Deriver().Cursor())
 	})
+}
+
+// TestReorgDropsResumePoint: an L1 reorg that drops the settlement a
+// restart resumed after seeds derivation again, keeping the finalized block.
+func TestReorgDropsResumePoint(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	first := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)})
+	l1First := c.Post(derivertest.Posting{Batch: first}).Header.Number
+	second := c.Compose(nil, derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{c.Transfer(bob, 2)}})
+	c.Post(derivertest.Posting{Batch: second})
+	n := newNode(t, c.L1)
+	require.NoError(t, n.follower.Boot(t.Context()))
+	n.requireBlocks(t, append(first.Blocks, second.Blocks...)...)
+	require.NoError(t, n.follower.Handle(t.Context(), l1.Finalized{Head: l1.Header{Number: l1First}}))
+	require.Equal(t, uint64(1), n.follower.Status().Finalized)
+
+	again := n.restart(t, c.L1, n.chain.Chain)
+	require.NoError(t, again.follower.Boot(t.Context()))
+	require.Equal(t, uint64(1), again.follower.Status().Finalized)
+
+	c.ReorgL1(l1First)
+	c.Rewind(first.Blocks[0].Header())
+	replacement := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{c.Transfer(alice, 2)}})
+	head := c.Post(derivertest.Posting{Batch: replacement}).Header
+	require.NoError(t, again.follower.Handle(t.Context(), l1.Reorg{Ancestor: l1.Header{Number: l1First}}))
+	require.NoError(t, again.follower.Handle(t.Context(), l1.NewHead{Head: head}))
+	again.requireBlocks(t, append(first.Blocks, replacement.Blocks...)...)
+	s := again.follower.Status()
+	require.Equal(t, uint64(2), s.Safe)
+	require.Equal(t, uint64(1), s.Finalized)
+	require.Contains(t, again.logs.String(), `msg="[eez] L1 reorg dropped the resume point, resuming again"`)
+	require.Contains(t, again.logs.String(), `msg="[eez] resuming from local settled block"`)
 }
 
 // TestWrongL1 refuses an L1 source on another chain.
@@ -448,6 +574,7 @@ func TestMetricsAndEvents(t *testing.T) {
 	_, chain := derivertest.NewL2(t)
 	cfg := testConfig
 	cfg.Dir = t.TempDir()
+	cfg.Progress = time.Nanosecond
 	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, logger)
 	require.NoError(t, err)
 	// Counters are process-wide: other tests move them too.
@@ -468,6 +595,8 @@ func TestMetricsAndEvents(t *testing.T) {
 		require.Contains(t, out.String(), "event="+event)
 	}
 	require.NotContains(t, out.String(), "event=eez.deriver.state.diverged_post")
+	require.Regexp(t, `msg="\[eez\] following" l1Scanned=\d+ l1Head=\d+ l1Finalized=\d+ safe=2 finalized=\d+ batches=[1-9]\d* blocks=[1-9]\d*`, out.String())
+	require.Regexp(t, `msg="\[eez\] batch derived" event=eez.deriver.batch.derived l1Block=\d+ tx=[0-9a-f]{6}…[0-9a-f]{6} from=1 to=\d+ settled=\d+ resumed=false`, out.String())
 
 	c.Post(derivertest.Posting{Batch: tampered(c)})
 	_, done := (&node{follower: f}).run(t)

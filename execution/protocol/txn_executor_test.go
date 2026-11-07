@@ -767,6 +767,72 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 	}
 }
 
+// TestBlockGasWithoutRefunds checks that up to Osaka a transaction run without
+// refunds counts what its block counts, while a gas bailout counts its whole limit.
+func TestBlockGasWithoutRefunds(t *testing.T) {
+	setThenClear := []byte{
+		byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE),
+		byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.SSTORE),
+		byte(vm.STOP),
+	}
+	const gasLimit, floorData = uint64(1_000_000), uint64(4096)
+	for _, test := range []struct {
+		name   string
+		config *chain.Config
+		code   []byte
+		data   []byte
+		// want is the block's count given the gas used before refunds.
+		want func(used uint64) uint64
+	}{
+		{
+			// The refund takes the count below a transaction's 21000.
+			name:   "refund capped at half before London",
+			config: chain.TestChainBerlinConfig,
+			code:   []byte{byte(vm.PUSH1), 0, byte(vm.SELFDESTRUCT)},
+			want:   func(used uint64) uint64 { return used - used/params.RefundQuotient },
+		},
+		{
+			name:   "refund capped at a fifth",
+			config: chain.TestChainOsakaConfig,
+			code:   setThenClear,
+			want:   func(used uint64) uint64 { return used - used/params.RefundQuotientEIP3529 },
+		},
+		{
+			name:   "calldata floor",
+			config: chain.TestChainOsakaConfig,
+			code:   []byte{byte(vm.STOP)},
+			data:   bytes.Repeat([]byte{1}, int(floorData)),
+			want: func(uint64) uint64 {
+				return params.TxGas + 4*floorData*params.TxTotalCostFloorPerToken
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run := func(refunds, gasBailout bool) *evmtypes.ExecutionResult {
+				sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+				recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+				ibs := state.New(state.NewNoopReader())
+				t.Cleanup(ibs.Close)
+				require.NoError(t, ibs.SetCode(recipient, test.code, tracing.CodeChangeUnspecified))
+				msg := types.NewMessage(
+					sender, recipient, 0, uint256.NewInt(0), gasLimit,
+					uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+					test.data, nil, false, false, true, false, nil,
+				)
+				result, err := NewTxnExecutor(newTestEVM(ibs, test.config, gasLimit), msg, NewGasPool(gasLimit, 0)).Execute(refunds, gasBailout)
+				require.NoError(t, err)
+				require.NoError(t, result.Err)
+				return result
+			}
+			without := run(false, false)
+			require.Equal(t, test.want(without.ReceiptGasUsed), without.BlockExecutionGasUsed)
+			require.Equal(t, run(true, false).BlockExecutionGasUsed, without.BlockExecutionGasUsed)
+			require.Equal(t, gasLimit, run(true, true).BlockExecutionGasUsed)
+			require.Equal(t, gasLimit, run(false, true).BlockExecutionGasUsed)
+		})
+	}
+}
+
 // TestEIP8037IntrinsicGasCapWithoutCheckGas verifies that the EIP-8037 cap on
 // max(intrinsic gas, calldata floor) also applies to messages that skip the gas
 // limit caps (CheckGas false, as in eth_estimateGas), but not to read-only calls
@@ -1006,7 +1072,7 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			var gasUsed GasUsed
 			writer := &completionErrorWriter{StateWriter: state.NewNoopWriter(), err: test.writerErr}
 			receipt, err := applyTransaction(chain.AllProtocolChanges, nil, NewGasPool(blockGasLimit, 0), ibs,
-				writer, &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
+				writer, &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg, nil)
 			require.ErrorIs(t, err, test.writerErr)
 			require.Equal(t, 1, calls)
 			require.ErrorIs(t, completionErr, test.writerErr)

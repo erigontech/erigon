@@ -17,8 +17,14 @@ package l1_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -80,6 +86,8 @@ func TestRPCErrorMapping(t *testing.T) {
 	}{
 		{"query returned more than 10000 results", l1.ErrRangeTooWide},
 		{"Log response size exceeded. You can make eth_getLogs requests with up to a 2K block range", l1.ErrRangeTooWide},
+		{"query block range exceeds server limit, narrow your filter: 1000", l1.ErrRangeTooWide},
+		{"query returns too many logs, narrow your filter: 20000", l1.ErrRangeTooWide},
 		{"finalized block not found", l1.ErrNotFound},
 		{"unknown block", l1.ErrNotFound},
 	} {
@@ -87,4 +95,80 @@ func TestRPCErrorMapping(t *testing.T) {
 	}
 	err := l1.MapRPCError(errors.New("connection refused"), "call")
 	require.False(t, errors.Is(err, l1.ErrRangeTooWide) || errors.Is(err, l1.ErrNotFound))
+}
+
+// TestRPCTransportError checks that a failed connection prints the call, the
+// socket operation, the remote address and the system error only.
+func TestRPCTransportError(t *testing.T) {
+	reset := &url.Error{Op: "Post", URL: "http://127.0.0.1:18545", Err: &net.OpError{
+		Op:     "read",
+		Net:    "tcp",
+		Source: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 57349},
+		Addr:   &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 18545},
+		Err:    &os.SyscallError{Syscall: "read", Err: syscall.ECONNRESET},
+	}}
+	err := l1.MapRPCError(reset, "eth_getBlockByNumber(latest)")
+	require.EqualError(t, err, "eth_getBlockByNumber(latest): read tcp 127.0.0.1:18545: read: connection reset by peer")
+	require.ErrorIs(t, err, syscall.ECONNRESET)
+	var ue *url.Error
+	require.ErrorAs(t, err, &ue)
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	require.NoError(t, ln.Close())
+	r, err := l1.DialRPC(t.Context(), "http://"+addr, log.New())
+	require.NoError(t, err)
+	defer r.Close()
+	_, err = r.ChainID(t.Context())
+	// The system error's text and errno are the platform's.
+	require.True(t, strings.HasPrefix(err.Error(), "eth_chainId: dial tcp "+addr+": "), err.Error())
+	require.NotContains(t, err.Error(), "http://")
+	var op *net.OpError
+	require.ErrorAs(t, err, &op)
+	require.Equal(t, "dial", op.Op)
+}
+
+// TestRPCURLError checks that a failure with no connection error, as an
+// untrusted certificate, prints the endpoint without its path and query,
+// where providers put API keys, and keeps the cause.
+func TestRPCURLError(t *testing.T) {
+	srv := httptest.NewTLSServer(nil)
+	defer srv.Close()
+	r, err := l1.DialRPC(t.Context(), srv.URL+"/v2/secret-key?apikey=secret-query", log.New())
+	require.NoError(t, err)
+	defer r.Close()
+	_, err = r.ChainID(t.Context())
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+	require.Contains(t, err.Error(), srv.URL)
+	require.ErrorContains(t, err, "x509")
+	var cert *tls.CertificateVerificationError
+	require.ErrorAs(t, err, &cert)
+	var ue *url.Error
+	require.ErrorAs(t, err, &ue)
+
+	err = l1.MapRPCError(&url.Error{Op: "Post", URL: "https://user:secret@host/v2/secret?apikey=secret", Err: errors.New("cause")}, "call")
+	require.EqualError(t, err, "call: Post https://host: cause")
+
+	host := strings.TrimPrefix(srv.URL, "https://")
+	for name, endpoint := range map[string]string{
+		"user info":       "https://user:secret@" + host + "/v2/secret-key",
+		"unparsable":      srv.URL + "/v2/secret-key\n",
+		"websocket dial":  "wss://" + host + "/v2/secret-key",
+		"websocket query": "wss://" + host + "/v2?apikey=secret",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, err := l1.DialRPC(t.Context(), endpoint, log.New())
+			if err == nil {
+				defer r.Close()
+				_, err = r.ChainID(t.Context())
+			}
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "secret")
+			if strings.HasPrefix(endpoint, "wss://") {
+				require.ErrorContains(t, err, "WebSocket dial")
+			}
+		})
+	}
 }

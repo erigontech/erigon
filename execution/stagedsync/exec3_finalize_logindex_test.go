@@ -92,7 +92,7 @@ func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
 		contract: accounts.InternAddress(logIndexContract),
 		calls:    1,
 	}
-	se, task := newSerialFinalizeTestExec(t, engine)
+	se, task := newSerialFinalizeTestExec(t, chain.TestChainOsakaConfig, engine)
 	task.Header.ReceiptHash = empty.RootHash
 	rwTx := se.applyTx.(kv.TemporalRwTx)
 	require.NoError(t, putLogEmittingContract(se.doms.AsPutDel(rwTx), logIndexContract))

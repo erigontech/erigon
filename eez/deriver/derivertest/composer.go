@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol/da"
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -65,17 +66,24 @@ func Config() *chain.Config {
 // the Chain derivation drives it through.
 func NewL2(t testing.TB) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
 	t.Helper()
+	return NewL2Of(t, networks.Devnet)
+}
+
+// NewL2Of returns the EEZ network spec at genesis in a fresh execution
+// module, and the Chain derivation drives it through.
+func NewL2Of(t testing.TB, spec chainspec.Spec, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *deriver.ExecChain) {
+	t.Helper()
 	eez.Register()
-	genesis := *networks.Devnet.Genesis
+	genesis := *spec.Genesis
 	engine, err := eezrules.New(genesis.Config)
 	require.NoError(t, err)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(t, append([]execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(&genesis),
 		execmoduletester.WithChainConfig(genesis.Config),
 		execmoduletester.WithEngine(engine),
 		execmoduletester.WithKey(UserKey),
 		execmoduletester.WithoutSystemContracts(),
-	)
+	}, opts...)...)
 	return m, deriver.NewExecChain(m.ExecModule, m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig)
 }
 
@@ -229,7 +237,7 @@ func (c *Composer) extend(parent *types.Header, span *da.Span, i int, txs [][]by
 }
 
 func (c *Composer) syncTxContext() protocol.SyncTxContext {
-	return protocol.SyncTxContext{ChainID: c.L2.ChainConfig.ChainID.Uint64(), RollupID: c.l2.RollupID}
+	return protocol.SyncTxContext{ChainID: c.L2.ChainConfig.ChainID.Uint64(), RollupID: c.l2.RollupID, EEZL2: c.l2.EEZL2()}
 }
 
 // AppliedAll is the settlement of every entry of b.

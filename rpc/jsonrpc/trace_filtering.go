@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -79,10 +80,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
@@ -113,7 +110,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +528,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gp, err := replayGasPool(dbtx, lastHeader, lastRules, msg, txIndex, txNum)
+		if err != nil {
+			return nil, err
+		}
 		ibs.SetTxContext(blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
@@ -833,7 +833,7 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* blockReplay */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
 
 	if cmErr != nil {
@@ -996,7 +996,10 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				txCtx := protocol.NewEVMTxContext(job.msg)
 				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
-				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
+				gp, err := replayGasPool(workerTx, header, chainRules, job.msg, job.txIndex, baseTxNum+uint64(job.txIndex))
+				if err != nil {
+					return err
+				}
 
 				if tracer.Hooks.OnTxStart != nil {
 					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
@@ -1046,7 +1049,6 @@ func (api *TraceAPIImpl) callTransaction(
 	traceTypes []string,
 	txIndex int,
 	gasBailOut bool,
-	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
 	blockNumber := header.Number.Uint64()
@@ -1056,11 +1058,6 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	engine := api.engine()
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
-	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-		return nil, err
-	}
-	rules := blockCtx.Rules(cfg)
 	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
@@ -1073,6 +1070,8 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 
+	// History holds the block's opening system calls; re-running them would
+	// cache what they read at block start, stale once doCall moves to txIndex.
 	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -1086,14 +1085,17 @@ func (api *TraceAPIImpl) callTransaction(
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
 
-	logger := log.New("trace_filtering")
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
-	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
-		return nil, err
+	// The engine's per-transaction rule reads the transaction's neighbours.
+	var blockTxs types.Transactions
+	if _, ok := engine.(protocolrules.TxPostProcessor); ok {
+		block, err := api.blockWithSenders(ctx, dbtx, header.Hash(), blockNumber)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, fmt.Errorf("block %d not found", blockNumber)
+		}
+		blockTxs = block.Transactions()
 	}
 
 	txnHash := txn.Hash()
@@ -1102,8 +1104,33 @@ func (api *TraceAPIImpl) callTransaction(
 		traceTypes: traceTypes,
 	}
 
-	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, callParam,
+	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, blockTxs, callParam,
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
+}
+
+// replayGasPool returns the gas pool of msg, the transaction at txIndex and txNum
+// of header's block, replayed without the transactions before it: a message
+// taking its gas from the block gets what the receipt domain says they left.
+// From Amsterdam it does not hold what a block counts, and the messages taking
+// gas from the block there encode all they get.
+func replayGasPool(tx kv.TemporalTx, header *types.Header, rules *chain.Rules, msg *types.Message, txIndex int, txNum uint64) (*protocol.GasPool, error) {
+	gas := msg.Gas()
+	if protocol.TakesGasFromBlock(msg) && !rules.IsAmsterdam {
+		var gasBefore uint64
+		// Before the first transaction the receipt domain still holds the previous block's gas.
+		if txIndex > 0 {
+			var ok bool
+			var err error
+			if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum, txIndex); err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("block %d: no receipt for the gas used before tx %d", header.Number.Uint64(), txIndex)
+			}
+		}
+		gas = header.GasLimit - min(header.GasLimit, gasBefore)
+	}
+	return new(protocol.GasPool).AddGas(gas).AddBlobGas(msg.BlobGas()), nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter. As in

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol/da"
 )
 
-var testSyncCtx = SyncTxContext{ChainID: 1, RollupID: 1}
+var testSyncCtx = SyncTxContext{ChainID: 1, RollupID: 1, EEZL2: EEZL2Address}
 
 // TestSyncPairsGolden rebuilds the reference client's golden inbound system
 // transaction, built there at system nonce 7.

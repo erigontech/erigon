@@ -128,3 +128,58 @@ func ResumeTxs(localHash, settled common.Hash, existing, newContent [][]byte) ([
 	}
 	return append(slices.Clone(base), newContent...), true
 }
+
+// ErrResume reports a resumed settlement whose Sync block is neither the
+// one it starts from nor the one it settles.
+var ErrResume = errors.New("resumed Sync block matches neither the entry nor the settled state")
+
+// ResumeNativeTxs is ResumeTxs under rollupX v0.1, where the gas limit of a
+// native transaction depends on its position. The local block is the
+// settled one when it ends with newContent, gas limits aside; otherwise it
+// must be the block the settlement starts from, and newContent is appended
+// to it.
+func ResumeNativeTxs(localHash common.Hash, s *protocol.Settlement, existing, newContent [][]byte) ([][]byte, bool, error) {
+	if len(newContent) > 0 && localHash == s.FinalState {
+		start := len(existing) - len(newContent)
+		if start < 0 {
+			return nil, false, fmt.Errorf("%w: settled suffix of %d transactions in a block of %d", ErrResume, len(newContent), len(existing))
+		}
+		for i, tx := range newContent {
+			same, err := sameUpToGas(existing[start+i], tx)
+			if err != nil {
+				return nil, false, err
+			}
+			if !same {
+				return nil, false, fmt.Errorf("%w: settled suffix transaction %d differs", ErrResume, i)
+			}
+		}
+		return nil, false, nil
+	}
+	if localHash != s.EntryState {
+		return nil, false, fmt.Errorf("%w: local %x, entry %x, settled %x", ErrResume, localHash, s.EntryState, s.FinalState)
+	}
+	return append(slices.Clone(existing), newContent...), true, nil
+}
+
+// sameUpToGas reports whether a and b encode the same transaction, the gas
+// limits of native transactions aside.
+func sameUpToGas(a, b []byte) (bool, error) {
+	if bytes.Equal(a, b) {
+		return true, nil
+	}
+	if len(a) == 0 || len(b) == 0 || a[0] != protocol.NativeTxType || b[0] != protocol.NativeTxType {
+		return false, nil
+	}
+	x, err := protocol.DecodeNativeTx(a)
+	if err != nil {
+		return false, err
+	}
+	y, err := protocol.DecodeNativeTx(b)
+	if err != nil {
+		return false, err
+	}
+	x.GasLimit, y.GasLimit = 0, 0
+	ex, _ := x.MarshalBinary()
+	ey, _ := y.MarshalBinary()
+	return bytes.Equal(ex, ey), nil
+}

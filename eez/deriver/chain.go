@@ -56,6 +56,9 @@ type Chain interface {
 	// Nonce returns the nonce of addr in the state after canonical block
 	// number.
 	Nonce(ctx context.Context, number uint64, addr common.Address) (uint64, error)
+	// Storage returns the value of slot of addr in the state after
+	// canonical block number.
+	Storage(ctx context.Context, number uint64, addr common.Address, slot common.Hash) (common.Hash, error)
 	// Receipts returns the receipts of a canonical block.
 	Receipts(ctx context.Context, block *types.Block) (types.Receipts, error)
 	// Extend builds the block of exactly txs on parent with header inputs in,
@@ -66,6 +69,9 @@ type Chain interface {
 	Insert(ctx context.Context, blocks []*types.Block) error
 	// ForkChoice sets the head, safe and finalized blocks.
 	ForkChoice(ctx context.Context, head, safe, finalized common.Hash) error
+	// Finalized returns the finalized block of the last fork choice, the
+	// zero hash before any.
+	Finalized(ctx context.Context) (common.Hash, error)
 }
 
 // ExecChain is the Chain of an execution module that derivation drives
@@ -121,6 +127,14 @@ func (c *ExecChain) Head(ctx context.Context) (h *types.Header, err error) {
 	return h, err
 }
 
+func (c *ExecChain) Finalized(ctx context.Context) (hash common.Hash, err error) {
+	err = c.db.View(ctx, func(tx kv.Tx) error {
+		hash = rawdb.ReadForkchoiceFinalized(tx)
+		return nil
+	})
+	return hash, err
+}
+
 func (c *ExecChain) HeaderByNumber(ctx context.Context, number uint64) (h *types.Header, err error) {
 	err = c.db.View(ctx, func(tx kv.Tx) error {
 		h, err = c.reader.HeaderByNumber(ctx, tx, number)
@@ -146,7 +160,8 @@ func (c *ExecChain) Nonce(ctx context.Context, number uint64, addr common.Addres
 		if number > executed {
 			return fmt.Errorf("state after block %d: executed up to %d", number, executed)
 		}
-		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, 0, c.reader.TxnumReader())
+		// -1: before the next block's opening system calls.
+		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, -1, c.reader.TxnumReader())
 		if err != nil {
 			return err
 		}
@@ -158,6 +173,27 @@ func (c *ExecChain) Nonce(ctx context.Context, number uint64, addr common.Addres
 		return nil
 	})
 	return nonce, err
+}
+
+func (c *ExecChain) Storage(ctx context.Context, number uint64, addr common.Address, slot common.Hash) (value common.Hash, err error) {
+	err = c.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		executed, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if number > executed {
+			return fmt.Errorf("state after block %d: executed up to %d", number, executed)
+		}
+		// -1: before the next block's opening system calls.
+		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, number == executed, -1, c.reader.TxnumReader())
+		if err != nil {
+			return err
+		}
+		v, _, err := r.ReadAccountStorage(accounts.InternAddress(addr), accounts.InternKey(slot))
+		value = v.Bytes32()
+		return err
+	})
+	return value, err
 }
 
 func (c *ExecChain) Receipts(ctx context.Context, block *types.Block) (rs types.Receipts, err error) {
@@ -189,6 +225,7 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 		ParentHash:            parent.Hash(),
 		Timestamp:             in.Time,
 		SuggestedFeeRecipient: in.Coinbase,
+		PrevRandao:            in.MixDigest,
 		TargetGasLimit:        &gasLimit,
 		ExtraData:             extra,
 		CustomTxnProvider:     staticTxns(txs),
@@ -200,27 +237,10 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	if c.config.IsCancun(in.Time) {
 		params.ParentBeaconBlockRoot = &common.Hash{}
 	}
-	id, err := retryBusy(ctx, func() (uint64, bool, error) {
-		r, err := c.exec.AssembleBlock(ctx, params)
-		return r.PayloadID, r.Busy, err
-	})
+	// Assembly binds a native transaction's gas limit to its position.
+	built, err := c.assemble(ctx, in.Number, params)
 	if err != nil {
-		return nil, fmt.Errorf("assemble block %d: %w", in.Number, err)
-	}
-	built, err := retryBusy(ctx, func() (*types.BlockWithReceipts, bool, error) {
-		r, err := c.exec.GetAssembledBlock(ctx, id)
-		if err == nil && r.Unknown {
-			err = errors.New("payload dropped")
-		}
-		return r.Block, r.Busy, err
-	})
-	switch {
-	case errors.Is(err, exec.ErrTxnNotIncluded):
-		return nil, fmt.Errorf("%w: block %d: %w", ErrRejected, in.Number, err)
-	case err != nil:
-		return nil, fmt.Errorf("assemble block %d: %w", in.Number, err)
-	case built == nil:
-		return nil, fmt.Errorf("assemble block %d: no block", in.Number)
+		return nil, err
 	}
 	block := built.Block
 	if !in.Matches(block.Header()) {
@@ -250,6 +270,32 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	}
 	if err := c.ForkChoice(ctx, block.Hash(), safe, finalized); err != nil {
 		return nil, err
+	}
+	return built, nil
+}
+
+func (c *ExecChain) assemble(ctx context.Context, number uint64, params *builder.Parameters) (*types.BlockWithReceipts, error) {
+	id, err := retryBusy(ctx, func() (uint64, bool, error) {
+		r, err := c.exec.AssembleBlock(ctx, params)
+		return r.PayloadID, r.Busy, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("assemble block %d: %w", number, err)
+	}
+	built, err := retryBusy(ctx, func() (*types.BlockWithReceipts, bool, error) {
+		r, err := c.exec.GetAssembledBlock(ctx, id)
+		if err == nil && r.Unknown {
+			err = errors.New("payload dropped")
+		}
+		return r.Block, r.Busy, err
+	})
+	switch {
+	case errors.Is(err, exec.ErrTxnNotIncluded):
+		return nil, fmt.Errorf("%w: block %d: %w", ErrRejected, number, err)
+	case err != nil:
+		return nil, fmt.Errorf("assemble block %d: %w", number, err)
+	case built == nil:
+		return nil, fmt.Errorf("assemble block %d: no block", number)
 	}
 	return built, nil
 }

@@ -20,6 +20,8 @@
 package protocol
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -32,6 +34,49 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+// PostProcessTx runs the per-transaction rule of engine, when it has one,
+// after txs[i] executed on ibs.
+func PostProcessTx(engine rules.EngineReader, config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error {
+	p, ok := engine.(rules.TxPostProcessor)
+	if !ok {
+		return nil
+	}
+	return p.PostProcessTx(config, ibs, txs, i)
+}
+
+// TxPostProcess returns PostProcessTx of txs[i] for the postProcess argument
+// of the Apply*PostProcessed functions, nil when engine has no rule.
+func TxPostProcess(engine rules.EngineReader, config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) func() error {
+	p, ok := engine.(rules.TxPostProcessor)
+	if !ok {
+		return nil
+	}
+	return func() error { return p.PostProcessTx(config, ibs, txs, i) }
+}
+
+// BindTxGas returns txn with the gas limit engine binds it to when gp is its
+// block's pool before it.
+func BindTxGas(engine rules.EngineReader, isAmsterdam bool, txn types.Transaction, gp *GasPool) (types.Transaction, error) {
+	b, ok := engine.(rules.TxGasBinder)
+	if !ok {
+		return txn, nil
+	}
+	return b.BindTxGas(txn, MaxInclusionGas(gp, isAmsterdam, false))
+}
+
+// CheckTxGas checks that txn has the gas limit engine binds it to when gp is
+// its block's pool before it.
+func CheckTxGas(engine rules.EngineReader, isAmsterdam bool, txn types.Transaction, gp *GasPool) error {
+	bound, err := BindTxGas(engine, isAmsterdam, txn, gp)
+	if err != nil {
+		return err
+	}
+	if have, want := txn.GetGasLimit(), bound.GetGasLimit(); have != want {
+		return fmt.Errorf("%w: %d, want %d", ErrGasLimitPosition, have, want)
+	}
+	return nil
+}
 
 type GasUsed struct {
 	Receipt        uint64 // Gas used with refunds (what the user pays) - see EIP-7778
@@ -63,10 +108,11 @@ func SetGasUsed(h *types.Header, gu *GasUsed) {
 // applyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
-// indicating the block was invalid.
+// indicating the block was invalid. A non-nil postProcess runs on the state the
+// transaction left, before its finalization.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
-	evm *vm.EVM, cfg vm.Config,
+	evm *vm.EVM, cfg vm.Config, postProcess func() error,
 ) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
@@ -105,6 +151,12 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
+	if postProcess != nil {
+		err = postProcess()
+		if err != nil {
+			return nil, err
+		}
+	}
 	err = ibs.FinalizeTx(rules, stateWriter)
 	if err != nil {
 		return nil, err
@@ -130,11 +182,21 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common
 	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed *GasUsed, cfg vm.Config,
 ) (*types.Receipt, error) {
+	return ApplyTransactionPostProcessed(config, blockHashFunc, engine, author, gp, ibs, stateWriter, header, txn, gasUsed, cfg, nil)
+}
+
+// ApplyTransactionPostProcessed is ApplyTransaction with postProcess run on the
+// state txn left, before its finalization: finalized, a versioned state answers
+// a read with what the transaction read, not what it wrote.
+func ApplyTransactionPostProcessed(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
+	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
+	header *types.Header, txn types.Transaction, gasUsed *GasUsed, cfg vm.Config, postProcess func() error,
+) (*types.Receipt, error) {
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, postProcess)
 }
 
 func CreateEVM(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader, author accounts.Address, ibs *state.IntraBlockState, header *types.Header, cfg vm.Config) *vm.EVM {
@@ -148,7 +210,17 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
 	cfg vm.Config, vmenv *vm.EVM,
 ) (*types.Receipt, error) {
-	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg)
+	return ApplyTransactionWithEVMPostProcessed(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, cfg, vmenv, nil)
+}
+
+// ApplyTransactionWithEVMPostProcessed is ApplyTransactionWithEVM with
+// postProcess run on the state txn left, before its finalization.
+func ApplyTransactionWithEVMPostProcessed(config *chain.Config, engine rules.EngineReader, gp *GasPool,
+	ibs *state.IntraBlockState,
+	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
+	cfg vm.Config, vmenv *vm.EVM, postProcess func() error,
+) (*types.Receipt, error) {
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, gasUsed, vmenv, cfg, postProcess)
 }
 
 func MakeReceipt(

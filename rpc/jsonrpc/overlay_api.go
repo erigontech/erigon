@@ -186,9 +186,8 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := evm.ChainRules()
 
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
-	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	// A message taking its gas from the block gets what the transactions before it left.
+	gp := protocol.NewGasPool(header.GasLimit, chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	for idx, txn := range replayTransactions {
 		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -200,6 +199,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		// Execute the transaction message
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
+			return nil, err
+		}
+		if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, block.Transactions(), idx); err != nil {
 			return nil, err
 		}
 		_ = statedb.FinalizeTx(rules, state.NewNoopWriter())
@@ -227,7 +229,8 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
-	// Execute the transaction message
+	// The replacement constructor runs unmetered.
+	gp.Reset(math.MaxUint64, math.MaxUint64)
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
 		return nil, ct.err
@@ -498,15 +501,22 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 			contractCreation := msg.To().IsNil()
 			if !contractCreation {
-				// bump the nonce of the sender
-				sender := vm.AccountRef(msg.From())
-				nonce, err := statedb.GetNonce(sender.Address())
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
+				if !types.TxTypeNonceless(txn.Type()) {
+					// bump the nonce of the sender
+					sender := vm.AccountRef(msg.From())
+					nonce, err := statedb.GetNonce(sender.Address())
+					if err != nil {
+						log.Error(err.Error())
+						return nil, err
+					}
+					err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
+					if err != nil {
+						log.Error(err.Error())
+						return nil, err
+					}
 				}
-				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
-				if err != nil {
+				// Block execution post-processed the failed transaction too.
+				if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, replayTransactions, idx); err != nil {
 					log.Error(err.Error())
 					return nil, err
 				}
@@ -521,6 +531,10 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		// Execute the transaction message
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 		if err != nil {
+			log.Error(err.Error())
+			return nil, err
+		}
+		if err := protocol.PostProcessTx(api.engine(), chainConfig, statedb, replayTransactions, idx); err != nil {
 			log.Error(err.Error())
 			return nil, err
 		}

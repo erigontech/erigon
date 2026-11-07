@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -37,19 +38,26 @@ import (
 )
 
 // TestTxpoolRefuses is the txpool part of 1.11: the pool's own parser,
-// used for RPC submissions and gossip, does not know type 0x76.
+// used for RPC submissions and gossip, knows none of the system types.
 func TestTxpoolRefuses(t *testing.T) {
-	enc := common.FromHex(minimalSystemTx)
-	wrapped, err := rlp.EncodeToBytes(enc)
-	require.NoError(t, err)
-
-	parser := txpool.NewTxnParseContext(*mustNew(t, protocol.SystemTx{ChainID: 1, To: protocol.EEZL2Address}).GetChainID())
 	for _, tc := range []struct {
-		payload     []byte
-		hasEnvelope bool
-	}{{enc, false}, {wrapped, true}} {
-		_, err := parser.ParseTransaction(tc.payload, 0, &txpool.TxnSlot{}, make([]byte, 20), tc.hasEnvelope, false, nil)
-		require.ErrorContains(t, err, "unknown transaction type")
+		chainID uint64
+		enc     []byte
+	}{
+		{1, common.FromHex(minimalSystemTx)},
+		{901, nativeVector(t, "native-source-base").ExpectedBytes},
+		{901, nativeVector(t, "native-history-advance").ExpectedBytes},
+	} {
+		wrapped, err := rlp.EncodeToBytes(tc.enc)
+		require.NoError(t, err)
+		parser := txpool.NewTxnParseContext(*uint256.NewInt(tc.chainID))
+		for _, p := range []struct {
+			payload     []byte
+			hasEnvelope bool
+		}{{tc.enc, false}, {wrapped, true}} {
+			_, err := parser.ParseTransaction(p.payload, 0, &txpool.TxnSlot{}, make([]byte, 20), p.hasEnvelope, false, nil)
+			require.ErrorContains(t, err, "unknown transaction type")
+		}
 	}
 }
 

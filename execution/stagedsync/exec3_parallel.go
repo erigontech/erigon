@@ -1100,7 +1100,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec); err != nil {
+			if err := pe.processRequest(ctx, applyTx, exec); err != nil {
 				return err
 			}
 			continue
@@ -1296,7 +1296,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 	return applyTx, nil
 }
 
-func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
+func (pe *parallelExecutor) processRequest(ctx context.Context, applyTx kv.TemporalTx, execRequest *execRequest) (err error) {
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
@@ -1316,6 +1316,10 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
+				// The view finalizeValidatedTx reads the first receipt's offsets from.
+				if executor.lacksPriorGas, err = pe.restorePriorGas(ctx, applyTx, executor.gasPool, txTask); err != nil {
+					return err
+				}
 				// Set the coinbase once, before any worker runs, so self-loop workers
 				// can read it during validation without racing the exec loop.
 				if h := txTask.BlockHeader(); h != nil {
@@ -2869,6 +2873,9 @@ type blockExecutor struct {
 	blockGasUsed          uint64
 	blobGasUsed           uint64
 	gasPool               *protocol.GasPool
+	// lacksPriorGas is set when gasPool lacks the gas of the transactions before
+	// tasks[0], which an earlier run executed.
+	lacksPriorGas bool
 
 	execFailed []int
 
@@ -3127,7 +3134,11 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	}
 
 	if txn := txTask.Tx(); txn != nil {
-		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
+		gas := txn.GetGasLimit()
+		if chainTx, ok := txTask.(*exec.TxTask); ok {
+			gas = chainTx.InclusionGas()
+		}
+		regularContribution, stateContribution := protocol.InclusionContributions(gas, txTask.Rules().IsAmsterdam, false)
 		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution, txn.GetBlobGas()); err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 		}
@@ -3251,6 +3262,24 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
+			if chainTx, ok := txTask.(*exec.TxTask); ok && be.gasPool != nil {
+				if !be.lacksPriorGas {
+					if err := protocol.CheckTxGas(pe.cfg.engine, chainTx.Rules().IsAmsterdam, chainTx.Tx(), be.gasPool); err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w: block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+					}
+				}
+				// A message that takes its gas from the block ran with the
+				// block limit; it re-runs with what the block has left.
+				stale, err := chainTx.BindBlockGas(be.gasPool)
+				if err != nil {
+					return nil, err
+				}
+				if stale {
+					be.validateTasks.clearComplete(tx)
+					be.signalSelfLoopReexec(tx)
+					break
+				}
+			}
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
@@ -3290,6 +3319,11 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.versionMap.FlushVersionedWrites(tipWrites, false, "")
 				be.markReadersDirty(tx, tipWrites)
 			}
+			if p, ok := pe.cfg.engine.(rules.TxPostProcessor); ok {
+				if err := be.postProcessTx(p, tx, txTask, txVersion, *stateReader); err != nil {
+					return nil, err
+				}
+			}
 		}
 		be.coinbaseFlushedUpTo = tx
 		// Promote the whole tx Estimate->Done and seal in one step. Done is granted
@@ -3307,6 +3341,65 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		be.signalCommitted(tx)
 	}
 	return nil, nil
+}
+
+// postProcessTx runs p on the state the transaction at tx left once its
+// deferred fees are in, as serial execution does, and records p's writes.
+func (be *blockExecutor) postProcessTx(p rules.TxPostProcessor, tx int, task exec.Task, version state.Version, stateReader state.StateReader) error {
+	txTask, ok := task.(*exec.TxTask)
+	if !ok {
+		return nil
+	}
+	// One index past the transaction its writes and fees are visible, also to the
+	// EIP-161 check of an account p empties. That floor is the reader's alone: on a
+	// private map p's writes stay at the transaction's index.
+	ibs := state.NewWithVersionMap(state.NewVersionedStateReader(version.TxIndex+1, state.ReadSet{}, be.versionMap, stateReader), state.NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(version.BlockNum, version.TxIndex)
+	// One value per version: at the next incarnation a reader of the
+	// transaction's validated cells fails validation against p's.
+	ibs.SetVersion(version.Incarnation + 1)
+	if err := p.PostProcessTx(txTask.Config, ibs, txTask.Txs, txTask.TxIndex); err != nil {
+		return err
+	}
+	writes, err := ibs.FinalizedWrites(txTask.Rules())
+	if err != nil || writes.IsEmpty() {
+		return err
+	}
+	// Serial execution reads a balance before p replaces it; the block access
+	// list needs that read to tell a balance spent to zero from a no-op touch.
+	reads := be.blockIO.ReadSet(version.TxIndex)
+	before := state.NewVersionedStateReader(version.TxIndex, state.ReadSet{}, be.versionMap, stateReader)
+	for addr := range writes.Balances() {
+		if _, ok := reads.GetBalance(addr); ok {
+			continue
+		}
+		acc, err := before.ReadAccountData(addr)
+		if err != nil {
+			return err
+		}
+		var balance uint256.Int
+		if acc != nil {
+			balance = acc.Balance
+		}
+		reads.SetBalance(addr, state.VersionedRead[uint256.Int]{ReadHeader: state.ReadHeader{Source: state.StorageRead}, Val: balance})
+	}
+	be.blockIO.RecordReads(version, reads)
+	// An account p removes keeps none of the transaction's other writes.
+	removed := func(h state.WriteHeader) bool {
+		sd, ok := writes.GetSelfDestruct(h.Address)
+		return ok && sd.Val && !writes.Has(h)
+	}
+	prev := be.blockIO.WriteSet(version.TxIndex)
+	dropped := prev.Filter(removed)
+	for h := range dropped.AllHeaders() {
+		be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, false)
+	}
+	be.blockIO.RecordWrites(version, prev.Filter(func(h state.WriteHeader) bool { return !removed(h) }).Merge(writes))
+	be.versionMap.FlushVersionedWrites(writes, false, "")
+	be.markReadersDirty(tx, writes)
+	be.markReadersDirty(tx, dropped)
+	return nil
 }
 
 // signalCommitted advances the commit frontier to tx and wakes exactly the tasks
