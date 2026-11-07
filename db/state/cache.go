@@ -28,7 +28,7 @@ type DomainGetFromFileCache struct {
 
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl uint8
+	lvl uint16
 	v   []byte
 }
 
