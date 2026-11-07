@@ -2,6 +2,7 @@
 
 ### Breaking Changes
 
+- engine: REST-SSZ clients must migrate from the v3.8 draft API to the routes and wire formats in [execution-apis#793](https://github.com/ethereum/execution-apis/pull/793). Fork-scoped requests now use `/engine/v1/...` with the required `Eth-Execution-Version` header. Blob requests use `POST /engine/v1/blobs/v1` through `/engine/v1/blobs/v4`, replacing `/engine/v{1..3}/blobs`. Capabilities change from `POST` to `GET /engine/v1/capabilities`, returning a JSON object with supported forks, endpoint groups and request limits instead of an SSZ list. `engine_exchangeCapabilities` no longer advertises REST endpoints. Client identity moves from `POST /engine/v1/client/version` to `GET /engine/v1/identity`, and errors use `application/problem+json` (#21729) — by @yperbasis
 - cli: removed the `--vmdebug` flag. Nothing read it, so it had no effect. Remove it from startup arguments and configuration files, or startup will fail (#25788) — by @awskii
 - cli: removed the experimental `--aa` flag and `aa` configuration key. Remove them from startup arguments and configuration files, including `aa: false`, or startup will fail. EIP-8141 frame transactions replace RIP-7560 account abstraction and activate at the chain's Bogota fork (#25243).
 - rpc, txpool: the private ETHBACKEND API is now version 5.0.0, replacing `AAValidation` with `FrameValidation`. Upgrade standalone `rpcdaemon` and `txpool` together with `erigon` (#25243).
@@ -10,6 +11,11 @@
 - rpc: `vmTrace` operations no longer carry the Erigon-only `idx` member, a `<transaction>-<operation>-...` path string; before Amsterdam and outside `--trace.compat` each operation now has exactly `pc`, `cost`, `op`, `ex` and `sub`. The operation part of the path follows from each operation's position in `ops` and its nesting under `sub`; the transaction part is the envelope's position in a block replay. This can be a breaking change (#25030) — by @banteg
 - rpc: `trace_call` and `trace_callMany` now return `-32001` "block not found" instead of `-32000` for a block number past the head or a block hash that names no known block, as `trace_block` and `trace_replayBlockTransactions` do. A `safe` or `finalized` tag the node cannot resolve yet now returns `-32001` instead of `-39001` in `trace_block`, `trace_replayBlockTransactions`, `trace_call`, `trace_callMany` and the `trace_filter` bounds. This can be a breaking change for clients that match on the error code (#25030) — by @banteg
 - db: the `chaindata` log and trace indices now store txNums in chunks: these tables are 2-6x smaller and `eth_getLogs` over recent blocks is about 10x faster. Existing datadirs need no migration, but the DB schema version becomes 7.1, so older Erigon versions and an older local `rpcdaemon --datadir` refuse the datadir. To downgrade, remove `chaindata/`. Upgrade a local `rpcdaemon` together with `erigon`. This can be a breaking change (#25304) — by @AskAlexSharov
+- rpc: `--rpc.batch.limit` now applies to the authenticated Engine port too; before, batches there had no size limit. A client that sends Engine batches with more requests than the limit (default 100) now gets a batch-limit error. This can be a breaking change (#25872) — by @lupin012
+
+### Added
+
+- engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729) — by @yperbasis
 
 ### Changed
 
