@@ -410,9 +410,6 @@ func (btx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if btx.BlobVersionedHashes, err = decodeHashListTo(s, nil); err != nil {
 		return fmt.Errorf("read BlobVersionedHashes: %w", err)
 	}
-	if len(btx.BlobVersionedHashes) == 0 {
-		return errors.New("a blob stx must contain at least one blob")
-	}
 	// decode V
 	if err := s.ReadUint256(&btx.V); err != nil {
 		return err
