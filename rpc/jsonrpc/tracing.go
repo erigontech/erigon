@@ -305,7 +305,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	var gasBefore uint64
 	if txnIndex > 0 && !rules.IsAmsterdam && protocol.TakesGasFromBlock(msg) {
 		var ok bool
-		if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum); err != nil {
+		if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum, txnIndex); err != nil {
 			return err
 		}
 		if !ok {

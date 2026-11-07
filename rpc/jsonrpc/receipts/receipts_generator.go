@@ -428,7 +428,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				return nil, err
 			}
 			if protocol.TakesGasFromBlock(msg) {
-				gasBefore, _, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, txNum)
+				gasBefore, _, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, txNum, index)
 				if err != nil {
 					return nil, err
 				}

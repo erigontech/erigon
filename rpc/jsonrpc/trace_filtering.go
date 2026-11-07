@@ -1121,7 +1121,7 @@ func replayGasPool(tx kv.TemporalTx, header *types.Header, rules *chain.Rules, m
 		if txIndex > 0 {
 			var ok bool
 			var err error
-			if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum); err != nil {
+			if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum, txIndex); err != nil {
 				return nil, err
 			}
 			if !ok {

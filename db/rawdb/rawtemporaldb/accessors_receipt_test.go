@@ -197,21 +197,45 @@ func TestReceiptGasAsOf(t *testing.T) {
 	require.NoError(doms.Flush(t.Context(), tx))
 
 	for _, tc := range []struct {
-		txNum, gas, blobGas uint64
-		ok                  bool
+		txNum        uint64
+		txIndex      int
+		gas, blobGas uint64
+		ok           bool
 	}{
-		{0, 0, 0, false},
-		{1, 0, 0, false},
-		{2, 10, 0, true},
-		{3, 30, 5, true},
-		{6, 0, 0, false},
+		{0, -1, 0, 0, false},
+		{1, 0, 0, 0, false},
+		{2, 1, 10, 0, true},
+		{3, 2, 30, 5, true}, // block1's end, indexed after its txns
+		{6, 1, 0, 0, false},
 	} {
-		gas, blobGas, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, tc.txNum)
+		gas, blobGas, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, tc.txNum, tc.txIndex)
 		require.NoError(err)
 		require.Equal(tc.ok, ok, "txNum %d", tc.txNum)
 		require.Equal(tc.gas, gas, "txNum %d", tc.txNum)
 		require.Equal(tc.blobGas, blobGas, "txNum %d", tc.txNum)
 	}
+}
+
+// TestReceiptGasAsOfFirstTxn checks that no gas is read before a block's first
+// txn, where the domain holds the previous block's.
+func TestReceiptGasAsOfFirstTxn(t *testing.T) {
+	dirs, require := datadir.New(t.TempDir()), require.New(t)
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+	// block1: txn0 at txNum 1; block2: txn0 at txNum 4.
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 10, 0, 1))
+	require.NoError(rawtemporaldb.AppendReceiptMetadata(doms.AsPutDel(tx), 0, 20, 0, 4))
+	require.NoError(doms.Flush(t.Context(), tx))
+
+	_, _, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, 4, 0)
+	require.NoError(err)
+	require.False(ok)
 }
 
 // TestReceiptGasAsOfOverlay checks that the gas before a txn is read through
@@ -241,36 +265,45 @@ func TestReceiptGasAsOfOverlay(t *testing.T) {
 	require.NoError(doms.InitBlockOverlay(tx))
 	overlay := doms.BlockOverlayTemporalTx(tx)
 
-	// block3: txn0 at txNum 8, not executed, and txn1 at txNum 9, whose gas the
-	// batch would answer with txn1 of block2's.
+	// txNum 6 is block2's end, indexed after its txns. block3: txn0 at txNum 8,
+	// not executed, and txn1 at txNum 9, whose gas the batch would answer with
+	// txn1 of block2's.
 	for _, tc := range []struct {
-		txNum, gas uint64
-		ok         bool
-	}{{5, 20, true}, {6, 30, true}, {9, 0, false}} {
-		gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, tc.txNum)
+		txNum   uint64
+		txIndex int
+		gas     uint64
+		ok      bool
+	}{{5, 1, 20, true}, {6, 2, 30, true}, {9, 1, 0, false}} {
+		gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, tc.txNum, tc.txIndex)
 		require.NoError(err)
 		require.Equal(tc.ok, ok, "txNum %d", tc.txNum)
 		require.Equal(tc.gas, gas, "txNum %d", tc.txNum)
 
-		_, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, tc.txNum)
+		_, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, tc.txNum, tc.txIndex)
 		require.NoError(err)
 		require.False(ok, "txNum %d without the overlay", tc.txNum)
 	}
 }
 
 // TestReceiptGasAsOfLostRecord checks that the gas is reported missing where the
-// record of txNum-1 is lost and the one before it is not, or a later one is not.
+// record of txNum-1 is lost, whether the domain ends before it or later records
+// survive it.
 func TestReceiptGasAsOfLostRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		flushed, batch [][2]uint64 // txNum, cumulative gas
 		txNum          uint64
+		txIndex        int
 	}{
 		// block2 spans txNums 3 to 8; the overlay holds its txn0 at 4, not its
 		// txn1 at 5, before txn2 at 6.
-		{"overlay one txn behind", [][2]uint64{{1, 10}}, [][2]uint64{{4, 20}}, 6},
+		{"overlay one txn behind", [][2]uint64{{1, 10}}, [][2]uint64{{4, 20}}, 6, 2},
 		// block2: txn0 at 4 and txn1 at 5 lost, txn2 at 6 and txn3 at 7 flushed.
-		{"flushed past lost receipts", [][2]uint64{{1, 10}, {6, 90}, {7, 120}}, nil, 5},
+		{"flushed past lost receipts", [][2]uint64{{1, 10}, {6, 90}, {7, 120}}, nil, 5, 1},
+		{"first flushed receipt past lost ones", [][2]uint64{{1, 10}, {6, 90}, {7, 120}}, nil, 6, 2},
+		// As the custom trace stage writes it, with zero at each block's start and
+		// end: block1 spans 0 to 2; block2 spans 3 to 6, its txn0 at 4 lost.
+		{"custom trace receipts past a lost txn0", [][2]uint64{{0, 0}, {1, 10}, {2, 0}, {5, 60}, {6, 0}}, nil, 5, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs, require := datadir.New(t.TempDir()), require.New(t)
@@ -300,7 +333,7 @@ func TestReceiptGasAsOfLostRecord(t *testing.T) {
 				reader = doms.BlockOverlayTemporalTx(tx)
 			}
 
-			_, _, ok, err := rawtemporaldb.ReceiptGasAsOf(reader, tc.txNum)
+			_, _, ok, err := rawtemporaldb.ReceiptGasAsOf(reader, tc.txNum, tc.txIndex)
 			require.NoError(err)
 			require.False(ok)
 		})
@@ -335,11 +368,11 @@ func TestReceiptGasAsOfOverlayResumedBlock(t *testing.T) {
 	require.NoError(doms.InitBlockOverlay(tx))
 	overlay := doms.BlockOverlayTemporalTx(tx)
 
-	_, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, 5)
+	_, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, 5, 1)
 	require.NoError(err)
 	require.False(ok)
 
-	gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, 6)
+	gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(overlay, 6, 2)
 	require.NoError(err)
 	require.True(ok)
 	require.Equal(uint64(60), gas)
@@ -384,7 +417,7 @@ func TestReceiptGasAsOfUnchangedFirstTxn(t *testing.T) {
 				require.NoError(doms.Flush(t.Context(), tx))
 			}
 
-			gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(reader, 5)
+			gas, _, ok, err := rawtemporaldb.ReceiptGasAsOf(reader, 5, 1)
 			require.NoError(err)
 			require.Equal(tc.second, ok)
 			if tc.second {

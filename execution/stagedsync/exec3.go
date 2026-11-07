@@ -609,7 +609,7 @@ func (te *txExecutor) restorePriorGas(ctx context.Context, tx kv.TemporalTx, gp 
 	if te.cfg.chainConfig.IsAmsterdam(first.BlockTime()) {
 		return true, nil
 	}
-	gasUsed, blobGasUsed, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, first.TxNum)
+	gasUsed, blobGasUsed, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, first.TxNum, first.TxIndex)
 	if err != nil {
 		return false, err
 	}

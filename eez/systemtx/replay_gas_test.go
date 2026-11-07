@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
@@ -445,6 +446,64 @@ func TestReplayGasFromBlockLaggingReceipts(t *testing.T) {
 			require.Equal(t, want, gas+params.TxGas)
 		})
 	}
+}
+
+// TestReplayGasFromBlockUnchangedFirstTxn checks that a replay runs a type-0x76
+// transaction second in its block with what the first left, where the first left
+// the cumulative gas of the block before unchanged, so unrecorded.
+func TestReplayGasFromBlockUnchangedFirstTxn(t *testing.T) {
+	m, l2, first := systemTxAfter(t, refunder, nil)
+	execChain := deriver.NewExecChain(m.ExecModule, m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig)
+	chainID := m.ChainConfig.ChainID
+	eezl2 := protocol.RollupXEEZL2Address
+	// EEZL2 burns all it gets, so each block's first transaction uses its limit
+	// and leaves a type-0x76 transaction after it less than its own.
+	burn := l2.BlockGasLimit - first.Block.Transactions()[1].GetGasLimit() + 1_000_000
+	burner := func(nonce uint64) types.Transaction {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: burn, To: &eezl2},
+			ChainID:  *chainID,
+			FeeCap:   *uint256.NewInt(100 * common.GWei),
+		}, *types.LatestSignerForChainID(chainID), derivertest.UserKey)
+		require.NoError(t, err)
+		return txn
+	}
+	extend := func(parent *types.Header, txs ...types.Transaction) *types.BlockWithReceipts {
+		b, err := execChain.Extend(t.Context(), parent, deriver.HeaderInputs{
+			Number:     parent.Number.Uint64() + 1,
+			ParentHash: parent.Hash(),
+			Time:       parent.Time + l2.BlockInterval,
+			Extra:      []byte{},
+			GasLimit:   l2.BlockGasLimit,
+		}, txs, common.Hash{}, common.Hash{})
+		require.NoError(t, err)
+		return b
+	}
+	second := extend(first.Block.HeaderNoCopy(), burner(1))
+	nonce, err := execChain.Nonce(t.Context(), 2, protocol.SystemAddress)
+	require.NoError(t, err)
+	sys, err := systemtx.New(protocol.SystemTx{ChainID: chainID.Uint64(), Nonce: nonce, To: eezl2})
+	require.NoError(t, err)
+	third := extend(second.Block.HeaderNoCopy(), burner(2), sys)
+	require.Equal(t, second.Receipts[0].CumulativeGasUsed, third.Receipts[0].CumulativeGasUsed)
+	want := third.Receipts[1].GasUsed
+	require.Equal(t, l2.BlockGasLimit-burn, want)
+	require.Less(t, want, sys.GetGasLimit())
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		start, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, 3)
+		require.NoError(t, err)
+		before, _, err := tx.GetAsOf(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, start+1)
+		require.NoError(t, err)
+		after, _, err := tx.GetAsOf(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, start+2)
+		require.NoError(t, err)
+		require.Equal(t, before, after, "no record of block 3's first transaction")
+		return nil
+	}))
+
+	require.Equal(t, want, traceGasUsed(t, m, sys), "debug_traceTransaction")
+	require.Equal(t, want, generatedGasUsed(t, m, m.ChainConfig, third.Block, 1), "GetReceipt")
+	// It has no input: its intrinsic gas is params.TxGas.
+	requireTraceGas(t, m, third.Block, 1, want, params.TxGas)
 }
 
 // TestExecutionWitnessGasFromBlock checks that the witness of a block proves
