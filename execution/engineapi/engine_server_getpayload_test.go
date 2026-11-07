@@ -352,6 +352,7 @@ func (s *getPayloadStubModule) AddSendersRecovery(common.Hash, *exec.SendersReco
 func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
 	return s.getAssembledBlockFunc(ctx, payloadID)
 }
+
 func (s *getPayloadStubModule) CompletePayload(context.Context, uint64) error {
 	panic("not implemented")
 }
