@@ -25,6 +25,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -464,6 +465,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		}
 		bc := branchCacheOf(ttx)
 		flat := skipCachedPrefixes(bc, flatPrefixes(hashedKeys))
+		flat = capToFreeCache(flat)
 		before := pfPages.Load()
 		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flat); err != nil {
 			return
@@ -677,6 +679,51 @@ var prefetchFlatDepth = func() int {
 	}
 	return 8
 }()
+
+// pfFreeCacheDiv is a probe knob: PF_FREECACHE_DIV=N caps the flat trie prefetch at 1/N of the page cache the cgroup
+// leaves free (memory.max minus anon), counting two pages per prefix. Without a cgroup limit nothing is capped.
+var pfFreeCacheDiv = func() int64 { n, _ := strconv.Atoi(os.Getenv("PF_FREECACHE_DIV")); return int64(n) }()
+
+func capToFreeCache(prefixes [][]byte) [][]byte {
+	if pfFreeCacheDiv <= 0 {
+		return prefixes
+	}
+	free := freeCachePages()
+	if free < 0 {
+		return prefixes
+	}
+	if n := int(free / pfFreeCacheDiv / 2); n < len(prefixes) {
+		prefixes = sampleEvenly(prefixes, n)
+	}
+	if pfInfo {
+		log.Info("[warmBAL] trie prefetch free-cache cap", "freePages", free, "kept", len(prefixes))
+	}
+	return prefixes
+}
+
+// freeCachePages returns memory.max minus anon of this process's cgroup in 4 KiB pages, or -1 without a limit.
+func freeCachePages() int64 {
+	b, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	if err != nil {
+		return -1
+	}
+	limit, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	if err != nil {
+		return -1
+	}
+	st, err := os.ReadFile("/sys/fs/cgroup/memory.stat")
+	if err != nil {
+		return -1
+	}
+	var anon int64
+	for _, l := range strings.Split(string(st), "\n") {
+		if v, ok := strings.CutPrefix(l, "anon "); ok {
+			anon, _ = strconv.ParseInt(v, 10, 64)
+			break
+		}
+	}
+	return max(limit-anon, 0) / 4096
+}
 
 // pfSkipCached is a probe knob: PF_SKIP_CACHED=1 drops trie prefixes the branch cache already holds, so the batch
 // prefetch reads only branches the fold would miss.
