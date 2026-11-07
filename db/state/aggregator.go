@@ -138,6 +138,8 @@ type Aggregator struct {
 	savedSalt              *uint32
 	disableFsync           bool
 	commitmentRefsOverride *bool
+
+	closeFilesOnce sync.Once
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*Aggregator, error) {
@@ -720,7 +722,11 @@ func (a *Aggregator) WaitForFiles() {
 	}
 }
 
-func (a *Aggregator) Close() {
+// StopBackground cancels and joins the aggregator's own background goroutines,
+// releasing the DB read transactions they hold, but leaves the files open. It
+// lets an owner drain external file readers (via the DB's own read-tx drain)
+// between the two halves of shutdown. Idempotent; Close calls it.
+func (a *Aggregator) StopBackground() {
 	a.observerCancel()
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
@@ -734,7 +740,14 @@ func (a *Aggregator) Close() {
 	}
 	a.ctxCancel()
 	a.metricsCollector.Stop()
+}
 
+func (a *Aggregator) Close() {
+	a.StopBackground()
+	a.closeFilesOnce.Do(a.closeFilesOnShutdown)
+}
+
+func (a *Aggregator) closeFilesOnShutdown() {
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
 	// BranchCaches size their trunk depth against real concurrency.
