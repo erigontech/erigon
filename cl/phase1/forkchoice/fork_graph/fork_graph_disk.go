@@ -152,10 +152,12 @@ type forkGraphDisk struct {
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
-	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists   sync.Map // common.Hash -> struct{}
-	envelopeMissing  sync.Map // common.Hash -> struct{}
-	invalidEnvelopes sync.Map // common.Hash -> struct{}
+	// Envelope state is tracked in memory by beacon block root.
+	// Corrupt files in invalidEnvelopes can be replaced; rejectedEnvelopes blocks redelivery until pruning.
+	envelopeExists    sync.Map // common.Hash -> struct{}
+	envelopeMissing   sync.Map // common.Hash -> struct{}
+	invalidEnvelopes  sync.Map // common.Hash -> struct{}
+	rejectedEnvelopes sync.Map // common.Hash -> struct{}
 
 	// stateDumpLock guards the reusable state buffer and the key of the last state dump
 	stateDumpLock  sync.Mutex
@@ -899,6 +901,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.envelopeExists.Delete(root)
 			f.envelopeMissing.Delete(root)
 			f.invalidEnvelopes.Delete(root)
+			f.rejectedEnvelopes.Delete(root)
 			f.unavailablePayloads.Delete(root)
 			f.acceptedPayloads.Delete(root)
 			f.badBlocks.Delete(root)

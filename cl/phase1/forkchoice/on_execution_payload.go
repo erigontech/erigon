@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
@@ -37,18 +37,18 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
-// errELBehind is returned by validatePayloadWithEL when the EL cannot process
-// the payload because it hasn't caught up yet (e.g. parent block not available).
-// applyEnvelope treats this as non-fatal: it proceeds with persisting the envelope
-// and queues the execution block for later EL insertion.
+// errELBehind signals that the EL has not provided a payload verdict yet.
+// The envelope can still be persisted and queued for a later NewPayload attempt.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
 // ErrPayloadValidationInterrupted marks a NewPayload that ended with its context, waiting for
@@ -370,8 +370,7 @@ func (f *ForkChoiceStore) checkDataAvailability(
 	return nil
 }
 
-// validatePayloadWithEL validates the execution payload with the execution layer engine.
-// Called before ProcessExecutionPayloadEnvelope verification.
+// validatePayloadWithEL checks the payload with the EL after consensus envelope processing.
 func (f *ForkChoiceStore) validatePayloadWithEL(
 	ctx context.Context,
 	envelope *cltypes.ExecutionPayloadEnvelope,
@@ -382,27 +381,9 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		return execution_client.PayloadStatusNone, nil
 	}
 
-	// Get committed bid from the block (not from state, since state transition hasn't happened yet)
-	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
-	if committedBid == nil || committedBid.Message == nil {
-		return execution_client.PayloadStatusNone, errors.New("validatePayloadWithEL: block missing execution payload bid")
-	}
-
-	// Calculate versioned hashes from committed bid's blob_kzg_commitments
-	versionedHashes := make([]common.Hash, 0)
-	blobCommitments := &committedBid.Message.BlobKzgCommitments
-	if blobCommitments.Len() > 0 {
-		versionedHashes = make([]common.Hash, 0, blobCommitments.Len())
-		if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-			if err != nil {
-				return err
-			}
-			versionedHashes = append(versionedHashes, versionedHash)
-			return nil
-		}); err != nil {
-			return execution_client.PayloadStatusNone, fmt.Errorf("validatePayloadWithEL: failed to compute versioned hashes: %w", err)
-		}
+	versionedHashes, err := executionPayloadVersionedHashes(block)
+	if err != nil {
+		return execution_client.PayloadStatusNone, err
 	}
 
 	// Get execution requests list
@@ -417,8 +398,19 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	// Call NewPayload to validate execution payload with EL
 	parentBlockRoot := block.Block.ParentRoot
 	payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
+	if errors.Is(err, misc.ErrMismatchBlobHashes) {
+		f.rejectEnvelopeLocked(beaconBlockRoot)
+	}
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 	return payloadStatus, err
+}
+
+func executionPayloadVersionedHashes(block *cltypes.SignedBeaconBlock) ([]common.Hash, error) {
+	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if committedBid == nil || committedBid.Message == nil {
+		return nil, errors.New("block missing execution payload bid")
+	}
+	return committedBid.Message.VersionedHashes(), nil
 }
 
 func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
@@ -430,9 +422,7 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 ) (execution_client.PayloadStatus, error) {
 	f.mu.Unlock()
 	defer f.mu.Lock()
-	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
-	})
+	return f.NewPayloadWithAdmission(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 }
 
 // executionHashMarkedInvalid reports whether this execution payload is already known bad.
@@ -629,8 +619,48 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 		defer finishImport()
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		// Detect blob mismatches locally because remote Engine API responses lose Go error identity.
+		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
+			blobErr := ValidatePayloadBlobHashes(payload, versionedHashes)
+			if errors.Is(blobErr, misc.ErrMismatchBlobHashes) {
+				// Callers may reject the beacon root only after the payload matches its claimed block hash.
+				requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
+				if _, headerErr := payload.RlpHeader(parentBlockRoot, requestsHash, nil); headerErr != nil {
+					return execution_client.PayloadStatusInvalidated, headerErr
+				}
+			}
+			if blobErr != nil {
+				return execution_client.PayloadStatusInvalidated, blobErr
+			}
+		}
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 	})
+}
+
+// A mismatch is terminal only after the payload's block hash has been authenticated.
+func ValidatePayloadBlobHashes(payload *cltypes.Eth1Block, versionedHashes []common.Hash) error {
+	actualHashes := make([]common.Hash, 0, len(versionedHashes))
+	for _, raw := range payload.Transactions.UnderlyngReference() {
+		// The EL validates non-blob transactions; only their type matters here.
+		if len(raw) > 0 {
+			if raw[0] >= rlp.EmptyListCode {
+				continue
+			}
+			switch raw[0] {
+			case types.AccessListTxType, types.DynamicFeeTxType, types.SetCodeTxType:
+				continue
+			}
+		}
+		transaction, err := types.UnmarshalTransactionFromBinary(raw, false)
+		if err != nil {
+			return err
+		}
+		actualHashes = append(actualHashes, transaction.GetBlobHashes()...)
+	}
+	if !slices.Equal(actualHashes, versionedHashes) {
+		return misc.ErrMismatchBlobHashes
+	}
+	return nil
 }
 
 func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
@@ -693,6 +723,9 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 }
 
 func validatePayloadValidationResult(payloadStatus execution_client.PayloadStatus, validationErr error) error {
+	if errors.Is(validationErr, misc.ErrMismatchBlobHashes) {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutionPayloadEnvelope, validationErr)
+	}
 	if validationErr != nil && payloadStatus != execution_client.PayloadStatusNone && payloadStatus != execution_client.PayloadStatusInvalidated {
 		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %w", validationErr)
 	}
@@ -703,6 +736,9 @@ func validatePayloadValidationResult(payloadStatus execution_client.PayloadStatu
 }
 
 func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus execution_client.PayloadStatus, blockRoot, executionBlockHash common.Hash) error {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, blockRoot)
+	}
 	if payloadStatus == execution_client.PayloadStatusInvalidated || !f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
 		return nil
 	}
@@ -759,6 +795,9 @@ func (f *ForkChoiceStore) applyTerminalPayloadValidationResultLocked(
 }
 
 func (f *ForkChoiceStore) refreshEnvelopeBlockLocked(beaconBlockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	if f.IsEnvelopeRejected(beaconBlockRoot) {
+		return nil, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
 		return nil, fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
@@ -980,7 +1019,7 @@ func (f *ForkChoiceStore) envelopeValidationSemaphore() chan struct{} {
 }
 
 func (f *ForkChoiceStore) queuePendingEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode, receivedAt time.Time) {
-	if missingMode != queueMissingEnvelope || f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
+	if missingMode != queueMissingEnvelope || f.IsEnvelopeRejected(signedEnvelope.Message.BeaconBlockRoot) || f.forkGraph.HasEnvelope(signedEnvelope.Message.BeaconBlockRoot) {
 		return
 	}
 	f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
@@ -1112,7 +1151,18 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	if validatePayload && f.engine != nil {
 		return cltypes.ValidateExecutionPayloadEnvelopeBidCommitments(f.beaconCfg, block, signedEnvelope)
 	}
-	return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
+	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope); err != nil {
+		return err
+	}
+	versionedHashes, err := executionPayloadVersionedHashes(block)
+	if err != nil {
+		return err
+	}
+	err = ValidatePayloadBlobHashes(signedEnvelope.Message.Payload, versionedHashes)
+	if errors.Is(err, misc.ErrMismatchBlobHashes) {
+		f.RejectEnvelope(signedEnvelope.Message.BeaconBlockRoot)
+	}
+	return err
 }
 
 func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
@@ -1171,6 +1221,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
 	// Skip if envelope already processed and persisted
+	if f.IsEnvelopeRejected(beaconBlockRoot) {
+		return false, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		return false, nil
 	}
@@ -1306,9 +1359,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		}
 		if err != nil {
 			if errors.Is(err, errELBehind) {
-				// EL is behind (e.g. parent block not yet available after forward sync).
-				// Proceed with persisting the envelope so HasEnvelope() returns true.
-				// The execution block will be fed to EL via blockCollector on the next Flush().
+				// Persist the envelope and queue it for a later NewPayload attempt.
 				elBehind = true
 			} else {
 				return false, err
@@ -1494,6 +1545,10 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	}
 
 	f.mu.Lock()
+	if f.IsEnvelopeRejected(blockRoot) {
+		f.mu.Unlock()
+		return fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, blockRoot)
+	}
 	applied := true
 	if f.forkGraph.HasEnvelope(blockRoot) {
 		persisted, readErr := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
@@ -1903,6 +1958,9 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
+	if f.IsEnvelopeRejected(beaconBlockRoot) {
+		return false, fmt.Errorf("%w: envelope previously rejected for root %x", ErrInvalidExecutionPayloadEnvelope, beaconBlockRoot)
+	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 		return false, nil
 	}

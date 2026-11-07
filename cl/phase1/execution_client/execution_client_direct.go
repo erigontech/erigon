@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -85,6 +86,16 @@ func (cc *ExecutionClientDirect) NewPayload(
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
+	}
+
+	if payload.Version() >= clparams.DenebVersion {
+		cfg := cc.chainRW.Config()
+		if err := misc.ValidateBlobs(payload.BlobGasUsed, cfg.GetMaxBlobGasPerBlock(payload.Time), cfg.GetMaxBlobsPerBlock(payload.Time), versionedHashes, &txs); err != nil {
+			if errors.Is(err, misc.ErrNilBlobHashes) {
+				return PayloadStatusNone, err
+			}
+			return PayloadStatusInvalidated, err
+		}
 	}
 
 	startInsertBlock := time.Now()

@@ -29,9 +29,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	dto "github.com/prometheus/client_model/go"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -497,6 +499,93 @@ func prepareEmbeddedPtcVoteBlock(
 	})
 
 	return store, anchorRoot, child
+}
+
+func TestValidateParentPayloadPathWithRejectedAnchor(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(64))
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	bid := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion).Body.SignedExecutionPayloadBid.Message
+	bid.Slot = 64
+	bid.BlockHash = common.Hash{1}
+	bid.ParentBlockHash = common.Hash{2}
+	anchor.SetLatestExecutionPayloadBid(bid)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	root := graph.AnchorRoot()
+	_, hasBlock := graph.GetBlock(root)
+	require.False(t, hasBlock)
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(&cfg), graph, nil, nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	store.RejectEnvelope(root)
+	require.True(t, store.IsEnvelopeRejected(root))
+
+	for _, test := range []struct {
+		name       string
+		parentHash common.Hash
+		wantErr    bool
+	}{
+		{name: "FULL", parentHash: bid.BlockHash, wantErr: true},
+		{name: "EMPTY", parentHash: bid.ParentBlockHash},
+		{name: "unrelated execution parent", parentHash: common.Hash{3}, wantErr: true},
+	} {
+		for _, requireEngineAcceptance := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
+				child := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+				child.Slot = 65
+				child.ParentRoot = root
+				child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = test.parentHash
+
+				err := store.validateParentPayloadPath(child, requireEngineAcceptance)
+				if test.wantErr {
+					require.Error(t, err)
+					require.NotErrorIs(t, err, ErrParentEnvelopePending)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
+func TestParentPayloadPathWithPreGloasAnchorStateUpgradedToGloas(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	forkSlot := cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(forkSlot))
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: forkSlot - 1})
+	bid := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion).Body.SignedExecutionPayloadBid.Message
+	bid.Slot = forkSlot - 1
+	bid.BlockHash = common.Hash{1}
+	anchor.SetLatestExecutionPayloadBid(bid)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	store, err := NewForkChoiceStore(nil, anchor, nil, pool.NewOperationsPool(&cfg), graph, nil, nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+	require.NoError(t, err)
+	child := cltypes.NewBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Slot = forkSlot
+	child.ParentRoot = graph.AnchorRoot()
+	child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = bid.BlockHash
+
+	require.NoError(t, store.validateParentPayloadPath(child, true))
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child))
 }
 
 func TestNewForkChoiceStorePreservesAnchorExecutionPayloadBuilderIndex(t *testing.T) {
@@ -1986,6 +2075,9 @@ func (g *getFinalizedExecutionHashForkGraph) IsBlockInvalid(common.Hash) bool {
 	return false
 }
 
+func (g *getFinalizedExecutionHashForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
+func (g *getFinalizedExecutionHashForkGraph) RejectEnvelope(common.Hash) bool     { return false }
+
 func (g *getFinalizedExecutionHashForkGraph) MarkPayloadUnavailable(common.Hash) {}
 func (g *getFinalizedExecutionHashForkGraph) MarkPayloadAvailable(common.Hash)   {}
 func (g *getFinalizedExecutionHashForkGraph) IsPayloadUnavailable(common.Hash) bool {
@@ -2190,6 +2282,50 @@ func TestHasImportedDescendantAfterSkipsNonViableBranches(t *testing.T) {
 			require.Equal(t, tc.viable, filtered[emptyChild] != nil)
 			store.selectedHead.Store(&ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty})
 			require.Equal(t, tc.lagging, store.HasImportedDescendantAfter(headRoot, 64+store.beaconCfg.SlotsPerEpoch))
+		})
+	}
+}
+
+func TestHasImportedDescendantAfterSkipsRejectedEnvelopeBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		full          bool
+		rejectSibling bool
+		wantLag       bool
+	}{
+		{name: "rejected FULL branch", full: true},
+		{name: "EMPTY branch", wantLag: true},
+		{name: "valid sibling FULL branch", full: true, rejectSibling: true, wantLag: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newViabilityTree(t)
+			headRoot, childRoot, descendantRoot := common.Hash{0xbb}, common.Hash{0xcc}, common.Hash{0xdd}
+			v.add(headRoot, v.justified.Root, 64, true, true)
+			v.add(childRoot, headRoot, 65, tc.full, true)
+			v.add(descendantRoot, childRoot, 98, true, true)
+			rejectedRoot := headRoot
+			if tc.rejectSibling {
+				rejectedRoot = common.Hash{0xee}
+				v.add(rejectedRoot, v.justified.Root, 64, true, true)
+				siblingBid := v.graph.blocks[rejectedRoot].Block.Body.GetSignedExecutionPayloadBid().Message
+				siblingBid.BlockHash = v.graph.blocks[headRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+			}
+			v.store.setLatestMessage(0, LatestMessage{Slot: 100, Root: descendantRoot})
+			toleranceSlot := uint64(64) + v.store.beaconCfg.SlotsPerEpoch
+			require.True(t, v.store.HasImportedDescendantAfter(headRoot, toleranceSlot))
+
+			v.store.RejectEnvelope(rejectedRoot)
+
+			require.True(t, v.store.IsEnvelopeRejected(rejectedRoot))
+			require.False(t, v.store.IsBlockInvalid(rejectedRoot))
+			head, _, err := v.store.GetHeadNode()
+			require.NoError(t, err)
+			if tc.wantLag {
+				require.Equal(t, descendantRoot, head.Root)
+			} else {
+				require.Equal(t, ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+			}
+			require.Equal(t, tc.wantLag, v.store.HasImportedDescendantAfter(headRoot, toleranceSlot))
 		})
 	}
 }

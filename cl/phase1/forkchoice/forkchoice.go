@@ -105,23 +105,22 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot                  atomic.Value
-	headHash                           common.Hash
-	headSlot                           uint64
-	headPayloadStatus                  cltypes.PayloadStatus
-	headIsFallback                     bool                           // Gloas get_head found no viable node and fell back to the justified root
-	selectedHead                       atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
-	genesisTime                        uint64
-	genesisValidatorsRoot              common.Hash
-	anchorExecutionPayloadBuilderIndex uint64
-	anchorHasExecutionPayloadBid       bool
-	weights                            map[common.Hash]uint64
-	headSet                            map[common.Hash]struct{}
-	hotSidecars                        map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload           *lru.Cache[common.Hash, struct{}]
-	verifiedExecutionPayloadHashes     *lru.Cache[common.Hash, common.Hash]
-	executionPayloadRoots              map[common.Hash]map[common.Hash]struct{}
-	invalidatedExecutionPayloads       *sync.Map
+	proposerBoostRoot              atomic.Value
+	headHash                       common.Hash
+	headSlot                       uint64
+	headPayloadStatus              cltypes.PayloadStatus
+	headIsFallback                 bool                           // Gloas get_head found no viable node and fell back to the justified root
+	selectedHead                   atomic.Pointer[ForkChoiceNode] // the head last published, for lock-free readers; nil after a payload decision changes
+	genesisTime                    uint64
+	genesisValidatorsRoot          common.Hash
+	anchorExecutionPayloadBid      *cltypes.ExecutionPayloadBid
+	weights                        map[common.Hash]uint64
+	headSet                        map[common.Hash]struct{}
+	hotSidecars                    map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload       *lru.Cache[common.Hash, struct{}]
+	verifiedExecutionPayloadHashes *lru.Cache[common.Hash, common.Hash]
+	executionPayloadRoots          map[common.Hash]map[common.Hash]struct{}
+	invalidatedExecutionPayloads   *sync.Map
 	// Carries an invalid verdict until the caller makes it durable, since the bounded
 	// caches below can evict in between. Not refcounted, so the writer clears its own key.
 	inFlightInvalidPayloads *sync.Map
@@ -506,8 +505,7 @@ func NewForkChoiceStore(
 	}
 	if anchorState.Version() >= clparams.GloasVersion {
 		if bid := anchorState.GetLatestExecutionPayloadBid(); bid != nil {
-			f.anchorExecutionPayloadBuilderIndex = bid.BuilderIndex
-			f.anchorHasExecutionPayloadBid = true
+			f.anchorExecutionPayloadBid = bid.Copy()
 		}
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
@@ -834,7 +832,10 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 }
 
 func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
-	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
+	if f.anchorExecutionPayloadBid == nil {
+		return 0, false
+	}
+	return f.anchorExecutionPayloadBid.BuilderIndex, true
 }
 
 func (f *ForkChoiceStore) copyCurrentStateLocked(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
@@ -1087,6 +1088,50 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
+// RejectEnvelope rejects this beacon root's envelope without invalidating its execution hash.
+// Sibling roots can reference the same execution block with different blob commitments.
+func (f *ForkChoiceStore) RejectEnvelope(blockRoot common.Hash) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rejectEnvelopeLocked(blockRoot)
+}
+
+func (f *ForkChoiceStore) rejectEnvelopeLocked(blockRoot common.Hash) {
+	if !f.forkGraph.RejectEnvelope(blockRoot) {
+		return
+	}
+	if bid := f.anchorExecutionPayloadBid; bid != nil && blockRoot == f.forkGraph.AnchorRoot() {
+		f.eth2Roots.Add(blockRoot, bid.ParentBlockHash)
+	}
+	if f.verifiedExecutionPayload != nil {
+		f.verifiedExecutionPayload.Remove(blockRoot)
+	}
+	if f.payloadStatusByRoot != nil {
+		f.payloadStatusByRoot.Remove(blockRoot)
+	}
+	if f.pendingEnvelopes != nil {
+		if envelope, ok := f.pendingEnvelopes.Peek(blockRoot); ok {
+			f.forgetPendingEnvelopeArrival(envelope)
+			f.pendingEnvelopes.Remove(blockRoot)
+		}
+	}
+	if f.pendingLocalSelfBuildEnvelopes != nil {
+		f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
+	}
+	f.dataAvailableEnvelopeRetryMu.Lock()
+	if f.dataAvailableEnvelopeRetryAt != nil {
+		f.dataAvailableEnvelopeRetryAt.Remove(blockRoot)
+	}
+	f.dataAvailableEnvelopeRetryMu.Unlock()
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.selectedHead.Store(nil)
+}
+
+func (f *ForkChoiceStore) IsEnvelopeRejected(blockRoot common.Hash) bool {
+	return f.forkGraph != nil && f.forkGraph.IsEnvelopeRejected(blockRoot)
+}
+
 func (f *ForkChoiceStore) IsBlockInvalid(blockRoot common.Hash) bool {
 	return f.forkGraph.IsBlockInvalid(blockRoot)
 }
@@ -1191,6 +1236,9 @@ func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
 	status execution_client.PayloadStatus,
 	gasLimit *uint64,
 ) (execution_client.PayloadStatus, bool) {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return execution_client.PayloadStatusNone, false
+	}
 	guard, ok := f.forkGraph.(retainedBlockGuard)
 	if !ok {
 		effective := f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
@@ -1229,6 +1277,9 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	status execution_client.PayloadStatus,
 	isRetained func(common.Hash) bool,
 ) execution_client.PayloadStatus {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return execution_client.PayloadStatusNone
+	}
 	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
 	effective := status
 	if f.invalidatedExecutionPayloads != nil {
@@ -1350,9 +1401,8 @@ func (f *ForkChoiceStore) reachableFromSelectedHead(root, child common.Hash) boo
 	return variant == head.PayloadStatus || (variant == cltypes.PayloadStatusFull && !f.isPayloadAvailable(root))
 }
 
-// cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
-// invalidations: an invalid pre-Gloas block, a child of one (it has no EMPTY alternative), or a
-// Gloas block built on an invalid parent payload.
+// cutOffByInvalidation reports whether root has no surviving fork-choice variant.
+// Rejecting a Gloas payload cuts off its FULL children while preserving its EMPTY branch.
 func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 	block, ok := f.forkGraph.GetBlock(root)
 	if !ok || block == nil || block.Block == nil {
@@ -1362,7 +1412,7 @@ func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 		return f.forkGraph.IsBlockInvalid(root)
 	}
 	parentRoot := block.Block.ParentRoot
-	if !f.forkGraph.IsBlockInvalid(parentRoot) {
+	if !f.forkGraph.IsBlockInvalid(parentRoot) && !f.IsEnvelopeRejected(parentRoot) {
 		return false
 	}
 	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {
@@ -1648,6 +1698,9 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	defer f.pendingELPayloadsMu.Unlock()
 	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
 	if ok {
+		if f.IsEnvelopeRejected(root) {
+			return
+		}
 		for _, p := range f.pendingELPayloads {
 			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
 				return

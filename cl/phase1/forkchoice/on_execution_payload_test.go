@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -53,6 +54,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -82,8 +85,11 @@ type panickingUpdateDB struct {
 
 type blockRefreshForkGraph struct {
 	fork_graph.ForkGraph
-	block *cltypes.SignedBeaconBlock
+	block    *cltypes.SignedBeaconBlock
+	rejected bool
 }
+
+func (g blockRefreshForkGraph) IsEnvelopeRejected(common.Hash) bool { return g.rejected }
 
 type dataAvailabilityForkGraph struct {
 	fork_graph.ForkGraph
@@ -92,6 +98,8 @@ type dataAvailabilityForkGraph struct {
 	block       *cltypes.SignedBeaconBlock
 	replayCalls *atomic.Int32
 }
+
+func (g dataAvailabilityForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 
 type persistedEnvelopeForkGraph struct {
 	dataAvailabilityForkGraph
@@ -243,6 +251,7 @@ type persistingEnvelopeForkGraph struct {
 	invalid  atomic.Bool
 	accepted atomic.Bool
 	verified atomic.Bool
+	rejected sync.Map
 }
 
 type currentEnvelopeForkGraph struct {
@@ -270,6 +279,8 @@ type interleavingIndexRepairForkGraph struct {
 }
 
 func (g *interleavingIndexRepairForkGraph) HasEnvelope(common.Hash) bool { return true }
+
+func (g *interleavingIndexRepairForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 
 func (g *interleavingIndexRepairForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	g.envelope = envelope
@@ -460,6 +471,16 @@ func (g *persistingEnvelopeForkGraph) HasEnvelope(common.Hash) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.envelope != nil
+}
+
+func (g *persistingEnvelopeForkGraph) RejectEnvelope(root common.Hash) bool {
+	g.rejected.Store(root, struct{}{})
+	return true
+}
+
+func (g *persistingEnvelopeForkGraph) IsEnvelopeRejected(root common.Hash) bool {
+	_, rejected := g.rejected.Load(root)
+	return rejected
 }
 
 func (g *persistingEnvelopeForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -656,7 +677,8 @@ func (g replacingPendingForkGraph) ReplayState(common.Hash) (*state2.CachingBeac
 	return nil, nil
 }
 
-func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool { return false }
+func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool        { return false }
+func (g replacingPendingForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 
 func (g missingBlockForkGraph) ReplayState(common.Hash) (*state2.CachingBeaconState, error) {
 	return g.state, nil
@@ -701,7 +723,8 @@ func validIngressEnvelope(cfg *clparams.BeaconChainConfig, blockRoot common.Hash
 	return envelope
 }
 
-func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root == g.completed }
+func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool   { return root == g.completed }
+func (g pendingRetryForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
 func (g pendingRetryForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return nil, false
 }
@@ -794,13 +817,8 @@ func TestPendingEnvelopeErrorClassification(t *testing.T) {
 
 func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
-	commitments.Append(new(cltypes.KZGCommitment))
-	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments = *commitments
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	envelope.Message.BeaconBlockRoot = blockRoot
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	blockRoot := envelope.Message.BeaconBlockRoot
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
@@ -839,12 +857,8 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 
 func TestOnExecutionPayloadRecordsFirstValidatedArrivalBeforeColumnAvailability(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(new(cltypes.KZGCommitment))
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	envelope.Message.BeaconBlockRoot = blockRoot
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	blockRoot := envelope.Message.BeaconBlockRoot
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
@@ -927,12 +941,8 @@ func TestQueuePendingExecutionPayloadEnvelopeParksEnvelopeAndPreservesArrival(t 
 
 func TestOnExecutionPayloadDoesNotRecordInvalidEarlyEnvelope(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(new(cltypes.KZGCommitment))
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	envelope.Message.BeaconBlockRoot = blockRoot
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	blockRoot := envelope.Message.BeaconBlockRoot
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
@@ -1031,17 +1041,8 @@ func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesZeroBlobEnvelo
 // Setting *available makes the columns appear; *probes counts data availability checks.
 func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityForkGraph) fork_graph.ForkGraph) (f *ForkChoiceStore, block *cltypes.SignedBeaconBlock, available *bool, probes *int) {
 	t.Helper()
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(new(cltypes.KZGCommitment))
-	bodyRoot, err := block.Block.Body.HashSSZ()
-	require.NoError(t, err)
-	header := blockState.LatestBlockHeader()
-	header.BodyRoot = bodyRoot
-	blockState.SetLatestBlockHeader(&header)
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	envelope.Message.BeaconBlockRoot = blockRoot
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	blockRoot := envelope.Message.BeaconBlockRoot
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
@@ -3526,6 +3527,7 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
 	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
 	envelope.Payload.BlockHash = common.HexToHash("0xabcd")
+	envelope.Payload.Transactions = solid.NewProgressiveTransactionsSSZ()
 
 	done := make(chan error, 1)
 	go func() {
@@ -3619,6 +3621,24 @@ func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
 		require.NoError(t, err)
 	})
 	require.Same(t, want, got)
+	f.forkGraph = blockRefreshForkGraph{block: want, rejected: true}
+	_, err := f.refreshEnvelopeBlockLocked(common.Hash{1})
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+}
+
+func TestNewPayloadWithAdmissionDefersNonBlobTransactionValidation(t *testing.T) {
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{{types.DynamicFeeTxType, 0xc0}})
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	invalidTransaction := errors.New("invalid transaction")
+	engine.EXPECT().NewPayload(gomock.Any(), payload, gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusInvalidated, invalidTransaction)
+	f := &ForkChoiceStore{engine: engine}
+
+	status, err := f.NewPayloadWithAdmission(t.Context(), payload, nil, []common.Hash{}, nil)
+
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	require.ErrorIs(t, err, invalidTransaction)
 }
 
 func TestNewPayloadWithAdmissionSerializesCallers(t *testing.T) {
@@ -3777,6 +3797,7 @@ func TestValidatePayloadWithELDoesNotWaitForUnrelatedForkChoiceWriter(t *testing
 	}}
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
 	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+	envelope.Payload.Transactions = solid.NewProgressiveTransactionsSSZ()
 
 	done := make(chan struct{})
 	validationLocked := make(chan struct{})
@@ -4214,6 +4235,144 @@ func TestExecutionPayloadDerivedHashRejectionDoesNotInvalidateVerifiedSibling(t 
 	require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 	require.False(t, graph.invalid.Load())
+}
+
+func TestValidatePayloadBlobHashes(t *testing.T) {
+	hashes := []common.Hash{{1, 1}, {1, 2}, {1, 3}}
+	blob := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}},
+		BlobVersionedHashes:   hashes[:2],
+	}
+	frame := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes[2:]}
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{
+		&types.LegacyTx{}, &types.AccessListTx{}, &types.DynamicFeeTransaction{},
+		&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}}},
+		blob, &types.DynamicFeeTransaction{}, frame,
+	})
+	require.NoError(t, err)
+	var wrapped bytes.Buffer
+	require.NoError(t, blob.EncodeRLP(&wrapped))
+
+	for _, tc := range []struct {
+		name         string
+		transactions [][]byte
+		expected     []common.Hash
+		mismatch     bool
+	}{
+		{name: "empty"},
+		{name: "non-blob", transactions: raw[:4]},
+		{name: "mixed", transactions: raw, expected: hashes},
+		{name: "no commitments", transactions: raw, mismatch: true},
+		{name: "missing commitment", transactions: raw, expected: hashes[:2], mismatch: true},
+		{name: "extra commitment", transactions: raw, expected: append(hashes, common.Hash{1, 4}), mismatch: true},
+		{name: "reordered", transactions: raw, expected: []common.Hash{hashes[1], hashes[0], hashes[2]}, mismatch: true},
+		{name: "wrapped blob", transactions: [][]byte{wrapped.Bytes()}, mismatch: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(tc.transactions)
+			err := ValidatePayloadBlobHashes(payload, tc.expected)
+			if tc.mismatch {
+				require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidatePayloadBlobHashesRejectsUndecodableCandidates(t *testing.T) {
+	for _, raw := range [][]byte{nil, {types.BlobTxType}, {types.BlobTxType, 0xc0}, {types.FrameTxType, 0xc0}, {0x7f, 0xc0}, {0x81, types.BlobTxType}} {
+		t.Run(fmt.Sprintf("%x", raw), func(t *testing.T) {
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+			payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions([][]byte{raw})
+			err := ValidatePayloadBlobHashes(payload, []common.Hash{})
+			require.Error(t, err)
+			require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
+		})
+	}
+}
+
+func TestExecutionPayloadUnauthenticatedBlobMismatchAllowsRetry(t *testing.T) {
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	payload := envelope.Message.Payload
+	beaconRoot := common.Hash(envelope.Message.BeaconBlockRoot)
+	executionHash := payload.BlockHash
+	verifiedRoot := common.HexToHash("0xaa")
+	authenticTransactions := payload.Transactions
+	txn, err := types.UnmarshalTransactionFromBinary(authenticTransactions.UnderlyngReference()[0], false)
+	require.NoError(t, err)
+	txn.(*types.BlobTx).BlobVersionedHashes[0][1] ^= 1
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+	require.NoError(t, err)
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	f.engine = engine
+	f.MarkPayloadVerified(verifiedRoot, executionHash)
+
+	err = f.OnExecutionPayload(t.Context(), envelope, false, true)
+
+	require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+	require.NotErrorIs(t, err, misc.ErrMismatchBlobHashes)
+	require.ErrorContains(t, err, "mismatching hash")
+	require.False(t, f.IsEnvelopeRejected(beaconRoot))
+	require.False(t, f.IsEnvelopeRejected(verifiedRoot))
+	require.True(t, f.verifiedExecutionPayload.Contains(verifiedRoot))
+	require.False(t, f.IsPayloadVerified(beaconRoot))
+	require.False(t, graph.HasEnvelope(beaconRoot))
+	require.False(t, graph.invalid.Load())
+	_, ok := f.payloadStatusByRoot.Get(beaconRoot)
+	require.False(t, ok)
+	status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusValidated, status)
+
+	payload.Transactions = authenticTransactions
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), payload, gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusValidated, nil)
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, true))
+	require.True(t, f.verifiedExecutionPayload.Contains(verifiedRoot))
+	require.False(t, f.IsEnvelopeRejected(beaconRoot))
+	require.True(t, f.IsPayloadVerified(beaconRoot))
+	require.True(t, graph.HasEnvelope(beaconRoot))
+	require.False(t, graph.invalid.Load())
+}
+
+func TestExecutionPayloadBlobCommitmentMismatchPreservesVerifiedSibling(t *testing.T) {
+	for _, validatePayload := range []bool{true, false} {
+		t.Run(fmt.Sprintf("validatePayload=%t", validatePayload), func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			verifiedRoot := common.Hash(envelope.Message.BeaconBlockRoot)
+			executionHash := envelope.Message.Payload.BlockHash
+			block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0xc0})
+			rebindAdmissionBlockRoot(t, blockState, block, envelope)
+			require.NotEqual(t, verifiedRoot, envelope.Message.BeaconBlockRoot)
+			resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+			f, graph := newEnvelopeApplicationTestStore(t, cfg, blockState, block)
+			f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			f.MarkPayloadVerified(verifiedRoot, executionHash)
+
+			err := f.OnExecutionPayload(t.Context(), envelope, false, validatePayload)
+
+			require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+			require.ErrorIs(t, err, misc.ErrMismatchBlobHashes)
+			require.True(t, f.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot))
+			require.False(t, f.IsEnvelopeRejected(verifiedRoot))
+			require.True(t, f.verifiedExecutionPayload.Contains(verifiedRoot))
+			require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+			require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+			require.False(t, graph.invalid.Load())
+			status, ok := f.GetRecentExecutionPayloadStatus(executionHash)
+			require.True(t, ok)
+			require.EqualValues(t, execution_client.PayloadStatusValidated, status)
+		})
+	}
 }
 
 func TestAuthenticatedExecutionPayloadInvalidationRevokesVerifiedSibling(t *testing.T) {
@@ -5399,6 +5558,32 @@ func TestExecutionPayloadEnvelopeValidationUsesFinalizedEpochStart(t *testing.T)
 
 func validAdmissionCancellationFixture(t testing.TB) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
 	return validAdmissionCancellationFixtureAtSlot(t, 64)
+}
+
+func validBlobEnvelopeFixture(t testing.TB) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
+	t.Helper()
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	commitment := new(cltypes.KZGCommitment)
+	versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*commitment))
+	require.NoError(t, err)
+	txn := &types.BlobTx{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{1}}},
+		BlobVersionedHashes:   []common.Hash{versionedHash},
+	}
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+	require.NoError(t, err)
+	payload := envelope.Message.Payload
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
+	payload.BlobGasUsed = misc.GetBlobGasUsed(1)
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+	payload.BlockHash, err = payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	bid := block.Block.Body.SignedExecutionPayloadBid.Message
+	bid.BlockHash = payload.BlockHash
+	bid.BlobKzgCommitments.Append(commitment)
+	rebindAdmissionBlockRoot(t, blockState, block, envelope)
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	return cfg, blockState, block, envelope
 }
 
 func validAdmissionCancellationFixtureAtSlot(t testing.TB, slot uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
