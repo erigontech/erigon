@@ -400,6 +400,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
 			return err
 		}
+		if err := CheckBinaryShadowRunning(tx, cfg.chainConfig, logger); err != nil {
+			return err
+		}
 
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
 			return err

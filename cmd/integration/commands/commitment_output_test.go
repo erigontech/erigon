@@ -174,6 +174,21 @@ func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestStageRebuildOutputSkipsCommitmentStopMarker(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	marker := filepath.Join(src.Snap, dbstate.COMMITMENT_STOP_FILE)
+	require.NoError(t, os.WriteFile(marker, []byte(`{"commitment":true}`), 0o644))
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
+	require.NoError(t, err)
+	outMarker := filepath.Join(out.dirs.Snap, dbstate.COMMITMENT_STOP_FILE)
+	require.NoFileExists(t, outMarker)
+	require.FileExists(t, marker)
+	_, err = stageRebuildOutput(src, out.dirs.DataDir, hexTarget(t), true, log.New())
+	require.NoError(t, err)
+	require.NoFileExists(t, outMarker)
+	require.FileExists(t, marker)
+}
+
 func TestStageRebuildOutputLeavesSourceIntact(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	before := snapshotTree(t, src.Snap)

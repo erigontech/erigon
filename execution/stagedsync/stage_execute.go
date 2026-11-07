@@ -179,8 +179,14 @@ func checkStoppedHexShadowUnwind(ctx context.Context, tx kv.TemporalTx, br dbser
 		return nil
 	}
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
-	if err != nil || !stopped {
+	if err != nil {
 		return err
+	}
+	if provider, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok {
+		stopped = stopped || provider.CommitmentDomainStopped(kv.CommitmentDomain)
+	}
+	if !stopped {
+		return nil
 	}
 	activationBlock, found, err := binaryTrieActivationBlock(ctx, tx, br, config, currentBlock)
 	if err != nil || !found {

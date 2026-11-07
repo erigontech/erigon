@@ -425,6 +425,9 @@ func resetExecState(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 		return err
 	}
 	defer chainDB.Close()
+	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
+		return err
+	}
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
 	tdb, err := temporal.New(chainDB, agg, nil)

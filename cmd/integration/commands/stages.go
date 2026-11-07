@@ -91,7 +91,7 @@ import (
 // makeStageCmd creates a cobra command that opens the DB, runs stageFn, and handles errors.
 // Set applyMigrations=false for read-only commands. Set timeit=true to log elapsed time.
 // Set debugVerbosity=true to force log verbosity to "debug" before SetupCobra.
-func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit, debugVerbosity bool) *cobra.Command {
+func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit, debugVerbosity, executes bool) *cobra.Command {
 	return &cobra.Command{
 		Use:          use,
 		Short:        "",
@@ -102,6 +102,7 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+			ownCommitmentStopFile = executes
 			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
 			if err != nil {
 				return fmt.Errorf("opening DB: %w", err)
@@ -125,16 +126,16 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 }
 
 var (
-	cmdStageSnapshots   = makeStageCmd("stage_snapshots", stageSnapshots, true, false, false)
-	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false, false)
-	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
-	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
-	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
-	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
-	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false)
-	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
-	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
-	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
+	cmdStageSnapshots   = makeStageCmd("stage_snapshots", stageSnapshots, true, false, false, false)
+	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false, false, false)
+	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false, false)
+	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false, false)
+	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false, true)
+	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false, true)
+	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false, false)
+	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false, false)
+	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false, false)
+	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true, false)
 )
 
 var cmdAlloc = &cobra.Command{
@@ -1183,6 +1184,9 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+	if ownCommitmentStopFile {
+		aggOpts = aggOpts.OwnCommitmentStopFile()
+	}
 	if reset || skipFilesDBGapCheck {
 		aggOpts = aggOpts.SkipFilesDBGapCheck()
 	}

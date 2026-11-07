@@ -261,6 +261,27 @@ func TestStepRebaseIncreaseHexV3FilesDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestStepRebaseDecreaseKeepBlocksHexV3FilesDoesNotPanic(t *testing.T) {
+	commitmentflags.Restore(t)
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	variant := state.TrieVariantHex
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{
+		StepSize:          16,
+		StepsInFrozenFile: 4,
+		TrieVariant:       &variant,
+	}))
+	writeTestFile(t, filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"))
+	_, err := state.GetStateIndicesSalt(dirs, true, logger)
+	require.NoError(t, err)
+	writeTestChaindata(t, dirs)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	require.NoError(t, err)
+	plan, err := planStepRebase(context.Background(), dirs, settings, 8, true, logger)
+	require.NoError(t, err)
+	require.NoError(t, applyStepRebasePlan(context.Background(), dirs, plan, logger))
+}
+
 func TestStepRebaseApplyRefusesChangedConversionPoint(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -476,6 +497,9 @@ func TestStepRebaseKeepBlocksKeepsStoppedCommitmentMarker(t *testing.T) {
 	hexStopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.False(t, hexStopped)
+	stopFile, err := os.ReadFile(filepath.Join(dirs.Snap, state.COMMITMENT_STOP_FILE))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"commitment-bin":true}`, string(stopFile))
 }
 
 func TestStepRebaseDecreaseRefusesStoppedCommitmentWithoutKeepBlocks(t *testing.T) {
