@@ -76,6 +76,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 0)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, false)
 
 	require.NoError(t, ibs.TouchAccount(addr))
 
@@ -86,13 +87,47 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	require.True(t, hasBalance && bal.Deletes(),
 		"a withheld created-empty account emits the balance-deleted removal verdict, overriding its lingering during-tx cells")
 
+	_, hasSelfDestruct := writes.GetSelfDestruct(addr)
+	require.True(t, hasSelfDestruct, "the removal carries the self-destruct marker")
+
 	vm.FlushVersionedWrites(writes, true)
+	published, err := WithoutVanished(writes, vm, 0, false, &minimalStateReader{})
+	require.NoError(t, err)
+	_, hasSelfDestruct = published.GetSelfDestruct(addr)
+	_, hasBalance = published.GetBalance(addr)
+	require.False(t, hasSelfDestruct || hasBalance, "the removal of an absent account publishes no writes")
+
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
 	next.SetTxContext(1, 1)
 	exists, err := next.Exist(addr)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+// An account that never existed and that each tx touches and leaves empty (a call to an absent
+// precompile) must not chain the txs: a tx that touches it again while the previous toucher is
+// still in flight records no dependency on it.
+func TestCreatedEmptyAccountTouchedByInFlightTxIsNoDependency(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x02})
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+
+	first := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(first.Close)
+	first.SetTxContext(1, 0)
+	require.NoError(t, first.TouchAccount(addr))
+	vm.FlushVersionedWrites(finalizedWrites(t, first, rules), false)
+
+	next := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(next.Close)
+	next.SetTxContext(1, 1)
+	exists, err := next.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, next.TouchAccount(addr))
+	require.False(t, next.HadInvalidRead(), "dependency on tx %d", next.DepTxIndex())
 }
 
 // TestFinalizedWritesEmptyRemovalClearsWholeAccountCell pins item 1's write-side
@@ -463,8 +498,12 @@ func TestRecreateAfterEmptyRemovalShadowsBalanceDelete(t *testing.T) {
 			touch := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(touch.Close)
 			touch.SetTxContext(1, 0)
+			vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, false)
 			require.NoError(t, touch.TouchAccount(addr))
-			vm.FlushVersionedWrites(finalizedWrites(t, touch, rules), true)
+			removal := finalizedWrites(t, touch, rules)
+			bal, ok := removal.GetBalance(addr)
+			require.True(t, ok && bal.Deletes(), "the touching tx removes the account")
+			vm.FlushVersionedWrites(removal, true)
 
 			recreate := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(recreate.Close)
