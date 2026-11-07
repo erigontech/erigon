@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 )
 
@@ -74,10 +73,6 @@ func cacheMeasurable(t testing.TB, dir string) bool {
 func TestSortAndFlushLeavesWrittenPagesOutOfPageCache(t *testing.T) {
 	tmp := t.TempDir()
 	measurable := dontCacheSupported(t, tmp) && cacheMeasurable(t, tmp)
-	if !dbg.EnvBool("FILE_BUILD_DONTCACHE", true) {
-		t.Logf("page cache residency check did not run: FILE_BUILD_DONTCACHE is false")
-		measurable = false
-	}
 
 	buffer := NewSortableBuffer(8 * datasize.MB)
 	defer buffer.Reset()
