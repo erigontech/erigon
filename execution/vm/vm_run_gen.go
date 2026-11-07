@@ -80,10 +80,9 @@ run:
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
 		if !false {
-			sLen := stack.len()
 			switch op {
 			case PUSH1:
-				if sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					codeLen := uint64(len(callContext.Contract.Code))
 					pc++
@@ -96,7 +95,7 @@ run:
 					continue run
 				}
 			case PUSH2:
-				if sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					codeLen := uint64(len(callContext.Contract.Code))
 					integer := callContext.Stack.pushRef()
@@ -113,7 +112,7 @@ run:
 					continue run
 				}
 			case ADD:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
 					y.Add(x, y)
@@ -121,20 +120,20 @@ run:
 					continue run
 				}
 			case POP:
-				if sLen >= 1 && gasLeft >= GasQuickStep {
+				if true {
 					gasLeft -= GasQuickStep
 					callContext.Stack.drop()
 					pc++
 					continue run
 				}
 			case JUMPDEST:
-				if gasLeft >= params.JumpdestGas {
+				if true {
 					gasLeft -= params.JumpdestGas
 					pc++
 					continue run
 				}
 			case JUMP:
-				if sLen >= 1 && gasLeft >= GasMidStep {
+				if true {
 					gasLeft -= GasMidStep
 					if evm.Cancelled() {
 						res, err = nil, errStopToken
@@ -159,7 +158,7 @@ run:
 					continue run
 				}
 			case JUMPI:
-				if sLen >= 2 && gasLeft >= GasSlowStep {
+				if true {
 					gasLeft -= GasSlowStep
 					if evm.Cancelled() {
 						res, err = nil, errStopToken
@@ -187,7 +186,7 @@ run:
 					continue run
 				}
 			case SUB:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
 					y.Sub(x, y)
@@ -195,7 +194,7 @@ run:
 					continue run
 				}
 			case MUL:
-				if sLen >= 2 && gasLeft >= GasFastStep {
+				if true {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
 					callContext.gas, callContext.savedPC = gasLeft, pc
@@ -205,7 +204,7 @@ run:
 					continue run
 				}
 			case DIV:
-				if sLen >= 2 && gasLeft >= GasFastStep {
+				if true {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
 					if y[0]&(y[0]-1) == 0 {
@@ -224,7 +223,7 @@ run:
 					continue run
 				}
 			case LT:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
 					if x.Lt(y) {
@@ -236,7 +235,7 @@ run:
 					continue run
 				}
 			case GT:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
 					if x.Gt(y) {
@@ -248,7 +247,7 @@ run:
 					continue run
 				}
 			case EQ:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
 					if x.Eq(y) {
@@ -260,7 +259,7 @@ run:
 					continue run
 				}
 			case AND:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
 					y.And(x, y)
@@ -268,7 +267,7 @@ run:
 					continue run
 				}
 			case ISZERO:
-				if sLen >= 1 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					x := callContext.Stack.peek()
 					if x.IsZero() {
@@ -280,14 +279,14 @@ run:
 					continue run
 				}
 			case CALLVALUE:
-				if sLen < stackLimit && gasLeft >= GasQuickStep {
+				if true {
 					gasLeft -= GasQuickStep
 					callContext.Stack.push(callContext.Contract.value)
 					pc++
 					continue run
 				}
 			case MLOAD:
-				if sLen >= 1 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
+				if callContext.Memory.allocated32(stack.peek()) {
 					gasLeft -= GasFastestStep
 					v := callContext.Stack.peek()
 					offset := v.Uint64()
@@ -296,7 +295,7 @@ run:
 					continue run
 				}
 			case MSTORE:
-				if sLen >= 2 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
+				if callContext.Memory.allocated32(stack.peek()) {
 					gasLeft -= GasFastestStep
 					mStart, val := callContext.Stack.pop2()
 					callContext.Memory.Set32(mStart.Uint64(), val)
@@ -304,14 +303,14 @@ run:
 					continue run
 				}
 			case PUSH0:
-				if jt[PUSH0].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+				if jt[PUSH0].constantGas != 0 {
 					gasLeft -= GasQuickStep
 					callContext.Stack.pushRef().Clear()
 					pc++
 					continue run
 				}
 			case MCOPY:
-				if sLen >= 3 && jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+				if jt[MCOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.back(1), stack.back(2)) {
 					gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 					dst, src, length := callContext.Stack.pop3()
 					callContext.gas, callContext.savedPC = gasLeft, pc
@@ -321,7 +320,7 @@ run:
 					continue run
 				}
 			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
-				if sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					code := callContext.Contract.Code
 					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(code)) {
@@ -359,84 +358,84 @@ run:
 					continue run
 				}
 			case DUP1:
-				if sLen >= 1 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(0)
 					pc++
 					continue run
 				}
 			case DUP2:
-				if sLen >= 2 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(1)
 					pc++
 					continue run
 				}
 			case DUP3:
-				if sLen >= 3 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(2)
 					pc++
 					continue run
 				}
 			case DUP4:
-				if sLen >= 4 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(3)
 					pc++
 					continue run
 				}
 			case DUP5:
-				if sLen >= 5 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(4)
 					pc++
 					continue run
 				}
 			case DUP6:
-				if sLen >= 6 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(5)
 					pc++
 					continue run
 				}
 			case DUP7:
-				if sLen >= 7 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(6)
 					pc++
 					continue run
 				}
 			case DUP8:
-				if sLen >= 8 && sLen < stackLimit && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.dup(7)
 					pc++
 					continue run
 				}
 			case SWAP1:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.swap(1)
 					pc++
 					continue run
 				}
 			case SWAP2:
-				if sLen >= 3 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.swap(2)
 					pc++
 					continue run
 				}
 			case SWAP3:
-				if sLen >= 4 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.swap(3)
 					pc++
 					continue run
 				}
 			case SWAP4:
-				if sLen >= 5 && gasLeft >= GasFastestStep {
+				if true {
 					gasLeft -= GasFastestStep
 					callContext.Stack.swap(4)
 					pc++
@@ -446,7 +445,7 @@ run:
 			if isColdOp[op] {
 				switch op {
 				case SLT:
-					if sLen >= 2 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						x, y := callContext.Stack.pop1Peek1()
 						callContext.gas, callContext.savedPC = gasLeft, pc
@@ -460,7 +459,7 @@ run:
 						continue run
 					}
 				case SGT:
-					if sLen >= 2 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						x, y := callContext.Stack.pop1Peek1()
 						callContext.gas, callContext.savedPC = gasLeft, pc
@@ -474,7 +473,7 @@ run:
 						continue run
 					}
 				case OR:
-					if sLen >= 2 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						x, y := callContext.Stack.pop1Peek1()
 						y.Or(x, y)
@@ -482,7 +481,7 @@ run:
 						continue run
 					}
 				case XOR:
-					if sLen >= 2 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						x, y := callContext.Stack.pop1Peek1()
 						y.Xor(x, y)
@@ -490,7 +489,7 @@ run:
 						continue run
 					}
 				case NOT:
-					if sLen >= 1 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						x := callContext.Stack.peek()
 						x.Not(x)
@@ -498,7 +497,7 @@ run:
 						continue run
 					}
 				case BYTE:
-					if sLen >= 2 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						th, val := callContext.Stack.pop1Peek1()
 						callContext.gas, callContext.savedPC = gasLeft, pc
@@ -508,7 +507,7 @@ run:
 						continue run
 					}
 				case SHL:
-					if jt[SHL].constantGas != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+					if jt[SHL].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.LtUint64(256) {
@@ -522,7 +521,7 @@ run:
 						continue run
 					}
 				case SHR:
-					if jt[SHR].constantGas != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+					if jt[SHR].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.LtUint64(256) {
@@ -536,7 +535,7 @@ run:
 						continue run
 					}
 				case SAR:
-					if jt[SAR].constantGas != 0 && sLen >= 2 && gasLeft >= GasFastestStep {
+					if jt[SAR].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						shift, value := callContext.Stack.pop1Peek1()
 						if shift.GtUint64(255) {
@@ -557,7 +556,7 @@ run:
 						continue run
 					}
 				case ADDRESS:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordSelf, callContext.Contract.Address()))
@@ -566,7 +565,7 @@ run:
 						continue run
 					}
 				case ORIGIN:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordOrigin, evm.Origin))
@@ -575,7 +574,7 @@ run:
 						continue run
 					}
 				case CALLER:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordCaller, callContext.Contract.Caller()))
@@ -584,35 +583,35 @@ run:
 						continue run
 					}
 				case CALLDATASIZE:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(uint64(len(callContext.input)))
 						pc++
 						continue run
 					}
 				case CODESIZE:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(uint64(len(callContext.Contract.Code)))
 						pc++
 						continue run
 					}
 				case GASPRICE:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.push(evm.GasPrice)
 						pc++
 						continue run
 					}
 				case RETURNDATASIZE:
-					if jt[RETURNDATASIZE].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[RETURNDATASIZE].constantGas != 0 {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(uint64(len(evm.returnData)))
 						pc++
 						continue run
 					}
 				case COINBASE:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().Set(callContext.addressWord(addressWordCoinbase, evm.Context.Coinbase))
@@ -621,21 +620,21 @@ run:
 						continue run
 					}
 				case TIMESTAMP:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(evm.Context.Time)
 						pc++
 						continue run
 					}
 				case NUMBER:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(evm.Context.BlockNumber)
 						pc++
 						continue run
 					}
 				case DIFFICULTY:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						if evm.Context.PrevRanDao != nil {
 
@@ -647,7 +646,7 @@ run:
 						continue run
 					}
 				case GASLIMIT:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						if evm.Context.MaxGasLimit {
 							callContext.Stack.pushRef().SetAllOne()
@@ -658,7 +657,7 @@ run:
 						continue run
 					}
 				case CHAINID:
-					if jt[CHAINID].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[CHAINID].constantGas != 0 {
 						gasLeft -= GasQuickStep
 						chainId := evm.ChainRules().ChainID
 						callContext.Stack.pushRef().Set(chainId)
@@ -666,7 +665,7 @@ run:
 						continue run
 					}
 				case BASEFEE:
-					if jt[BASEFEE].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[BASEFEE].constantGas != 0 {
 						gasLeft -= GasQuickStep
 						baseFee := evm.Context.BaseFee
 						callContext.Stack.push(baseFee)
@@ -674,7 +673,7 @@ run:
 						continue run
 					}
 				case BLOBBASEFEE:
-					if jt[BLOBBASEFEE].constantGas != 0 && sLen < stackLimit && gasLeft >= GasQuickStep {
+					if jt[BLOBBASEFEE].constantGas != 0 {
 						gasLeft -= GasQuickStep
 						blobBaseFee := evm.Context.BlobBaseFee
 						callContext.Stack.push(blobBaseFee)
@@ -682,28 +681,28 @@ run:
 						continue run
 					}
 				case PC:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(pc)
 						pc++
 						continue run
 					}
 				case MSIZE:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(uint64(callContext.Memory.Len()))
 						pc++
 						continue run
 					}
 				case GAS:
-					if sLen < stackLimit && gasLeft >= GasQuickStep {
+					if true {
 						gasLeft -= GasQuickStep
 						callContext.Stack.pushRef().SetUint64(gasLeft)
 						pc++
 						continue run
 					}
 				case CALLDATACOPY:
-					if sLen >= 3 && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					if callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) {
 						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 						memOffset, dataOffset, length := callContext.Stack.pop3()
 						dataOffset64, overflow := dataOffset.Uint64WithOverflow()
@@ -720,7 +719,7 @@ run:
 						continue run
 					}
 				case CODECOPY:
-					if sLen >= 3 && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					if callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) {
 						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 						memOffset, codeOffset, length := callContext.Stack.pop3()
 						uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
@@ -734,7 +733,7 @@ run:
 						continue run
 					}
 				case RETURNDATACOPY:
-					if sLen >= 3 && jt[RETURNDATACOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) && gasLeft >= GasFastestStep+params.CopyGas*ToWordSize(stack.back(2).Uint64()) {
+					if jt[RETURNDATACOPY].memorySize != nil && callContext.Memory.allocatedCopy(stack.peek(), stack.peek(), stack.back(2)) {
 						gasLeft -= GasFastestStep + params.CopyGas*ToWordSize(stack.back(2).Uint64())
 						memOffset, dataOffset, length := callContext.Stack.pop3()
 
@@ -763,7 +762,7 @@ run:
 						continue run
 					}
 				case BLOBHASH:
-					if jt[BLOBHASH].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastestStep {
+					if jt[BLOBHASH].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						idx := callContext.Stack.peek()
 						if idx.LtUint64(uint64(len(evm.BlobHashes))) {
@@ -776,7 +775,7 @@ run:
 						continue run
 					}
 				case CLZ:
-					if jt[CLZ].constantGas != 0 && sLen >= 1 && gasLeft >= GasFastStep {
+					if jt[CLZ].constantGas != 0 {
 						gasLeft -= GasFastStep
 						x := callContext.Stack.peek()
 
@@ -785,7 +784,7 @@ run:
 						continue run
 					}
 				case DUPN:
-					if jt[DUPN].constantGas != 0 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					if jt[DUPN].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						code := callContext.Contract.Code
 						pc++
@@ -811,7 +810,7 @@ run:
 						continue run
 					}
 				case SWAPN:
-					if jt[SWAPN].constantGas != 0 && gasLeft >= GasFastestStep {
+					if jt[SWAPN].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						code := callContext.Contract.Code
 						pc++
@@ -837,7 +836,7 @@ run:
 						continue run
 					}
 				case EXCHANGE:
-					if jt[EXCHANGE].constantGas != 0 && gasLeft >= GasFastestStep {
+					if jt[EXCHANGE].constantGas != 0 {
 						gasLeft -= GasFastestStep
 						code := callContext.Contract.Code
 						pc++
@@ -864,14 +863,14 @@ run:
 						continue run
 					}
 				case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
-					if sLen >= int(op-DUP1)+1 && sLen < stackLimit && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						callContext.Stack.dup(int(op - DUP1))
 						pc++
 						continue run
 					}
 				case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
-					if sLen >= int(op-SWAP1)+2 && gasLeft >= GasFastestStep {
+					if true {
 						gasLeft -= GasFastestStep
 						callContext.Stack.swap(int(op-SWAP1) + 1)
 						pc++
@@ -889,11 +888,11 @@ run:
 		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
-		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+		if sLen := stack.len(); false && sLen < 0 {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
+		if false {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
 			callContext.gas -= cost.Execution
