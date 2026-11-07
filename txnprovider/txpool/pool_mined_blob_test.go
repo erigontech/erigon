@@ -236,6 +236,20 @@ func TestMinedBlobTxnSurvivesReorgThatMinesItAgain(t *testing.T) {
 	require.Len(t, r.pool.byHash[r.hash].TxnSlot.BlobBundles, 2)
 }
 
+// The new branch's head is past the depth bound of the old cache entry, which must still give the re-mined txn its blobs.
+func TestMinedBlobTxnSurvivesDeepReorgThatMinesItAgain(t *testing.T) {
+	r := newMinedBlobReorgTest(t)
+	r.mine(t, 1, 3)
+	for height := 2; height <= minedBlobReorgDepth; height++ {
+		require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(byte(height), 3, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	head := byte(2 + minedBlobReorgDepth)
+	reorg := r.block(0, 3, remoteproto.Direction_UNWIND)
+	reorg.ChangeBatch = append(reorg.ChangeBatch, &remoteproto.StateChange{BlockHeight: uint64(head), BlockHash: gointerfaces.ConvertHashToH256(common.Hash{head})})
+	require.NoError(t, r.pool.OnNewBlock(r.ctx, reorg, TxnSlots{}, r.streamed(), r.streamed()))
+	require.Len(t, r.pool.minedBlobTxnsByHash[r.hash].TxnSlot.BlobBundles, 2)
+}
+
 func TestMinedBlobCacheIsBoundedWithoutFinality(t *testing.T) {
 	r := newMinedBlobReorgTest(t)
 	r.mine(t, 1, 3)

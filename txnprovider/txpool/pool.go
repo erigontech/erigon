@@ -2228,16 +2228,6 @@ const minedBlobReorgDepth = 64
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
 func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
-	// Remove blobs of finalized blocks, and of blocks too deep to reorg.
-	for b, mts := range p.minedBlobTxnsByBlock {
-		if (finalizedBlock > 0 && b <= finalizedBlock) || b+minedBlobReorgDepth < minedBlock {
-			for _, mt := range mts {
-				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
-			}
-			delete(p.minedBlobTxnsByBlock, b)
-		}
-	}
-
 	// Add mined blobs
 	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
 		p.minedBlobTxnsByBlock[minedBlock] = nil
@@ -2261,6 +2251,16 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, fi
 		mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(p.minedBlobTxnsByBlock[minedBlock])}
 		p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
 		p.minedBlobTxnsByHash[hash] = mt
+	}
+
+	// Remove blobs of finalized blocks, and of blocks too deep to reorg, after the re-mined txns took their copies.
+	for b, mts := range p.minedBlobTxnsByBlock {
+		if (finalizedBlock > 0 && b <= finalizedBlock) || b+minedBlobReorgDepth < minedBlock {
+			for _, mt := range mts {
+				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+			}
+			delete(p.minedBlobTxnsByBlock, b)
+		}
 	}
 	return nil
 }
