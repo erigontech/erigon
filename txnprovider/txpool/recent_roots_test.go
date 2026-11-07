@@ -83,8 +83,8 @@ func TestFramePoolRecentRootExpiry(t *testing.T) {
 		slot *uint64
 		keep bool
 	}{
-		{"oldest usable", common.NewUint64(10 + protocol.RecentRootLength - 2), true},
-		{"expired", common.NewUint64(10 + protocol.RecentRootLength - 1), false},
+		{"oldest usable", common.NewUint64(10 + protocol.RecentRootHistorySlots - 2), true},
+		{"expired", common.NewUint64(10 + protocol.RecentRootHistorySlots - 1), false},
 		{"current slot after reorg", common.NewUint64(9), false},
 		{"future slot after reorg", common.NewUint64(8), false},
 		{"missing slot", nil, false},

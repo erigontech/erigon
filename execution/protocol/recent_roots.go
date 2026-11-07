@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	RecentRootLength    = 8192
-	recentRootTupleSize = 72
+	RecentRootHistorySlots = 8192
+	recentRootTupleSize    = 72
 )
 
 // RecentRootCode is the ordinary contract runtime required by the public pool:
@@ -40,7 +40,7 @@ var (
 )
 
 // RecentRootReference records the (storage_key, entry_hash) dependency required by
-// EIP-8272. It is usable only at later slots and expires at Slot + RecentRootLength;
+// EIP-8272. It is usable only at later slots and expires at Slot + RecentRootHistorySlots;
 // keeping Slot avoids storing an expiry that can overflow uint64.
 type RecentRootReference struct {
 	StorageKey common.Hash
@@ -49,7 +49,7 @@ type RecentRootReference struct {
 }
 
 func (r RecentRootReference) ValidAt(slot uint64) bool {
-	return r.Slot < slot && slot-r.Slot < RecentRootLength
+	return r.Slot < slot && slot-r.Slot < RecentRootHistorySlots
 }
 
 // FrameTransactionRecentRoots uses the validation prefix, so approval frames
@@ -76,7 +76,7 @@ func recentRootReferences(data []byte) []RecentRootReference {
 		slot := binary.BigEndian.Uint64(tuple[32:40])
 		copy(entryData[32:], tuple)
 		copy(storageData[32:64], tuple[:32])
-		binary.BigEndian.PutUint64(storageData[64:], slot%RecentRootLength)
+		binary.BigEndian.PutUint64(storageData[64:], slot%RecentRootHistorySlots)
 		ref := RecentRootReference{
 			StorageKey: crypto.Keccak256Hash(storageData[:]),
 			EntryHash:  crypto.Keccak256Hash(entryData[:]),

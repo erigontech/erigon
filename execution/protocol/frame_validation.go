@@ -347,13 +347,14 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 	}
 	ctx := v.evm.FrameContext
 	deploying := ctx.Index == v.deploymentFrame
+	inRecentRootVerifier := ctx.Index == v.recentRootFrame && depth == 1
 	stack := scope.StackData()
 	banned := false
 	switch vm.OpCode(op) {
 	case vm.GASPRICE, vm.BLOCKHASH, vm.COINBASE, vm.NUMBER, vm.DIFFICULTY, vm.GASLIMIT, vm.BASEFEE, vm.BLOBBASEFEE, vm.INVALID, vm.SELFDESTRUCT, vm.BALANCE, vm.SELFBALANCE:
 		banned = true
 	case vm.SLOTNUM:
-		banned = ctx.Index != v.recentRootFrame || depth != 1
+		banned = !inRecentRootVerifier
 	case vm.TIMESTAMP:
 		frame := &ctx.Transaction.Frames[ctx.Index]
 		banned = ctx.Index != 0 || !frame.IsExpiryVerifier() || scope.Address().Value() != types.FrameExpiryVerifier || !bytes.Equal(scope.Code(), frameExpiryCode)
@@ -386,7 +387,7 @@ func (v *frameValidationTracer) onOpcode(pc uint64, op byte, gas mdgas.MdGas, co
 		banned = !deploying || scope.Address().Value() != ctx.Transaction.SenderAddress
 	case vm.SLOAD:
 		banned = scope.Address().Value() != ctx.Transaction.SenderAddress
-		if ctx.Index == v.recentRootFrame && depth == 1 && len(stack) > 0 {
+		if inRecentRootVerifier && len(stack) > 0 {
 			key := common.Hash(stack[len(stack)-1].Bytes32())
 			banned = !slices.ContainsFunc(v.RecentRoots, func(ref RecentRootReference) bool { return ref.StorageKey == key })
 		}
