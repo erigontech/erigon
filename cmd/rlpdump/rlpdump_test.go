@@ -152,7 +152,7 @@ func TestTextToRlpRejectsMalformedInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			data, err := textToRlp(strings.NewReader(tc.text))
-			if err == nil || err.Error() == "" {
+			if err == nil {
 				t.Fatalf("expected an error, got data %x and error %v", data, err)
 			}
 			if data != nil {

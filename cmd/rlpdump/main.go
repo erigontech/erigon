@@ -222,18 +222,16 @@ func textToRlp(r io.Reader) ([]byte, error) {
 				return nil, fmt.Errorf("invalid token %q", t)
 			}
 			var data []byte
+			var err error
 			if t[0] == '"' { // ascii string
-				str, err := strconv.Unquote(t)
-				if err != nil {
-					return nil, fmt.Errorf("invalid string %q: %w", t, err)
-				}
+				var str string
+				str, err = strconv.Unquote(t)
 				data = []byte(str)
 			} else { // hex data
-				var err error
 				data, err = hexutil.FromHexWithValidation(t)
-				if err != nil {
-					return nil, fmt.Errorf("invalid hex data %q: %w", t, err)
-				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("invalid element %q: %w", t, err)
 			}
 			obj = append(obj, data)
 		}
