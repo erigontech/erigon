@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -1317,7 +1316,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, applyTx kv.Tempo
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
 				// The view finalizeValidatedTx reads the first receipt's offsets from.
-				if executor.lacksPriorGas, err = pe.restorePriorGas(ctx, applyTx, executor.gasPool, txTask); err != nil {
+				if executor.prior, executor.lacksPriorGas, err = pe.restorePriorGas(ctx, applyTx, executor.gasPool, txTask); err != nil {
 					return err
 				}
 				// Set the coinbase once, before any worker runs, so self-loop workers
@@ -2876,6 +2875,9 @@ type blockExecutor struct {
 	// lacksPriorGas is set when gasPool lacks the gas of the transactions before
 	// tasks[0], which an earlier run executed.
 	lacksPriorGas bool
+	// prior is what those transactions left, where restorePriorGas executed them
+	// again.
+	prior *priorReceipt
 
 	execFailed []int
 
@@ -3123,7 +3125,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 			cumulativeGasUsed = prevRes.Receipt.CumulativeGasUsed
 			firstLogIndex = prevRes.Receipt.FirstLogIndexWithinBlock + uint32(len(prevRes.Receipt.Logs))
 		} else {
-			cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(applyTx, txVersion.TxNum)
+			cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := resumedReceiptBase(applyTx, txVersion.TxNum, be.prior)
 			if err != nil {
 				return nil, err
 			}

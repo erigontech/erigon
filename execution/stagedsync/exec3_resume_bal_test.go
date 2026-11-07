@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"maps"
@@ -1048,6 +1049,86 @@ func TestResumedBlockGasFromBlock(t *testing.T) {
 	}
 }
 
+// TestResumedBlockReceiptGasFromBlock checks that both executors, resuming a
+// block after transactions whose receipts are missing, before a message taking
+// its gas from the block, record the message's receipt with the cumulative
+// gas, blob gas and log index the whole block gives it, not with those of the
+// receipt domain's latest record.
+func TestResumedBlockReceiptGasFromBlock(t *testing.T) {
+	// Emits two logs: PUSH1 0 PUSH1 0 LOG0, twice, STOP.
+	logger := common.HexToAddress("0x000000000000000000000000000000000000106e")
+	fx := newResumeFixture(t, chain.TestChainOsakaConfig, types.GenesisAlloc{
+		resumeRecorder: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.GAS), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}},
+		logger:         {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}},
+	})
+	signer := types.LatestSignerForChainID(fx.config.ChainID)
+	// tx0 and tx1 each carry a blob and call logger.
+	var txs types.Transactions
+	for nonce := range uint64(2) {
+		blob, err := types.SignTx(&types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce, To: &logger, GasLimit: 100_000},
+				ChainID:  *fx.config.ChainID, TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(1_000_000_000),
+			},
+			MaxFeePerBlobGas:    *uint256.NewInt(1_000_000_000),
+			BlobVersionedHashes: []common.Hash{{0x01, byte(nonce)}},
+		}, *signer, senderIsCoinbaseKey.key)
+		require.NoError(t, err)
+		txs = append(txs, blob)
+	}
+	recorder, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 2, To: &resumeRecorder, GasLimit: params.MaxTxnGasLimit}, GasPrice: *uint256.NewInt(1_000_000_000),
+	}, *signer, senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+	txs = append(txs, fromBlockTxn{recorder})
+	fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+	require.Len(t, fx.receipts[0].Logs, 2)
+	require.Len(t, fx.receipts[1].Logs, 2)
+	wantGas, wantBlobGas := fx.receipts[2].CumulativeGasUsed, txs[0].GetBlobGas()+txs[1].GetBlobGas()
+	require.NotZero(t, txs[0].GetBlobGas())
+
+	var gas, blobGas, logIndex uint64
+	fx.inspect = func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx) {
+		latest := func(key []byte) uint64 {
+			v, _, err := sd.GetLatest(kv.ReceiptDomain, tx, key)
+			require.NoError(t, err)
+			n, _ := binary.Uvarint(v)
+			return n
+		}
+		gas = latest(rawtemporaldb.CumulativeGasUsedInBlockKey)
+		blobGas = latest(rawtemporaldb.CumulativeBlobGasUsedInBlockKey)
+		logIndex = latest(rawtemporaldb.LogIndexAfterTxKey)
+	}
+	for _, tc := range []struct {
+		name             string
+		point            resumePoint
+		noPrefixReceipts bool
+		earlierReceipt   bool
+	}{
+		{"full", fromBlockStart, false, false},
+		// tx1, the first transaction run, carries a blob too.
+		{"after tx0 without receipts", afterTx0, true, false},
+		{"after tx0 with only an earlier block's receipt", afterTx0, true, true},
+		{"after tx1 without receipts", resumePoint(2), true, false},
+		{"after tx1 with only an earlier block's receipt", resumePoint(2), true, true},
+	} {
+		for _, serial := range []bool{false, true} {
+			name := "parallel/" + tc.name
+			if serial {
+				name = "serial/" + tc.name
+			}
+			t.Run(name, func(t *testing.T) {
+				gas, blobGas, logIndex = 0, 0, 0
+				fx.noPrefixReceipts, fx.earlierReceipt = tc.noPrefixReceipts, tc.earlierReceipt
+				require.NoError(t, fx.run(t, fx.block, tc.point, serial))
+				require.Equal(t, wantGas, gas, "cumulative gas")
+				require.Equal(t, wantBlobGas, blobGas, "cumulative blob gas")
+				require.Equal(t, uint64(4), logIndex, "log index after the message")
+			})
+		}
+	}
+}
+
 const noWritesTxType = 0x7d
 
 func init() {
@@ -1225,13 +1306,14 @@ func TestRestorePriorGas(t *testing.T) {
 			te := &txExecutor{cfg: ExecuteBlockCfg{chainConfig: tc.config}}
 			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit}
 			task := &exec.TxTask{TxNum: tc.txNum, TxIndex: tc.txIndex, Txs: tc.txs, Config: tc.config, Header: header}
-			lacking, err := te.restorePriorGas(t.Context(), tx, gp, task)
+			prior, lacking, err := te.restorePriorGas(t.Context(), tx, gp, task)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 				require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 				return
 			}
 			require.NoError(t, err)
+			require.Nil(t, prior, "nothing executed again")
 			require.Equal(t, tc.lacking, lacking)
 			require.Equal(t, gasLimit-tc.gasUsed, gp.ExecutionGasAvailable())
 			require.Equal(t, maxBlobGas-tc.blobGasUsed, gp.BlobGas())

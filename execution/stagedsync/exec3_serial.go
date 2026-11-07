@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 
@@ -359,6 +358,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	}
 
 	var gasPool *protocol.GasPool
+	var prior *priorReceipt
 	var lacksPriorGas bool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
@@ -367,7 +367,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 		if gasPool == nil {
 			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
-			if lacksPriorGas, err = se.restorePriorGas(ctx, se.applyTx, gasPool, txTask); err != nil {
+			if prior, lacksPriorGas, err = se.restorePriorGas(ctx, se.applyTx, gasPool, txTask); err != nil {
 				return false, err
 			}
 		}
@@ -486,7 +486,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				case txTask.TxIndex > 0:
 					// reconstruct receipt from previous receipt values
-					cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := resumedReceiptBase(se.applyTx, txTask.TxNum, prior)
 					if err != nil {
 						return err
 					}
