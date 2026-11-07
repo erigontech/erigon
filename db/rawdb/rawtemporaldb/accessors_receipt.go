@@ -70,10 +70,9 @@ func ReceiptGasAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed, cumBlobGasUsed 
 	if txNum == 0 {
 		return 0, 0, false, nil
 	}
-	// The domain is written in txNum order: a persisted record from txNum-1 on,
-	// or one up to txNum-1 in the in-memory batch a block overlay reads first,
-	// shows it covers txNum-1. HistorySeek(ts) finds the former, and from that
-	// batch, one before ts.
+	// A record from txNum-1 on shows the domain, written in txNum order, reached
+	// txNum-1. HistorySeek(ts) finds a persisted one, but from the in-memory
+	// batch a block overlay reads first, any record before ts.
 	for _, ts := range []uint64{txNum - 1, txNum} {
 		if _, ok, err = tx.HistorySeek(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, ts); err != nil {
 			return 0, 0, false, err
@@ -88,6 +87,22 @@ func ReceiptGasAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed, cumBlobGasUsed 
 	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum)
 	if err != nil || !ok || len(v) == 0 {
 		return 0, 0, false, err
+	}
+	// As that batch answers past its end too, require the record of txNum-1 or,
+	// where the block's first txn left the cumulative gas unchanged and so
+	// unwritten, that of txNum: each shows as a change of value. Receipts lost
+	// before the txn a domain resumed at look the same at that txn.
+	var prev, next []byte
+	if prev, _, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum-1); err != nil {
+		return 0, 0, false, err
+	}
+	if bytes.Equal(prev, v) {
+		if next, _, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, txNum+1); err != nil {
+			return 0, 0, false, err
+		}
+		if bytes.Equal(v, next) {
+			return 0, 0, false, nil
+		}
 	}
 	cumGasUsed = uvarint(v)
 	if v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, txNum); err != nil || !ok || len(v) == 0 {
