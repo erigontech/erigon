@@ -968,6 +968,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		seen[addr] = struct{}{}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
+		defer e.mu.Unlock()
 		if vw, ok := writes.address[addr]; ok {
 			e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
 		}
@@ -1003,7 +1004,6 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage)
 			}
 		}
-		e.mu.Unlock()
 	})
 }
 
