@@ -1113,7 +1113,7 @@ func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
 	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: state.Version{TxIndex: 1}}, Val: *uint256.NewInt(95)})
 	cc.handleMessage(ctx, recordTx(vm, 1, common.Hash{0x01}, 12, &chain.Rules{}, ws))
 
-	acc, ok := cc.foldView(vm, 12, cc.asOfReader.dr.StateReaderAt(13)).GetAccount(addr)
+	acc, ok, _ := cc.foldView(vm, 12, cc.asOfReader.dr.StateReaderAt(13)).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, *uint256.NewInt(95), acc.Balance)
 	require.Equal(t, uint64(6), acc.Nonce, "the nonce committed by the block's earlier tx comes from the base")

@@ -761,7 +761,7 @@ type accountFloors struct {
 	codeHash                                                      accounts.CodeHash
 	address                                                       *accounts.Account
 	hasBalance, hasNonce, hasIncarnation, hasCodeHash, hasAddress bool
-	balanceDeleted, addressFromBAL                                bool
+	balanceDeleted, addressFromBAL, wasDeleted                    bool
 }
 
 // accountFloorsAt reads addr's floor cells under one entry lock instead of one lock per field.
@@ -790,6 +790,8 @@ func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accou
 	if _, c := floorCell(e.Address, txIdx); c != nil {
 		f.address, f.hasAddress, f.addressFromBAL = c.Value, true, c.accSource == AccountFromBAL
 	}
+	life, _, _, _ := accountLifecycleLocked(e, txIdx, false)
+	f.wasDeleted = life != LifecycleLive
 	return f
 }
 

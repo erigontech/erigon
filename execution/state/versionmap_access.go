@@ -59,22 +59,22 @@ func (view *VersionMapView) txIdx() int {
 // to the base domain as a delete — and an account with no live cell here that the base
 // also reports absent does not exist (in a cross-block batch the touched union carries
 // accounts removed in an earlier block; the base resolves them as absent). Otherwise the
-// composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
-// the read; it is the why-free add/remove projection.
-func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account, bool) {
+// composed account is present. wasDeleted reports a self-destruct or EIP-161 removal at
+// or below the view's txNum, the commitment's signal to drop the whole storage subtree.
+func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDeleted bool) {
 	f := view.vm.accountFloorsAt(addr, view.txIdx())
 	if f.balanceDeleted {
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
 	base, err := view.baseAccount(addr, &f)
 	if err != nil {
 		view.err = cmp.Or(view.err, err)
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
 	if base == nil && !f.hasBalance && !f.hasNonce && !f.hasIncarnation && !f.hasCodeHash {
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	acc := accounts.NewAccount()
+	acc = accounts.NewAccount()
 	if base != nil {
 		acc = *base
 	}
@@ -90,7 +90,7 @@ func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account,
 	if f.hasCodeHash {
 		acc.CodeHash = f.codeHash
 	}
-	return acc, true
+	return acc, true, f.wasDeleted
 }
 
 // baseAccount is the record the field cells overlay: a non-BAL address cell, else the
@@ -129,14 +129,6 @@ func (view *VersionMapView) GetStorage(addr accounts.Address, key accounts.Stora
 		}
 	}
 	return uint256.Int{}, false
-}
-
-// WasDestroyed reports whether addr was destroyed or removed (self-destruct or EIP-161
-// touched-empty removal) at or below the view's txNum — the lifecycle verdict the
-// commitment uses to delete the account's whole storage subtree.
-func (view *VersionMapView) WasDestroyed(addr accounts.Address) bool {
-	state, _, _, _ := view.vm.AccountLifecycleAt(addr, view.txIdx())
-	return state != LifecycleLive
 }
 
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
