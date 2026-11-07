@@ -107,7 +107,8 @@ func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 		if err != nil {
 			h.logger.Error("problem reading plain state version", "err", err)
 		}
-		notifications.Accumulator.Reset(stateVersion)
+		// Pending canonical changes belong to the next dispatch, even across runs.
+		notifications.Accumulator.SetStateID(stateVersion)
 	}
 	return nil
 }

@@ -45,9 +45,10 @@ import (
 var logEmitter = common.Address{0xbb}
 
 type reorgSubscriptions struct {
-	headers  [][]byte
-	logs     []*notifications.LogNotification
-	receipts []*notifications.ReceiptNotification
+	headers      [][]byte
+	logs         []*notifications.LogNotification
+	receipts     []*notifications.ReceiptNotification
+	stateChanges *remoteproto.StateChangeBatch
 }
 
 func collectReorgSubscriptions(headers <-chan [][]byte, logs <-chan []*notifications.LogNotification, receipts <-chan []*notifications.ReceiptNotification) *reorgSubscriptions {
@@ -225,9 +226,36 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(newHead.Hash())
+	batch := waitForBatchWithHead(newHead.Hash())
 
-	return oldHead, forkBlocks, collectReorgSubscriptions(headers, logs, receipts)
+	got = collectReorgSubscriptions(headers, logs, receipts)
+	got.stateChanges = batch
+	return oldHead, forkBlocks, got
+}
+
+func TestReorgPreservesUnwindStateChanges(t *testing.T) {
+	for _, tc := range reorgCases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldHead, forkBlocks, got := runReorg(t, tc)
+			changes := got.stateChanges.ChangeBatch
+			require.Len(t, changes, 1+len(forkBlocks))
+			require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
+			require.Equal(t, oldHead.ParentHash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[0].BlockHash)))
+			var unwound []common.Hash
+			for _, raw := range changes[0].Txs {
+				txn, err := types.DecodeTransaction(raw)
+				require.NoError(t, err)
+				unwound = append(unwound, txn.Hash())
+			}
+			for _, txn := range oldHead.Transactions() {
+				require.Contains(t, unwound, txn.Hash())
+			}
+			for i, block := range forkBlocks {
+				require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
+				require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
+			}
+		})
+	}
 }
 
 func TestReorgAnnouncesNewCanonicalHeaders(t *testing.T) {
@@ -280,13 +308,16 @@ func TestSideForkValidationDoesNotAnnounceUnwindForExtension(t *testing.T) {
 	m, canonical, side := newReorgChains(t, 3, 2)
 	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
 	waitForBatchWithHead(canonical.Blocks[1].Hash())
+	require.Empty(t, m.Notifications.Accumulator.Changes())
 	status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	validation, err := m.ValidateChain(t.Context(), side.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Empty(t, m.Notifications.Accumulator.Changes(), "validation must not change canonical notifications")
 
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[2:]))
 	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
