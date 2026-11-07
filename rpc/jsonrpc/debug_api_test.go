@@ -1333,6 +1333,17 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, result, tokenContract, "storage-only modified contract must be included")
 	})
+	t.Run("empty range is []", func(t *testing.T) {
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		result, err := getModifiedAccounts(tx, 1, 1)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(result)
+		require.NoError(t, err)
+		require.Equal(t, "[]", string(encoded))
+	})
 	t.Run("invalid input", func(t *testing.T) {
 		n := rpc.BlockNumber(1_000_000)
 		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
@@ -2187,21 +2198,4 @@ func TestTraceCallRejectsTxIndexOutOfLatestBlock(t *testing.T) {
 	config := &tracersConfig.TraceConfig{TxIndex: new(hexutil.Uint(500))}
 	err := debugApi.TraceCall(m.Ctx, calls[0], &latest, config, jsonstream.New(&bytes.Buffer{}))
 	require.ErrorAs(t, err, &invalidParams)
-}
-
-// A range in which nothing changed must be encoded as [] and not as null, because
-// clients decode the result of debug_getModifiedAccountsBy* as an array.
-func TestGetModifiedAccountsEmptyRangeIsEmptyArray(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	// startTxNum == endTxNum is an empty txNum range, so no account can have changed.
-	result, err := getModifiedAccounts(tx, 1, 1)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	encoded, err := json.Marshal(result)
-	require.NoError(t, err)
-	require.Equal(t, "[]", string(encoded))
 }
