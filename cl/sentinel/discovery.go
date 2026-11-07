@@ -40,13 +40,14 @@ import (
 )
 
 const (
-	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	minimumPeersPerSubnet            = 4 // Minimum peers needed per subnet before proactive search stops
-	subnetSearchTimeout              = 30 * time.Second
-	subnetSearchInterval             = 12 * time.Second // Check every slot
-	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
+	// Subscribers wanted per attestation subnet before the proactive search stops: the mesh low watermark, so
+	// gossipsub can fill a subnet's mesh.
+	minimumPeersPerSubnet = gossip.GossipSubDlo
+	subnetSearchTimeout   = 30 * time.Second
+	subnetSearchInterval  = 12 * time.Second // Check every slot
+	peerPruneInterval     = 60 * time.Second // How often to check for excess peers
 )
 
 func filterNonPrivatePeerAddresses(info *peer.AddrInfo) bool {
@@ -215,28 +216,11 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			s.pruneExcessPeers()
 		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
-
-			// Collect underserved subnets with their peer counts
-			var underserved []subnetSearchState
-			for i, count := range &coverage {
-				if count < minimumPeersPerSubnet {
-					underserved = append(underserved, subnetSearchState{
-						idx:    i,
-						wanted: minimumPeersPerSubnet - count,
-						found:  0,
-					})
-				}
-			}
-
+			underserved := underservedSubnets(&coverage)
 			if len(underserved) == 0 {
 				log.Trace("[Sentinel] All subnets have sufficient peers")
 				continue
 			}
-
-			// Sort by wanted count descending (subnets needing most peers first, i.e., 0-peer subnets)
-			slices.SortFunc(underserved, func(a, b subnetSearchState) int {
-				return cmp.Compare(b.wanted, a.wanted)
-			})
 
 			// Extract just the subnet indices for logging
 			underservedIdxs := make([]int, len(underserved))
@@ -275,6 +259,31 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				"stillUnderserved", stillUnderserved)
 		}
 	}
+}
+
+// underservedSubnets returns the subnets with fewer than minimumPeersPerSubnet subscribers, the emptiest first.
+func underservedSubnets(coverage *[attestationSubnetCount]int) []subnetSearchState {
+	var underserved []subnetSearchState
+	for i, count := range coverage {
+		if count < minimumPeersPerSubnet {
+			underserved = append(underserved, subnetSearchState{idx: i, wanted: minimumPeersPerSubnet - count})
+		}
+	}
+	slices.SortFunc(underserved, func(a, b subnetSearchState) int {
+		return cmp.Compare(b.wanted, a.wanted)
+	})
+	return underserved
+}
+
+// coversUnderservedSubnet reports whether a peer advertising peerSubnets would add a subscriber to a subnet
+// below minimumPeersPerSubnet.
+func coversUnderservedSubnet(peerSubnets bitfield.Bitvector64, coverage *[attestationSubnetCount]int) bool {
+	for i := range attestationSubnetCount {
+		if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
+			return true
+		}
+	}
+	return false
 }
 
 // peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions
@@ -591,12 +600,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 				var peerSubnets bitfield.Bitvector64
 				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil && len(peerSubnets) == 8 {
 					coverage := s.getSubnetCoverage()
-					for i := range attestationSubnetCount {
-						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
-							peerHelpsSubnets = true
-							break
-						}
-					}
+					peerHelpsSubnets = coversUnderservedSubnet(peerSubnets, &coverage)
 				}
 			}
 		}
