@@ -980,13 +980,22 @@ func TestFetchSerializesBatchFlushes(t *testing.T) {
 
 func TestPenalizePeerForBroadcastBlobTxn(t *testing.T) {
 	t.Parallel()
+	for _, known := range []bool{false, true} {
+		t.Run(fmt.Sprintf("known=%t", known), func(t *testing.T) {
+			t.Parallel()
+			testPenalizePeerForBroadcastBlobTxn(t, known)
+		})
+	}
+}
+
+func testPenalizePeerForBroadcastBlobTxn(t *testing.T, known bool) {
 	ctx := t.Context()
 
 	ctrl := gomock.NewController(t)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
-	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(known, nil).AnyTimes()
 	pool.EXPECT().AddRemoteTxns(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	sentryServer.EXPECT().
 		PenalizePeer(gomock.Any(), gomock.Any()).
