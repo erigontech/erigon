@@ -124,7 +124,6 @@ type Downloader struct {
 	chainTomlTorrentLock sync.Mutex
 	chainTomlSeedPending atomic.Bool
 	chainTomlCache       *cachedChainToml
-	chainTomlVerified    atomic.Pointer[chainTomlVerification]
 
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.

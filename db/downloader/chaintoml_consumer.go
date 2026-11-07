@@ -95,11 +95,6 @@ type cachedChainToml struct {
 	data     []byte
 }
 
-type chainTomlVerification struct {
-	infoHash metainfo.Hash
-	local    *snapcfg.Cfg
-}
-
 type chainTomlStorage struct {
 	storage.ClientImplCloser
 	rejected chan error
@@ -143,17 +138,6 @@ func validateChainTomlInfo(info *metainfo.Info) error {
 		return fmt.Errorf("invalid chain.toml torrent piece length: %d", info.PieceLength)
 	}
 	return nil
-}
-
-func readChainToml(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, maxChainTomlSize+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > maxChainTomlSize {
-		return nil, fmt.Errorf("chain.toml exceeds size limit of %d bytes", maxChainTomlSize)
-	}
-	return data, nil
 }
 
 func (d *Downloader) downloadChainToml(ctx context.Context, peer *ChainTomlPeer) ([]byte, error) {
@@ -243,16 +227,16 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 		return nil, fmt.Errorf("opening downloaded chain.toml: %w", err)
 	}
 	defer f.Close()
-	data, err := readChainToml(f)
+	data, err := io.ReadAll(io.LimitReader(f, info.Length+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading downloaded chain.toml: %w", err)
+	}
+	if int64(len(data)) != info.Length {
+		return nil, fmt.Errorf("chain.toml does not match torrent length")
 	}
 	if !added {
 		// The local file may have changed since the torrent was marked complete.
 		// Verify the bytes we return, since a separate file read could see different contents.
-		if int64(len(data)) != info.Length {
-			return nil, fmt.Errorf("chain.toml does not match torrent length")
-		}
 		pieces, hashErr := metainfo.GeneratePieces(bytes.NewReader(data), info.PieceLength, nil)
 		if hashErr != nil {
 			return nil, fmt.Errorf("hashing local chain.toml: %w", hashErr)
@@ -390,7 +374,6 @@ func (d *Downloader) chainTomlDiscoveryLoop(ctx context.Context, networkName str
 // acquireChainToml discovers the best chain.toml from peers, downloads it, and merges
 // new entries into the preverified registry.
 func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, ns NodeSource) {
-	d.chainTomlVerified.Store(nil)
 	allNodes := ns.AllNodes()
 	// Count chain-toml entries and log details for debugging
 	var withChainToml int
@@ -462,15 +445,6 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 		return
 	}
 
-	cfg, known := snapcfg.KnownCfg(networkName)
-	if !known {
-		cfg = nil
-	}
-	// Registry updates replace the cached config, so its identity tracks the local comparison inputs.
-	if previous := d.chainTomlVerified.Load(); previous != nil && previous.infoHash == best.ChainToml.InfoHash && previous.local == cfg {
-		return
-	}
-
 	discovered, err := ParseChainToml(tomlBytes)
 	if err != nil {
 		d.logger.Warn("[chaintoml] verify: failed to parse chain.toml", "err", err)
@@ -479,7 +453,7 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 
 	// Build local map from current preverified registry
 	local := make(map[string]string)
-	if cfg != nil {
+	if cfg, known := snapcfg.KnownCfg(networkName); known {
 		for _, item := range cfg.Preverified.Items {
 			local[item.Name] = item.Hash
 		}
@@ -501,5 +475,4 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 	if matching > 0 {
 		d.logger.Debug("[chaintoml] peer agrees on entries", "count", matching)
 	}
-	d.chainTomlVerified.Store(&chainTomlVerification{infoHash: best.ChainToml.InfoHash, local: cfg})
 }

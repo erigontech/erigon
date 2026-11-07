@@ -390,58 +390,6 @@ func TestChainTomlCacheRejectsInvalidToml(t *testing.T) {
 	require.ErrorContains(t, err, "chain.toml does not match torrent", "a failed parse must not populate the cache")
 }
 
-func TestVerifyChainTomlReportsChangedInputs(t *testing.T) {
-	const network = "sepolia"
-	const name = "domain/v1-accounts.0-64.kv"
-	previous := append([]byte{}, snapcfg.GetToml(network)...)
-	previousCfg, _ := snapcfg.KnownCfg(network)
-	t.Cleanup(func() { require.NoError(t, snapcfg.SetToml(network, previous, previousCfg.Local)) })
-	localHash := strings.Repeat("a", 40)
-	peerHash := strings.Repeat("b", 40)
-	require.NoError(t, snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: localHash}), true))
-	test := newDownloaderTest(t)
-	d := test.downloader
-	logs := &logBuffer{}
-	d.logger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(logs, log.LogfmtFormat())))
-	require.NoError(t, SaveChainToml(test.dirs.Snap, BuildTomlFromMap(map[string]string{name: peerHash})))
-	mi := buildTestMetainfo(t, test.dirs.Snap, ChainTomlFileName)
-	manifest, err := d.torrentClient.AddTorrent(&mi)
-	require.NoError(t, err)
-	require.True(t, manifest.Complete().Bool())
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	node := makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: mi.HashInfoBytes()})
-	ns := &mockNodeSource{nodes: []*enode.Node{node}}
-
-	d.verifyChainToml(t.Context(), network, ns)
-	require.Equal(t, 1, strings.Count(logs.String(), "hash mismatch"))
-	d.verifyChainToml(t.Context(), network, ns)
-	require.Equal(t, 1, strings.Count(logs.String(), "hash mismatch"), "unchanged comparisons must not repeat warnings")
-
-	require.NoError(t, snapcfg.SetToml(network, BuildTomlFromMap(map[string]string{name: strings.Repeat("c", 40)}), true))
-	d.verifyChainToml(t.Context(), network, ns)
-	require.Equal(t, 2, strings.Count(logs.String(), "hash mismatch"), "local changes must be compared with the cached peer manifest")
-
-	d.acquireChainToml(t.Context(), network, ns)
-	d.verifyChainToml(t.Context(), network, ns)
-	require.Equal(t, 3, strings.Count(logs.String(), "hash mismatch"), "returning to verify mode must compare again")
-
-	manifest.Drop()
-	peerHash = strings.Repeat("d", 40)
-	require.NoError(t, SaveChainToml(test.dirs.Snap, BuildTomlFromMap(map[string]string{name: peerHash})))
-	mi = buildTestMetainfo(t, test.dirs.Snap, ChainTomlFileName)
-	manifest, err = d.torrentClient.AddTorrent(&mi)
-	require.NoError(t, err)
-	require.True(t, manifest.Complete().Bool())
-	ns.nodes[0] = makeTestNode(t, key, &enr.ChainToml{KnownBlocks: 1, InfoHash: mi.HashInfoBytes()})
-
-	d.verifyChainToml(t.Context(), network, ns)
-	require.Equal(t, 4, strings.Count(logs.String(), "hash mismatch"), "a changed peer manifest must be compared with the unchanged local registry")
-	require.Contains(t, logs.String(), "peer="+peerHash)
-	d.verifyChainToml(t.Context(), network, ns)
-	require.Equal(t, 4, strings.Count(logs.String(), "hash mismatch"), "repeating the new peer manifest must not repeat warnings")
-}
-
 func TestAcquireChainTomlReusesCacheAfterLocalChanges(t *testing.T) {
 	const network = "sepolia"
 	previous := append([]byte{}, snapcfg.GetToml(network)...)
@@ -495,17 +443,14 @@ func TestDownloadChainTomlByInfoHashUsesSeededManifest(t *testing.T) {
 			err:         "chain.toml does not match torrent",
 		},
 		{
-			name: "longer",
-			replacement: BuildTomlFromMap(map[string]string{
-				"snapshot.seg": "abc123",
-				"extra.seg":    "def456",
-			}),
-			err: "chain.toml does not match torrent",
+			name:        "longer",
+			replacement: append(bytes.Clone(data), '\n'),
+			err:         "chain.toml does not match torrent length",
 		},
 		{
 			name:        "oversized",
 			replacement: make([]byte, maxChainTomlSize+1),
-			err:         "chain.toml exceeds size limit",
+			err:         "chain.toml does not match torrent length",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -651,31 +596,6 @@ func TestChainTomlStorageRejectsInvalidMetadataBeforeOpeningFiles(t *testing.T) 
 			entries, err := os.ReadDir(downloadDir)
 			require.NoError(t, err)
 			assert.Empty(t, entries, "rejected metadata must not create files")
-		})
-	}
-}
-
-func TestReadChainTomlLimitsSize(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		size int64
-	}{
-		{name: "empty", size: 0},
-		{name: "below_limit", size: maxChainTomlSize - 1},
-		{name: "at_limit", size: maxChainTomlSize},
-		{name: "above_limit", size: maxChainTomlSize + 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := bytes.NewReader(make([]byte, tc.size))
-			data, err := readChainToml(r)
-			if tc.size <= maxChainTomlSize {
-				require.NoError(t, err)
-				assert.Len(t, data, int(tc.size))
-			} else {
-				assert.ErrorContains(t, err, "chain.toml exceeds size limit")
-				assert.Zero(t, len(data))
-				assert.Equal(t, 1, r.Len(), "read only one byte beyond the limit to detect excess data")
-			}
 		})
 	}
 }
