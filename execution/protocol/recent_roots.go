@@ -18,7 +18,6 @@ package protocol
 
 import (
 	"encoding/binary"
-	"errors"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -63,23 +62,11 @@ func FrameTransactionRecentRoots(tx *types.FrameTransaction) ([]RecentRootRefere
 	if prefix.recentRootFrame < 0 {
 		return nil, nil
 	}
-	return ParseRecentRootReferences(tx.Frames[prefix.recentRootFrame].Data)
+	return recentRootReferences(tx.Frames[prefix.recentRootFrame].Data), nil
 }
 
-func validateRecentRootDataLength(size int) error {
-	const maxReferences = 16
-	if size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
-		return errors.New("invalid recent root data length")
-	}
-	return nil
-}
-
-// ParseRecentRootReferences derives expected storage entries from encoded tuples.
-// It checks the encoding; the verifier contract checks age and stored values.
-func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
-	if err := validateRecentRootDataLength(len(data)); err != nil {
-		return nil, err
-	}
+// recentRootReferences expects data whose length has been checked by parseFrameValidationPrefix.
+func recentRootReferences(data []byte) []RecentRootReference {
 	refs := make([]RecentRootReference, 0, len(data)/recentRootTupleSize)
 	var entryData [32 + recentRootTupleSize]byte
 	var storageData [32 + 32 + 8]byte
@@ -100,5 +87,5 @@ func ParseRecentRootReferences(data []byte) ([]RecentRootReference, error) {
 			refs = append(refs, ref)
 		}
 	}
-	return refs, nil
+	return refs
 }

@@ -117,10 +117,7 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 		evm:             evm,
 	}
 	if validation.recentRootFrame >= 0 {
-		validation.RecentRoots, err = ParseRecentRootReferences(tx.Frames[validation.recentRootFrame].Data)
-		if err != nil {
-			return nil, err
-		}
+		validation.RecentRoots = recentRootReferences(tx.Frames[validation.recentRootFrame].Data)
 	}
 	config, txContext := evm.Config(), evm.TxContext
 	defer evm.ResetBetweenBlocks(evm.Context, txContext, evm.IntraBlockState(), config, evm.ChainRules())
@@ -178,8 +175,9 @@ func parseFrameValidationPrefix(tx *types.FrameTransaction) (framePrefix, error)
 			if !f.Value.IsZero() || f.Limits.State != 0 {
 				return framePrefix{}, invalid
 			}
-			if err := validateRecentRootDataLength(len(f.Data)); err != nil {
-				return framePrefix{}, err
+			const maxReferences = 16
+			if size := len(f.Data); size < recentRootTupleSize || size%recentRootTupleSize != 0 || size > maxReferences*recentRootTupleSize {
+				return framePrefix{}, errors.New("invalid recent root data length")
 			}
 			prefix.recentRootFrame = i
 			i++

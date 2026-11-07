@@ -237,10 +237,9 @@ func TestFrameValidationRecentRootCodeAndStorage(t *testing.T) {
 	}
 	t.Run("entry removed", func(t *testing.T) {
 		evm, tx := recentRootTestEnv(t)
-		refs, err := ParseRecentRootReferences(tx.Frames[0].Data)
-		require.NoError(t, err)
+		refs := recentRootReferences(tx.Frames[0].Data)
 		require.NoError(t, evm.IntraBlockState().SetState(accounts.InternAddress(types.FrameRecentRootVerifier), accounts.InternKey(refs[0].StorageKey), uint256.Int{}))
-		_, err = ValidateFrameTransaction(evm, tx)
+		_, err := ValidateFrameTransaction(evm, tx)
 		require.ErrorIs(t, err, vm.ErrExecutionReverted)
 	})
 }
@@ -300,8 +299,7 @@ func TestFrameValidationRecentRootMultipleTuples(t *testing.T) {
 				}
 				tx.Frames[0].Data = append(tx.Frames[0].Data, data...)
 			}
-			refs, err := ParseRecentRootReferences(tx.Frames[0].Data)
-			require.NoError(t, err)
+			refs := recentRootReferences(tx.Frames[0].Data)
 			count := 16
 			if duplicate {
 				count = 1
