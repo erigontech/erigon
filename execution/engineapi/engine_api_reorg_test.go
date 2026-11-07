@@ -499,7 +499,7 @@ func TestNewPayloadResentHeadKeepsExecutedState(t *testing.T) {
 			status, err := eat.MockCl.InsertNewPayload(ctx, payload)
 			require.NoError(t, err)
 			require.Equal(t, enginetypes.ValidStatus, status.Status)
-			require.Equal(t, hash, forkValidator.ExtendingForkHeadHash())
+			require.True(t, forkValidator.HasValidatedState(hash))
 		}
 		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
 	})

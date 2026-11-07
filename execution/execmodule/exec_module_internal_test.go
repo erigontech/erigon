@@ -290,6 +290,23 @@ func TestBeginOverlayOrRoPanicReleasesLock(t *testing.T) {
 	e.lock.Unlock()
 }
 
+func TestIsValidatedDoesNotWaitForValidation(t *testing.T) {
+	fv := newForkValidator(t.Context(), 0, nil, nil, 1, nil)
+	hash := common.Hash{1}
+	fv.validHashes.Add(hash, true)
+
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	validated := make(chan bool, 1)
+	go func() { validated <- fv.IsValidated(hash) }()
+	select {
+	case ok := <-validated:
+		require.True(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("IsValidated waited for the fork validator lock")
+	}
+}
+
 func TestCacheCodeByHashIsNilWithoutStateCache(t *testing.T) {
 	require.True(t, (&Cache{}).CodeByHash() == nil)
 	require.True(t, (&Cache{execModule: &ExecModule{}}).CodeByHash() == nil, "a nil *StateCache must not become a non-nil CodeByHash")
