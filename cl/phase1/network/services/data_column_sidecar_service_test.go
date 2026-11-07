@@ -20,9 +20,11 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	das_state_mock "github.com/erigontech/erigon/cl/das/state/mock_services"
+	"github.com/erigontech/erigon/cl/gossip"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossipmock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -629,7 +631,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyLookupFails_R
 	stateReader := das_state_mock.NewMockPeerDasStateReader(t.gomockCtrl)
 	t.mockForkChoice.MockPeerDas = peerDas
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
-	peerDas.EXPECT().IsArchivedMode().Return(false)
 	peerDas.EXPECT().StateReader().Return(stateReader)
 	stateReader.EXPECT().GetMyCustodyColumns().Return(nil, errors.New("custody unavailable"))
 
@@ -712,6 +713,79 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidSidecarOutsid
 	header := sidecar.SignedBlockHeader.Header
 	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: 1})
 	t.False(seen)
+	t.Empty(events)
+}
+
+// archivePeerDas is an archive node with custody column 0 whose block has its blobs recovered, or else over half of
+// its columns stored. Such a node stores only its custody columns of the block.
+func (t *dataColumnSidecarTestSuite) archivePeerDas(blobsRecovered bool) *das_mock.MockPeerDas {
+	peerDas := t.archivePeerDasWithCustodyColumn0()
+	peerDas.EXPECT().IsColumnOverHalf(gomock.Any(), gomock.Any()).Return(!blobsRecovered).AnyTimes()
+	peerDas.EXPECT().IsBlobAlreadyRecovered(gomock.Any()).Return(blobsRecovered).AnyTimes()
+	return peerDas
+}
+
+func (t *dataColumnSidecarTestSuite) archivePeerDasWithCustodyColumn0() *das_mock.MockPeerDas {
+	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
+	stateReader := das_state_mock.NewMockPeerDasStateReader(t.gomockCtrl)
+	peerDas.EXPECT().IsArchivedMode().Return(true).AnyTimes()
+	peerDas.EXPECT().StateReader().Return(stateReader).AnyTimes()
+	stateReader.EXPECT().GetMyCustodyColumns().Return(map[uint64]bool{0: true}, nil).AnyTimes()
+	return peerDas
+}
+
+func (t *dataColumnSidecarTestSuite) assertFuluArchiveSidecar(blobsRecovered, kzgProofsValid bool) {
+	t.expectFuluSidecarOutsideCustody(kzgProofsValid)
+	t.mockForkChoice.MockPeerDas = t.archivePeerDas(blobsRecovered)
+	sidecar := createMockDataColumnSidecar(testSlot, 1, clparams.FuluVersion)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
+
+	header := sidecar.SignedBlockHeader.Header
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenSidecar.Get(seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: 1})
+	if kzgProofsValid {
+		t.NoError(err)
+		t.True(seen)
+		return
+	}
+	t.ErrorContains(err, "invalid kzg proofs")
+	t.NotErrorIs(err, ErrIgnore)
+	t.False(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOverHalf_AcceptsValidSidecar() {
+	t.assertFuluArchiveSidecar(false, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOverHalf_RejectsInvalidSidecar() {
+	t.assertFuluArchiveSidecar(false, false)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndBlobsRecovered_AcceptsValidSidecar() {
+	t.assertFuluArchiveSidecar(true, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndBlobsRecovered_RejectsInvalidSidecar() {
+	t.assertFuluArchiveSidecar(true, false)
+}
+
+// A custody column is stored even when the archive node can recover the blobs, so a column that recovery failed to
+// write is still stored from gossip. Storage sends its event, so the service does not send another.
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenArchiveAndColumnsOverHalf_StoresCustodySidecar() {
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	t.expectFuluSidecarOutsideCustody(true)
+	peerDas := t.archivePeerDas(false)
+	t.mockForkChoice.MockPeerDas = peerDas
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
+	blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	t.Require().NoError(err)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), int64(0), sidecar).Return(nil).Times(1)
+	peerDas.EXPECT().TryScheduleRecover(testSlot, common.Hash(blockRoot)).Return(nil).Times(1)
+
+	t.NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
+
 	t.Empty(events)
 }
 
@@ -1228,7 +1302,6 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenCustodyLookupFa
 	t.mockForkChoice.MockPeerDas = peerDas
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot)
-	peerDas.EXPECT().IsArchivedMode().Return(false)
 	peerDas.EXPECT().StateReader().Return(stateReader)
 	stateReader.EXPECT().GetMyCustodyColumns().Return(nil, errors.New("custody unavailable"))
 	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
@@ -1327,13 +1400,89 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSidecarOutsideC
 	t.Len(events, 1)
 }
 
-func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveMode_StoresSidecar() {
+func (t *dataColumnSidecarTestSuite) assertGloasArchiveSidecar(blobsRecovered, kzgProofsValid bool) {
+	t.expectGloasSidecarOutsideCustody(kzgProofsValid)
+	t.mockForkChoice.MockPeerDas = t.archivePeerDas(blobsRecovered)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
+
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	if kzgProofsValid {
+		t.NoError(err)
+		t.True(seen)
+		return
+	}
+	t.EqualError(err, "invalid kzg proofs for data column sidecar")
+	t.False(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndColumnsOverHalf_AcceptsValidSidecar() {
+	t.assertGloasArchiveSidecar(false, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndColumnsOverHalf_RejectsInvalidSidecar() {
+	t.assertGloasArchiveSidecar(false, false)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndBlobsRecovered_AcceptsValidSidecar() {
+	t.assertGloasArchiveSidecar(true, true)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndBlobsRecovered_RejectsInvalidSidecar() {
+	t.assertGloasArchiveSidecar(true, false)
+}
+
+// A published Gloas column, such as a recovered one, is marked seen, so a later gossip copy is a duplicate that is
+// ignored before the KZG check.
+func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_MarksColumnSeenSoGossipCopyIsIgnored() {
 	t.activateGloas()
-	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
-	t.mockForkChoice.MockPeerDas = peerDas
-	peerDas.EXPECT().IsArchivedMode().Return(true).AnyTimes()
+	publisher := gossipmock.NewMockGossip(t.gomockCtrl)
+	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = publisher
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index }
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)
+	encoded, err := sidecar.EncodeSSZ(nil)
+	t.Require().NoError(err)
+	digest := common.Bytes4{1, 2, 3, 4}
+	t.mockEthClock.EXPECT().ComputeForkDigest(testSlot/testSlotsPerEpoch).Return(digest, nil)
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), digest, gossip.TopicNameDataColumnSidecar(1), encoded).Return(nil).Times(1)
+
+	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{sidecar})
+
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Times(0)
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.Equal(ErrIgnore, t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_WhenSlotFinalized_PublishesNothing() {
+	t.activateGloas()
+	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = gossipmock.NewMockGossip(t.gomockCtrl)
+	t.mockForkChoice.FinalizedSlotVal = testSlot
+
+	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)})
+
+	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	t.False(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveMode_StoresSidecar() {
+	peerDas := t.archivePeerDasWithCustodyColumn0()
 	peerDas.EXPECT().IsColumnOverHalf(testSlot, testBlockRoot).Return(false).AnyTimes()
 	peerDas.EXPECT().IsBlobAlreadyRecovered(testBlockRoot).Return(false).AnyTimes()
+	t.assertGloasArchiveStoresSidecar(peerDas, 1)
+}
+
+// A custody column is stored even when the archive node can recover the blobs, so a column that recovery failed to
+// write is still stored from gossip.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveAndColumnsOverHalf_StoresCustodySidecar() {
+	t.assertGloasArchiveStoresSidecar(t.archivePeerDas(false), 0)
+}
+
+func (t *dataColumnSidecarTestSuite) assertGloasArchiveStoresSidecar(peerDas *das_mock.MockPeerDas, index uint64) {
+	t.activateGloas()
+	t.mockForkChoice.MockPeerDas = peerDas
 	peerDas.EXPECT().TryScheduleRecover(testSlot, testBlockRoot).Return(nil).Times(1)
 	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
 	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
@@ -1342,9 +1491,9 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenArchiveMode_Sto
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
-	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(1), gomock.Any()).Return(nil).Times(1)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(index), gomock.Any()).Return(nil).Times(1)
 
-	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, index, testBlockRoot))
 
 	t.NoError(err)
 }
