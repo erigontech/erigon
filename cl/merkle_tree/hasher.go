@@ -56,11 +56,6 @@ func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit 
 		copy(out, ZeroHashes[GetDepth(limit)][:])
 		return nil
 	}
-	if len(leaves)%32 != 0 {
-		padded := make([]byte, chunks*32)
-		copy(padded, leaves)
-		leaves = padded
-	}
 	return m.merkleizeTrieLeavesFlatWithStart(leaves, out, limit, 0)
 }
 
@@ -91,9 +86,13 @@ func (m *merkleHasher) getBuffer(size int) [][32]byte {
 }
 
 func (m *merkleHasher) getBufferFromFlat(xs []byte) [][32]byte {
-	buf := m.getBuffer(len(xs) / 32)
-	for i := 0; i < len(xs)/32; i++ {
-		copy(buf[i][:], xs[i*32:(i+1)*32])
+	n := (len(xs) + 31) / 32
+	buf := m.getBuffer(n)
+	for i := range n {
+		copy(buf[i][:], xs[i*32:])
+	}
+	if rem := len(xs) % 32; rem != 0 {
+		clear(buf[n-1][rem:])
 	}
 	return buf
 }

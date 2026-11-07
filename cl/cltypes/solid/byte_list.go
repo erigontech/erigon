@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
 )
 
 // ByteListSSZ is a variable-length SSZ byte list (ByteList[N]) with a
@@ -107,12 +106,8 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	// Number of 32-byte chunks needed to hold limit bytes.
 	chunkLimit := (b.limit + 31) / 32
 
-	// Pack the data into 32-byte chunks and merkleize with the chunk limit.
-	leaves := make([]byte, (len(b.data)+31)/length.Hash*length.Hash)
-	copy(leaves, b.data)
-
 	var root [32]byte
-	if err := merkle_tree.MerkleRootFromFlatLeavesWithLimit(leaves, root[:], chunkLimit); err != nil {
+	if err := merkle_tree.MerkleRootFromFlatLeavesWithLimit(b.data, root[:], chunkLimit); err != nil {
 		return [32]byte{}, err
 	}
 
