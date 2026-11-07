@@ -502,19 +502,22 @@ func (p *TxPool) refreshFrameAccounts(cacheView kvcache.CacheView) error {
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
+	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
+	headIsBogota := p.chainConfig.IsBogota(head.BlockTime)
+	activationUnwound := p.headIsBogota && !headIsBogota
+	p.headIsBogota = headIsBogota
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
-	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
 	blockTime := head.BlockTime
-	// Expiry and activation checks use the same pending-block time as validation.
+	// Expiry and pending-fork checks use the same block time as validation.
 	pendingTime := max(blockTime+p.chainConfig.SecondsPerSlot(), uint64(time.Now().Unix()))
 	var pendingSlot uint64
 	hasPendingSlot := head.SlotNumber != nil && *head.SlotNumber != math.MaxUint64
 	if hasPendingSlot {
 		pendingSlot = *head.SlotNumber + 1
 	}
-	isBogota := p.chainConfig.IsBogota(pendingTime)
+	pendingIsBogota := p.chainConfig.IsBogota(pendingTime)
 	touched := make(map[common.Address]struct{})
 	codeChanged := make(map[common.Address]struct{})
 	accountChanges := make(map[common.Address][]byte)
@@ -556,15 +559,15 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		if len(previous.RecentRoots) > 0 {
 			affected = affected || changes.StateChangesIncomplete
-			invalidRoots := !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
+			invalidRoots := activationUnwound || !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
 				return !ref.ValidAt(pendingSlot)
 			})
 			if invalidRoots {
-				p.removeFromSubPool(mt, "recent root outside slot window")
+				p.removeFromSubPool(mt, "recent root no longer usable")
 				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 				continue
 			}
-			affected = affected || !isBogota
+			affected = affected || !pendingIsBogota
 		}
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
