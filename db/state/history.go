@@ -1575,24 +1575,25 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		binary.BigEndian.PutUint64(from, uint64(startTxNum))
 	}
 	if endTxNum >= 0 {
-		toTxNum := uint64(endTxNum)
-		if !asc {
-			// dup values are txNum followed by the previous value, so endTxNum's own entries sort above an 8-byte endTxNum bound
-			toTxNum++
-		}
 		to = make([]byte, 8)
-		binary.BigEndian.PutUint64(to, toTxNum)
+		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
 	it, err := roTx.RangeDupSort(ht.h.ValuesTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+	res := stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
 		if len(v) < 8 {
 			return 0, fmt.Errorf("unexpected small value length %d", len(v))
 		}
 		return binary.BigEndian.Uint64(v), nil
-	}), nil
+	})
+	if !asc && endTxNum >= 0 {
+		// dup values are txNum followed by the previous value, so a non-empty previous value at endTxNum sorts above the
+		// 8-byte bound and leaks through the exclusive desc end; there is at most one such entry, and it is the last one
+		return stream.FilterU64(res, func(n uint64) bool { return n != uint64(endTxNum) }), nil
+	}
+	return res, nil
 }
 
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

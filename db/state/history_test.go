@@ -2560,6 +2560,19 @@ func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, rangeOf(5, 0), got)
 
+			// adjacent bounds, and an empty previous value right after endTxNum
+			it, err = hc.IdxRange(key[:], 3, 2, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(3, 2), got)
+
+			it, err = hc.IdxRange(key[:], 5, 0, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(5, 0), got)
+
 			it, err = hc.IdxRange(key[:], -1, 995, order.Desc, -1, roTx)
 			require.NoError(t, err)
 			got, err = stream.ToArrayU64(it)
