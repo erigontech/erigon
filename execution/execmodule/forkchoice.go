@@ -563,6 +563,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return nil
 	}
 
+	// Validation can leave speculative unwind data. Publish only changes made
+	// by this forkchoice and the forward changes it adopts.
+	if e.accum != nil && e.accum.Accumulator != nil {
+		e.accum.Accumulator.Reset(0)
+	}
 	var restoreRecentReceipts func()
 	defer func() {
 		if restoreRecentReceipts != nil {

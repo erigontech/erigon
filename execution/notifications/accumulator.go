@@ -200,3 +200,15 @@ func (a *Accumulator) CopyAndReset(target *Accumulator) {
 	target.storageChangeIndex = a.storageChangeIndex
 	a.storageChangeIndex = nil
 }
+
+// AppendAndReset appends these changes to target, then resets this accumulator.
+func (a *Accumulator) AppendAndReset(target *Accumulator) {
+	if len(a.changes) == 0 {
+		return
+	}
+	target.changes = append(target.changes, a.changes...)
+	target.latestChange = &target.changes[len(target.changes)-1]
+	target.accountChangeIndex = a.accountChangeIndex
+	target.storageChangeIndex = a.storageChangeIndex
+	a.Reset(0)
+}

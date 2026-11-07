@@ -17,7 +17,7 @@ network_params:
   electra_fork_epoch: 0
   fulu_fork_epoch: 0
   gloas_fork_epoch: 10000000
-additional_services: [spamoor, disruptoor]
+additional_services: [disruptoor]
 ethereum_genesis_generator_params:
   image: ethpandaops/ethereum-genesis-generator:6.1.4
   extra_env:
@@ -26,9 +26,10 @@ disruptoor_params:
   image: ethpandaops/disruptoor:v1.1.1
 spamoor_params:
   image: ethpandaops/spamoor:v1.2.4
-  start_chainload: false
   spammers:
-    - scenario: storagerefundtx
-      config: {throughput: 2, slots_per_call: 32}
-    - scenario: eoatx
-      config: {throughput: 2}
+    - name: storage
+      scenario: storagerefundtx
+      config: {throughput: 1, slots_per_call: 32}
+    - name: transfers
+      scenario: eoatx
+      config: {throughput: 1}

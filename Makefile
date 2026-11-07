@@ -264,7 +264,7 @@ REORG_ENCLAVE ?= unwind-reorg
 ## test-reorg-devnet:                  partition/heal real CLs using test/erigon:current
 .PHONY: test-reorg-devnet
 test-reorg-devnet:
-	$(KURTOSIS) run --privileged --enclave $(REORG_ENCLAVE) github.com/ethpandaops/ethereum-package@5795b77e65235ad223d4d3b413b2739190bf60cc --args-file .github/workflows/kurtosis/reorg-bounce.io
+	$(KURTOSIS) run --privileged --enclave $(REORG_ENCLAVE) .github/workflows/kurtosis/reorg --args-file .github/workflows/kurtosis/reorg-bounce.io
 	KURTOSIS=$(KURTOSIS) python3 tools/test-reorg-devnet.py $(REORG_ENCLAVE)
 
 ## test-fixtures:                      download & verify all pinned test fixture tarballs

@@ -297,7 +297,9 @@ func readRecoveryState(t *testing.T, m *execmoduletester.ExecModuleTester) recov
 	require.Equal(t, blockNum, lastBlock)
 	require.Equal(t, txNum, lastTxNum, "transaction numbering must end at the commitment boundary")
 	require.GreaterOrEqual(t, txNum, m.DB.StepSize(), "fixture must cross a domain step")
-	require.Empty(t, tx.Debug().DomainFiles(), "fixture must remain fully unwindable")
+	for domain := range kv.DomainLen {
+		require.Empty(t, tx.Debug().DomainFiles(domain), "fixture must remain fully unwindable: %s files", domain)
+	}
 	result := recoveryState{
 		Head: head, Canonical: make([]common.Hash, blockNum+1), TxNums: make([]uint64, blockNum+1),
 		Domains: make(map[kv.Domain]map[string]string), TxLookup: make(map[string]string),
