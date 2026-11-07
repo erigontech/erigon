@@ -122,6 +122,41 @@ func TestInvertedIndexVisibleEnd(t *testing.T) {
 	require.Equal(t, uint64(200), iit.visibleEnd(tx))
 }
 
+// Read-only txs share lastTxNumInDB per snapshot: a tx begun after a commit sees the new
+// value, and a tx begun before it keeps its own.
+func TestLastTxNumInDBPerSnapshot(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	put := func(txNum uint64) {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], txNum)
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Put(ii.KeysTable, k[:], []byte{1}) }))
+	}
+	last := func(tx kv.Tx) uint64 { n, _ := ii.lastTxNumInDB(tx); return n }
+
+	put(10)
+	old, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer old.Rollback()
+	require.Equal(t, uint64(10), last(old))
+
+	put(100)
+	cur, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer cur.Rollback()
+	require.Equal(t, uint64(100), last(cur))
+	require.Equal(t, uint64(10), last(old))
+	require.Equal(t, uint64(100), last(cur))
+
+	// A second reader of the same snapshot is served from the cached answer.
+	same, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer same.Rollback()
+	require.Equal(t, cur.ViewID(), same.ViewID())
+	n, found := ii.lastTxNumInDB(same)
+	require.Equal(t, uint64(100), n)
+	require.True(t, found)
+}
+
 func TestInvIndexPruningCorrectness(t *testing.T) {
 	t.Parallel()
 

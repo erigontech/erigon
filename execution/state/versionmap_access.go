@@ -59,23 +59,55 @@ func (view *VersionMapView) txIdx() int {
 // to the base domain as a delete — and an account with no live cell here that the base
 // also reports absent does not exist (in a cross-block batch the touched union carries
 // accounts removed in an earlier block; the base resolves them as absent). Otherwise the
-// composed account is present. No self-destruct / EIP / lifecycle reasoning crosses into
-// the read; it is the why-free add/remove projection.
-func (view *VersionMapView) GetAccount(addr accounts.Address) (accounts.Account, bool) {
-	txIdx := view.txIdx()
-	if _, balRes, balOk := view.vm.ReadBalance(addr, txIdx); balOk && balRes.ValStatus() == ValueDeleted {
-		return accounts.Account{}, false
+// composed account is present. wasDeleted reports a self-destruct or EIP-161 removal at
+// or below the view's txNum, the commitment's signal to drop the whole storage subtree.
+func (view *VersionMapView) GetAccount(addr accounts.Address) (acc accounts.Account, ok, wasDeleted bool) {
+	f := view.vm.accountFloorsAt(addr, view.txIdx())
+	if f.balanceDeleted {
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	av := VersionedAccountView{addr: addr, txIdx: txIdx, vm: view.vm, base: view.base}
-	exists := av.recordExists()
-	if err := av.Err(); err != nil {
+	base, err := view.baseAccount(addr, &f)
+	if err != nil {
 		view.err = cmp.Or(view.err, err)
-		return accounts.Account{}, false
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	if !exists {
-		return accounts.Account{}, false
+	if base == nil && !f.hasBalance && !f.hasNonce && !f.hasIncarnation && !f.hasCodeHash {
+		return accounts.Account{}, false, f.wasDeleted
 	}
-	return av.compose(), true
+	acc = accounts.NewAccount()
+	if base != nil {
+		acc = *base
+	}
+	if f.hasBalance {
+		acc.Balance = f.balance
+	}
+	if f.hasNonce {
+		acc.Nonce = f.nonce
+	}
+	if f.hasIncarnation {
+		acc.Incarnation = f.incarnation
+	}
+	if f.hasCodeHash {
+		acc.CodeHash = f.codeHash
+	}
+	return acc, true, f.wasDeleted
+}
+
+// baseAccount is the record the field cells overlay: a non-BAL address cell, else the
+// seeded origin when no address cell exists, else the base reader.
+func (view *VersionMapView) baseAccount(addr accounts.Address, f *accountFloors) (*accounts.Account, error) {
+	switch {
+	case f.hasAddress && !f.addressFromBAL && f.address != nil:
+		return f.address, nil
+	case !f.hasAddress:
+		if oacc, seeded := view.vm.LoadOriginAccount(addr); seeded && oacc != nil {
+			return oacc, nil
+		}
+	}
+	if view.base == nil {
+		return nil, nil
+	}
+	return view.base.ReadAccountData(addr)
 }
 
 // GetStorage returns addr's slot value at the view's txNum, in comma-ok form: a true ok

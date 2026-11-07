@@ -1056,7 +1056,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 func (r *asOfStateReader) readFoldingBlock(d kv.Domain, plainKey []byte) ([]byte, error) {
 	view := r.cur.View(r.curTxNum, r.dr.StateReaderAt(r.txNum))
 	if d == kv.AccountsDomain {
-		acc, ok := view.GetAccount(accounts.InternAddress(common.BytesToAddress(plainKey)))
+		acc, ok, _ := view.GetAccount(accounts.InternAddress(common.BytesToAddress(plainKey)))
 		if !ok {
 			return nil, view.Err()
 		}
