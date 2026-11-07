@@ -17,11 +17,17 @@
 package stagedsync
 
 import (
+	"context"
+	"maps"
 	"slices"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -100,7 +106,7 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 	}
 	address := a.Value()
 	cc.touchedAccounts[a] = cc.touchHash(address[:])
-	if base != nil {
+	if _, prefetched := cc.baseAccounts[a]; base != nil && !prefetched {
 		if acc, err := base.ReadAccountData(a); err == nil {
 			cc.baseAccounts[a] = acc
 		} else if cc.baseErr == nil {
@@ -194,4 +200,74 @@ func (r *cachedAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 		return acc, nil
 	}
 	return r.StateReader.ReadAccountData(addr)
+}
+
+// baseAccountReaders is how many read txs the BAL prefetch of block-start accounts uses.
+const baseAccountReaders = 8
+
+// baseAccountPrefetchMinTxs is the block size from which the touch bookkeeping falls behind exec without the prefetch.
+const baseAccountPrefetchMinTxs = 1000
+
+// prefetchBaseAccounts reads, in parallel, the block-start values of the accounts a BAL block declares, so the
+// per-tx touch bookkeeping does not read them one by one on the calculator's goroutine.
+func (cc *commitmentCalculator) prefetchBaseAccounts(ctx context.Context, vm *state.VersionMap, txNum uint64) {
+	bal := vm.BALAccounts()
+	if len(bal) == 0 || balTxCount(bal) < baseAccountPrefetchMinTxs || cc.db == nil || cc.asOfReader == nil {
+		return
+	}
+	got, err := readBaseAccounts(ctx, bal, baseAccountReaders, func() (state.StateReader, func(), error) {
+		tx, err := cc.db.BeginTemporalRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic // readBaseAccounts rolls it back through the returned func; no free reader skips the prefetch
+		if err != nil {
+			return nil, nil, err
+		}
+		return cc.asOfReader.dr.CloneWithTx(tx).StateReaderAt(txNum), tx.Rollback, nil
+	})
+	if err != nil {
+		return // the touch reads the account itself
+	}
+	maps.Copy(cc.baseAccounts, got)
+}
+
+// balTxCount is the number of txs a BAL block holds: every tx raises its sender's nonce at its own block-access index
+// 1..n, and the pre- and post-block system calls raise none.
+func balTxCount(bal types.BlockAccessList) int {
+	n := uint32(0)
+	for i := range bal {
+		for _, c := range bal[i].NonceChanges {
+			n = max(n, c.Index)
+		}
+	}
+	return int(n)
+}
+
+// readBaseAccounts reads every BAL account through workers readers, each from newReader; an absent account maps to nil.
+func readBaseAccounts(ctx context.Context, bal types.BlockAccessList, workers int, newReader func() (state.StateReader, func(), error)) (map[accounts.Address]*accounts.Account, error) {
+	accs := make([]*accounts.Account, len(bal))
+	g, ctx := errgroup.WithContext(ctx)
+	for w := range workers {
+		g.Go(func() error {
+			r, done, err := newReader()
+			if err != nil {
+				return err
+			}
+			defer done()
+			for i := w; i < len(bal); i += workers {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if accs[i], err = r.ReadAccountData(accounts.InternAddress(bal[i].Address)); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	all := make(map[accounts.Address]*accounts.Account, len(bal))
+	for i, acc := range accs {
+		all[accounts.InternAddress(bal[i].Address)] = acc
+	}
+	return all, nil
 }

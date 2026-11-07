@@ -17,13 +17,17 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -371,5 +375,87 @@ func TestEmitTouched_FoldReusesFirstTouchKeyHash(t *testing.T) {
 	}))
 	for _, pk := range []string{acctPlainKey(addr), storPlainKey(addr, slot)} {
 		require.Equal(t, commitment.KeyToHexNibbleHash([]byte(pk)), got[pk], "key %x", pk)
+	}
+}
+
+// TestAccumulateTouched_SkipsPrefetchedBaseAccount pins that a touch of an account whose block-start value the BAL
+// prefetch already read does not read the base again.
+func TestAccumulateTouched_SkipsPrefetchedBaseAccount(t *testing.T) {
+	t.Parallel()
+
+	const txIdx = 1
+	addr := accounts.InternAddress([20]byte{0xf3})
+	acc := accounts.NewAccount()
+	acc.Nonce = 2
+	ws := newWS().bal(addr, state.Version{TxIndex: txIdx}, *uint256.NewInt(5)).build()
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws, true)
+	base := &countingAccountReader{mapStateReader: newMapStateReader()}
+	base.accounts[addr] = &acc
+
+	cc := &commitmentCalculator{updates: newTestUpdates()}
+	cc.setBlockBase(vm, base)
+	cc.baseAccounts[addr] = &acc
+	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), base)
+	require.Zero(t, base.reads)
+}
+
+// TestReadBaseAccounts_ReadsEveryBALAccountOnce pins that the BAL prefetch reads each account's block-start value,
+// absent ones included, with every worker on its own reader.
+func TestReadBaseAccounts_ReadsEveryBALAccountOnce(t *testing.T) {
+	t.Parallel()
+
+	present := accounts.NewAccount()
+	present.Nonce = 7
+	var bal types.BlockAccessList
+	for i := range 20 {
+		bal = append(bal, types.AccountChanges{Address: common.Address{19: byte(i + 1)}})
+	}
+	var opened, reads atomic.Int32
+	newReader := func() (state.StateReader, func(), error) {
+		opened.Add(1)
+		r := &countingAccountReader{mapStateReader: newMapStateReader()}
+		r.accounts[accounts.InternAddress(bal[0].Address)] = &present
+		return r, func() { reads.Add(int32(r.reads)) }, nil
+	}
+	got, err := readBaseAccounts(t.Context(), bal, 4, newReader)
+	require.NoError(t, err)
+	require.Len(t, got, len(bal))
+	require.Equal(t, &present, got[accounts.InternAddress(bal[0].Address)])
+	require.Nil(t, got[accounts.InternAddress(bal[1].Address)], "an absent account is cached as absent")
+	require.Equal(t, int32(4), opened.Load())
+	require.Equal(t, int32(len(bal)), reads.Load())
+}
+
+type countingRoDB struct {
+	kv.TemporalRwDB
+	opens atomic.Int32
+}
+
+func (d *countingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	d.opens.Add(1)
+	return nil, errors.New("no db")
+}
+
+// TestPrefetchBaseAccounts_SkipsBlocksWithFewTxs pins that only a block with many txs prefetches its BAL accounts: in a
+// small block the touch bookkeeping keeps up, and extra readers only slow exec down.
+func TestPrefetchBaseAccounts_SkipsBlocksWithFewTxs(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		txs       int
+		wantReads bool
+	}{{txs: 20, wantReads: false}, {txs: baseAccountPrefetchMinTxs - 1, wantReads: false}, {txs: baseAccountPrefetchMinTxs, wantReads: true}} {
+		// Each tx raises its sender's nonce at its block-access index 1..txs; the block-end system call raises none.
+		sender := types.AccountChanges{Address: common.Address{19: 1}}
+		for i := 1; i <= tc.txs; i++ {
+			sender.NonceChanges = append(sender.NonceChanges, &types.NonceChange{Index: uint32(i), Value: uint64(i)})
+		}
+		coinbase := types.AccountChanges{Address: common.Address{19: 2}, BalanceChanges: []*types.BalanceChange{{Index: uint32(tc.txs + 1)}}}
+		vm := state.NewVersionMap(types.BlockAccessList{sender, coinbase})
+		db := &countingRoDB{}
+		cc := &commitmentCalculator{db: db, asOfReader: &asOfStateReader{}, baseAccounts: map[accounts.Address]*accounts.Account{}}
+		cc.prefetchBaseAccounts(t.Context(), vm, 0)
+		require.Equal(t, tc.wantReads, db.opens.Load() > 0, "%d txs", tc.txs)
 	}
 }

@@ -387,6 +387,9 @@ func (vm *VersionMap) StoreOriginAccount(addr accounts.Address, acc *accounts.Ac
 	lazyMap(&vm.originAccounts).LoadOrStore(addr, acc)
 }
 
+// BALAccounts returns the block access list the map was seeded from (nil without one).
+func (vm *VersionMap) BALAccounts() types.BlockAccessList { return vm.bal }
+
 // LoadOriginAccount returns the committed base account and whether it was seeded.
 func (vm *VersionMap) LoadOriginAccount(addr accounts.Address) (*accounts.Account, bool) {
 	m := vm.originAccounts.Load()
