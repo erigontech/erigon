@@ -98,7 +98,7 @@ func TestRecentReceiptsNotifyLogsIncludesBlockTimestamp(t *testing.T) {
 	}}, nil, &types.Header{Time: 123})
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1, 2)
+	recent.NotifyLogs(notifier, 1, 2, nil)
 
 	require.Len(t, notifier.logs, 1)
 	require.Equal(t, uint64(123), notifier.logs[0].BlockTimestamp)
@@ -119,7 +119,7 @@ func TestRecentReceiptsNotifyLogsAfterUnwind(t *testing.T) {
 	}}, nil, nil)
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 2, 3)
+	recent.NotifyLogs(notifier, 2, 3, nil)
 
 	require.Len(t, notifier.logBatches, 1)
 	require.Len(t, notifier.logBatches[0], 2)
@@ -139,7 +139,7 @@ func TestRecentReceiptsNotifiesRemovedLogsBelowAddedRange(t *testing.T) {
 	recent.Unwind(1)
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1_000, 1_001)
+	recent.NotifyLogs(notifier, 1_000, 1_001, nil)
 
 	require.Len(t, notifier.logs, 1)
 	require.Same(t, removedLog, notifier.logs[0].Log)
@@ -158,7 +158,7 @@ func TestRecentReceiptsBatchesRemovedBlocksInOrder(t *testing.T) {
 	recent.Unwind(0)
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 4, 4)
+	recent.NotifyLogs(notifier, 4, 4, nil)
 
 	require.Len(t, notifier.logBatches, 1)
 	require.Len(t, notifier.logBatches[0], 3)
@@ -181,8 +181,8 @@ func TestRecentReceiptsNotifiesAddedBlocksInOrder(t *testing.T) {
 	}
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1, blockCount+1)
-	recent.NotifyReceipts(notifier, 1, blockCount+1)
+	recent.NotifyLogs(notifier, 1, blockCount+1, nil)
+	recent.NotifyReceipts(notifier, 1, blockCount+1, nil)
 
 	require.Len(t, notifier.logBatches, 1)
 	require.Len(t, notifier.logBatches[0], blockCount)
@@ -202,7 +202,7 @@ func TestRecentReceiptsDoesNotSendEmptyLogBatch(t *testing.T) {
 	recent.Add(types.Receipts{{BlockNumber: uint256.NewInt(1)}}, nil, nil)
 	notifier := &recordingChainEventNotifier{}
 
-	recent.NotifyLogs(notifier, 1, 2)
+	recent.NotifyLogs(notifier, 1, 2, nil)
 
 	require.Empty(t, notifier.logBatches)
 }
@@ -216,7 +216,7 @@ func TestRecentReceiptsDropsUnwindWithoutSubscriptions(t *testing.T) {
 	recent.Unwind(1)
 	notifier := &noSubscriptionNotifier{}
 
-	recent.NotifyLogs(notifier, 2, 3)
+	recent.NotifyLogs(notifier, 2, 3, nil)
 
 	require.Empty(t, recent.removedLogs)
 }
