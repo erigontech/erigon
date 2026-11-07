@@ -165,7 +165,7 @@ func TestVersionMapViewServesAccountWithoutAddressCellFromOrigin(t *testing.T) {
 	vm := NewVersionMap(nil)
 	SeedOrigin(vm, a, &acc)
 
-	got, ok := vm.View(2, reader).GetAccount(a)
+	got, ok, _ := vm.View(2, reader).GetAccount(a)
 	require.True(t, ok)
 	require.Equal(t, uint64(3), got.Nonce)
 	require.Equal(t, *uint256.NewInt(100), got.Balance)
