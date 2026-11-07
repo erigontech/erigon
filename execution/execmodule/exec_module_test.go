@@ -312,6 +312,49 @@ func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
 	require.Equal(t, head.Hash(), result.LatestValidHash)
 }
 
+func TestValidateChainSideForkFromGenesis(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		canonicalLength int
+		invalidAncestor bool
+	}{
+		{name: "at canonical head", canonicalLength: 3},
+		{name: "below canonical head", canonicalLength: 4},
+		{name: "invalid ancestor", canonicalLength: 3, invalidAncestor: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			m := execmoduletester.New(t)
+			canonical, err := m.GenerateChain(tc.canonicalLength, transferGen(t, m.Key, common.Address{0x42}, 1_000))
+			require.NoError(t, err)
+			fork, err := m.GenerateChain(3, transferGen(t, m.Key, common.Address{0x43}, 1_000))
+			require.NoError(t, err)
+			require.NotEqual(t, canonical.Blocks[0].Hash(), fork.Blocks[0].Hash())
+			require.NoError(t, m.InsertValidateAndUfc1By1(ctx, canonical.Blocks))
+
+			wantStatus := execmodule.ExecutionStatusSuccess
+			latestValid := fork.TopBlock.Hash()
+			if tc.invalidAncestor {
+				fork.Blocks[1] = tamperBlockGasUsed(t, fork.Blocks[1], 1)
+				header := fork.TopBlock.Header()
+				header.ParentHash = fork.Blocks[1].Hash()
+				fork.Blocks[2] = types.NewBlockFromNetwork(header, fork.TopBlock.Body(), nil)
+				fork.TopBlock = fork.Blocks[2]
+				wantStatus = execmodule.ExecutionStatusBadBlock
+				latestValid = fork.Blocks[0].Hash()
+			}
+
+			status, err := m.InsertBlocks(ctx, fork.Blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			validation, err := m.ValidateChain(ctx, fork.TopBlock.Header())
+			require.NoError(t, err)
+			require.Equal(t, wantStatus, validation.ValidationStatus)
+			require.Equal(t, latestValid, validation.LatestValidHash)
+		})
+	}
+}
+
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
 	// This was caught by some of the gas-benchmark tests which run a series of new payloads and FCUs
 	// for forks with different lengths, and they jump from one fork to another.
