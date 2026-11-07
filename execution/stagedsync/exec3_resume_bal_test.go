@@ -50,6 +50,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -124,6 +125,13 @@ type resumeBALFixture struct {
 	// earlierGas, when set, is that receipt's cumulative gas instead of
 	// earlierReceiptGas.
 	earlierGas uint64
+	// rcacheTxs, when set, seeds the receipt cache with the block start's entry
+	// and those of the prefix's first rcacheTxs transactions, as execution writes
+	// them; the domain must be historical.
+	rcacheTxs int
+	// rcacheForeign seeds each of those entries with the next transaction's
+	// receipt instead.
+	rcacheForeign bool
 	// inspect, when set, sees the state each exec and execSerial run leaves.
 	inspect func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx)
 }
@@ -275,6 +283,26 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumeP
 				txNum := resumeBALBlockStartTxNum + uint64(i) + 1
 				if err := rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), logIndex, receipt.CumulativeGasUsed, blobGas, txNum); err != nil {
 					return err
+				}
+			}
+			if fx.rcacheTxs > 0 {
+				var w rawtemporaldb.ReceiptWriter
+				if err := w.Append(domains.AsPutDel(tx), nil, resumeBALBlockStartTxNum); err != nil {
+					return err
+				}
+				for i := range fx.rcacheTxs {
+					receipt := fx.receipts[i]
+					if fx.rcacheForeign {
+						// The next transaction's, as a fork unwound past its block could leave.
+						receipt = fx.receipts[i+1]
+					}
+					stored := receipt.Copy()
+					if len(stored.Logs) > 0 {
+						stored.FirstLogIndexWithinBlock = uint32(stored.Logs[0].Index)
+					}
+					if err := w.Append(domains.AsPutDel(tx), stored, resumeBALBlockStartTxNum+uint64(i)+1); err != nil {
+						return err
+					}
 				}
 			}
 			bal := fx.block.BlockAccessList()
@@ -1088,22 +1116,33 @@ func TestResumedBlockReceipts(t *testing.T) {
 	}
 }
 
-// postProcessCounter counts, per index, the transactions its engine runs:
-// execution and replay alike post-process each one.
-type postProcessCounter struct {
+// recordingEngine counts, per index, the transactions its engine runs, as
+// execution and replay alike post-process each one, and keeps the receipts it
+// finalizes a block with.
+type recordingEngine struct {
 	rules.Engine
-	mu     *sync.Mutex
-	counts map[int]int
+	mu        *sync.Mutex
+	counts    map[int]int
+	finalized *types.Receipts
 }
 
-func (c postProcessCounter) PostProcessTx(config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error {
-	c.mu.Lock()
-	c.counts[i]++
-	c.mu.Unlock()
-	if p, ok := c.Engine.(rules.TxPostProcessor); ok {
+func (e recordingEngine) PostProcessTx(config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error {
+	e.mu.Lock()
+	e.counts[i]++
+	e.mu.Unlock()
+	if p, ok := e.Engine.(rules.TxPostProcessor); ok {
 		return p.PostProcessTx(config, ibs, txs, i)
 	}
 	return nil
+}
+
+func (e recordingEngine) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	e.mu.Lock()
+	*e.finalized = slices.Clone(receipts)
+	e.mu.Unlock()
+	return e.Engine.Finalize(config, header, ibs, uncles, receipts, withdrawals, chainReader, syscall, skipReceiptsEval, logger)
 }
 
 func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool) {
@@ -1113,8 +1152,9 @@ func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool
 		resumeRecorder: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.GAS), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}},
 		logger:         {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}},
 	})
-	counter := postProcessCounter{fx.engine, new(sync.Mutex), map[int]int{}}
-	fx.engine = counter
+	var finalized types.Receipts
+	engine := recordingEngine{fx.engine, new(sync.Mutex), map[int]int{}, &finalized}
+	fx.engine = engine
 	signer := types.LatestSignerForChainID(fx.config.ChainID)
 	// tx0 and tx1 each carry a blob and call logger.
 	var txs types.Transactions
@@ -1144,7 +1184,17 @@ func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool
 	wantGas, wantBlobGas := fx.receipts[2].CumulativeGasUsed, txs[0].GetBlobGas()+txs[1].GetBlobGas()
 	require.NotZero(t, txs[0].GetBlobGas())
 
+	var wantRecorded uint256.Int
+	bal := fx.block.BlockAccessList()
+	for i := range bal {
+		if bal[i].Address == resumeRecorder {
+			wantRecorded = bal[i].StorageChanges[0].Changes[0].Value
+		}
+	}
+	require.False(t, wantRecorded.IsZero())
+
 	var gas, blobGas, logIndex uint64
+	var recorded uint256.Int
 	fx.inspect = func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx) {
 		latest := func(key []byte) uint64 {
 			v, _, err := sd.GetLatest(kv.ReceiptDomain, tx, key)
@@ -1155,8 +1205,12 @@ func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool
 		gas = latest(rawtemporaldb.CumulativeGasUsedInBlockKey)
 		blobGas = latest(rawtemporaldb.CumulativeBlobGasUsedInBlockKey)
 		logIndex = latest(rawtemporaldb.LogIndexAfterTxKey)
+		v, _, err := sd.GetLatest(kv.StorageDomain, tx, dbutils.GenerateStoragePlainKey(resumeRecorder, common.Hash{}))
+		require.NoError(t, err)
+		recorded.SetBytes(v)
 	}
-	for _, tc := range []struct {
+	isAmsterdam := config.IsAmsterdam(resumeBlockTime)
+	type testCase struct {
 		name             string
 		point            resumePoint
 		noPrefixReceipts bool
@@ -1164,18 +1218,37 @@ func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool
 		// unchangedTx0 gives the earlier block's receipt tx0's cumulative gas, so
 		// tx0's record leaves it unchanged and unwritten.
 		unchangedTx0 bool
-	}{
-		{"full", fromBlockStart, false, false, false},
+		wipeHistory  bool
+		rcacheTxs    int
+		// replays is how many times tx0 executes again in a resumed run.
+		replays       int
+		rcacheForeign bool
+	}
+	cases := []testCase{
+		{"full", fromBlockStart, false, false, false, false, 0, 0, false},
 		// tx1, the first transaction run, carries a blob too.
-		{"after tx0 without receipts", afterTx0, true, false, false},
-		{"after tx0 with only an earlier block's receipt", afterTx0, true, true, false},
-		{"after tx0 left the earlier block's gas unchanged", afterTx0, false, true, true},
-		{"after tx1 without receipts", resumePoint(2), true, false, false},
-		{"after tx1 with only an earlier block's receipt", resumePoint(2), true, true, false},
-	} {
+		{"after tx0 without receipts", afterTx0, true, false, false, false, 0, 1, false},
+		{"after tx0 with only an earlier block's receipt", afterTx0, true, true, false, false, 0, 1, false},
+		{"after tx0 left the earlier block's gas unchanged", afterTx0, false, true, true, false, 0, 1, false},
+		{"after tx1 without receipts", resumePoint(2), true, false, false, false, 0, 1, false},
+		{"after tx1 with only an earlier block's receipt", resumePoint(2), true, true, false, false, 0, 1, false},
+		// The receipt cache holds what the receipt domain lost or left unwritten.
+		{"after tx0 without receipts/receipt cache", afterTx0, true, false, false, false, 1, 0, false},
+		{"after tx1 without receipts/receipt cache without tx1", resumePoint(2), true, false, false, false, 1, 1, false},
+		{"after tx0 without receipts/receipt cache of another transaction", afterTx0, true, false, false, false, 1, 1, true},
+	}
+	if !isAmsterdam {
+		// From Amsterdam a block resumed without the history fails on its block
+		// access list.
+		cases = append(cases,
+			testCase{"after tx0 without receipts or history/receipt cache", afterTx0, true, false, false, true, 1, 0, false},
+			testCase{"after tx0 left the earlier block's gas unchanged without history/receipt cache", afterTx0, false, true, true, true, 1, 0, false},
+			testCase{"after tx1 without receipts or history/receipt cache", resumePoint(2), true, false, false, true, 2, 0, false})
+	}
+	for _, tc := range cases {
 		for _, serial := range []bool{false, true} {
 			// The serial executor refuses Amsterdam blocks.
-			if serial && config.IsAmsterdam(resumeBlockTime) {
+			if serial && isAmsterdam {
 				continue
 			}
 			name := "parallel/" + tc.name
@@ -1183,19 +1256,37 @@ func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool
 				name = "serial/" + tc.name
 			}
 			t.Run(name, func(t *testing.T) {
-				gas, blobGas, logIndex = 0, 0, 0
-				clear(counter.counts)
+				if tc.rcacheTxs > 0 {
+					saved := statecfg.Schema.RCacheDomain
+					statecfg.EnableHistoricalRCache()
+					t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+				}
+				gas, blobGas, logIndex, recorded = 0, 0, 0, uint256.Int{}
+				clear(engine.counts)
+				finalized = nil
 				fx.noPrefixReceipts, fx.earlierReceipt, fx.earlierGas = tc.noPrefixReceipts, tc.earlierReceipt, 0
+				fx.wipeHistory, fx.rcacheTxs, fx.rcacheForeign = tc.wipeHistory, tc.rcacheTxs, tc.rcacheForeign
 				if tc.unchangedTx0 {
 					fx.earlierGas = fx.receipts[0].CumulativeGasUsed
 				}
 				require.NoError(t, fx.run(t, fx.block, tc.point, serial))
+				require.Equal(t, wantRecorded, recorded, "gas the message got")
 				require.Equal(t, wantGas, gas, "cumulative gas")
 				require.Equal(t, wantBlobGas, blobGas, "cumulative blob gas")
 				require.Equal(t, uint64(4), logIndex, "log index after the message")
 				// From Amsterdam the block access list check executes them again.
-				if tc.point != fromBlockStart && !config.IsAmsterdam(resumeBlockTime) {
-					require.Equal(t, 1, counter.counts[0], "tx0 executed again once, for the receipts and the block's finalization")
+				if tc.point != fromBlockStart && !isAmsterdam {
+					require.Equal(t, tc.replays, engine.counts[0], "times tx0 executed again")
+				}
+				require.Len(t, finalized, len(txs), "receipts the block is finalized with")
+				var firstLogIndex uint
+				for i, receipt := range finalized {
+					require.Equal(t, txs[i].Hash(), receipt.TxHash, "finalized receipt %d", i)
+					require.Equal(t, uint32(firstLogIndex), receipt.FirstLogIndexWithinBlock, "finalized receipt %d", i)
+					for _, lg := range receipt.Logs {
+						require.Equal(t, firstLogIndex, uint(lg.Index), "log of finalized receipt %d", i)
+						firstLogIndex++
+					}
 				}
 			})
 		}

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
@@ -604,12 +605,12 @@ type priorReceipt struct {
 // and blob gas used by the block's transactions before task, which an earlier
 // run executed. Their receipts tell it; where those are missing, as a block's
 // first transaction that left the cumulative gas unchanged also reads, the
-// transactions are executed again from the state history, and what they left
-// is returned for the receipts from task on. It reports whether gp lacks that
-// gas instead: from Amsterdam a receipt's cumulative gas is not its block's
-// (EIP-7778, EIP-8037), or the transactions cannot be executed again, which
-// fails the run before Amsterdam when a message from task on takes its gas
-// from the block.
+// receipt cache does, or the transactions are executed again from the state
+// history, and what they left is returned for the receipts from task on. It
+// reports whether gp lacks that gas instead: from Amsterdam a receipt's
+// cumulative gas is not its block's (EIP-7778, EIP-8037), or neither the cache
+// nor the history tells it, which fails the run before Amsterdam when a
+// message from task on takes its gas from the block.
 func (te *txExecutor) restorePriorGas(ctx context.Context, tx kv.TemporalTx, gp *protocol.GasPool, task exec.Task) (prior *priorReceipt, lacking bool, err error) {
 	if task.Version().TxIndex <= 0 {
 		return nil, false, nil
@@ -646,18 +647,24 @@ func (te *txExecutor) restorePriorGas(ctx context.Context, tx kv.TemporalTx, gp 
 	return prior, false, nil
 }
 
-// priorGasUsed executes the transactions of first's block before first again
-// from the state history and returns what they left.
+// priorGasUsed returns what the transactions of first's block before first
+// left, from the receipt cache or by executing them again from the state
+// history.
 func (te *txExecutor) priorGasUsed(ctx context.Context, tx kv.TemporalTx, first *exec.TxTask) (*priorReceipt, error) {
 	tx0Num := first.TxNum - uint64(first.TxIndex)
-	// Without the history a read answers from the latest state. The block
-	// start's writes count too: the transactions may write nothing.
-	if err := state.RequireStateHistory(tx.Debug(), tx0Num-1, first.TxNum); err != nil {
-		return nil, err
-	}
-	priorReceipts, err := te.reconstructPriorReceipts(ctx, tx, first.Header, first.Txs, first.TxIndex, tx0Num)
+	priorReceipts, err := te.cachedPriorReceipts(tx, first, tx0Num)
 	if err != nil {
 		return nil, err
+	}
+	if priorReceipts == nil {
+		// Without the history a read answers from the latest state. The block
+		// start's writes count too: the transactions may write nothing.
+		if err := state.RequireStateHistory(tx.Debug(), tx0Num-1, first.TxNum); err != nil {
+			return nil, err
+		}
+		if priorReceipts, err = te.reconstructPriorReceipts(ctx, tx, first.Header, first.Txs, first.TxIndex, tx0Num); err != nil {
+			return nil, err
+		}
 	}
 	if len(priorReceipts) != first.TxIndex {
 		return nil, fmt.Errorf("block %d: %d receipts before tx %d", first.BlockNumber(), len(priorReceipts), first.TxIndex)
@@ -668,6 +675,43 @@ func (te *txExecutor) priorGasUsed(ctx context.Context, tx kv.TemporalTx, first 
 		prior.logIndex += uint32(len(priorReceipts[i].Logs))
 	}
 	return prior, nil
+}
+
+// cachedPriorReceipts returns the receipts of first's block before first from
+// the receipt cache, or nil where it does not hold each at its txNum, tx0Num
+// on. Execution records every txNum there, an unchanged value too, so a record
+// shows as a change of value at its txNum.
+func (te *txExecutor) cachedPriorReceipts(tx kv.TemporalTx, first *exec.TxTask, tx0Num uint64) (types.Receipts, error) {
+	if !te.cfg.syncCfg.PersistReceiptsCacheV2 {
+		return nil, nil
+	}
+	blockHash, blockNum := first.Header.Hash(), first.BlockNumber()
+	receipts := make(types.Receipts, first.TxIndex)
+	prev, _, err := tx.GetAsOf(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, tx0Num)
+	if err != nil {
+		return nil, err
+	}
+	for i := range receipts {
+		v, _, err := tx.GetAsOf(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, tx0Num+uint64(i)+1)
+		if err != nil {
+			return nil, err
+		}
+		if len(v) == 0 || bytes.Equal(v, prev) {
+			return nil, nil
+		}
+		stored := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, stored); err != nil {
+			return nil, fmt.Errorf("block %d: cached receipt of tx %d: %w", blockNum, i, err)
+		}
+		receipt := (*types.Receipt)(stored)
+		// A fork unwound past the block could have left another transaction's.
+		if receipt.TransactionIndex != uint(i) {
+			return nil, nil
+		}
+		receipt.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, first.Txs[i].Hash(), false)
+		receipts[i], prev = receipt, v
+	}
+	return receipts, nil
 }
 
 // finalizedPriorReceipts returns the receipts of a resumed block's transactions
