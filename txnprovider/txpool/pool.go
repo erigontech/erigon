@@ -686,8 +686,8 @@ func refetchableDiscard(reason txpoolcfg.DiscardReason) bool {
 	return false
 }
 
-// HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation;
-// a discarded txn is neither.
+// HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation.
+// A discarded txn that a refetch would drop as known counts as held; one a refetch can fix is neither.
 func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()

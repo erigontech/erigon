@@ -917,8 +917,10 @@ type announceFetchTest struct {
 	queued        map[[32]byte]bool // hashes whose body waits for validation
 	onFilter      func()
 	onSend        func()
-	lookedUp      int  // hashes passed to HeldOrQueuedIdHashes
-	noDeadline    bool // a send reached sentry without a deadline
+	lookedUp      int      // hashes passed to HeldOrQueuedIdHashes
+	sentHashes    []Hashes // hashes of each request, in send order
+	blockSend     bool     // the next send blocks until its context is done
+	noDeadline    bool     // a send reached sentry without a deadline
 	sendErr       error
 	failSendAt    int               // when > 0, only that send (1-based) fails with sendErr
 	gone          map[[64]byte]bool // peers sentry no longer knows: a send reaches no one
@@ -965,10 +967,20 @@ func newAnnounceFetchTest(t *testing.T) *announceFetchTest {
 		}).AnyTimes()
 	sentryServer.EXPECT().SendMessageById(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+			if a.blockSend {
+				a.blockSend = false
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
 			if _, ok := ctx.Deadline(); !ok {
 				a.noDeadline = true
 			}
 			a.requestedFrom = append(a.requestedFrom, gointerfaces.ConvertH512ToHash(r.PeerId))
+			_, sentHashes, _, err := ParseGetPooledTransactions66(r.Data.Data, 0, nil)
+			if err != nil {
+				return nil, err
+			}
+			a.sentHashes = append(a.sentHashes, sentHashes)
 			a.sends++
 			if onSend := a.onSend; onSend != nil {
 				a.onSend = nil
@@ -1009,6 +1021,13 @@ func (a *announceFetchTest) announceSized(t *testing.T, peer [64]byte, size uint
 	require.NoError(t, a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
 		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peer),
 	}, a.sentryClient))
+}
+
+// answer delivers n PooledTransactions replies from peer.
+func (a *announceFetchTest) answer(peer [64]byte, n int) {
+	for range n {
+		a.fetch.retryAnswered(fetchPeer{a.sentryClient, peer})
+	}
 }
 
 func (a *announceFetchTest) timeoutSweep() {
@@ -1340,9 +1359,9 @@ func TestRetryRequestsPerPeerArePaced(t *testing.T) {
 	a.requestedFrom = nil
 	a.timeoutSweep()
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a sweep must not overflow the peer's outbound queue")
-	*a.now = a.now.Add(retryBudgetWindow)
+	a.answer(peerB, maxRetryRequestsPerPeer)
 	a.fetch.requestFromAlternates(a.ctx, nil)
-	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes in the next budget window")
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+2, "the rest keeps its alternate and goes once the peer answers")
 }
 
 func TestRetryWithUnknownSizeGetsItsOwnRequest(t *testing.T) {
@@ -1407,7 +1426,7 @@ func TestQueuedBodyKeepsAlternatesUntilValidated(t *testing.T) {
 	require.Equal(t, [][64]byte{peerA, peerB}, a.requestedFrom, "the alternate is still there")
 }
 
-func TestBudgetDeferredHashesWaitForTheWindow(t *testing.T) {
+func TestBudgetDeferredHashesWaitForAnAnswer(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
 	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
@@ -1425,8 +1444,8 @@ func TestBudgetDeferredHashesWaitForTheWindow(t *testing.T) {
 		*a.now = a.now.Add(time.Second)
 		a.fetch.requestFromAlternates(a.ctx, nil)
 	}
-	require.Equal(t, looked, a.lookedUp, "a hash waiting for B's budget is not looked up again before B's window ends")
-	*a.now = a.now.Add(retryBudgetWindow)
+	require.Equal(t, looked, a.lookedUp, "a hash waiting for B's retry room is not looked up again before B answers")
+	a.answer(peerB, 1)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Greater(t, a.lookedUp, looked)
 }
@@ -1449,12 +1468,12 @@ func TestRetryBudgetHoldsAcrossSweeps(t *testing.T) {
 	*a.now = a.now.Add(time.Second)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "the peer may still be draining the last sweep's requests")
-	*a.now = a.now.Add(retryBudgetWindow)
+	a.answer(peerB, maxRetryRequestsPerPeer)
 	a.fetch.requestFromAlternates(a.ctx, nil)
 	require.Len(t, a.requestedFrom, 2*maxRetryRequestsPerPeer)
 }
 
-func TestRetryBudgetSpansTheSentryWriteTimeout(t *testing.T) {
+func TestSlowPeerGetsNoRetriesUntilItAnswers(t *testing.T) {
 	t.Parallel()
 	a := newAnnounceFetchTest(t)
 	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
@@ -1466,10 +1485,15 @@ func TestRetryBudgetSpansTheSentryWriteTimeout(t *testing.T) {
 	a.announceSized(t, peerA, blobTxnSize, hashes...)
 	a.announceSized(t, peerB, blobTxnSize, hashes...)
 	a.requestedFrom = nil
-	for range 4 {
-		a.timeoutSweep()
+	a.timeoutSweep()
+	for range 5 { // a writer slower than one message per 19 s stays connected
+		*a.now = a.now.Add(19 * time.Second)
+		a.fetch.requestFromAlternates(a.ctx, nil)
 	}
-	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "a stalled peer holds its queued retries until sentry's write timeout")
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer, "unanswered retries hold the peer's queue")
+	a.answer(peerB, 1)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Len(t, a.requestedFrom, maxRetryRequestsPerPeer+1, "each answer frees one retry")
 }
 
 func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
@@ -1480,10 +1504,76 @@ func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 	for _, peer := range [][64]byte{peerA, peerB, peerC} {
 		a.announceSized(t, peer, blobTxnSize, h1, h2)
 	}
-	a.requestedFrom = nil
+	a.requestedFrom, a.sentHashes = nil, nil
 	a.onSend = a.timeoutSweep // the first send to B stalls past the timeout, so another sweep runs
 	a.timeoutSweep()
 	require.Equal(t, [][64]byte{peerB, peerC, peerB}, a.requestedFrom, "only the sent hash moves on to C; the unsent one goes to B once")
+	require.Equal(t, []Hashes{h1[:], h1[:], h2[:]}, a.sentHashes)
+}
+
+func TestBlockedFirstSendDoesNotStrandLaterChunks(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA := [64]byte{0xa}
+	hashes := make([][32]byte, 257)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	a.blockSend = true
+	announcement := func() []byte {
+		var txTypes []byte
+		var sizes []uint32
+		var concat []byte
+		for _, h := range hashes {
+			txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+		}
+		buf := make([]byte, announcementsLen(txTypes, sizes, concat))
+		return buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
+	}()
+	_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
+		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peerA),
+	}, a.sentryClient)
+	r, ok := a.fetch.requested.Get(hashes[256][:])
+	require.False(t, ok && r.unsent, "the last chunk's hash must not stay unsent, or it never times out")
+}
+
+func TestNewAnnouncerOfAWaitingHashIsAskedAtOnce(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB, peerC := [64]byte{0xa}, [64]byte{0xb}, [64]byte{0xc}
+	hashes := make([][32]byte, maxRetryRequestsPerPeer+1)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.timeoutSweep() // B's retry room is spent: the last hash waits
+	last := hashes[len(hashes)-1]
+	a.announceSized(t, peerC, blobTxnSize, last)
+	a.requestedFrom, a.sentHashes = nil, nil
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Equal(t, [][64]byte{peerC}, a.requestedFrom, "C has room, so the waiting hash does not wait for B")
+	require.Equal(t, []Hashes{last[:]}, a.sentHashes)
+}
+
+func TestStaleWaitingEntriesAreDropped(t *testing.T) {
+	t.Parallel()
+	a := newAnnounceFetchTest(t)
+	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+	hashes := make([][32]byte, maxRetryRequestsPerPeer+1)
+	for i := range hashes {
+		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
+	}
+	const blobTxnSize = 131 * 1024
+	a.announceSized(t, peerA, blobTxnSize, hashes...)
+	a.announceSized(t, peerB, blobTxnSize, hashes...)
+	a.timeoutSweep()
+	require.Len(t, a.fetch.waiting, 1)
+	a.fetch.requested.Delete(hashes[len(hashes)-1][:]) // evicted while waiting
+	a.answer(peerB, 1)
+	a.fetch.requestFromAlternates(a.ctx, nil)
+	require.Empty(t, a.fetch.waiting, "a sweep with nothing to retry still drops the stale entry")
 }
 
 func TestDisconnectDuringAStalledSendReachesTheUnsentRequest(t *testing.T) {
