@@ -428,9 +428,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				return nil, err
 			}
 			if protocol.TakesGasFromBlock(msg) {
-				gasBefore, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
+				gasBefore, _, ok, err := rawtemporaldb.ReceiptGasAsOf(tx, txNum)
 				if err != nil {
 					return nil, err
+				}
+				if !ok {
+					return nil, fmt.Errorf("block %d: no receipt for the gas used before tx %d", blockNum, index)
 				}
 				genEnv.gp = protocol.NewGasPool(header.GasLimit-min(header.GasLimit, gasBefore), cfg.GetMaxBlobGasPerBlock(header.Time))
 			}

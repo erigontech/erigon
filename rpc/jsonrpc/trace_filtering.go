@@ -1119,9 +1119,13 @@ func replayGasPool(tx kv.TemporalTx, header *types.Header, rules *chain.Rules, m
 		var gasBefore uint64
 		// Before the first transaction the receipt domain still holds the previous block's gas.
 		if txIndex > 0 {
+			var ok bool
 			var err error
-			if gasBefore, _, _, err = rawtemporaldb.ReceiptAsOf(tx, txNum); err != nil {
+			if gasBefore, _, ok, err = rawtemporaldb.ReceiptGasAsOf(tx, txNum); err != nil {
 				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("block %d: no receipt for the gas used before tx %d", header.Number.Uint64(), txIndex)
 			}
 		}
 		gas = header.GasLimit - min(header.GasLimit, gasBefore)

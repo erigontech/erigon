@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
@@ -131,27 +132,44 @@ func newAmsterdamReplay(t *testing.T, slots byte) *amsterdamReplay {
 // traceGasUsed returns the gas debug_traceTransaction reports for txn.
 func traceGasUsed(t *testing.T, m *execmoduletester.ExecModuleTester, txn types.Transaction) uint64 {
 	t.Helper()
+	gas, err := traceTransactionGas(t, m, txn)
+	require.NoError(t, err)
+	return gas
+}
+
+func traceTransactionGas(t *testing.T, m *execmoduletester.ExecModuleTester, txn types.Transaction) (uint64, error) {
+	t.Helper()
 	api := jsonrpc.NewPrivateDebugAPI(
 		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
 		m.DB, nil, &rpccfg.DebugApiConfig{})
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
 	tracer := "callTracer"
-	require.NoError(t, api.TraceTransaction(t.Context(), txn.Hash(), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
+	if err := api.TraceTransaction(t.Context(), txn.Hash(), &tracersConfig.TraceConfig{Tracer: &tracer}, stream); err != nil {
+		return 0, err
+	}
 	require.NoError(t, stream.Flush())
 	var trace struct {
 		GasUsed hexutil.Uint64 `json:"gasUsed"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &trace), buf.String())
-	return uint64(trace.GasUsed)
+	return uint64(trace.GasUsed), nil
 }
 
 // generatedGasUsed returns the gas of the receipt GetReceipt generates under cc
 // for the transaction at index of block, by re-executing it alone.
 func generatedGasUsed(t *testing.T, m *execmoduletester.ExecModuleTester, cc *chain.Config, block *types.Block, index int) uint64 {
 	t.Helper()
+	gas, err := generatedReceiptGas(t, m, cc, block, index)
+	require.NoError(t, err)
+	return gas
+}
+
+func generatedReceiptGas(t *testing.T, m *execmoduletester.ExecModuleTester, cc *chain.Config, block *types.Block, index int) (uint64, error) {
+	t.Helper()
 	gen := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, 5*time.Minute)
-	var gasUsed uint64
+	var receipt *types.Receipt
+	var genErr error
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		first, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, block.NumberU64())
 		require.NoError(t, err)
@@ -160,12 +178,13 @@ func generatedGasUsed(t *testing.T, m *execmoduletester.ExecModuleTester, cc *ch
 		_, persisted, err := gen.PersistedReceipt(t.Context(), tx, block.HeaderNoCopy(), index, txNum)
 		require.NoError(t, err)
 		require.False(t, persisted, "a persisted receipt would not re-execute")
-		receipt, err := gen.GetReceipt(t.Context(), cc, tx, block.HeaderNoCopy(), block.Transactions()[index], index, txNum, nil)
-		require.NoError(t, err)
-		gasUsed = receipt.GasUsed
+		receipt, genErr = gen.GetReceipt(t.Context(), cc, tx, block.HeaderNoCopy(), block.Transactions()[index], index, txNum, nil)
 		return nil
 	}))
-	return gasUsed
+	if genErr != nil {
+		return 0, genErr
+	}
+	return receipt.GasUsed, nil
 }
 
 // TestReplayEncodedGasAmsterdam checks that a replay runs a native transaction
@@ -188,45 +207,57 @@ func TestReplayEncodedGasAmsterdam(t *testing.T) {
 }
 
 // traceMethods replay a transaction of a block; each returns the gas the
-// top-level call of the transaction at index gets.
+// top-level call of the transaction at index gets. With alone, the method runs
+// the transaction without the ones before it.
 var traceMethods = []struct {
-	name string
-	gas  func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64
+	name  string
+	alone bool
+	gas   func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error)
 }{
-	{"trace_replayTransaction", func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64 {
+	{"trace_replayTransaction", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
 		res, err := api.ReplayTransaction(t.Context(), block.Transactions()[index].Hash(), []string{"trace"}, nil, nil)
-		require.NoError(t, err)
-		return rootCallGas(t, res.Trace, index)
+		if err != nil {
+			return 0, err
+		}
+		return rootCallGas(t, res.Trace, index), nil
 	}},
-	{"trace_transaction", func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64 {
+	{"trace_transaction", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
 		traces, err := api.Transaction(t.Context(), block.Transactions()[index].Hash(), nil, nil)
-		require.NoError(t, err)
-		return rootCallGas(t, traces, index)
+		if err != nil {
+			return 0, err
+		}
+		return rootCallGas(t, traces, index), nil
 	}},
 	// Without stateDiff or vmTrace the transactions of a block run each alone.
-	{"trace_replayBlockTransactions trace", replayBlockGas("trace")},
-	{"trace_replayBlockTransactions trace,stateDiff", replayBlockGas("trace", "stateDiff")},
-	{"trace_block", func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64 {
+	{"trace_replayBlockTransactions trace", true, replayBlockGas("trace")},
+	{"trace_replayBlockTransactions trace,stateDiff", false, replayBlockGas("trace", "stateDiff")},
+	{"trace_block", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
 		traces, err := api.Block(t.Context(), rpc.BlockNumber(block.NumberU64()), nil, nil)
-		require.NoError(t, err)
-		return rootCallGas(t, traces, index)
+		if err != nil {
+			return 0, err
+		}
+		return rootCallGas(t, traces, index), nil
 	}},
-	{"trace_filter", func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64 {
+	{"trace_filter", true, func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
 		n := rpc.BlockNumber(block.NumberU64())
 		var buf bytes.Buffer
 		stream := jsonstream.New(&buf)
-		require.NoError(t, api.Filter(t.Context(), jsonrpc.TraceFilterRequest{FromBlock: &n, ToBlock: &n}, nil, nil, stream))
+		if err := api.Filter(t.Context(), jsonrpc.TraceFilterRequest{FromBlock: &n, ToBlock: &n}, nil, nil, stream); err != nil {
+			return 0, err
+		}
 		require.NoError(t, stream.Flush())
-		return rootCallGas(t, json.RawMessage(buf.Bytes()), index)
+		return rootCallGas(t, json.RawMessage(buf.Bytes()), index), nil
 	}},
 }
 
-func replayBlockGas(traceTypes ...string) func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64 {
-	return func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) uint64 {
+func replayBlockGas(traceTypes ...string) func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
+	return func(t *testing.T, api *jsonrpc.TraceAPIImpl, block *types.Block, index int) (uint64, error) {
 		results, err := api.ReplayBlockTransactions(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64())), traceTypes, nil, nil)
-		require.NoError(t, err)
+		if err != nil {
+			return 0, err
+		}
 		require.Len(t, results, block.Transactions().Len())
-		return rootCallGas(t, results[index].Trace, index)
+		return rootCallGas(t, results[index].Trace, index), nil
 	}
 }
 
@@ -260,14 +291,20 @@ func rootCallGas(t *testing.T, traces any, index int) uint64 {
 // gas less intrinsic.
 func requireTraceGas(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block, index int, want, intrinsic uint64) {
 	t.Helper()
-	api := jsonrpc.NewTraceAPI(
-		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
-		m.DB, &rpccfg.TraceApiConfig{})
+	api := newTraceAPI(m)
 	for _, method := range traceMethods {
 		t.Run(method.name, func(t *testing.T) {
-			require.Equal(t, want, method.gas(t, api, block, index)+intrinsic)
+			gas, err := method.gas(t, api, block, index)
+			require.NoError(t, err)
+			require.Equal(t, want, gas+intrinsic)
 		})
 	}
+}
+
+func newTraceAPI(m *execmoduletester.ExecModuleTester) *jsonrpc.TraceAPIImpl {
+	return jsonrpc.NewTraceAPI(
+		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+		m.DB, &rpccfg.TraceApiConfig{})
 }
 
 // TestReplayGasFromBlock checks that up to Osaka a replay runs a type-0x76
@@ -326,6 +363,88 @@ func TestReplayGasFromBlockFirstInBlock(t *testing.T) {
 	require.Equal(t, third.Receipts[0].GasUsed, traceGasUsed(t, m, third.Block.Transactions()[0]), "debug_traceTransaction")
 	require.Equal(t, third.Receipts[0].GasUsed, generatedGasUsed(t, m, m.ChainConfig, third.Block, 0), "GetReceipt")
 	requireTraceGas(t, m, third.Block, 0, third.Receipts[0].GasUsed, params.TxGas)
+}
+
+// TestReplayGasFromBlockLaggingReceipts checks that a replay running a type-0x76
+// transaction without the ones before it fails, rather than takes an earlier
+// block's receipt for theirs, where the receipt domain ends before its block,
+// and that neither a replay of a transaction with its own limit nor one running
+// them needs their receipts.
+func TestReplayGasFromBlockLaggingReceipts(t *testing.T) {
+	m, l2, first := systemTxAfter(t, refunder, nil)
+	execChain := deriver.NewExecChain(m.ExecModule, m.DB, m.BlockReader, m.ReceiptsReader, m.ChainConfig)
+	chainID := m.ChainConfig.ChainID
+	sign := func(nonce, gas uint64, to common.Address) types.Transaction {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: &to},
+			ChainID:  *chainID,
+			FeeCap:   *uint256.NewInt(100 * common.GWei),
+		}, *types.LatestSignerForChainID(chainID), derivertest.UserKey)
+		require.NoError(t, err)
+		return txn
+	}
+	// Block 2 repeats block 1 with a transfer before the type-0x76 transaction,
+	// which gets less than its limit.
+	user := sign(1, first.Block.Transactions()[0].GetGasLimit(), refunder)
+	plain := sign(2, params.TxGas, common.Address{0xee})
+	nonce, err := execChain.Nonce(t.Context(), 1, protocol.SystemAddress)
+	require.NoError(t, err)
+	sys, err := systemtx.New(protocol.SystemTx{ChainID: chainID.Uint64(), Nonce: nonce, To: protocol.RollupXEEZL2Address})
+	require.NoError(t, err)
+	parent := first.Block.HeaderNoCopy()
+	second, err := execChain.Extend(t.Context(), parent, deriver.HeaderInputs{
+		Number:     2,
+		ParentHash: parent.Hash(),
+		Time:       parent.Time + l2.BlockInterval,
+		Extra:      []byte{},
+		GasLimit:   l2.BlockGasLimit,
+	}, []types.Transaction{user, plain, sys}, common.Hash{}, common.Hash{})
+	require.NoError(t, err)
+	want := second.Receipts[2].GasUsed
+	require.Less(t, want, sys.GetGasLimit())
+
+	// The custom trace stage produces the receipt domain again up to block 1 only.
+	setExecuted := func(block uint64) {
+		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+			return stages.SaveStageProgress(tx, stages.Execution, block)
+		}))
+	}
+	cfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
+	require.NoError(t, stagedsync.StageCustomTraceReset(t.Context(), m.DB, cfg.Produce))
+	setExecuted(1)
+	require.NoError(t, stagedsync.SpawnCustomTrace(cfg, t.Context(), m.Log))
+	setExecuted(2)
+	require.Equal(t, []uint64{first.Receipts[0].CumulativeGasUsed, first.Receipts[1].CumulativeGasUsed}, domainCumulative(t, m, 1, 2))
+	// Read for the transaction before the type-0x76 one, the domain's latest record leaves it its limit.
+	require.Greater(t, l2.BlockGasLimit-domainCumulative(t, m, 2, 2)[1], sys.GetGasLimit())
+
+	gas, err := traceTransactionGas(t, m, plain)
+	require.NoError(t, err, "debug_traceTransaction of the transfer")
+	require.Equal(t, second.Receipts[1].GasUsed, gas)
+	gas, err = generatedReceiptGas(t, m, m.ChainConfig, second.Block, 1)
+	require.NoError(t, err, "GetReceipt of the transfer")
+	require.Equal(t, second.Receipts[1].GasUsed, gas)
+
+	missing := "block 2: no receipt for the gas used before tx 2"
+	_, err = traceTransactionGas(t, m, sys)
+	require.ErrorContains(t, err, missing, "debug_traceTransaction")
+	_, err = generatedReceiptGas(t, m, m.ChainConfig, second.Block, 2)
+	require.ErrorContains(t, err, missing, "GetReceipt")
+	api := newTraceAPI(m)
+	// A block trace fails on the type-0x76 transaction, so only this one replays the transfer.
+	_, err = api.ReplayTransaction(t.Context(), plain.Hash(), []string{"trace"}, nil, nil)
+	require.NoError(t, err, "trace_replayTransaction of the transfer")
+	for _, method := range traceMethods {
+		t.Run(method.name, func(t *testing.T) {
+			gas, err := method.gas(t, api, second.Block, 2)
+			if method.alone {
+				require.ErrorContains(t, err, missing)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, want, gas+params.TxGas)
+		})
+	}
 }
 
 // TestExecutionWitnessGasFromBlock checks that the witness of a block proves
