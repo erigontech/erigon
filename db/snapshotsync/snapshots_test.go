@@ -386,6 +386,89 @@ func TestMergeAbortDropsTheBuiltIndexOfASameRangeInput(t *testing.T) {
 	}
 }
 
+// A merge that fails after any of its write steps must leave every input file as it was, or remove an index so it
+// is rebuilt: a reopen trusts what is on disk.
+func TestFailedMergeLeavesInputFilesAsTheyWere(t *testing.T) {
+	injected := errors.New("injected")
+	for _, scenario := range []struct {
+		name      string
+		sameRange bool // a sole input of the range with an older version shares the output's index names
+	}{{"two inputs", false}, {"same-range older input", true}} {
+		for _, step := range []struct {
+			name                           string
+			failSegment, failIdx, afterIdx bool
+			failOnMerge                    bool
+		}{
+			{name: "segment write", failSegment: true},
+			{name: "index build", failIdx: true},
+			{name: "after the index is built", afterIdx: true},
+			{name: "onMerge", failOnMerge: true},
+		} {
+			t.Run(scenario.name+"/"+step.name, func(t *testing.T) {
+				logger := log.New()
+				dir, require := t.TempDir(), require.New(t)
+				current := snaptype.BeaconBlocks.FileInfo(dir, 0, 20_000).Version
+				ranges := [][2]uint64{{0, 10_000}, {10_000, 20_000}}
+				if scenario.sameRange {
+					ranges = [][2]uint64{{0, 20_000}}
+				}
+				var inputFiles []string
+				for _, r := range ranges {
+					createTestSegmentOnlyFile(t, r[0], r[1], snaptype.CaplinEnums.BeaconBlocks, dir, version.V1_0, logger)
+					info, _, ok := snaptype.ParseFileName(dir, snaptype.SegmentFileName(version.V1_0, r[0], r[1], snaptype.CaplinEnums.BeaconBlocks))
+					require.True(ok)
+					idxInfo := info
+					if scenario.sameRange {
+						idxInfo.Version = current // the index under the names the output also builds
+					}
+					const inputSalt = 1 // not the merge's salt, so an index the merge rebuilt over this path differs
+					require.NoError(BeaconSimpleIdx(t.Context(), idxInfo, inputSalt, dir, &background.Progress{}, log.LvlDebug, logger))
+					inputFiles = append(inputFiles, info.Path, filepath.Join(dir, snaptype.IdxFileName(idxInfo.Version, r[0], r[1], snaptype.BeaconBlocks.Name())))
+				}
+				before := map[string][]byte{}
+				for _, f := range inputFiles {
+					b, err := os.ReadFile(f)
+					require.NoError(err)
+					before[f] = b
+				}
+
+				types := []snaptype.Type{snaptype.BeaconBlocks}
+				s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, types, snaptype.BeaconBlocks, true, logger)
+				defer s.Close()
+				require.NoError(s.OpenFolder())
+				s.SetIndexBuilder(snaptype.BeaconBlocks, snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+					if step.failIdx {
+						return injected
+					}
+					if err := BeaconSimpleIdx(ctx, info, salt, tmpDir, p, lvl, logger); err != nil || !step.afterIdx {
+						return err
+					}
+					return injected
+				}))
+				if step.failSegment { // a directory in the output's place
+					require.NoError(os.Mkdir(snaptype.BeaconBlocks.FileInfo(dir, 0, 20_000).Path, 0o755))
+				}
+				onMerge := func([]string) error { return nil }
+				if step.failOnMerge {
+					onMerge = func([]string) error { return injected }
+				}
+				merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+				merger.DisableFsync()
+				require.Error(merger.Merge(t.Context(), s, types, []Range{NewRange(0, 20_000)}, dir, true, onMerge, nil))
+
+				for _, f := range inputFiles {
+					after, err := os.ReadFile(f)
+					if errors.Is(err, os.ErrNotExist) && strings.HasSuffix(f, ".idx") {
+						continue // a removed index is rebuilt
+					}
+					require.NoError(err, "%s: an input file is gone", filepath.Base(f))
+					require.Equal(before[f], after, "%s: an input file changed", filepath.Base(f))
+				}
+			})
+		}
+	}
+}
+
 func TestRemoveMergedFilesRemovesTheIndexesOfItsType(t *testing.T) {
 	dir := t.TempDir()
 	info := snaptype2.Transactions.FileInfo(dir, 0, 500_000)
