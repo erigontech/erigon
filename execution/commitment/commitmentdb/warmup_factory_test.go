@@ -18,6 +18,7 @@ package commitmentdb
 
 import (
 	"context"
+	"math/rand/v2"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -510,4 +511,51 @@ func TestConcurrentTrieContextSkipsPutterWithoutWorkerTx(t *testing.T) {
 
 	require.Zero(t, shared.putDels.Load(), "a worker with no read tx must not bind a putter to a nil one")
 	require.NoError(t, trieCtx.PutBranch([]byte("prefix"), []byte("data"), nil))
+}
+
+type branchStubReader struct{ branch []byte }
+
+func (r *branchStubReader) WithHistory() bool                           { return false }
+func (r *branchStubReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+func (r *branchStubReader) Read(_ kv.Domain, prefix []byte, _ uint64) ([]byte, kv.Step, error) {
+	if len(prefix) > 4 {
+		return nil, 0, nil
+	}
+	return r.branch, 0, nil
+}
+func (r *branchStubReader) Clone(kv.TemporalTx) StateReader                           { return r }
+func (r *branchStubReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
+func (r *branchStubReader) BindsWorkerTx() bool                                       { return true }
+
+// BenchmarkWarmupDescent warms random keys through a trie of full branches at depth 0..7.
+func BenchmarkWarmupDescent(b *testing.B) {
+	branch := []byte{0xff, 0xff, 0xff, 0xff}
+	for range 16 {
+		branch = append(branch, 8, 32)
+		branch = append(branch, make([]byte, 32)...)
+	}
+	trieCtx := NewTrieContextRo(&branchStubReader{branch: branch}, 1)
+	rnd := rand.New(rand.NewPCG(1, 2))
+	keys := make([][]byte, 4096)
+	for i := range keys {
+		keys[i] = make([]byte, 64)
+		for j := range keys[i] {
+			keys[i][j] = byte(rnd.IntN(16))
+		}
+	}
+	w := commitment.NewWarmuper(b.Context(), commitment.WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return trieCtx, nil },
+		NumWorkers: 1,
+		MaxDepth:   commitment.WarmupMaxDepth,
+	})
+	w.Start()
+	defer w.CloseAndWait()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		w.WarmKey(keys[i%len(keys)], 0, 0)
+	}
+	require.NoError(b, w.WaitBufferFree(0))
+	b.StopTimer()
 }
