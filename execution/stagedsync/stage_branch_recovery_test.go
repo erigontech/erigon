@@ -215,6 +215,10 @@ func assertRecoveryHeaders(t *testing.T, m *execmoduletester.ExecModuleTester, t
 	}
 	for _, block := range rejected {
 		require.Nil(t, rawdb.ReadHeaderNumber(tx, block.Hash()), "rejected branch block %d %s must stay unindexed", block.NumberU64(), block.Hash())
+		badNumber, readErr := rawdb.ReadBadHeaderNumber(tx, block.Hash())
+		require.NoError(t, readErr)
+		require.NotNil(t, badNumber, "rejected branch block %d %s must be marked bad", block.NumberU64(), block.Hash())
+		require.Equal(t, block.NumberU64(), *badNumber)
 		header, readErr := m.BlockReader.HeaderByHash(t.Context(), tx, block.Hash())
 		require.NoError(t, readErr)
 		require.Nil(t, header)
