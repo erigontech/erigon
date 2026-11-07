@@ -17,7 +17,9 @@
 package cache
 
 import (
+	"fmt"
 	"math"
+	"os"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -174,9 +176,19 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
+	if fillStub != "stripe" {
+		mu := &c.putStripes[h&(putStripeCount-1)]
+		mu.Lock()
+		defer mu.Unlock()
+	}
+	if !overwrite {
+		if n := fillProbePuts.Add(1); fillProbeSize && n%50000 == 0 {
+			fmt.Fprintf(os.Stderr, "FILL_PROBE fills=%d size=%d cap=%d\n", n, c.data.SizeBytes(), int64(c.capacityB))
+		}
+		if fillStub == "compute" {
+			return
+		}
+	}
 	newSize := len(key) + c.sizeFunc(value)
 	c.data.compute(h, func(existing entry[T], found bool) (entry[T], otter.ComputeOp) {
 		sameKey := found && existing.key == string(key)
@@ -292,3 +304,8 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"capacity_mb", int64(c.capacityB/datasize.MB),
 	)
 }
+
+var (
+	fillProbeSize = os.Getenv("FILL_PROBE_SIZE") == "1"
+	fillProbePuts atomic.Uint64
+)

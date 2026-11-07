@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -254,9 +255,13 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 			readTxNum = visibleEnd - 1
 		}
 	}
-	value = bytes.Clone(value)
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
+	if fillStub != "clone" {
+		value = bytes.Clone(value)
+	}
+	if fillStub != "rlock" {
+		c.admissionMu.RLock()
+		defer c.admissionMu.RUnlock()
+	}
 	if c.publishing ||
 		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[domain] {
@@ -583,3 +588,6 @@ func (c *StateCache) PrintStatsAndReset() {
 		code.PrintStatsAndReset()
 	}
 }
+
+// fillStub is a probe bound: FILL_STUB=clone|rlock|stripe|compute removes one piece of the read-miss fill path.
+var fillStub = os.Getenv("FILL_STUB")
