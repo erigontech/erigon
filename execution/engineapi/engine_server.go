@@ -430,10 +430,28 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	minTxBlockGas := mdgas.MinTxBlockGas(e.config.IsLondon(header.Number.Uint64()), e.config.IsPrague(header.Time), e.config.IsAmsterdam(header.Time))
 	if uint64(len(req.Transactions)) > header.GasLimit/minTxBlockGas {
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, len(req.Transactions), minTxBlockGas)),
-		}, nil
+		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
+	}
+
+	// The transaction bound uses at most the gas limit the parent allows. The header checks assume a
+	// valid parent, so they run here only against a validated one. A header error only skips the
+	// sender recovery and is left to the block validation, which also removes the block if it is
+	// stored. An L2 rules engine has its own header rules.
+	gasLimit := header.GasLimit
+	var headerErr error
+	parent := e.chainRW.GetHeaderByHash(ctx, req.ParentHash)
+	if parent != nil && e.config.L2 == nil {
+		gasLimit = min(gasLimit, misc.MaxGasLimit(e.config, parent, &header))
+		if e.chainRW.IsValidated(req.ParentHash) {
+			headerErr = merge.VerifyHeaderWithParent(e.config, &header, parent)
+		}
+	}
+	// A payload above the capped bound has a gas limit above what the parent allows, so it is invalid.
+	// A stored block with such a gas limit was stored without the cap. It takes the normal path, which
+	// validates and removes it as any stored invalid block.
+	aboveCappedBound := uint64(len(req.Transactions)) > gasLimit/minTxBlockGas
+	if aboveCappedBound && !e.parentBeforeTTD(ctx, req) && !e.mayBeStoredWithInvalidGasLimit(ctx, req, parent) {
+		return gasLimitReached(len(req.Transactions), minTxBlockGas), nil
 	}
 
 	// The SSZ envelope omits blob hashes. Derive them during transaction decoding,
@@ -488,7 +506,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var sendersRecovery *exec.SendersRecovery
 	// With a non-empty BAL the exec workers recover the senders themselves.
 	execRecoversSenders := exec.ExecRecoversBALSenders() && blockAccessList != nil && len(blockAccessList.BlockAccessList()) > 0
-	if invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
+	if headerErr == nil && !aboveCappedBound && invalidTransactionStatus == nil && len(transactions) > 0 && !execRecoversSenders {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
@@ -549,7 +567,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
+	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
@@ -587,6 +605,26 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
+// mayBeStoredWithInvalidGasLimit reports whether the payload's hash names, or may name, a stored
+// block on the payload's parent with a gas limit that is invalid for that parent. Only the stored
+// header decides, as the payload's block hash is not verified yet. A failed lookup, or one while the
+// execution module is busy, may miss a stored block.
+func (e *EngineServer) mayBeStoredWithInvalidGasLimit(ctx context.Context, req *engine_types.ExecutionPayload, parent *types.Header) bool {
+	number := req.BlockNumber.Uint64()
+	stored, idle, err := e.executionService.GetHeaderIfIdle(ctx, &req.BlockHash, &number)
+	if !idle || err != nil {
+		return true
+	}
+	return stored != nil && stored.ParentHash == req.ParentHash && misc.VerifyParentGasLimit(e.config, parent, stored) != nil
+}
+
+func gasLimitReached(txCount int, minTxBlockGas uint64) *engine_types.PayloadStatus {
+	return &engine_types.PayloadStatus{
+		Status:          engine_types.InvalidStatus,
+		ValidationError: engine_types.NewStringifiedError(fmt.Errorf("%w: %d transactions use at least %d gas each", protocol.ErrGasLimitReached, txCount, minTxBlockGas)),
+	}
+}
+
 // defaultReadinessWait is how long a request waits for a busy execution module before answering
 // SYNCING.
 const defaultReadinessWait = 500 * time.Millisecond
@@ -605,8 +643,22 @@ func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
 	return min(time.Duration(secondsPerSlot)*time.Second, maxAttributesReadinessWait)
 }
 
-// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
+// beforeTTD reports whether a block with total difficulty td precedes the terminal total
+// difficulty. An unknown td does not, and a chain without one never reaches it.
+func (e *EngineServer) beforeTTD(td *uint256.Int) bool {
+	ttd := e.config.TerminalTotalDifficulty
+	return ttd == nil || (td != nil && td.Cmp(ttd) < 0)
+}
+
+// parentBeforeTTD reports whether the payload's parent precedes the terminal total difficulty, as
+// the quick status decides it. The capped bound leaves such a payload to the quick status.
+func (e *EngineServer) parentBeforeTTD(ctx context.Context, req *engine_types.ExecutionPayload) bool {
+	return e.beforeTTD(e.chainRW.GetTd(ctx, req.ParentHash, uint64(req.BlockNumber)-1))
+}
+
+// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated. For a
+// newPayload, parent is the stored parent header, or nil.
+func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, parent *types.Header, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -642,17 +694,14 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		header = e.chainRW.GetHeaderByHash(ctx, blockHash)
 	}
 
-	// Retrieve parent and total difficulty.
-	var parent *types.Header
 	var td *uint256.Int
 	if newPayload {
-		parent = e.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = e.chainRW.GetTd(ctx, parentHash, blockNumber-1)
 	} else {
 		td = e.chainRW.GetTd(ctx, blockHash, blockNumber)
 	}
 
-	if td != nil && td.Cmp(e.config.TerminalTotalDifficulty) < 0 {
+	if e.beforeTTD(td) {
 		e.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}
@@ -871,7 +920,7 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
 		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
 	}
-	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false, readinessWait)
+	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, nil, forkchoiceState, false, readinessWait)
 	if err != nil {
 		return nil, err
 	}

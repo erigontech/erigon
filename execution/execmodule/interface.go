@@ -182,6 +182,11 @@ type ExecutionModule interface {
 	// the range are returned as nil entries.
 	GetHeadersByRange(ctx context.Context, start, count uint64) ([]*types.Header, error)
 
+	// GetHeaderIfIdle is GetHeader while no other operation holds the module.
+	// It returns idle=false, and no header, when one does: a forkchoice update
+	// hides the blocks that it commits until its commit ends.
+	GetHeaderIfIdle(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (header *types.Header, idle bool, err error)
+
 	// GetBody returns the raw body for the block identified by blockHash
 	// and/or blockNumber.  Pass nil for an unknown argument.
 	// Returns nil (no error) when the block is not found.

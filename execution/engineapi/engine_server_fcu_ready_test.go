@@ -220,7 +220,7 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 	srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, true, true, nil, nil, 0, 0)
 
 	start := time.Now()
-	status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, &engine_types.ForkChoiceState{HeadHash: headHash}, false, 200*time.Millisecond)
+	status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, nil, &engine_types.ForkChoiceState{HeadHash: headHash}, false, 200*time.Millisecond)
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	require.Equal(t, engine_types.SyncingStatus, status.Status)
