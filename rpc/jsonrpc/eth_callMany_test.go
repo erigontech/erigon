@@ -161,6 +161,34 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 	require.NotContains(t, byNumber[0][0], "error")
 }
 
+// State is read from canonical history by number, which a side block at the same
+// height does not share.
+func TestCallManyRejectsNonCanonicalBlockHash(t *testing.T) {
+	m, chain, orphanedChains := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	ctx := context.Background()
+
+	canonical := chain.Blocks[0]
+	side := orphanedChains[0].Blocks[0]
+	require.Equal(t, canonical.NumberU64(), side.NumberU64())
+	require.NotEqual(t, canonical.Hash(), side.Hash())
+
+	to := common.Address{3}
+	gas := hexutil.Uint64(21_000)
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{{
+		From: &m.Address, To: &to, Gas: &gas, Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}}}}
+
+	res, err := api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithHash(canonical.Hash(), false)}, nil, nil)
+	require.NoError(t, err)
+	require.NotContains(t, res[0][0], "error")
+
+	_, err = api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithHash(side.Hash(), false)}, nil, nil)
+	require.ErrorContains(t, err, "is not currently canonical")
+}
+
 func TestCapEVMTimeout(t *testing.T) {
 	for _, tc := range []struct {
 		server   time.Duration
