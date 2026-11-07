@@ -388,7 +388,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	// Check custody columns
+	inCustody := true
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
 		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) ||
 			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
@@ -399,15 +399,16 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		if err != nil {
 			return fmt.Errorf("%w: failed to get my custody columns: %w", ErrIgnore, err)
 		}
-		if _, ok := myCustodyColumns[msg.Index]; !ok {
-			return ErrIgnore
-		}
+		_, inCustody = myCustodyColumns[msg.Index]
 	}
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
+		if !inCustody {
+			return ErrIgnore
+		}
 		return errGloasSidecarBlockUnavailable
 	}
 
@@ -439,6 +440,14 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return errors.New("invalid kzg proofs for data column sidecar")
 	}
 
+	if !inCustody {
+		if seen, _ := s.seenGloasSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
+			return ErrIgnore
+		}
+		msg.BlockRoot = blockRoot
+		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
+		return nil
+	}
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
