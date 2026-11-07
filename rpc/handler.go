@@ -322,17 +322,23 @@ func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream *jsonstre
 	}
 }
 
-// handleBatchTooLarge answers a batch the codec rejected for its size.
-func (h *handler) handleBatchTooLarge(tooLarge *batchTooLargeError) {
+// handleBatchTooLarge answers a batch the codec rejected for its size, and calls done, when
+// it is not nil, once the answer is written.
+func (h *handler) handleBatchTooLarge(tooLarge *batchTooLargeError, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	h.startCallProc(func(cp *callProc) {
 		reason := fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", h.batchLimit, tooLarge.size)
 		resp := errorMessage(&invalidRequestError{reason})
 		// The protocol has no error for a whole batch, so the error takes the first call's id.
-		resp.ID = tooLarge.id
+		if tooLarge.id != nil {
+			resp.ID = tooLarge.id
+		}
 		if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
 			h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
 		}
-	}, func() {})
+	}, done)
 }
 
 // handleMsg handles a single message and calls done, when it is not nil, once the message

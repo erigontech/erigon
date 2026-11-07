@@ -346,7 +346,11 @@ func (c *jsonCodec) ReadBatch(batchLimit int) (messages []*jsonrpcMessage, batch
 	}
 	messages, batch, err = parseMessage(rawmsg, batchLimit)
 	if err != nil {
-		c.releaseFrame()
+		// A batch over the limit keeps its frame until its error, which holds the frame's
+		// id, is written.
+		if _, tooLarge := errors.AsType[*batchTooLargeError](err); !tooLarge {
+			c.releaseFrame()
+		}
 		return nil, false, err
 	}
 	for i, msg := range messages {
@@ -496,37 +500,28 @@ func (e *batchTooLargeError) Error() string {
 	return fmt.Sprintf("batch of %d requests is too large", e.size)
 }
 
-// firstCallID returns a copy of the id of the first call in the batch raw, nil when there is
-// none. It reads only the id and method fields, so it allocates nothing per element.
+// firstCallID returns the id of the first element of the batch raw that fillMessage would
+// make a call, nil when there is none. It reads only the id and method fields, so it
+// allocates nothing.
 func firstCallID(raw []byte) json.RawMessage {
 	var id json.RawMessage
-	var msg jsonrpcMessage // one for all elements: fillMessage makes it escape
 	forEachJSONElement(raw, func(elem []byte) bool {
-		msg = jsonrpcMessage{}
-		var method []byte
-		escaped := false
+		var msg jsonrpcMessage
+		hasMethod := false
 		forEachJSONField(elem, func(key, value []byte) {
 			switch {
-			case bytes.IndexByte(key, '\\') >= 0:
-				escaped = true
-			case string(key) == "id":
+			case jsonKeyIs(key, "id"):
 				msg.ID = value
-			case string(key) == "method":
-				method = value
+			case jsonKeyIs(key, "method") && !isJSONNull(value):
+				// As in decodeStringField: null keeps the name, a non-empty string sets one.
+				hasMethod = len(value) > 2 && value[0] == '"'
 			}
 		})
-		var isCall bool
-		if escaped {
-			fillMessage(elem, &msg)
-			isCall = msg.isCall()
-		} else {
-			// A non-empty JSON string decodes to a non-empty method name.
-			isCall = msg.hasValidID() && len(method) > 2 && method[0] == '"'
+		if hasMethod && msg.hasValidID() {
+			id = msg.ID
+			return false
 		}
-		if isCall {
-			id = bytes.Clone(msg.ID)
-		}
-		return !isCall
+		return true
 	})
 	return id
 }

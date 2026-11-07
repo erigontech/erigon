@@ -148,7 +148,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	for {
 		msgs, batch, err := readBatch(codec, s.batchLimit, s.logger)
 		if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
-			h.handleBatchTooLarge(tooLarge)
+			h.handleBatchTooLarge(tooLarge, codec.takeRelease())
 			continue
 		}
 		if err != nil {
@@ -185,7 +185,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	reqs, batch, err := codec.ReadBatch(s.batchLimit)
 	if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
-		h.handleBatchTooLarge(tooLarge)
+		h.handleBatchTooLarge(tooLarge, nil)
 		return nil
 	}
 	if err != nil {
