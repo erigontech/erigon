@@ -198,6 +198,84 @@ func TestForwardSyncQueuesTipEnvelopeUntilDataIsAvailable(t *testing.T) {
 	}, 3*time.Second, 50*time.Millisecond)
 }
 
+// Fork choice does not schedule a column download while the head is unpublished, so ForwardSync schedules the tip's.
+func TestForwardSyncSchedulesTipColumnsWhenDataIsMissing(t *testing.T) {
+	f := newForwardSyncTipFixtureWithBlob(t, 0, false, true)
+	var scheduled []common.Hash
+	peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	peerDas.EXPECT().SyncColumnDataLater(gomock.Any()).DoAndReturn(func(block *cltypes.SignedBeaconBlock) error {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		scheduled = append(scheduled, root)
+		return nil
+	}).AnyTimes()
+	peerDas.EXPECT().BackfillCustodyColumns(gomock.Any(), gomock.Any()).AnyTimes()
+	f.cfg.forkChoice.InitPeerDas(peerDas)
+	f.cfg.peerDas = peerDas
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+	require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
+	require.Contains(t, scheduled, f.tipRoot)
+}
+
+// With an execution client that inserts blocks, the tip's envelope skips EL validation. Its arrival still counts for
+// the payload attestation of the tip's slot, but only after the builder signature is checked.
+func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		f := newForwardSyncTipFixture(t, 0, false)
+		f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+		f.cfg.blockCollector = &gloasCollectorTest{}
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		started := time.Now()
+
+		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+		require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+		require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, started))
+		require.True(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+	})
+	for _, badSignature := range []bool{false, true} {
+		t.Run(fmt.Sprintf("data missing/bad signature=%t", badSignature), func(t *testing.T) {
+			f := newForwardSyncTipFixtureWithBlob(t, 0, false, true)
+			f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+			f.cfg.blockCollector = &gloasCollectorTest{}
+			if badSignature {
+				badEnvelope := *f.envelope
+				badEnvelope.Signature[0] ^= 0xff
+				f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
+			}
+			peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+			peerDas.EXPECT().IsDataAvailable(gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+			peerDas.EXPECT().SyncColumnDataLater(gomock.Any()).Return(nil).AnyTimes()
+			peerDas.EXPECT().BackfillCustodyColumns(gomock.Any(), gomock.Any()).AnyTimes()
+			f.cfg.forkChoice.InitPeerDas(peerDas)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+
+			require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+			require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
+			require.Equal(t, !badSignature, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+		})
+	}
+	t.Run("bad signature", func(t *testing.T) {
+		f := newForwardSyncTipFixture(t, 0, false)
+		f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+		f.cfg.blockCollector = &gloasCollectorTest{}
+		badEnvelope := *f.envelope
+		badEnvelope.Signature[0] ^= 0xff
+		f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+
+		require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+		require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+		require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+	})
+}
+
 // The answer that brings the tip covers no slot after it, so ForwardSync asks again and finds the successor.
 func TestForwardSyncAsksForSuccessorAfterAnswerWithTip(t *testing.T) {
 	f := newForwardSyncTipFixture(t, 1, false)

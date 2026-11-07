@@ -108,7 +108,7 @@ func makeFullGloasTipAndEnvelope(t *testing.T, cfg *clparams.BeaconChainConfig, 
 	return block, envelope, root
 }
 
-func acceptAnyTip(*cltypes.SignedBeaconBlock, common.Hash, *cltypes.SignedExecutionPayloadEnvelope) bool {
+func acceptAnyTip(*cltypes.SignedBeaconBlock, common.Hash, *cltypes.SignedExecutionPayloadEnvelope, time.Time) bool {
 	return true
 }
 
@@ -252,7 +252,7 @@ func TestForwardBeaconDownloaderImportsHeldGloasTipWithHTTPEnvelope(t *testing.T
 	var importedTip *cltypes.SignedBeaconBlock
 	var importedRoot common.Hash
 	var importedEnvelope *cltypes.SignedExecutionPayloadEnvelope
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), time.Second, func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), time.Second, func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, _ time.Time) bool {
 		importedTip, importedRoot, importedEnvelope = tip, root, envelope
 		return true
 	}))
@@ -324,7 +324,7 @@ func TestForwardBeaconDownloaderRetriesHeldGloasTipInNextSlot(t *testing.T) {
 				return test.processedSlot(highest), nil
 			})
 			importTip := func() bool {
-				return downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, func(*cltypes.SignedBeaconBlock, common.Hash, *cltypes.SignedExecutionPayloadEnvelope) bool {
+				return downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, func(*cltypes.SignedBeaconBlock, common.Hash, *cltypes.SignedExecutionPayloadEnvelope, time.Time) bool {
 					return test.accepted
 				})
 			}
@@ -407,7 +407,7 @@ func TestForwardBeaconDownloaderFetchesHeldGloasTipEnvelopeFromHTTPAfterP2P(t *t
 	})
 
 	var importedEnvelope *cltypes.SignedExecutionPayloadEnvelope
-	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 400*time.Millisecond, func(_ *cltypes.SignedBeaconBlock, _ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 400*time.Millisecond, func(_ *cltypes.SignedBeaconBlock, _ common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, _ time.Time) bool {
 		importedEnvelope = envelope
 		return true
 	}))

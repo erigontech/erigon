@@ -312,7 +312,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	lastProgressTime := time.Now()
 	lastProgressSlot := currentSlot.Load()
 	endedAtTip := false
-	importTip := func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	importTip := func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool {
 		if _, known := cfg.forkChoice.GetHeader(root); !known {
 			return false
 		}
@@ -320,11 +320,24 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			return true
 		}
 		err := processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, tip.Block, root, envelope, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert), true)
-		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
-			return true
+		dataMissing := errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+		if err != nil && !dataMissing {
+			return false
 		}
-		return err == nil
+		// A queued envelope has not passed its signature check yet.
+		if !dataMissing || cfg.forkChoice.ValidateExecutionPayloadEnvelopeForGossip(envelope) == nil {
+			cfg.forkChoice.RecordExecutionPayloadArrival(root, tip.Block.Slot, receivedAt)
+		}
+		if dataMissing {
+			logger.Debug("[Caplin] forward sync: tip envelope waits for its column data", "slot", tip.Block.Slot, "root", root)
+			// Fork choice does not schedule the download while the head is unpublished.
+			if cfg.peerDas != nil {
+				if err := cfg.peerDas.SyncColumnDataLater(tip); err != nil {
+					logger.Warn("[Caplin] forward sync: failed to schedule the tip's column download", "slot", tip.Block.Slot, "root", root, "err", err)
+				}
+			}
+		}
+		return true
 	}
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot

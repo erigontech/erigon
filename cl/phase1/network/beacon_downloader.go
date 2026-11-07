@@ -776,10 +776,10 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 }
 
 // ImportHeldGloasTip processes the held Gloas block, then passes it to importTip with the envelope that arrives within
-// envelopeTimeout (nil if none), and reports whether both succeeded. A tip that processing rejects is dropped; any other
-// tip that is not imported is tried again in the next slot. A held block that is the parent of a downloaded block has a
-// successor and is left to the batch path.
-func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, importTip func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool) bool {
+// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip that processing
+// rejects is dropped; any other tip that is not imported is tried again in the next slot. A held block that is the
+// parent of a downloaded block has a successor and is left to the batch path.
+func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, importTip func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool) bool {
 	f.mu.Lock()
 	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
 	f.mu.Unlock()
@@ -805,6 +805,7 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	}
 	p2pCtx, cancelP2P := context.WithTimeout(envelopeCtx, p2pTimeout)
 	envelopes := f.fetchGloasEnvelopes(envelopeCtx, p2pCtx, tipPeer, blocks, [][32]byte{root})
+	receivedAt := time.Now()
 	cancelP2P()
 	cancel()
 	if ctx.Err() != nil {
@@ -814,7 +815,7 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	highestSlotProcessed, err := f.process(f.highestSlotProcessed, blocks, nil)
-	if err != nil || highestSlotProcessed < tip.Block.Slot || !importTip(tip, root, envelopes[root]) {
+	if err != nil || highestSlotProcessed < tip.Block.Slot || !importTip(tip, root, envelopes[root], receivedAt) {
 		if f.currentSlot != nil {
 			f.gloasTipRetrySlot = saturatingIncrement(f.currentSlot())
 		}
