@@ -72,8 +72,7 @@ type StorageChange struct {
 	Data     []byte
 }
 
-// BlockBatchNotification carries state changes for a batch of blocks.
-// This is the primary notification type for local (in-process) consumers.
+// BlockBatchNotification holds a batch in native Go types before protobuf conversion.
 type BlockBatchNotification struct {
 	StateVersionID         uint64
 	Changes                []StateChange

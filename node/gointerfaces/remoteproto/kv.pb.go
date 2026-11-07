@@ -516,14 +516,16 @@ func (x *AccountChange) GetStorageChanges() []*StorageChange {
 
 // StateChangeBatch - list of StateDiff done in one DB transaction
 type StateChangeBatch struct {
-	state                  protoimpl.MessageState `protogen:"open.v1"`
-	StateVersionId         uint64                 `protobuf:"varint,1,opt,name=state_version_id,json=stateVersionId,proto3" json:"state_version_id,omitempty"` // mdbx's tx.ID() - id of write transaction in db - where this changes happened
-	ChangeBatch            []*StateChange         `protobuf:"bytes,2,rep,name=change_batch,json=changeBatch,proto3" json:"change_batch,omitempty"`
-	PendingBlockBaseFee    uint64                 `protobuf:"varint,3,opt,name=pending_block_base_fee,json=pendingBlockBaseFee,proto3" json:"pending_block_base_fee,omitempty"` // BaseFee of the next block to be produced
-	BlockGasLimit          uint64                 `protobuf:"varint,4,opt,name=block_gas_limit,json=blockGasLimit,proto3" json:"block_gas_limit,omitempty"`                     // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
-	FinalizedBlock         uint64                 `protobuf:"varint,5,opt,name=finalized_block,json=finalizedBlock,proto3" json:"finalized_block,omitempty"`
-	PendingBlobFeePerGas   uint64                 `protobuf:"varint,6,opt,name=pending_blob_fee_per_gas,json=pendingBlobFeePerGas,proto3" json:"pending_blob_fee_per_gas,omitempty"`   // Base Blob Fee for the next block to be produced
-	StateChangesIncomplete bool                   `protobuf:"varint,7,opt,name=state_changes_incomplete,json=stateChangesIncomplete,proto3" json:"state_changes_incomplete,omitempty"` // Some executed or unwound state changes were omitted from this batch
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	StateVersionId       uint64                 `protobuf:"varint,1,opt,name=state_version_id,json=stateVersionId,proto3" json:"state_version_id,omitempty"` // mdbx's tx.ID() - id of write transaction in db - where this changes happened
+	ChangeBatch          []*StateChange         `protobuf:"bytes,2,rep,name=change_batch,json=changeBatch,proto3" json:"change_batch,omitempty"`
+	PendingBlockBaseFee  uint64                 `protobuf:"varint,3,opt,name=pending_block_base_fee,json=pendingBlockBaseFee,proto3" json:"pending_block_base_fee,omitempty"` // BaseFee of the next block to be produced
+	BlockGasLimit        uint64                 `protobuf:"varint,4,opt,name=block_gas_limit,json=blockGasLimit,proto3" json:"block_gas_limit,omitempty"`                     // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
+	FinalizedBlock       uint64                 `protobuf:"varint,5,opt,name=finalized_block,json=finalizedBlock,proto3" json:"finalized_block,omitempty"`
+	PendingBlobFeePerGas uint64                 `protobuf:"varint,6,opt,name=pending_blob_fee_per_gas,json=pendingBlobFeePerGas,proto3" json:"pending_blob_fee_per_gas,omitempty"` // Base Blob Fee for the next block to be produced
+	// State changes may be missing from this batch or earlier deliveries.
+	// Absent entries do not imply unchanged state.
+	StateChangesIncomplete bool `protobuf:"varint,7,opt,name=state_changes_incomplete,json=stateChangesIncomplete,proto3" json:"state_changes_incomplete,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }

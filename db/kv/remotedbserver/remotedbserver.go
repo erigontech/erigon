@@ -461,7 +461,7 @@ func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remote
 		select {
 		case event := <-ch:
 			reply := event.batch
-			// A new subscription may have missed changes before it connected.
+			// A new subscription or a queue gap may leave earlier changes unseen.
 			// Batches are shared, so mark only this subscriber's response incomplete.
 			if !reply.StateChangesIncomplete && (lastSequence == 0 || event.sequence != lastSequence+1) {
 				reply = proto.Clone(reply).(*remoteproto.StateChangeBatch)

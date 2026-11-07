@@ -52,8 +52,8 @@ func (a *Accumulator) Reset(plainStateID uint64) {
 	a.plainStateID = plainStateID
 }
 
-// SendAndReset dispatches accumulated changes to both remote (gRPC/protobuf) and
-// local (in-process/native) consumers, then resets the accumulator.
+// SendAndReset converts accumulated changes to protobuf and dispatches them,
+// then resets the accumulator. In-process consumers use the same messages.
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64, pendingBlobFee uint64, blockGasLimit uint64, finalizedBlock uint64) {
 	if a == nil || len(a.changes) == 0 {
 		return
