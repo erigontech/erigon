@@ -747,6 +747,7 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	if arg64 >= lower && arg64 < upper {
 		hash, err := evm.Context.GetHash(arg64)
 		if err != nil {
+			evm.IntraBlockState().RecordStateReadError(err)
 			arg.Clear()
 			return pc, nil, err
 		}

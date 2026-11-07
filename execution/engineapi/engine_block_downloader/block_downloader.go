@@ -158,6 +158,9 @@ func newPayloadGapExceedsLimit(currentHeadNum, missingBlockNum, maxReorgDepth ui
 func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDownloadRequest) error {
 	err := e.downloadBlocks(ctx, req)
 	if err != nil {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) && req.ValidateChainTip != nil {
+			e.ReportBadHeader(req.ValidateChainTip.Hash(), common.Hash{}, err.Error())
+		}
 		return fmt.Errorf("could not process backward download of blocks: %w", err)
 	}
 	e.logger.Info("[EngineBlockDownloader] backward download of blocks finished successfully", req.LogArgs()...)
@@ -167,6 +170,9 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 	tip := req.ValidateChainTip
 	err = e.chainRW.InsertBlock(ctx, tip)
 	if err != nil {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+			e.ReportBadHeader(tip.Hash(), common.Hash{}, err.Error())
+		}
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
 	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
@@ -240,6 +246,16 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		}
 		err := e.chainRW.InsertBlocks(ctx, blocks)
 		if err != nil {
+			if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+				for _, block := range blocks {
+					rawBlock := types.RawBlock{Header: block.HeaderNoCopy(), Body: block.RawBody()}
+					if rawBlock.ValidateMaxRlpSize(e.chainRW.Config()) != nil {
+						e.ReportBadHeader(block.Hash(), common.Hash{}, err.Error())
+						e.ReportBadHeader(req.MissingHash, common.Hash{}, err.Error())
+						break
+					}
+				}
+			}
 			return err
 		}
 		insertedBlocksWithoutExec += len(blocks)
