@@ -255,6 +255,9 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 			readTxNum = visibleEnd - 1
 		}
 	}
+	if fillStub == "all" {
+		return
+	}
 	if fillStub != "clone" {
 		value = bytes.Clone(value)
 	}
@@ -589,5 +592,5 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 }
 
-// fillStub is a probe bound: FILL_STUB=clone|rlock|stripe|compute removes one piece of the read-miss fill path.
+// fillStub is a probe bound: FILL_STUB=all|clone|rlock|stripe|compute removes the fill or one piece of the read-miss fill path.
 var fillStub = os.Getenv("FILL_STUB")
