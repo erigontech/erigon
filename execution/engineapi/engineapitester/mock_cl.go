@@ -56,6 +56,7 @@ type MockCl struct {
 	state                 *MockClState
 	chainConfig           *chain.Config
 	waitForTxPool         func(context.Context, common.Hash) error
+	completePayload       func(context.Context, uint64) error
 }
 
 func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
@@ -219,6 +220,15 @@ func (cl *MockCl) BuildEmptyPayload(
 // GetBuiltPayload fetches the payload being built under the given id using the fork-appropriate
 // engine_getPayload version. It is the second half of BuildNewPayload.
 func (cl *MockCl) GetBuiltPayload(ctx context.Context, payloadId hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
+	if cl.completePayload != nil {
+		id, err := enginetypes.DecodePayloadID(payloadId)
+		if err != nil {
+			return nil, err
+		}
+		if err := cl.completePayload(ctx, id); err != nil {
+			return nil, fmt.Errorf("complete payload: %w", err)
+		}
+	}
 	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
 			var r *enginetypes.GetPayloadResponse
