@@ -555,6 +555,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		// of the validation's account dependencies changed.
 		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		if len(previous.RecentRoots) > 0 {
+			affected = affected || changes.StateChangesIncomplete
 			invalidRoots := !hasPendingSlot || slices.ContainsFunc(previous.RecentRoots, func(ref protocol.RecentRootReference) bool {
 				return !ref.ValidAt(pendingSlot)
 			})

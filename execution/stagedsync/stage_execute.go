@@ -595,6 +595,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 			return err
 		}
 		accumulator.StartChange(header, txs, true)
+	} else if cfg.notifications != nil && cfg.notifications.Accumulator != nil {
+		cfg.notifications.Accumulator.MarkIncomplete()
 	}
 
 	if err := unwindExec3(u, s, doms, rwTx, ctx, cfg, accumulator, logger); err != nil {

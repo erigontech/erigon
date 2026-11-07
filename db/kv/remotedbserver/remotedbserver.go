@@ -69,7 +69,7 @@ const MaxTxTTL = 60 * time.Second
 // 7.3.0 - Remove HasPrefix from the remote KV service
 // 7.3.1 - Include pinned history-file generations in transaction replies
 // 7.3.2 - Add IndexJoin
-// 7.3.3 - Include block slots in state-change notifications
+// 7.3.3 - Include block slots and completeness in state-change notifications
 var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 3}
 
 type KvServer struct {

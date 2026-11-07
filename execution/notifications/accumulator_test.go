@@ -44,3 +44,33 @@ func TestAccumulatorSlotNumber(t *testing.T) {
 		})
 	}
 }
+
+func TestAccumulatorCopyIncompleteChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		source     bool
+		target     bool
+		incomplete bool
+	}{
+		{"both complete", false, false, false},
+		{"source incomplete", true, false, true},
+		{"target incomplete", false, true, true},
+		{"both incomplete", true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, target := NewAccumulator(), NewAccumulator()
+			source.StartChange(&types.Header{}, nil, false)
+			if tc.source {
+				source.MarkIncomplete()
+			}
+			if tc.target {
+				target.MarkIncomplete()
+			}
+			source.CopyAndReset(target)
+			require.Equal(t, tc.incomplete, target.stateChangesIncomplete)
+			require.False(t, source.stateChangesIncomplete)
+			target.Reset(0)
+			require.False(t, target.stateChangesIncomplete)
+		})
+	}
+}

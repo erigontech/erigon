@@ -481,6 +481,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
 		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
 		cfg.notifications.Accumulator.StartChange(lastHeader, nil, false /* unwind */)
+		cfg.notifications.Accumulator.MarkIncomplete()
 	}
 
 	return execErr
