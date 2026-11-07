@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -120,6 +121,9 @@ type resumeBALFixture struct {
 	// earlierReceipt seeds the receipt of a transaction before the block, which
 	// a receipt domain that does not reach the block leaves as its latest.
 	earlierReceipt bool
+	// earlierGas, when set, is that receipt's cumulative gas instead of
+	// earlierReceiptGas.
+	earlierGas uint64
 	// inspect, when set, sees the state each exec and execSerial run leaves.
 	inspect func(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx)
 }
@@ -252,7 +256,11 @@ func (fx *resumeBALFixture) seed(t *testing.T, db kv.TemporalRwDB, point resumeP
 				return err
 			}
 			if fx.earlierReceipt {
-				if err := rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 0, earlierReceiptGas, 0, resumeBALGenesisTxNum); err != nil {
+				gas := earlierReceiptGas
+				if fx.earlierGas != 0 {
+					gas = fx.earlierGas
+				}
+				if err := rawtemporaldb.AppendReceiptMetadata(domains.AsPutDel(tx), 0, gas, 0, resumeBALGenesisTxNum); err != nil {
 					return err
 				}
 			}
@@ -824,10 +832,10 @@ func (b boundAt) BindTxGas(txn types.Transaction, gasLeft uint64) (types.Transac
 }
 
 // TestResumedBlockTxGas checks that a gas limit bound to its position is
-// checked in a block executed from its start or resumed before Amsterdam, and
-// left alone in a block resumed from Amsterdam or after transactions without
-// receipts, whose gas its pool then lacks: no message takes its gas from the
-// block, so the transactions are not executed again.
+// checked in a block executed from its start or resumed before Amsterdam, also
+// after transactions without receipts, executed again for them, and left alone
+// in a block resumed from Amsterdam or after transactions that neither their
+// receipts nor the state history tell, whose gas its pool then lacks.
 func TestResumedBlockTxGas(t *testing.T) {
 	amsterdam := chain.TestChainOsakaConfig.Copy()
 	amsterdam.AmsterdamTime = common.NewUint64(resumeBlockTime)
@@ -887,19 +895,27 @@ func testResumedBlockTxGas(t *testing.T, config *chain.Config) {
 		offset           uint64
 		point            resumePoint
 		noPrefixReceipts bool
+		wipeHistory      bool
 		err              error
 	}
 	cases := []testCase{
-		{"full/bound", valid, bound[2].Hash(), offset, fromBlockStart, false, nil},
-		{"full/unbound", invalid, unbound[2].Hash(), offset, fromBlockStart, false, protocol.ErrGasLimitPosition},
-		{"full/first unbound", valid, bound[0].Hash(), 0, fromBlockStart, false, protocol.ErrGasLimitPosition},
-		{"after block start/unbound", invalid, unbound[2].Hash(), offset, afterBlockInit, false, protocol.ErrGasLimitPosition},
-		{"after tx0/bound", valid, bound[2].Hash(), offset, afterTx0, false, nil},
-		{"after tx0 without receipts/bound", valid, bound[2].Hash(), offset, afterTx0, true, nil},
-		{"after tx0 without receipts/unbound", invalid, unbound[2].Hash(), offset, afterTx0, true, nil},
+		{"full/bound", valid, bound[2].Hash(), offset, fromBlockStart, false, false, nil},
+		{"full/unbound", invalid, unbound[2].Hash(), offset, fromBlockStart, false, false, protocol.ErrGasLimitPosition},
+		{"full/first unbound", valid, bound[0].Hash(), 0, fromBlockStart, false, false, protocol.ErrGasLimitPosition},
+		{"after block start/unbound", invalid, unbound[2].Hash(), offset, afterBlockInit, false, false, protocol.ErrGasLimitPosition},
+		{"after tx0/bound", valid, bound[2].Hash(), offset, afterTx0, false, false, nil},
+		{"after tx0 without receipts/bound", valid, bound[2].Hash(), offset, afterTx0, true, false, nil},
 	}
-	if !isAmsterdam {
-		cases = append(cases, testCase{"after tx0/unbound", invalid, unbound[2].Hash(), offset, afterTx0, false, protocol.ErrGasLimitPosition})
+	if isAmsterdam {
+		cases = append(cases, testCase{"after tx0 without receipts/unbound", invalid, unbound[2].Hash(), offset, afterTx0, true, false, nil})
+	} else {
+		// From Amsterdam a block resumed without the history fails on its block
+		// access list.
+		cases = append(cases,
+			testCase{"after tx0/unbound", invalid, unbound[2].Hash(), offset, afterTx0, false, false, protocol.ErrGasLimitPosition},
+			testCase{"after tx0 without receipts/unbound", invalid, unbound[2].Hash(), offset, afterTx0, true, false, protocol.ErrGasLimitPosition},
+			testCase{"after tx0 without receipts or history/bound", valid, bound[2].Hash(), offset, afterTx0, true, true, nil},
+			testCase{"after tx0 without receipts or history/unbound", invalid, unbound[2].Hash(), offset, afterTx0, true, true, nil})
 	}
 	for _, tc := range cases {
 		for _, serial := range []bool{false, true} {
@@ -913,7 +929,7 @@ func testResumedBlockTxGas(t *testing.T, config *chain.Config) {
 			}
 			t.Run(name, func(t *testing.T) {
 				fx.engine = boundAt{base, tc.mark, tc.offset}
-				fx.noPrefixReceipts = tc.noPrefixReceipts
+				fx.noPrefixReceipts, fx.wipeHistory = tc.noPrefixReceipts, tc.wipeHistory
 				err := fx.run(t, tc.block, tc.point, serial)
 				if tc.err == nil {
 					require.NoError(t, err)
@@ -1049,18 +1065,56 @@ func TestResumedBlockGasFromBlock(t *testing.T) {
 	}
 }
 
-// TestResumedBlockReceiptGasFromBlock checks that both executors, resuming a
-// block after transactions whose receipts are missing, before a message taking
-// its gas from the block, record the message's receipt with the cumulative
-// gas, blob gas and log index the whole block gives it, not with those of the
-// receipt domain's latest record.
-func TestResumedBlockReceiptGasFromBlock(t *testing.T) {
+// TestResumedBlockReceipts checks that both executors, resuming a block after
+// transactions whose receipts are missing, record the receipt of the message
+// after them with the cumulative gas, blob gas and log index the whole block
+// gives it, not with those of the receipt domain's latest record, whether the
+// message takes its gas from the block or not, before Amsterdam and from it.
+func TestResumedBlockReceipts(t *testing.T) {
+	amsterdam := chain.TestChainOsakaConfig.Copy()
+	amsterdam.AmsterdamTime = common.NewUint64(resumeBlockTime)
+	for _, tc := range []struct {
+		name      string
+		config    *chain.Config
+		fromBlock bool
+	}{
+		{"osaka/gas from block", chain.TestChainOsakaConfig, true},
+		{"osaka/gas limit", chain.TestChainOsakaConfig, false},
+		{"amsterdam/gas limit", amsterdam, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testResumedBlockReceipts(t, tc.config, tc.fromBlock)
+		})
+	}
+}
+
+// postProcessCounter counts, per index, the transactions its engine runs:
+// execution and replay alike post-process each one.
+type postProcessCounter struct {
+	rules.Engine
+	mu     *sync.Mutex
+	counts map[int]int
+}
+
+func (c postProcessCounter) PostProcessTx(config *chain.Config, ibs *state.IntraBlockState, txs types.Transactions, i int) error {
+	c.mu.Lock()
+	c.counts[i]++
+	c.mu.Unlock()
+	if p, ok := c.Engine.(rules.TxPostProcessor); ok {
+		return p.PostProcessTx(config, ibs, txs, i)
+	}
+	return nil
+}
+
+func testResumedBlockReceipts(t *testing.T, config *chain.Config, fromBlock bool) {
 	// Emits two logs: PUSH1 0 PUSH1 0 LOG0, twice, STOP.
 	logger := common.HexToAddress("0x000000000000000000000000000000000000106e")
-	fx := newResumeFixture(t, chain.TestChainOsakaConfig, types.GenesisAlloc{
+	fx := newResumeFixture(t, config, types.GenesisAlloc{
 		resumeRecorder: {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.GAS), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}},
 		logger:         {Balance: new(big.Int), Nonce: 1, Code: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}},
 	})
+	counter := postProcessCounter{fx.engine, new(sync.Mutex), map[int]int{}}
+	fx.engine = counter
 	signer := types.LatestSignerForChainID(fx.config.ChainID)
 	// tx0 and tx1 each carry a blob and call logger.
 	var txs types.Transactions
@@ -1080,7 +1134,10 @@ func TestResumedBlockReceiptGasFromBlock(t *testing.T) {
 		CommonTx: types.CommonTx{Nonce: 2, To: &resumeRecorder, GasLimit: params.MaxTxnGasLimit}, GasPrice: *uint256.NewInt(1_000_000_000),
 	}, *signer, senderIsCoinbaseKey.key)
 	require.NoError(t, err)
-	txs = append(txs, fromBlockTxn{recorder})
+	if fromBlock {
+		recorder = fromBlockTxn{recorder}
+	}
+	txs = append(txs, recorder)
 	fx.block, fx.receipts = fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
 	require.Len(t, fx.receipts[0].Logs, 2)
 	require.Len(t, fx.receipts[1].Logs, 2)
@@ -1104,26 +1161,42 @@ func TestResumedBlockReceiptGasFromBlock(t *testing.T) {
 		point            resumePoint
 		noPrefixReceipts bool
 		earlierReceipt   bool
+		// unchangedTx0 gives the earlier block's receipt tx0's cumulative gas, so
+		// tx0's record leaves it unchanged and unwritten.
+		unchangedTx0 bool
 	}{
-		{"full", fromBlockStart, false, false},
+		{"full", fromBlockStart, false, false, false},
 		// tx1, the first transaction run, carries a blob too.
-		{"after tx0 without receipts", afterTx0, true, false},
-		{"after tx0 with only an earlier block's receipt", afterTx0, true, true},
-		{"after tx1 without receipts", resumePoint(2), true, false},
-		{"after tx1 with only an earlier block's receipt", resumePoint(2), true, true},
+		{"after tx0 without receipts", afterTx0, true, false, false},
+		{"after tx0 with only an earlier block's receipt", afterTx0, true, true, false},
+		{"after tx0 left the earlier block's gas unchanged", afterTx0, false, true, true},
+		{"after tx1 without receipts", resumePoint(2), true, false, false},
+		{"after tx1 with only an earlier block's receipt", resumePoint(2), true, true, false},
 	} {
 		for _, serial := range []bool{false, true} {
+			// The serial executor refuses Amsterdam blocks.
+			if serial && config.IsAmsterdam(resumeBlockTime) {
+				continue
+			}
 			name := "parallel/" + tc.name
 			if serial {
 				name = "serial/" + tc.name
 			}
 			t.Run(name, func(t *testing.T) {
 				gas, blobGas, logIndex = 0, 0, 0
-				fx.noPrefixReceipts, fx.earlierReceipt = tc.noPrefixReceipts, tc.earlierReceipt
+				clear(counter.counts)
+				fx.noPrefixReceipts, fx.earlierReceipt, fx.earlierGas = tc.noPrefixReceipts, tc.earlierReceipt, 0
+				if tc.unchangedTx0 {
+					fx.earlierGas = fx.receipts[0].CumulativeGasUsed
+				}
 				require.NoError(t, fx.run(t, fx.block, tc.point, serial))
 				require.Equal(t, wantGas, gas, "cumulative gas")
 				require.Equal(t, wantBlobGas, blobGas, "cumulative blob gas")
 				require.Equal(t, uint64(4), logIndex, "log index after the message")
+				// From Amsterdam the block access list check executes them again.
+				if tc.point != fromBlockStart && !config.IsAmsterdam(resumeBlockTime) {
+					require.Equal(t, 1, counter.counts[0], "tx0 executed again once, for the receipts and the block's finalization")
+				}
 			})
 		}
 	}
@@ -1248,9 +1321,9 @@ func (badMessageTxn) AsMessage(types.Signer, *uint256.Int, *chain.Rules) (*types
 
 // TestRestorePriorGas checks that a resumed block's gas pool loses the gas and
 // blob gas its earlier transactions' receipts tell, and is left as it is, and
-// reported to lack them, where they do not tell it and no later message takes
-// its gas from the block, which otherwise fails the run without the state
-// history.
+// reported to lack them, where neither they nor the state history tell it,
+// unless a later message takes its gas from the block before Amsterdam, which
+// fails the run.
 func TestRestorePriorGas(t *testing.T) {
 	const gasLimit = 30_000_000
 	db := newResumeTestDB(t)
@@ -1288,22 +1361,23 @@ func TestRestorePriorGas(t *testing.T) {
 		blobGasUsed uint64
 	}{
 		{"resumed", chain.TestChainOsakaConfig, 5, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, nil, false, 1_000_000, params.GasPerBlob},
-		{"resumed without receipts", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, tx1, tx2}, nil, true, 0, 0},
+		{"resumed without receipts or history", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, tx1, tx2}, nil, true, 0, 0},
 		{"resumed without receipts or history before gas from the block", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, state.ErrPruned, false, 0, 0},
 		{"resumed without receipts or history before later gas from the block", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, tx1, fromBlockTxn{tx2}}, state.ErrPruned, false, 0, 0},
 		// Executing the transaction without a message rejects the block first.
-		{"resumed without receipts before a transaction without a message", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, badMessageTxn{tx1}, fromBlockTxn{tx2}}, nil, true, 0, 0},
+		{"resumed without receipts or history before a transaction without a message", chain.TestChainOsakaConfig, 4, 1, types.Transactions{tx0, badMessageTxn{tx1}, fromBlockTxn{tx2}}, nil, true, 0, 0},
 		// The block starts at txNum 6, after the one of the receipt at txNum 4.
-		{"resumed with only an earlier block's receipt", chain.TestChainOsakaConfig, 8, 1, types.Transactions{tx0, tx1, tx2}, nil, true, 0, 0},
+		{"resumed with only an earlier block's receipt and no history", chain.TestChainOsakaConfig, 8, 1, types.Transactions{tx0, tx1, tx2}, nil, true, 0, 0},
 		{"resumed with only an earlier block's receipt before gas from the block", chain.TestChainOsakaConfig, 8, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, state.ErrPruned, false, 0, 0},
 		{"resumed from amsterdam", amsterdam, 5, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, nil, true, 0, 0},
+		{"resumed from amsterdam without receipts or history before gas from the block", amsterdam, 4, 1, types.Transactions{tx0, fromBlockTxn{tx1}}, nil, true, 0, 0},
 		// The receipt before the first transaction is the parent block's last.
 		{"first transaction", chain.TestChainOsakaConfig, 5, 0, types.Transactions{fromBlockTxn{tx0}}, nil, false, 0, 0},
 		{"block start", chain.TestChainOsakaConfig, 5, -1, types.Transactions{fromBlockTxn{tx0}}, nil, false, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gp := protocol.NewGasPool(gasLimit, maxBlobGas)
-			te := &txExecutor{cfg: ExecuteBlockCfg{chainConfig: tc.config}}
+			te := &txExecutor{cfg: ExecuteBlockCfg{chainConfig: tc.config}, logger: log.New()}
 			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit}
 			task := &exec.TxTask{TxNum: tc.txNum, TxIndex: tc.txIndex, Txs: tc.txs, Config: tc.config, Header: header}
 			prior, lacking, err := te.restorePriorGas(t.Context(), tx, gp, task)
@@ -1342,8 +1416,8 @@ func TestParallelResumedAtOtherTask(t *testing.T) {
 // TestResumedBlockBlobGas checks that both executors, resuming a block after a
 // transaction that used blob gas, reject a later one whose blobs the rest of
 // the block's blob gas does not fit, also without the first one's receipt,
-// the latest one then an earlier block's, when the later one takes its gas
-// from the block.
+// the latest one then an earlier block's, whether or not the later one takes
+// its gas from the block.
 func TestResumedBlockBlobGas(t *testing.T) {
 	fx := newResumeFixture(t, chain.TestChainOsakaConfig, nil)
 	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
@@ -1388,6 +1462,8 @@ func TestResumedBlockBlobGas(t *testing.T) {
 	}{
 		{"full", block, fromBlockStart, false, false},
 		{"after tx0", block, afterTx0, false, false},
+		{"after tx0 without receipts/gas limit", block, afterTx0, true, false},
+		{"after tx0 with only an earlier block's receipt/gas limit", block, afterTx0, true, true},
 		{"after tx0 without receipts/gas from block", fromBlock, afterTx0, true, false},
 		{"after tx0 with only an earlier block's receipt/gas from block", fromBlock, afterTx0, true, true},
 	} {

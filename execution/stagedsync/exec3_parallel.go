@@ -3848,7 +3848,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			blockStartTxNum := be.tasks[0].Version().TxNum - uint64(startTxIndex) - 1
 			receiptsComplete = startTxIndex == 0
 			if startTxIndex > 0 && len(txs) > 0 {
-				priorReceipts, err := pe.reconstructPriorReceipts(ctx, applyTx, header, txs, startTxIndex, blockStartTxNum+1)
+				priorReceipts, err := pe.finalizedPriorReceipts(ctx, applyTx, be.prior, header, txs, startTxIndex, blockStartTxNum+1)
 				if err != nil {
 					pe.logger.Warn("["+pe.logPrefix+"] failed to reconstruct prior receipts for partial block",
 						"block", be.blockNum, "startTxIndex", startTxIndex, "err", err)
