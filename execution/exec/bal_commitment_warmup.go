@@ -179,7 +179,7 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers i
 
 func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats, onErr func(error)) commitment.TrieContextFactory {
 	return func(workerCtx context.Context) (commitment.PatriciaContext, func()) {
-		tx, err := db.BeginRo(kv.WithNonBlockingAcquire(workerCtx)) //nolint:gocritic // The returned cleanup owns Rollback.
+		tx, err := db.BeginRo(workerCtx) //nolint:gocritic // The returned cleanup owns Rollback.
 		if err != nil {
 			onErr(err)
 			return nil, nil
@@ -227,8 +227,8 @@ type rawBranchReader interface {
 	GetLatestBranchRaw(prefix []byte, tx kv.Tx) ([]byte, bool, error)
 }
 
-// inChunks runs fn over up to par chunks of n items at once: the first chunk on ttx, the others each on a read tx taken
-// without blocking. A chunk that gets no tx runs on ttx after the others, since the caller holds a permit.
+// inChunks runs fn over up to par chunks of n items at once: the first chunk on ttx, the others each on their own
+// read tx. A chunk that gets no tx runs on ttx after the others.
 func inChunks(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, n, par int, fn func(tx kv.TemporalTx, from, to int)) {
 	chunk := (n + par - 1) / max(par, 1)
 	if chunk == 0 {
@@ -239,7 +239,7 @@ func inChunks(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, n, par int, fn
 	var skipped []int
 	for from := chunk; from < n; from += chunk {
 		wg.Go(func() {
-			tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx))
+			tx, err := db.BeginRo(ctx)
 			if err != nil {
 				mu.Lock()
 				skipped = append(skipped, from)

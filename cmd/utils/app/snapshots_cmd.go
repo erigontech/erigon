@@ -1960,8 +1960,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
 	// Open MDBX without Accede so it creates the DB if needed (memState-only setups have no chaindata).
-	limiterB := semaphore.NewWeighted(threadsLimit)
-	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	agg := openAgg(ctx, dirs, chainDB, logger)
@@ -1980,8 +1979,7 @@ func doVerifyState(ctx context.Context, cliCtx *cli.Command, logger log.Logger) 
 func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 
-	limiterB := semaphore.NewWeighted(threadsLimit)
-	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -3708,9 +3706,7 @@ func doCompareIdx(ctx context.Context, cliCtx *cli.Command) error {
 }
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
-	limiterB := semaphore.NewWeighted(threadsLimit)
 	return mdbx.New(label, log.New()).Path(path).
-		RoTxsLimiter(limiterB).
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 
@@ -3757,10 +3753,6 @@ const (
 	duCatRcache     = "rcache"
 	duCatOther      = "other"
 )
-
-// threadsLimit is the weight of the MDBX RoTxsLimiter used by integration
-// tooling: large enough to never back-pressure interactive commands.
-const threadsLimit = 9_000
 
 // duFileInfo holds metadata for a single snapshot file.
 type duFileInfo struct {

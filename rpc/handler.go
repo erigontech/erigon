@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -72,7 +71,8 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
-	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
+	inlineCalls    bool          // the caller waits for every answer, as a single HTTP request does
+	callSlots      chan struct{} // the server's call limit for goroutine calls; nil = unlimited
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -534,6 +534,20 @@ func (h *handler) startCallProc(fn func(*callProc), done func()) {
 		run()
 		return
 	}
+	if h.callSlots != nil {
+		// The wait for a slot runs off the read loop: WebSocket reads its pongs there.
+		h.callWG.Go(func() {
+			select {
+			case h.callSlots <- struct{}{}:
+			case <-h.rootCtx.Done():
+				done()
+				return
+			}
+			defer func() { <-h.callSlots }()
+			run()
+		})
+		return
+	}
 	h.callWG.Go(run)
 }
 
@@ -743,16 +757,6 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	return answer, answered
 }
 
-// remapDBOverload converts kv.ErrReadTxLimitExceeded into a JSON-RPC -32005 error and sets
-// the HTTP 503 flag in ctx so ServeHTTP can write the correct status before flushing.
-func remapDBOverload(ctx context.Context, err error) error {
-	if errors.Is(err, kv.ErrReadTxLimitExceeded) {
-		SetOverloadedFlag(ctx)
-		return errServerOverloaded
-	}
-	return err
-}
-
 // servedLvl logs an error the handler coded as an answer, such as a revert, at trace. Uncoded errors may be
 // infrastructure failures, so they stay at warn with internal and overload errors.
 func servedLvl(err error) log.Lvl {
@@ -773,7 +777,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
-			return msg.errorResponse(remapDBOverload(ctx, err)), nil
+			return msg.errorResponse(err), nil
 		}
 		if msg.isNotification() {
 			return nil, nil
@@ -782,10 +786,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	}
 
 	return nil, writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
-		if _, err := callb.call(ctx, msg.Method, args, s); err != nil {
-			return remapDBOverload(ctx, err)
-		}
-		return nil
+		_, err := callb.call(ctx, msg.Method, args, s)
+		return err
 	})
 }
 

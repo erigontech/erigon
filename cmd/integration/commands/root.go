@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -61,11 +60,8 @@ func RootCommand() *cobra.Command {
 }
 
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
-	const ThreadsLimit = 9_000
-	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.New(label, log.New()).
 		Path(path).
-		RoTxsLimiter(limiterB).
 		WriteMap(dbWriteMap).
 		Accede(true) // integration tool: must not create db. must open db without stoping erigon.
 

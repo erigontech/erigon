@@ -36,30 +36,6 @@ type stubSharedDomains struct{ sd }
 
 func (stubSharedDomains) StepSize() uint64 { return 1 }
 
-type beginRoRecordingDB struct {
-	kv.TemporalRoDB
-	sawNonBlocking bool
-}
-
-func (db *beginRoRecordingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	db.sawNonBlocking = kv.IsNonBlockingAcquire(ctx)
-	return nil, kv.ErrReadTxLimitExceeded
-}
-
-// Warmup is best-effort: its read txs must never queue on the read-tx
-// semaphore, or warmup workers can wedge commitment shutdown and starve
-// execution workers of semaphore slots.
-func TestWarmupTrieContextFactoryUsesNonBlockingReadTxAcquire(t *testing.T) {
-	t.Parallel()
-	db := &beginRoRecordingDB{}
-	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
-
-	_, cleanup := sdc.warmupTrieContextFactory(db, 0)(t.Context())
-	defer cleanup()
-
-	require.True(t, db.sawNonBlocking, "warmup BeginTemporalRo must use non-blocking semaphore acquire")
-}
-
 type blockingBeginDB struct {
 	kv.TemporalRoDB
 }
@@ -69,8 +45,8 @@ func (db *blockingBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, 
 	return nil, ctx.Err()
 }
 
-// A factory blocked opening its read tx (e.g. parked on the read-tx semaphore)
-// must unblock when the warmuper shuts down, or CloseAndWait hangs.
+// A factory blocked opening its read tx must unblock when the warmuper shuts
+// down, or CloseAndWait hangs.
 func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 	t.Parallel()
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}

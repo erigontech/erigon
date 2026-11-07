@@ -88,6 +88,21 @@ func (d *LeakDetector) slowList() (res []string) {
 	return res
 }
 
+// Live lists every tracked resource except the given id, with its age and creation stack.
+func (d *LeakDetector) Live(except uint64) (res []string) {
+	if d == nil || !d.Enabled() {
+		return res
+	}
+	d.listLock.Lock()
+	defer d.listLock.Unlock()
+	for key, value := range d.list {
+		if key != except {
+			res = append(res, fmt.Sprintf("%d(%s): %s", key, time.Since(value.started), value.stack))
+		}
+	}
+	return res
+}
+
 func (d *LeakDetector) Del(id uint64) {
 	if d == nil || !d.Enabled() {
 		return

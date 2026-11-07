@@ -60,10 +60,11 @@ type Server struct {
 
 	batchConcurrency    uint
 	disableStreaming    bool
-	traceRequests       bool // Whether to print requests at INFO level
-	debugSingleRequest  bool // Whether to print requests at INFO level
-	batchLimit          int  // Maximum number of requests in a batch
-	subscriptionLimit   int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
+	traceRequests       bool          // Whether to print requests at INFO level
+	debugSingleRequest  bool          // Whether to print requests at INFO level
+	batchLimit          int           // Maximum number of requests in a batch
+	subscriptionLimit   int           // Maximum number of concurrent subscriptions per connection; 0 = unlimited
+	callSlots           chan struct{} // shared by every connection that runs calls in goroutines; nil = unlimited
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
 	ingress             ingressBudget
@@ -105,6 +106,15 @@ func (s *Server) SetSubscriptionLimit(limit int) {
 	s.subscriptionLimit = limit
 }
 
+// SetCallLimit caps the calls that WebSocket and IPC connections run at once; 0 removes the cap.
+// HTTP runs calls inline and has its own admission limit.
+func (s *Server) SetCallLimit(limit int) {
+	s.callSlots = nil
+	if limit > 0 {
+		s.callSlots = make(chan struct{}, limit)
+	}
+}
+
 // RegisterName creates a service for the given receiver type under the given name. When no
 // methods on the given receiver match the criteria to be either a RPC method or a
 // subscription an error is returned. Otherwise a new service is created and added to the
@@ -130,8 +140,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 }
 
 // ServeCodecWithContext is like ServeCodec but uses connCtx as the base context for all
-// handler goroutines spawned for this connection. Values set on connCtx (e.g.
-// kv.WithNonBlockingAcquire) propagate to every method call on the connection.
+// handler goroutines spawned for this connection.
 func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
@@ -163,7 +172,9 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h.callSlots = s.callSlots
+	return h
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This

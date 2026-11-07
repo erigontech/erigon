@@ -295,7 +295,6 @@ func New(
 	}
 
 	// Assemble the Ethereum object
-	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
@@ -1066,10 +1065,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		if err != nil {
 			return err
 		}
-		// NonBlockingAcquire on the in-process connection so BeginRo fails
-		// fast (ErrServerOverloaded) instead of blocking MCP handlers when
-		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
-		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
+		mcpClient := rpc.DialInProcWithContext(ctx, mcpSrv, s.logger)
 		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
 		modules, err := mcpClient.SupportedModules()
 		if err != nil {
