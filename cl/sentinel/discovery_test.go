@@ -18,6 +18,7 @@ package sentinel
 
 import (
 	"context"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,10 @@ import (
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover"
+	"github.com/erigontech/erigon/p2p/enode"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -349,4 +354,33 @@ func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
 	coverage[4] = 0
 	peerSubnets.SetBitAt(3, false)
 	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+}
+
+// A discv5 walk that finds no node blocks in Next; the search must still end when its context does.
+func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	db, err := enode.OpenDBEx(t.Context(), "", t.TempDir(), log.Root())
+	require.NoError(t, err)
+	defer db.Close()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	listener, err := discover.ListenV5(t.Context(), conn, enode.NewLocalNode(db, key), discover.Config{PrivateKey: key, Log: log.Root()})
+	require.NoError(t, err)
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	s := &Sentinel{ctx: ctx, listener: listener, cfg: &SentinelConfig{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.findPeersForSubnets([]subnetSearchState{{idx: 0, wanted: 1}})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the search outlived its context")
+	}
 }
