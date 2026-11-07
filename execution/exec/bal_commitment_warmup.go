@@ -462,7 +462,8 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		flat := flatPrefixes(hashedKeys)
+		bc := branchCacheOf(ttx)
+		flat := skipCachedPrefixes(bc, flatPrefixes(hashedKeys))
 		before := pfPages.Load()
 		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flat); err != nil {
 			return
@@ -491,7 +492,7 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		if depth > prefetchFlatDepth {
-			prefixes := compactPrefixes(active, depth)
+			prefixes := skipCachedPrefixes(branchCacheOf(ttx), compactPrefixes(active, depth))
 			before := pfPages.Load()
 			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, prefixes); err != nil {
 				return err
@@ -676,3 +677,32 @@ var prefetchFlatDepth = func() int {
 	}
 	return 8
 }()
+
+// pfSkipCached is a probe knob: PF_SKIP_CACHED=1 drops trie prefixes the branch cache already holds, so the batch
+// prefetch reads only branches the fold would miss.
+var pfSkipCached = os.Getenv("PF_SKIP_CACHED") == "1"
+
+func branchCacheOf(ttx kv.TemporalTx) *commitment.BranchCache {
+	if p, ok := ttx.AggTx().(interface {
+		BranchCache() *commitment.BranchCache
+	}); ok {
+		return p.BranchCache()
+	}
+	return nil
+}
+
+func skipCachedPrefixes(bc *commitment.BranchCache, prefixes [][]byte) [][]byte {
+	if !pfSkipCached || bc == nil {
+		return prefixes
+	}
+	kept := prefixes[:0:0]
+	for _, p := range prefixes {
+		if _, _, ok := bc.Get(p); !ok {
+			kept = append(kept, p)
+		}
+	}
+	if pfInfo {
+		log.Info("[warmBAL] trie prefetch skip cached", "prefixes", len(prefixes), "kept", len(kept))
+	}
+	return kept
+}
