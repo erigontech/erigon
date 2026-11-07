@@ -192,3 +192,21 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
+	t.Parallel()
+	newBatch := func() *TemporalMemBatch {
+		return &TemporalMemBatch{
+			stepSize: 16,
+			storage:  btree2.NewMap[string, []dataWithTxNum](128),
+			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		}
+	}
+	sd, other := newBatch(), newBatch()
+	other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1)
+	other.currentChangesAccumulator = &changeset.StateChangeSet{}
+
+	require.Error(t, sd.Merge(other))
+	_, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("k"))
+	require.False(t, ok)
+}
