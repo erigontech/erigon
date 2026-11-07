@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,11 +37,11 @@ func cachedMiB(tb testing.TB, path string) (float64, bool) {
 	f, err := os.Open(path)
 	require.NoError(tb, err)
 	defer f.Close()
-	var st unix.Cachestat_t
-	if err := unix.Cachestat(uint(f.Fd()), &unix.CachestatRange{}, &st, 0); err != nil {
+	cached, err := cachedPages(f)
+	if err != nil {
 		return 0, false
 	}
-	return float64(st.Cache*uint64(os.Getpagesize())) / (1 << 20), true
+	return float64(cached*uint64(os.Getpagesize())) / (1 << 20), true
 }
 
 func BenchmarkBuildBtreeIndex(b *testing.B) {
@@ -61,14 +60,17 @@ func BenchmarkBuildBtreeIndex(b *testing.B) {
 
 	indexPath := filepath.Join(tmp, "bench.bt")
 	var cached float64
-	measured := true
+	measured := cacheMeasurable(b, tmp)
 	var lookup time.Duration
 	for b.Loop() {
 		r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
 		require.NoError(b, BuildBtreeIndexWithDecompressor(indexPath, "", r, background.NewProgressSet(), tmp, 1, logger, false, statecfg.AccessorBTree))
-		mib, ok := cachedMiB(b, indexPath)
-		measured = measured && ok
-		cached += mib
+		b.StopTimer()
+		if measured {
+			mib, ok := cachedMiB(b, indexPath)
+			measured = measured && ok
+			cached += mib
+		}
 
 		start := time.Now()
 		bt, err := OpenBtreeIndexWithDecompressor(indexPath, seg.NewReader(decomp.MakeGetter(), seg.CompressNone))
@@ -81,6 +83,7 @@ func BenchmarkBuildBtreeIndex(b *testing.B) {
 		}
 		bt.Close()
 		lookup += time.Since(start)
+		b.StartTimer()
 	}
 	if measured {
 		b.ReportMetric(cached/float64(b.N), "index-cached-MiB/op")
