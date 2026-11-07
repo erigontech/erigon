@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -87,5 +88,31 @@ func TestMCPNamespacesFollowHTTPAPI(t *testing.T) {
 			got = slices.DeleteFunc(got, func(ns string) bool { return ns == "rpc" })
 			require.Equal(t, tc.want, got)
 		})
+	}
+}
+
+func TestDeletedFilesWatchWarnsOnlyForAFileThatStays(t *testing.T) {
+	var w deletedFilesWatch
+	t0 := time.Unix(1_000_000, 0)
+	_, _, ok := w.warn(t0, []string{"/d/a.seg"})
+	require.False(t, ok)
+	_, _, ok = w.warn(t0.Add(deletedFileWarnAfter-time.Second), []string{"/d/a.seg", "/d/b.seg"})
+	require.False(t, ok, "a file that readers still drain is normal")
+	oldest, since, ok := w.warn(t0.Add(deletedFileWarnAfter), []string{"/d/a.seg", "/d/b.seg"})
+	require.True(t, ok)
+	require.Equal(t, "/d/a.seg", oldest)
+	require.Equal(t, t0, since)
+	_, _, ok = w.warn(t0.Add(deletedFileWarnAfter+time.Minute), []string{"/d/a.seg"})
+	require.False(t, ok, "one warning per period")
+	_, _, ok = w.warn(t0.Add(2*deletedFileWarnAfter), []string{"/d/a.seg"})
+	require.True(t, ok)
+}
+
+func TestDeletedFilesWatchIgnoresChurnOfShortLivedFiles(t *testing.T) {
+	var w deletedFilesWatch
+	t0 := time.Unix(1_000_000, 0)
+	for i := range 3 * int(deletedFileWarnAfter/time.Minute) {
+		_, _, ok := w.warn(t0.Add(time.Duration(i)*time.Minute), []string{fmt.Sprintf("/d/%d.seg", i)})
+		require.False(t, ok, "every file went away within a minute")
 	}
 }

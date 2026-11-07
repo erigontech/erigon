@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	dir2 "github.com/erigontech/erigon/common/dir"
 )
 
 // residencySink defeats dead-code elimination of the page-touching loop.
@@ -85,6 +87,38 @@ func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.ErrorIs(t, ReadPages(ctx, []uintptr{uintptr(unsafe.Pointer(&m[0]))}), context.Canceled)
+}
+
+func TestDeletedMappingsCountsAMappedFileUntilUnmap(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir()) // /proc shows resolved paths
+	require.NoError(t, err)
+	p := filepath.Join(dir, "f.seg")
+	pg := os.Getpagesize()
+	require.NoError(t, os.WriteFile(p, make([]byte, pg*4), 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	m, err := OpenRo(f, pg*4)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	paths, _, err := DeletedMappings(dir)
+	require.NoError(t, err)
+	require.Empty(t, paths, "a mapped file that still exists is not counted")
+
+	require.NoError(t, dir2.RemoveFile(p))
+	paths, size, err := DeletedMappings(dir)
+	require.NoError(t, err)
+	require.Equal(t, []string{p}, paths)
+	require.Equal(t, uint64(pg*4), size)
+
+	paths, _, err = DeletedMappings(dir[:len(dir)-1])
+	require.NoError(t, err)
+	require.Empty(t, paths, "a sibling directory with the same prefix is not counted")
+
+	require.NoError(t, m.Unmap())
+	paths, _, err = DeletedMappings(dir)
+	require.NoError(t, err)
+	require.Empty(t, paths)
 }
 
 func TestMappingOfFindsTheMappingThatHoldsThePage(t *testing.T) {
