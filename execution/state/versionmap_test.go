@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -2355,4 +2356,10 @@ func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a read after the recovered panic blocks on the account lock")
 	}
+}
+
+// TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
+// registers only up to that size, and every version-map read returns one.
+func TestReadResultFitsInRegisters(t *testing.T) {
+	require.LessOrEqual(t, reflect.TypeFor[ReadResult]().NumField(), 4)
 }
