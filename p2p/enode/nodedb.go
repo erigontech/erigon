@@ -137,7 +137,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		GrowthStep(2 * datasize.MB).
 		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync | mdbx1.WriteMap }).
 		SyncBytes(dbSyncBytesThreshold).
-		SyncPeriod(dbSyncPeriod).
+		PollerSyncPeriod(dbSyncPeriod).
 		DirtySpace(uint64(32 * datasize.MB)).
 		// WithMetrics().
 		Open(ctx)

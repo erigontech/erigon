@@ -77,7 +77,7 @@ type BeaconSnapshotReader interface {
 	FrozenSlots() uint64
 	// CacheBlockBody caches a recently produced block's execution body so it can
 	// be returned immediately before the EL commits to its database.
-	CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
+	CacheBlockBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal)
 }
 
 type beaconSnapshotReader struct {
@@ -95,9 +95,9 @@ func (r *beaconSnapshotReader) FrozenSlots() uint64 {
 	return r.sn.BlocksAvailable()
 }
 
-func (r *beaconSnapshotReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+func (r *beaconSnapshotReader) CacheBlockBody(blockNumber uint64, blockHash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
 	if r.eth1Getter != nil {
-		r.eth1Getter.CacheBody(blockNumber, transactions, withdrawals)
+		r.eth1Getter.CacheBody(blockNumber, blockHash, transactions, withdrawals)
 	}
 }
 

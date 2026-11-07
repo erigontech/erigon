@@ -24,7 +24,9 @@ import (
 	"math"
 	"sync"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // GasPool tracks block-level gas availability across the two EIP-8037
@@ -218,6 +220,21 @@ func InclusionContributions(gas uint64, isAmsterdam, skipExecutionGasCap bool) (
 	return min(params.MaxTxnGasLimit, gas), gas
 }
 
+// MaxInclusionGas returns the largest gas_limit that CheckBlockGasInclusion admits
+// from gp for the InclusionContributions of the same rules. With the execution cap,
+// a tx reserves at most MaxTxnGasLimit of execution gas, so once that much remains
+// only the state reservoir binds.
+func MaxInclusionGas(gp *GasPool, isAmsterdam, skipExecutionGasCap bool) uint64 {
+	execution, state := gp.ExecutionGasAvailable(), gp.StateGasAvailable()
+	if !isAmsterdam {
+		return execution
+	}
+	if !skipExecutionGasCap && execution >= params.MaxTxnGasLimit {
+		return state
+	}
+	return min(execution, state)
+}
+
 // BlobGas returns the blob gas remaining.
 func (gp *GasPool) BlobGas() uint64 {
 	if gp == nil {
@@ -235,4 +252,17 @@ func (gp *GasPool) String() string {
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
 	return fmt.Sprintf("executionGas: %d, stateGas: %d, blobGas: %d", gp.executionGas, gp.stateGas, gp.blobGas)
+}
+
+// TransactionGasLimits returns the execution and state gas reserved for block inclusion.
+// Ordinary transactions reserve their gas limit in each active dimension, with
+// execution capped from Amsterdam onward. Frame transactions reserve separate
+// budgets, including intrinsic gas and the calldata floor in the execution dimension.
+func TransactionGasLimits(tx types.Transaction, isAmsterdam bool) (mdgas.MdGas, error) {
+	if frame, ok := tx.Unwrap().(*types.FrameTransaction); ok {
+		_, _, limits, err := frame.GasLimits()
+		return limits, err
+	}
+	execution, state := InclusionContributions(tx.GetGasLimit(), isAmsterdam, false)
+	return mdgas.MdGas{Execution: execution, State: state}, nil
 }

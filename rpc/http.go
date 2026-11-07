@@ -104,7 +104,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 	}
 
 	cfg := &clientConfig{httpClient: client}
-	return newClient(context.Background(), cfg, newClientTransportHTTP(endpoint, cfg), logger)
+	return newClient(context.Background(), newClientTransportHTTP(endpoint, cfg), logger)
 }
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
@@ -462,10 +462,11 @@ func validateRequest(r *http.Request) (int, error) {
 		err := fmt.Errorf("content length too large (%d>%d)", r.ContentLength, maxRequestContentLength)
 		return http.StatusRequestEntityTooLarge, err
 	}
-	// Allow OPTIONS and GET (regardless of content-type)
-	if r.Method == http.MethodOptions || r.Method == http.MethodGet {
+	if r.Method == http.MethodOptions {
 		return 0, nil
 	}
+	// GET calls need the content type too: a cross-site page can send a GET without a CORS
+	// preflight, but not one carrying this header.
 	// Check content-type
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("content-type")); err == nil {
 		if slices.Contains(acceptedContentTypes, mt) {
@@ -478,6 +479,14 @@ func validateRequest(r *http.Request) (int, error) {
 }
 
 func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
+	if err := ValidateJWT(r, jwtSecret); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func ValidateJWT(r *http.Request, jwtSecret []byte) error {
 	var tokenStr string
 	// Check if JWT signature is correct
 	if auth := r.Header.Get("Authorization"); len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
@@ -485,8 +494,7 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 	}
 
 	if len(tokenStr) == 0 {
-		http.Error(w, "missing token", http.StatusForbidden)
-		return false
+		return errors.New("missing token")
 	}
 
 	keyFunc := func(token *jwt.Token) (any, error) {
@@ -502,22 +510,20 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 
 	switch {
 	case err != nil:
-		http.Error(w, err.Error(), http.StatusForbidden)
+		return err
 	case !token.Valid:
-		http.Error(w, "invalid token", http.StatusForbidden)
+		return errors.New("invalid token")
 	case !claims.VerifyExpiresAt(time.Now(), false): // optional
-		http.Error(w, "token is expired", http.StatusForbidden)
+		return errors.New("token is expired")
 	case claims.IssuedAt == nil:
-		http.Error(w, "missing issued-at", http.StatusForbidden)
+		return errors.New("missing issued-at")
 	case time.Since(claims.IssuedAt.Time) > jwtTokenExpiry:
-		http.Error(w, "stale token", http.StatusForbidden)
+		return errors.New("stale token")
 	case time.Until(claims.IssuedAt.Time) > jwtTokenExpiry:
-		http.Error(w, "future token", http.StatusForbidden)
+		return errors.New("future token")
 	default:
-		return true
+		return nil
 	}
-
-	return false
 }
 
 type sentWriter struct {

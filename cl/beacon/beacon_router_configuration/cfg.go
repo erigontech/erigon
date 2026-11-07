@@ -47,6 +47,8 @@ type RouterConfiguration struct {
 	// PreserveGraffiti uses caller-supplied graffiti verbatim instead of prefixing it with
 	// the EL+CL identification segment.
 	PreserveGraffiti bool
+
+	DisablePayloadPreparation bool
 }
 
 func (r *RouterConfiguration) UnwrapEndpointsList(l []string) error {

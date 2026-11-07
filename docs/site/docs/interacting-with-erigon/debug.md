@@ -25,7 +25,7 @@ The `debug` namespace is intended for debugging and development purposes, not fo
 
 * Tracing methods (`debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceTransaction`, `debug_traceCall`, `debug_traceCallMany`) support streaming for large results to reduce memory usage
 * The `AccountRangeMaxResults` constant limits account range queries to 8192 results, or 256 when storage is included;
-* Memory and GC control methods allow fine-tuning of node performance.
+* Memory and garbage collection (GC) control methods allow fine-tuning of node performance.
 * Some methods like `debug_accountRange` have compatibility layers for both Geth and legacy Erigon parameter formats `debug_api`
 
 #### Integration with Erigon Architecture
@@ -253,7 +253,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["
 
 ### debug\_traceTransaction
 
-Returns Geth style transaction trace.
+Returns a Geth-style transaction trace.
 
 #### Parameters
 
@@ -278,7 +278,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x
 
 ### debug\_traceCall
 
-Returns Geth style call trace.
+Returns a Geth-style call trace.
 
 #### Parameters
 

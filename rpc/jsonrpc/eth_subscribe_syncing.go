@@ -99,7 +99,10 @@ func (api *EthSyncingSubscriptionAPI) Syncing(ctx context.Context) (*rpc.Subscri
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 
-	ch, id := api.filters.SubscribeSyncing(8, rpchelper.ProtocolWS)
+	ch, id, err := api.filters.SubscribeSyncing(8, rpchelper.ProtocolWS)
+	if err != nil {
+		return &rpc.Subscription{}, err
+	}
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {

@@ -52,8 +52,10 @@ func (ff *Filters) hasTrackedSub(id SubscriptionID) bool {
 func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 	f := newTestFilters(t)
 
-	headsCh, headsID := f.SubscribeNewHeads(8, ProtocolHTTP)
-	txsCh, txsID := f.SubscribePendingTxs(8, ProtocolHTTP)
+	headsCh, headsID, err := f.SubscribeNewHeads(8, ProtocolHTTP)
+	require.NoError(t, err)
+	txsCh, txsID, err := f.SubscribePendingTxs(8, ProtocolHTTP)
+	require.NoError(t, err)
 	logsCh, logsID, err := f.SubscribeLogs(8, filters.FilterCriteria{}, ProtocolHTTP)
 	require.NoError(t, err)
 
@@ -90,8 +92,10 @@ func TestEvictStaleSubscriptionsRemovesIdleFilters(t *testing.T) {
 func TestTouchSubscriptionPreventsEviction(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, touchedID := f.SubscribePendingTxs(8, ProtocolHTTP)
-	_, idleID := f.SubscribePendingTxs(8, ProtocolHTTP)
+	_, touchedID, err := f.SubscribePendingTxs(8, ProtocolHTTP)
+	require.NoError(t, err)
+	_, idleID, err := f.SubscribePendingTxs(8, ProtocolHTTP)
+	require.NoError(t, err)
 
 	for _, id := range []PendingTxsSubID{touchedID, idleID} {
 		sub, ok := f.pendingTxsSubs.Get(id)
@@ -113,7 +117,8 @@ func TestTouchSubscriptionPreventsEviction(t *testing.T) {
 func TestEvictStaleSubscriptionsSkipsWebSocketSubscriptions(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, id := f.SubscribeNewHeads(8, ProtocolWS)
+	_, id, err := f.SubscribeNewHeads(8, ProtocolWS)
+	require.NoError(t, err)
 
 	f.evictStaleSubscriptions(time.Nanosecond)
 
@@ -128,7 +133,8 @@ func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
 	f := newTestFilters(t)
 
 	t.Run("heads", func(t *testing.T) {
-		_, id := f.SubscribeNewHeads(8, ProtocolHTTP)
+		_, id, err := f.SubscribeNewHeads(8, ProtocolHTTP)
+		require.NoError(t, err)
 		require.True(t, f.UnsubscribeHeads(id))
 		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 		f.AddPendingBlock(id, &types.Header{})
@@ -136,7 +142,8 @@ func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
 		require.False(t, ok)
 	})
 	t.Run("pendingTxs", func(t *testing.T) {
-		_, id := f.SubscribePendingTxs(8, ProtocolHTTP)
+		_, id, err := f.SubscribePendingTxs(8, ProtocolHTTP)
+		require.NoError(t, err)
 		require.True(t, f.UnsubscribePendingTxs(id))
 		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 		f.AddPendingTxs(id, []types.Transaction{})
@@ -186,7 +193,8 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 func TestConcurrentTouchAndEviction(t *testing.T) {
 	f := newTestFilters(t)
 
-	_, id := f.SubscribePendingTxs(8, ProtocolHTTP)
+	_, id, err := f.SubscribePendingTxs(8, ProtocolHTTP)
+	require.NoError(t, err)
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup

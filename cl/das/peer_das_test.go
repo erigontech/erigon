@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -287,16 +288,72 @@ func recoverableGloasColumns(t *testing.T, cfg *clparams.BeaconChainConfig, slot
 	return block, root, columns
 }
 
+func TestColumnsToStore(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	withCgc := func(cgc uint64) func(*testing.T) PeerDas {
+		return func(t *testing.T) PeerDas {
+			d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+			d.state.SetCustodyGroupCount(cgc, func() uint64 { return 0 })
+			return d
+		}
+	}
+	withCaplinConfig := func(caplinConfig clparams.CaplinConfig) func(*testing.T) PeerDas {
+		return func(t *testing.T) PeerDas { return newELBlobsTestPeerDas(t, &cfg, &caplinConfig) }
+	}
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	for _, tc := range []struct {
+		name        string
+		peerDas     func(*testing.T) PeerDas
+		custodyOnly bool
+	}{
+		{name: "custody", peerDas: withCaplinConfig(clparams.CaplinConfig{}), custodyOnly: true},
+		{name: "supernode", peerDas: withCgc(cfg.NumberOfCustodyGroups)},
+		{name: "archive", peerDas: withCaplinConfig(clparams.CaplinConfig{ArchiveBlobs: true})},
+		{name: "immediate backfill", peerDas: withCaplinConfig(clparams.CaplinConfig{ImmediateBlobsBackfilling: true})},
+		{name: "no local node", peerDas: func(*testing.T) PeerDas {
+			return &peerdas{state: peerdasstate.NewPeerDasState(&cfg, &networkConfig), beaconConfig: &cfg, caplinConfig: &clparams.CaplinConfig{}}
+		}},
+		{name: "custody lookup error", peerDas: withCgc(cfg.NumberOfCustodyGroups + 1)},
+		{name: "nil", peerDas: func(*testing.T) PeerDas { return nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := tc.peerDas(t)
+			store := ColumnsToStore(d)
+			if !tc.custodyOnly {
+				for column := range cfg.NumberOfColumns {
+					require.True(t, store(column), "column %d", column)
+				}
+				return
+			}
+			custody, err := d.StateReader().GetMyCustodyColumns()
+			require.NoError(t, err)
+			require.Less(t, len(custody), int(cfg.NumberOfColumns))
+			for column := range cfg.NumberOfColumns {
+				require.Equal(t, custody[column], store(column), "column %d", column)
+			}
+		})
+	}
+}
+
 func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 	tests := []struct {
 		name           string
 		initial, floor uint64
+		stored         uint64
+		storedErr      error
 		pruneErr       error
 		want           uint64
 	}{
 		{name: "advances", initial: 0, floor: 100, want: 100},
-		{name: "does not move backwards", initial: 100, floor: 50, want: 100},
-		{name: "zero floor resets", initial: 100, floor: 0, want: 0},
+		{name: "advances to the lowest stored bucket above the floor", initial: 0, floor: 100, stored: 150, want: 150},
+		{name: "ignores a stored bucket below the floor", initial: 0, floor: 100, stored: 50, want: 100},
+		{name: "follows the lowest stored bucket down", initial: 300, floor: 100, stored: 150, want: 150},
+		{name: "does not move backwards on a store error", initial: 100, floor: 50, storedErr: errors.New("readdir failed"), want: 100},
+		{name: "advances to the floor on a store error", initial: 0, floor: 100, storedErr: errors.New("readdir failed"), want: 100},
+		{name: "zero floor resets to the lowest stored bucket", initial: 100, floor: 0, stored: 150, want: 150},
+		{name: "zero floor resets on an empty store", initial: 100, floor: 0, want: 0},
+		{name: "zero floor resets on a store error", initial: 100, floor: 0, stored: 150, storedErr: errors.New("readdir failed"), want: 0},
 		{name: "advances after prune error", initial: 100, floor: 200, pruneErr: errors.New("prune failed"), want: 200},
 		{name: "does not advance when prune did not start", initial: 100, floor: 200, pruneErr: fmt.Errorf("readdir: %w", blob_storage.ErrPruneNotStarted), want: 100},
 	}
@@ -306,6 +363,7 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 			columnStorage.EXPECT().PruneBelow(test.floor).Return(test.pruneErr)
+			columnStorage.EXPECT().EarliestStoredSlot().Return(test.stored, test.storedErr).AnyTimes()
 			cfg := clparams.MainnetBeaconConfig
 			state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 			state.SetEarliestAvailableSlot(test.initial)
@@ -316,6 +374,47 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 			require.Equal(t, test.want, state.GetEarliestAvailableSlot())
 		})
 	}
+}
+
+func TestPeerDasPruneBelowDoesNotAdvertiseColumnsPrunedUnderAShorterWindow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	fs := afero.NewMemMapFs()
+	before := blob_storage.NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())
+	for _, slot := range []uint64{15_000, 25_000, 35_000, 45_000} {
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+		sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
+		require.NoError(t, before.WriteColumnSidecars(t.Context(), common.Hash{byte(slot / 10_000)}, 0, sidecar))
+	}
+	require.NoError(t, before.PruneBelow(32_000))
+
+	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+	d := &peerdas{state: state, columnStorage: blob_storage.NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())}
+	require.NoError(t, d.PruneBelow(5_000))
+
+	require.Equal(t, uint64(30_000), state.GetEarliestAvailableSlot())
+}
+
+func TestPeerDasPruneBelowFollowsBackfilledColumnsDown(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	store := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	write := func(slot uint64) {
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+		sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
+		require.NoError(t, store.WriteColumnSidecars(t.Context(), common.Hash{byte(slot / 10_000)}, 0, sidecar))
+	}
+	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+	d := &peerdas{state: state, columnStorage: store}
+
+	write(35_000)
+	require.NoError(t, d.PruneBelow(5_000))
+	require.Equal(t, uint64(30_000), state.GetEarliestAvailableSlot())
+
+	write(25_000)
+	write(15_000)
+	require.NoError(t, d.PruneBelow(5_000))
+	require.Equal(t, uint64(10_000), state.GetEarliestAvailableSlot())
 }
 
 func TestPeerDasPruneBelowUpdatesRecoveryOwnership(t *testing.T) {
@@ -333,6 +432,7 @@ func TestPeerDasPruneBelowUpdatesRecoveryOwnership(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 			columnStorage.EXPECT().PruneBelow(uint64(10)).Return(test.err)
+			columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(0), nil).AnyTimes()
 			cfg := clparams.MainnetBeaconConfig
 			state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 			d := &peerdas{state: state, columnStorage: columnStorage, recoverBlobsQueue: make(chan recoverBlobsRequest, 8)}
@@ -373,6 +473,7 @@ func TestPeerDasPruneBelowHandlesQueuedAndActiveRecovery(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
 	columnStorage.EXPECT().PruneBelow(uint64(10)).Return(nil)
+	columnStorage.EXPECT().EarliestStoredSlot().Return(uint64(0), nil).AnyTimes()
 	cfg := clparams.MainnetBeaconConfig
 	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
 	d := &peerdas{state: state, columnStorage: columnStorage, recoverBlobsQueue: make(chan recoverBlobsRequest, 2)}

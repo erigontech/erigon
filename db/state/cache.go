@@ -105,6 +105,11 @@ type IISeekInFilesCache struct {
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
+	lo               uint64 // second half of the key hash: the LRU key alone can collide
+	// position of `found` in .ef file fileIdx, which addresses the .vi accessor.
+	// A file index is stable because each cache pool serves one visible file list.
+	keyOrdinal, rank uint64
+	fileIdx          int
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {

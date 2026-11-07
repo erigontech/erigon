@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -212,6 +213,11 @@ var (
 		Usage: "Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersTimeout,
 	}
+	RpcSubscriptionFiltersMaxSubscriptionsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxsubscriptions",
+		Usage: "Maximum number of live filters and subscriptions across all clients. Set to 0 to disable the limit.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxSubscriptions,
+	}
 )
 
 // BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
@@ -221,13 +227,6 @@ var (
 // After this function returns, the config is fully populated from CLI flags.
 func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
 	utils.SetEthConfig(nodeCtx, ctx, nodeCfg, cfg, logger)
-	applyRemainingEthFlags(ctx, cfg, logger)
-}
-
-// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
-//
-// Deprecated: use BuildEthConfig instead.
-func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
@@ -423,7 +422,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Command, cfg *nodecfg.Config, logger log.L
 func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logger) {
 	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
-		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
+		jwtSecretPath = filepath.Join(cfg.Dirs.DataDir, "jwt.hex")
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
@@ -478,7 +477,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
 		OverlayReplayBlockTimeout: ctx.Duration(OverlayReplayBlockFlag.Name),
 		WebsocketPort:             ctx.Int(utils.WSPortFlag.Name),
-		WebsocketEnabled:          ctx.IsSet(utils.WSEnabledFlag.Name),
+		WebsocketEnabled:          ctx.Bool(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
@@ -486,12 +485,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		WsMaxConnections:          ctx.Int(utils.WsMaxConnectionsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
-			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
-			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
-			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
-			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
-			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
-			RpcSubscriptionFiltersTimeout:      ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
+			RpcSubscriptionFiltersMaxLogs:          ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
+			RpcSubscriptionFiltersMaxHeaders:       ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
+			RpcSubscriptionFiltersMaxTxs:           ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
+			RpcSubscriptionFiltersMaxAddresses:     ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
+			RpcSubscriptionFiltersMaxTopics:        ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+			RpcSubscriptionFiltersTimeout:          ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
+			RpcSubscriptionFiltersMaxSubscriptions: ctx.Int(RpcSubscriptionFiltersMaxSubscriptionsFlag.Name),
 		},
 		Gascap:                  utils.RpcGasCap(ctx),
 		BlockRangeLimit:         ctx.Int(utils.RpcBlockRangeLimit.Name),
@@ -532,7 +532,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		} else {
 			c.HttpCompression = true
 		}
-		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression)
+		c.HttpCompressionLoopback = ctx.Bool(utils.HttpCompressionLoopbackFlag.Name)
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression, "http.compression.loopback", c.HttpCompressionLoopback)
 	} else {
 		c.HttpCompression = false
 	}
@@ -586,11 +587,10 @@ func setPrivateApi(ctx *cli.Command, cfg *nodecfg.Config) {
 		certFile := ctx.String(utils.TLSCertFlag.Name)
 		keyFile := ctx.String(utils.TLSKeyFlag.Name)
 		if certFile == "" {
-			log.Warn("Could not establish TLS grpc: missing certificate")
-			return
-		} else if keyFile == "" {
-			log.Warn("Could not establish TLS grpc: missing key file")
-			return
+			utils.Fatalf("--%s requires --%s", utils.TLSFlag.Name, utils.TLSCertFlag.Name)
+		}
+		if keyFile == "" {
+			utils.Fatalf("--%s requires --%s", utils.TLSFlag.Name, utils.TLSKeyFlag.Name)
 		}
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
