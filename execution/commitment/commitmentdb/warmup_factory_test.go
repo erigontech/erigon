@@ -629,13 +629,17 @@ func TestConcurrentTrieContextSkipsPutterWithoutWorkerTx(t *testing.T) {
 	require.NoError(t, trieCtx.PutBranch([]byte("prefix"), []byte("data"), nil))
 }
 
-func TestConcurrentTrieContextFactoryReportsAFullReadTxLimitAsNoContext(t *testing.T) {
+func TestConcurrentTrieContextFactoryReportsAFullReadTxLimitAsErrorContext(t *testing.T) {
 	t.Parallel()
-	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
+	sdc := &SharedDomainsCommitmentContext{
+		sharedDomains: stubSharedDomains{},
+		patriciaTrie:  commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
+	}
 	factory, _ := sdc.concurrentTrieContextFactory(t.Context(), &beginRoRecordingDB{}, nil, nil, 0, nil)
 	trieCtx, cleanup := factory(kv.WithNonBlockingAcquire(t.Context()))
-	if cleanup != nil {
-		defer cleanup()
-	}
-	require.Nil(t, trieCtx, "a fold that tries for a read tx and finds none runs that part on its own context")
+	require.NotNil(t, cleanup)
+	defer cleanup()
+	require.NotNil(t, trieCtx)
+	_, err := trieCtx.Account(nil)
+	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
 }

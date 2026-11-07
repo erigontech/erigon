@@ -922,7 +922,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		if !sharedSource {
 			var err error
 			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
-			if errors.Is(err, kv.ErrReadTxLimitExceeded) {
+			if errors.Is(err, kv.ErrReadTxLimitExceeded) && sdc.patriciaTrie != nil && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
 				return nil, nil
 			}
 			if err != nil {

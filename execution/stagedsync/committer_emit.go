@@ -198,7 +198,8 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 
 func (cc *commitmentCalculator) accountUpdate(view *state.VersionMapView, addr accounts.Address) commitment.Update {
 	u := commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
-	if acc, ok := view.GetAccount(addr); ok {
+	acc, ok, wasDeleted := view.GetAccount(addr)
+	if ok {
 		u = commitment.Update{
 			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 			Balance:  acc.Balance,
@@ -209,8 +210,15 @@ func (cc *commitmentCalculator) accountUpdate(view *state.VersionMapView, addr a
 			u.CodeHash = empty.CodeHash
 		}
 	}
-	if _, ok := cc.destructed[addr]; ok || view.WasDestroyed(addr) {
+	if _, ok := cc.destructed[addr]; ok {
 		u.DeleteStorageSubtree = true
+	}
+	if wasDeleted {
+		at, _ := view.DestroyedAt(addr)
+		if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
+			u.DeleteStorageSubtree = true
+		}
+		cc.wipedAt[addr] = at
 	}
 	return u
 }
