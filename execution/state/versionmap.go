@@ -1346,7 +1346,7 @@ func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statu
 // concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
 // is omitted from the BAL and folded away by StorageChanges, so it is never materialized and
 // counts as already-present, unless an earlier run of the tx left a cell the flush resets or removes.
-// Lifecycle transitions and the putCell-only paths (which never no-bump) force the slow path.
+// Only incarnation, createContract, and selfDestruct force the slow path.
 // Caller holds e's read lock; only used on the BAL fast path.
 func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
 	if _, ok := writes.selfDestruct[addr]; ok {
@@ -1355,11 +1355,15 @@ func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag
 	if _, ok := writes.incarnation[addr]; ok {
 		return false
 	}
-	if _, ok := writes.code[addr]; ok {
-		return false
+	if vw, ok := writes.code[addr]; ok {
+		if !cellNoOp(e.Code, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqCode) {
+			return false
+		}
 	}
-	if _, ok := writes.codeSize[addr]; ok {
-		return false
+	if vw, ok := writes.codeSize[addr]; ok {
+		if !cellNoOp(e.CodeSize, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqInt) {
+			return false
+		}
 	}
 	if _, ok := writes.createContract[addr]; ok {
 		return false
