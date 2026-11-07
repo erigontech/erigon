@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -184,7 +183,7 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 		return err
 	}
 	if len(report.failed) > 0 {
-		return fmt.Errorf("%d slots could not be checked or filled: %s", len(report.failed), formatSlots(report.failed))
+		return fmt.Errorf("%d slots could not be checked or filled, the first: %v", len(report.failed), report.failed[:min(len(report.failed), 20)])
 	}
 	return nil
 }
@@ -340,9 +339,6 @@ func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, end
 	if len(sidecars) == 0 {
 		return errors.New("the endpoint has no sidecars for the block")
 	}
-	if slices.Contains(sidecars, nil) {
-		return errors.New("blob response contains a nil sidecar")
-	}
 	slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int { return cmp.Compare(a.Index, b.Index) })
 	// Identifiers carry the canonical root: the block read from storage keeps no transactions,
 	// so its own hash is not that root.
@@ -420,17 +416,4 @@ func logFillProgress(ctx context.Context, from, to uint64, report *fillReport) {
 				"valid", report.valid.Load(), "filled", report.filled.Load(), "failed", failed)
 		}
 	}
-}
-
-// formatSlots lists up to 20 slots, which is enough to start a re-run from.
-func formatSlots(slots []uint64) string {
-	shown := slots[:min(len(slots), 20)]
-	parts := make([]string, 0, len(shown)+1)
-	for _, slot := range shown {
-		parts = append(parts, fmt.Sprint(slot))
-	}
-	if len(slots) > len(shown) {
-		parts = append(parts, "...")
-	}
-	return strings.Join(parts, ", ")
 }
