@@ -62,9 +62,10 @@ var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload en
 var ErrExecutionPayloadEnvelopePersistenceFailed = errors.New("execution payload envelope persistence failed")
 
 var (
-	ErrInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
-	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
-	errEnvelopeStateUnavailable        = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
+	ErrInvalidExecutionPayloadEnvelope           = errors.New("invalid execution payload envelope")
+	ErrExecutionPayloadEnvelopeStateUnavailable  = fmt.Errorf("%w: execution payload envelope state unavailable", ErrIgnore)
+	ErrExecutionPayloadEnvelopeStateReplayFailed = fmt.Errorf("%w: execution payload envelope state replay failed", ErrIgnore)
+	errPendingEnvelopeAgeBounded                 = errors.New("pending execution payload envelope is age bounded")
 )
 
 var blsVerify = bls.Verify
@@ -166,14 +167,6 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockAfterCommitments(
 	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, true)
 }
 
-func (f *ForkChoiceStore) validateEnvelopeAgainstBlockForGossip(
-	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
-	block *cltypes.SignedBeaconBlock,
-	blockState abstract.BeaconState,
-) error {
-	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, false)
-}
-
 func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
 	block *cltypes.SignedBeaconBlock,
@@ -181,8 +174,18 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 	commitmentsValidated bool,
 	validateParentBeaconBlockRoot bool,
 ) error {
+	if err := validateEnvelopeAgainstBlockStateFree(signedEnvelope, block); err != nil {
+		return err
+	}
+	return f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, commitmentsValidated, validateParentBeaconBlockRoot)
+}
+
+func validateEnvelopeAgainstBlockStateFree(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+) error {
 	if signedEnvelope.Message == nil {
-		log.Warn("[validateEnvelopeAgainstBlock] received signed envelope with nil message")
+		log.Warn("[validateEnvelopeAgainstBlockStateFree] received signed envelope with nil message")
 		return errors.New("signed envelope has nil message")
 	}
 	envelope := signedEnvelope.Message
@@ -226,6 +229,17 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 		return fmt.Errorf("execution_requests root %v != bid execution_requests_root %v",
 			requestsRoot, bid.Message.ExecutionRequestsRoot)
 	}
+	return nil
+}
+
+func (f *ForkChoiceStore) validateEnvelopeStateDependent(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+	blockState abstract.BeaconState,
+	commitmentsValidated bool,
+	validateParentBeaconBlockRoot bool,
+) error {
+	envelope := signedEnvelope.Message
 	if !commitmentsValidated {
 		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope); err != nil {
 			return fmt.Errorf("invalid execution payload envelope commitments: %w", err)
@@ -789,7 +803,7 @@ func (f *ForkChoiceStore) applyEnvelope(
 		replayedState, verifiedOffLock, releaseValidation, err = f.replayAndVerifyEnvelopeOffLock(signedEnvelope)
 		defer releaseValidation()
 		if err != nil {
-			if errors.Is(err, errEnvelopeStateUnavailable) {
+			if errors.Is(err, ErrExecutionPayloadEnvelopeStateUnavailable) {
 				func() {
 					f.mu.RLock()
 					defer f.mu.RUnlock()
@@ -861,7 +875,7 @@ func (f *ForkChoiceStore) replayAndVerifyEnvelopeOffLock(
 		return nil, false, noRelease, fmt.Errorf("%w: OnExecutionPayload: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
 	}
 	if blockState == nil {
-		return nil, false, noRelease, fmt.Errorf("%w: OnExecutionPayload: state unavailable for beacon_block_root %v", errEnvelopeStateUnavailable, root)
+		return nil, false, noRelease, fmt.Errorf("%w: OnExecutionPayload: state unavailable for beacon_block_root %v", ErrExecutionPayloadEnvelopeStateUnavailable, root)
 	}
 	if err := validate(block, blockState); err != nil {
 		return nil, false, noRelease, err
@@ -874,48 +888,63 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err
 	}
-
-	releaseValidation, err := f.acquireExecutionPayloadValidationRead(context.Background())
+	root := signedEnvelope.Message.BeaconBlockRoot
+	block, err := func() (*cltypes.SignedBeaconBlock, error) {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block == nil || block.Block == nil {
+			return nil, fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
+		}
+		finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+		if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+			return nil, fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+		}
+		return block, nil
+	}()
 	if err != nil {
 		return err
 	}
-	validationHeld := true
-	lockHeld := true
-	defer func() {
-		if lockHeld {
-			f.mu.RUnlock()
-		}
-		if validationHeld {
-			releaseValidation()
-		}
-	}()
-	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.copyStateAtBlockRootLocked(root)
-	if err != nil || blockState == nil {
-		return fmt.Errorf("%w: beacon block state %v is unavailable", ErrIgnore, root)
-	}
-	block, ok := f.forkGraph.GetBlock(root)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
-	f.mu.RUnlock()
-	lockHeld = false
-	if !ok || block == nil || block.Block == nil {
-		return fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
-	}
-	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
-	}
-	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
-		releaseValidation()
-		validationHeld = false
+	if err := validateEnvelopeAgainstBlockStateFree(signedEnvelope, block); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
-	releaseValidation()
-	validationHeld = false
-	f.mu.RLock()
-	lockHeld = true
-	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
-	f.mu.RUnlock()
-	lockHeld = false
+	_, _ = signedEnvelope.Message.Payload.HashSSZ()
+
+	validated, err := func() (bool, error) {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+		if blockState := f.forkGraph.CurrentStateLocked(root); blockState != nil {
+			if err := f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, true, false); err != nil {
+				return false, fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+			}
+			return true, nil
+		}
+		return false, nil
+	}()
+	if err != nil {
+		return err
+	}
+	if !validated {
+		if err := func() error {
+			validation := f.envelopeValidationSemaphore()
+			validation <- struct{}{}
+			defer func() { <-validation }()
+			blockState, err := f.forkGraph.ReplayState(root)
+			if err != nil {
+				return fmt.Errorf("%w: beacon block state %v: %w", ErrExecutionPayloadEnvelopeStateReplayFailed, root, err)
+			}
+			if blockState == nil {
+				return fmt.Errorf("%w: beacon block state %v is unavailable", ErrExecutionPayloadEnvelopeStateUnavailable, root)
+			}
+			if err := f.validateEnvelopeStateDependent(signedEnvelope, block, blockState, true, false); err != nil {
+				return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+			}
+			return nil
+		}(); err != nil {
+			return err
+		}
+	}
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
@@ -953,6 +982,12 @@ func (f *ForkChoiceStore) queuePendingEnvelope(signedEnvelope *cltypes.SignedExe
 	}
 	f.rememberPendingEnvelopeArrival(signedEnvelope, receivedAt)
 	f.pendingEnvelopes.Add(signedEnvelope.Message.BeaconBlockRoot, signedEnvelope)
+}
+
+func (f *ForkChoiceStore) QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	f.queuePendingEnvelope(signedEnvelope, queueMissingEnvelope, receivedAt)
 }
 
 func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
@@ -1155,7 +1190,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	if blockState == nil {
 		f.queuePendingEnvelope(signedEnvelope, missingMode, receivedAt)
 		log.Trace("OnExecutionPayload: block state not found", "beaconBlockRoot", common.Hash(beaconBlockRoot))
-		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", errEnvelopeStateUnavailable, common.Hash(beaconBlockRoot))
+		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrExecutionPayloadEnvelopeStateUnavailable, common.Hash(beaconBlockRoot))
 	}
 
 	// Get the block to verify it exists
@@ -1318,9 +1353,12 @@ func (f *ForkChoiceStore) ExecutionPayloadReceivedBefore(blockRoot common.Hash, 
 	return ok && arrival.receivedAt.Before(deadline)
 }
 
-// ExecutionPayloadApplyInFlight reports an envelope for blockRoot that passed its signature check
-// and is still being applied; it stops counting when the apply returns, applied or rejected.
+// ExecutionPayloadApplyInFlight reports an envelope held for import or past its signature check
+// with the apply still running.
 func (f *ForkChoiceStore) ExecutionPayloadApplyInFlight(blockRoot common.Hash) bool {
+	if f.payloadPreparation.HasPendingEnvelope(blockRoot) {
+		return true
+	}
 	f.envelopeAppliesMu.Lock()
 	defer f.envelopeAppliesMu.Unlock()
 	return f.envelopeApplies[blockRoot] > 0
@@ -1354,6 +1392,10 @@ func (f *ForkChoiceStore) recordExecutionPayloadArrival(blockRoot common.Hash, s
 	if _, ok := f.executionPayloadFirstSeen[blockRoot]; !ok {
 		f.executionPayloadFirstSeen[blockRoot] = executionPayloadArrival{receivedAt: receivedAt, slot: slot}
 	}
+}
+
+func (f *ForkChoiceStore) RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time) {
+	f.recordExecutionPayloadArrival(blockRoot, slot, receivedAt)
 }
 
 func (f *ForkChoiceStore) pruneExecutionPayloadFirstSeen(pruneSlot uint64) {
