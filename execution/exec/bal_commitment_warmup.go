@@ -22,7 +22,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"os"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -324,8 +326,12 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 	var mu sync.Mutex
 	var first error
 	inChunks(ctx, db, ttx, len(keys), par, func(tx kv.TemporalTx, from, to int) {
+		if pfBudgetPages > 0 && pfPages.Load() >= pfBudgetPages {
+			return
+		}
 		if p, ok := tx.AggTx().(latestPrefetcher); ok {
-			_, err := p.PrefetchLatest(ctx, domain, keys[from:to])
+			pages, err := p.PrefetchLatest(ctx, domain, keys[from:to])
+			pfPages.Add(int64(pages))
 			mu.Lock()
 			first = firstFailure(first, err)
 			mu.Unlock()
@@ -352,6 +358,10 @@ func logBatchPrefetch(ctx context.Context, what string, keys int, started time.T
 	}
 	if err != nil && !errors.Is(err, kv.ErrPrefetchIncomplete) {
 		logPrefetchFailure("[warmBAL] batch prefetch failed", "what", what, "keys", keys, "elapsed", time.Since(started), "err", err)
+		return
+	}
+	if pfInfo {
+		log.Info("[warmBAL] batch prefetch", "what", what, "keys", keys, "pages", pfPages.Swap(0), "elapsed", time.Since(started))
 		return
 	}
 	log.Debug("[warmBAL] batch prefetch", "what", what, "keys", keys, "elapsed", time.Since(started))
@@ -496,6 +506,9 @@ func stateKeysCold(ctx context.Context, db kv.RoDB, bal types.BlockAccessList) c
 		if p, ok := ttx.AggTx().(latestPrefetcher); ok {
 			accs, slots := balPrefetchSample(bal)
 			cold = stateSampleCold(ctx, p, accs, slots, len(bal), balSlotCount(bal))
+			if pfInfo {
+				log.Info("[warmBAL] state residency", "accountsCold", cold.accounts, "storageCold", cold.storage, "accounts", len(bal), "slots", balSlotCount(bal))
+			}
 		}
 	})
 	return cold
@@ -638,3 +651,11 @@ func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]
 	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
 }
+
+// Probe knobs: PF_INFO=1 logs the residency decision and each batch (keys, pages) at Info; PF_BUDGET_MB=N stops
+// issuing prefetch chunks once N MB of cold pages were read since the last logged batch.
+var (
+	pfInfo        = os.Getenv("PF_INFO") == "1"
+	pfBudgetPages = func() int64 { n, _ := strconv.Atoi(os.Getenv("PF_BUDGET_MB")); return int64(n) * 256 }()
+	pfPages       atomic.Int64
+)
