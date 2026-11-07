@@ -460,7 +460,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return frames, err
 	}
 
@@ -2222,30 +2222,44 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 	return p.blobs.get(blobHashes)
 }
 
+// minedBlobReorgDepth bounds the mined-blob cache when finality stalls: two epochs.
+const minedBlobReorgDepth = 64
+
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
-	// Remove blobs in the finalized block and older, loop through all entries
-	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
-		// delete individual hashes
-		for _, mt := range p.minedBlobTxnsByBlock[finalizedBlock] {
-			delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+	// Add mined blobs
+	if _, ok := p.minedBlobTxnsByBlock[minedBlock]; !ok {
+		p.minedBlobTxnsByBlock[minedBlock] = nil
+	}
+	for _, txn := range minedTxns {
+		if !txn.HasBlobs() {
+			continue
 		}
-		// delete the map entry for this block num
-		delete(p.minedBlobTxnsByBlock, finalizedBlock)
-		// move on to older blocks, if present
-		finalizedBlock--
+		hash := string(txn.IDHash[:])
+		// Mined txns arrive without blobs; the pooled or an earlier cached copy still has them.
+		if pooled, ok := p.byHash[hash]; ok {
+			txn = pooled.TxnSlot
+		} else if queued, ok := p.unprocessedRemoteByHash[hash]; ok {
+			full := *queued
+			full.SenderID, full.Traced = txn.SenderID, txn.Traced
+			txn = &full
+		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
+			txn = cached.TxnSlot
+		}
+		p.deleteMinedBlobTxn(hash)
+		mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(p.minedBlobTxnsByBlock[minedBlock])}
+		p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
+		p.minedBlobTxnsByHash[hash] = mt
 	}
 
-	// Add mined blobs
-	minedBlock := p.lastSeenBlock.Load()
-	p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0)
-	for _, txn := range minedTxns {
-		if txn.HasBlobs() {
-			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
-			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
-			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
-			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
+	// Remove blobs of finalized blocks, and of blocks too deep to reorg, after the re-mined txns took their copies.
+	for b, mts := range p.minedBlobTxnsByBlock {
+		if (finalizedBlock > 0 && b <= finalizedBlock) || b+minedBlobReorgDepth < minedBlock {
+			for _, mt := range mts {
+				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+			}
+			delete(p.minedBlobTxnsByBlock, b)
 		}
 	}
 	return nil
@@ -2925,7 +2939,10 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 				return err
 			}
 		}
-		metaTx.TxnSlot.Rlp = nil
+		// Blobs alias Rlp, so keeping it costs no memory and lets a mined blob txn return on unwind.
+		if !metaTx.TxnSlot.HasBlobs() {
+			metaTx.TxnSlot.Rlp = nil
+		}
 	}
 
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
@@ -3077,7 +3094,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
 			continue
 		}
-		txn.Rlp = nil // means that we don't need store it in db anymore
+		if !txn.HasBlobs() {
+			txn.Rlp = nil // means that we don't need store it in db anymore
+		}
 		restored.Append(txn, addr[:], false)
 	}
 
