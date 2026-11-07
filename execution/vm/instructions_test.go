@@ -1343,3 +1343,22 @@ func TestPutReleasesFrameSlotKeys(t *testing.T) {
 	evm.putCallContext(ctx)
 	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
 }
+
+// A failed header read is the node's failure, not the transaction's. BLOCKHASH records it as a
+// state read error, so the executor does not judge the block by the call it aborted.
+func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	readErr := errors.New("header read failed")
+	blockCtx := gasTraceBlockContext()
+	blockCtx.BlockNumber = 10
+	blockCtx.GetHash = func(uint64) (common.Hash, error) { return common.Hash{}, readErr }
+	evm := NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 9, byte(BLOCKHASH)}
+
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+	require.ErrorIs(t, err, readErr)
+	require.ErrorIs(t, ibs.StateReadError(), readErr)
+}

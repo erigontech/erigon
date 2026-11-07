@@ -237,11 +237,20 @@ func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts
 		if ci.incarnation > incarnation {
 			panic(fmt.Sprintf("markComplete: incarnation addr=%x path=%s txIdx=%d have=%d want=%d", addr.Value(), path, txIdx, ci.incarnation, incarnation))
 		}
-		if !reflect.DeepEqual(ci.Value, value) {
+		if !sameCellValue(ci.Value, value) {
 			panic(fmt.Sprintf("markComplete: value changed at published version addr=%x path=%s txIdx=%d inc=%d old=%v new=%v", addr.Value(), path, txIdx, incarnation, ci.Value, value))
 		}
 	}
 	ci.flag.Store(uint32(FlagDone))
+}
+
+// sameCellValue compares accounts with Account.Equals: their Root is derived by commitment, not part of the value.
+func sameCellValue(a, b any) bool {
+	if x, ok := a.(*accounts.Account); ok {
+		y, _ := b.(*accounts.Account)
+		return x == y || eqAccount(x, y)
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 type VersionMap struct {
@@ -716,13 +725,15 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -743,6 +754,47 @@ func floorCell[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) (int, *Wr
 		return false
 	})
 	return fk, fv
+}
+
+// accountFloors is addr's raw field and address floor cells at txIdx.
+type accountFloors struct {
+	balance                                                       uint256.Int
+	nonce, incarnation                                            uint64
+	codeHash                                                      accounts.CodeHash
+	address                                                       *accounts.Account
+	hasBalance, hasNonce, hasIncarnation, hasCodeHash, hasAddress bool
+	balanceDeleted, addressFromBAL, wasDeleted                    bool
+}
+
+// accountFloorsAt reads addr's floor cells under one entry lock instead of one lock per field.
+func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accountFloors) {
+	if vm == nil {
+		return f
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return f
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if _, c := floorCell(e.Balance, txIdx); c != nil {
+		f.balance, f.hasBalance, f.balanceDeleted = c.Value, true, c.valStatus == ValueDeleted
+	}
+	if _, c := floorCell(e.Nonce, txIdx); c != nil {
+		f.nonce, f.hasNonce = c.Value, true
+	}
+	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
+		f.incarnation, f.hasIncarnation = c.Value, true
+	}
+	if _, c := floorCell(e.CodeHash, txIdx); c != nil {
+		f.codeHash, f.hasCodeHash = c.Value, true
+	}
+	if _, c := floorCell(e.Address, txIdx); c != nil {
+		f.address, f.hasAddress, f.addressFromBAL = c.Value, true, c.accSource == AccountFromBAL
+	}
+	life, _, _, _ := accountLifecycleLocked(e, txIdx, false)
+	f.wasDeleted = life != LifecycleLive
+	return f
 }
 
 // applySubFieldWrites overlays the Balance/Nonce/Incarnation/CodeHash floor cells for
@@ -823,13 +875,15 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	}
 	res.depIdx = fk
 	res.valStatus = fv.valStatus
-	res.accSource = fv.accSource
+	if fv.accSource == AccountFromBAL {
+		res.flags |= readFromBAL
+	}
 	switch fv.loadFlag() {
 	case FlagDone:
 		res.incarnation = fv.incarnation
 	case FlagValidated:
 		res.incarnation = fv.incarnation
-		res.validated = true
+		res.flags |= readValidated
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -1400,6 +1454,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
+		defer e.mu.Unlock()
 		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
 		destructed := false
 		if sd, ok := writes.selfDestruct[addr]; ok {
@@ -1467,7 +1522,6 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
 			}
 		}
-		e.mu.Unlock()
 	})
 }
 
@@ -2278,11 +2332,26 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation Incarnation
-	// validated: the floor cell was Validated (pre-seal, revertible); the reader
+	valStatus   valueStatus
+	flags       readFlags
+}
+
+// readFlags packs a read's boolean facts into one field: ReadResult stays at 4 fields, so the compiler keeps it in
+// registers.
+type readFlags uint8
+
+const (
+	// readValidated: the floor cell was Validated (pre-seal, revertible); the reader
 	// continues on it like Done but the dep is not yet final.
-	validated bool
-	valStatus valueStatus
-	accSource AccountSource
+	readValidated readFlags = 1 << iota
+	readFromBAL             // the cell's record is an AccountFromBAL existence marker
+)
+
+func (res ReadResult) accSource() AccountSource {
+	if res.flags&readFromBAL != 0 {
+		return AccountFromBAL
+	}
+	return AccountFromBase
 }
 
 func (res *ReadResult) DepString() string {
@@ -2314,7 +2383,7 @@ func (res *ReadResult) ValStatus() valueStatus {
 
 func (res ReadResult) Status() int {
 	if res.depIdx != UnknownDep {
-		if res.validated {
+		if res.flags&readValidated != 0 {
 			return MVReadResultValidated
 		}
 		if res.incarnation == -1 {
