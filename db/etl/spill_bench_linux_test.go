@@ -25,17 +25,16 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func cachedMiB(f *os.File) (float64, bool) {
-	var st unix.Cachestat_t
-	if err := unix.Cachestat(uint(f.Fd()), &unix.CachestatRange{}, &st, 0); err != nil {
+	cached, err := cachedPages(f)
+	if err != nil {
 		return 0, false
 	}
-	return float64(st.Cache*uint64(os.Getpagesize())) / (1 << 20), true
+	return float64(cached*uint64(os.Getpagesize())) / (1 << 20), true
 }
 
 func BenchmarkCollectorSpillAndLoad(b *testing.B) {
@@ -43,7 +42,7 @@ func BenchmarkCollectorSpillAndLoad(b *testing.B) {
 	key, val := make([]byte, 32), make([]byte, 32)
 	noop := func(_, _ []byte, _ CurrentTableReader, _ LoadNextFunc) error { return nil }
 	var cached float64
-	measured := true
+	measured := cacheMeasurable(b, b.TempDir())
 	for b.Loop() {
 		c := NewCollector("bench", b.TempDir(), NewSortableBuffer(64*datasize.MB), logger)
 		for i := range 8_000_000 {
@@ -53,7 +52,7 @@ func BenchmarkCollectorSpillAndLoad(b *testing.B) {
 		require.NoError(b, c.Flush())
 		for _, p := range c.dataProviders {
 			require.NoError(b, p.Wait())
-			if fp, ok := p.(*fileDataProvider); ok {
+			if fp, ok := p.(*fileDataProvider); ok && measured {
 				mib, ok := cachedMiB(fp.file)
 				measured = measured && ok
 				cached += mib

@@ -21,8 +21,10 @@ package dir
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -32,14 +34,38 @@ func dontCacheSupported(t *testing.T, dir string) bool {
 	f, err := os.CreateTemp(dir, "probe-")
 	require.NoError(t, err)
 	defer f.Close()
-	_, err = unix.Pwritev2(int(f.Fd()), [][]byte{make([]byte, os.Getpagesize())}, 0, unix.RWF_DONTCACHE)
-	return err == nil
+	for {
+		_, err = unix.Pwritev2(int(f.Fd()), [][]byte{make([]byte, os.Getpagesize())}, 0, unix.RWF_DONTCACHE)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if errors.Is(err, unix.EOPNOTSUPP) {
+			t.Logf("page cache residency check did not run: RWF_DONTCACHE is unsupported on %s", dir)
+			return false
+		}
+		require.NoError(t, err)
+		return true
+	}
 }
 
-func cachedPages(t *testing.T, f *os.File) uint64 {
+func cachedPages(f *os.File) (uint64, error) {
 	var st unix.Cachestat_t
-	require.NoError(t, unix.Cachestat(uint(f.Fd()), &unix.CachestatRange{}, &st, 0))
-	return st.Cache
+	err := unix.Cachestat(uint(f.Fd()), &unix.CachestatRange{}, &st, 0)
+	return st.Cache, err
+}
+
+func cacheMeasurable(t *testing.T, dir string) bool {
+	f, err := os.CreateTemp(dir, "cached-probe-")
+	require.NoError(t, err)
+	defer f.Close()
+	_, err = f.Write(make([]byte, os.Getpagesize()))
+	require.NoError(t, err)
+	cached, err := cachedPages(f)
+	if err != nil || cached == 0 {
+		t.Logf("page cache residency check did not run: plain-write control on %s returned %d cached pages, error %v", dir, cached, err)
+		return false
+	}
+	return true
 }
 
 func TestUncachedWriterLeavesWrittenPagesOutOfPageCache(t *testing.T) {
@@ -48,7 +74,7 @@ func TestUncachedWriterLeavesWrittenPagesOutOfPageCache(t *testing.T) {
 	t.Cleanup(func() { dontCacheWrites = prev })
 
 	tmp := t.TempDir()
-	supported := dontCacheSupported(t, tmp)
+	measurable := dontCacheSupported(t, tmp) && cacheMeasurable(t, tmp)
 
 	f, err := os.CreateTemp(tmp, "uncached-")
 	require.NoError(t, err)
@@ -61,9 +87,18 @@ func TestUncachedWriterLeavesWrittenPagesOutOfPageCache(t *testing.T) {
 	require.NoError(t, bw.Flush())
 	require.NoError(t, f.Sync())
 
-	if supported {
+	if measurable {
 		pages := uint64(len(data) / os.Getpagesize())
-		cached := cachedPages(t, f)
+		var cached uint64
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			cached, err = cachedPages(f)
+			require.NoError(t, err)
+			if cached < pages/10 || !time.Now().Before(deadline) {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		require.Less(t, cached, pages/10, "kernel supports RWF_DONTCACHE on %s: %d of %d pages still cached", tmp, cached, pages)
 	}
 
