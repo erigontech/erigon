@@ -1441,13 +1441,8 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		// entirely when nothing changes, so a flush never parks the concurrent readers on a
 		// hot account. Promotes to the write lock below only when a cell actually changes.
 		if vm.HasBAL && !complete {
-			if e := vm.load(addr); e != nil {
-				e.mu.RLock()
-				noop := flushAllNoOp(e, writes, addr, flag)
-				e.mu.RUnlock()
-				if noop {
-					return
-				}
+			if e := vm.load(addr); e != nil && flushAllNoOpRLocked(e, writes, addr, flag) {
+				return
 			}
 		}
 		if !stamped && vm.stamps != nil {
@@ -1456,6 +1451,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
+		defer e.mu.Unlock() // a recovered panic (an assert) must not leave the account's readers blocked
 		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
 		destructed := false
 		if sd, ok := writes.selfDestruct[addr]; ok {
@@ -1523,8 +1519,14 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, destructed)
 			}
 		}
-		e.mu.Unlock()
 	})
+}
+
+// flushAllNoOpRLocked is flushAllNoOp under the account's read lock, released before the flush takes the write lock.
+func flushAllNoOpRLocked(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return flushAllNoOp(e, writes, addr, flag)
 }
 
 // hasDestruct reports a true SelfDestruct cell; a created account holds only false markers.
